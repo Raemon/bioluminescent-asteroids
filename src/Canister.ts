@@ -1,11 +1,13 @@
-import { Vec, v, add, mul, fromAngle, wrap, rand, pick, TAU } from "./vec";
-import { drawGlow } from "./glow";
+import { Vec, v, add, mul, fromAngle, rand, pick, TAU } from "./vec";
 
-// Five powerup kinds, each with its own hue + glyph so the player can read
-// the canister at a glance from across the screen. Keeping the list short
+// Five powerup kinds, each with its own glyph so the player can read the
+// canister at a glance from across the screen. Keeping the list short
 // (rather than 10+ kinds) means each one stays familiar after a few waves.
 export type PowerupKind = "trident" | "rapid" | "pierce" | "shield" | "slow";
 
+// Hue is kept for downstream effects (pickup burst tinting) but the canister
+// itself renders pure white so the player reads it as "incoming pod" first
+// and only resolves its kind from the glyph.
 export const POWERUP_HUE: Record<PowerupKind, number> = {
   trident: 180,
   rapid: 300,
@@ -14,8 +16,6 @@ export const POWERUP_HUE: Record<PowerupKind, number> = {
   slow: 130,
 };
 
-// Single capital letter rendered inside the capsule. Deliberately ASCII so
-// it stays sharp at any zoom and doesn't need a custom font asset.
 const POWERUP_GLYPH: Record<PowerupKind, string> = {
   trident: "T",
   rapid: "R",
@@ -33,22 +33,46 @@ export class Canister {
   hue: number;
   radius = 16;
   age = 0;
-  rotation: number;
-  rotSpeed: number;
+  alive = true;
+  // Three independent tumble axes so the projected silhouette never settles
+  // into a flat 2D spin — gives the eye a clear "3D object" read.
+  rotX: number;
+  rotY: number;
+  rotZ: number;
+  rotSpeedX: number;
+  rotSpeedY: number;
+  rotSpeedZ: number;
 
   constructor(pos: Vec, vel: Vec, kind: PowerupKind) {
     this.pos = pos;
     this.vel = vel;
     this.kind = kind;
     this.hue = POWERUP_HUE[kind];
-    this.rotation = rand(0, TAU);
-    this.rotSpeed = rand(-0.6, 0.6);
+    this.rotX = rand(0, TAU);
+    this.rotY = rand(0, TAU);
+    this.rotZ = rand(0, TAU);
+    this.rotSpeedX = rand(-2.2, 2.2);
+    this.rotSpeedY = rand(-2.2, 2.2);
+    this.rotSpeedZ = rand(-1.2, 1.2);
   }
 
   update(dt: number, w: number, h: number) {
     this.age += dt;
-    this.rotation += this.rotSpeed * dt;
-    this.pos = wrap(add(this.pos, mul(this.vel, dt)), w, h);
+    this.rotX += this.rotSpeedX * dt;
+    this.rotY += this.rotSpeedY * dt;
+    this.rotZ += this.rotSpeedZ * dt;
+    this.pos = add(this.pos, mul(this.vel, dt));
+    // Pods drift offscreen once and are gone — no screen-wrap. Generous
+    // margin so the fade-out at the edge isn't visibly clipped.
+    const margin = this.radius * 4;
+    if (
+      this.pos.x < -margin ||
+      this.pos.x > w + margin ||
+      this.pos.y < -margin ||
+      this.pos.y > h + margin
+    ) {
+      this.alive = false;
+    }
   }
 
   collidesWith(point: Vec, pointRadius: number): boolean {
@@ -59,48 +83,83 @@ export class Canister {
 
   render(ctx: CanvasRenderingContext2D, t: number) {
     const time = t * 0.001;
-    const pulse = 0.7 + 0.3 * Math.sin(time * 3 + this.age * 2);
-    const beckon = 0.8 + 0.2 * Math.sin(time * 1.7);
+    const pulse = 0.75 + 0.25 * Math.sin(time * 3 + this.age * 2);
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-
-    drawGlow(ctx, this.pos.x, this.pos.y, this.radius * 3.4, this.hue, 0.55 * beckon);
-    drawGlow(ctx, this.pos.x, this.pos.y, this.radius * 1.6, this.hue, 0.85 * pulse);
-
-    ctx.translate(this.pos.x, this.pos.y);
-    ctx.rotate(this.rotation * 0.4);
-
-    const capsuleW = this.radius * 1.4;
-    const capsuleH = this.radius * 0.85;
-    ctx.lineWidth = 1.4;
-    ctx.strokeStyle = `hsla(${this.hue}, 100%, 80%, ${0.9 * pulse})`;
-    ctx.shadowColor = `hsla(${this.hue}, 100%, 70%, 1)`;
-    ctx.shadowBlur = 14;
+    // Soft white bloom around the pod.
+    const haloGrad = ctx.createRadialGradient(this.pos.x, this.pos.y, 0, this.pos.x, this.pos.y, this.radius * 3.2);
+    haloGrad.addColorStop(0, `rgba(255, 255, 255, ${0.55 * pulse})`);
+    haloGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
+    ctx.fillStyle = haloGrad;
     ctx.beginPath();
-    if (typeof ctx.roundRect === "function") {
-      ctx.roundRect(-capsuleW, -capsuleH, capsuleW * 2, capsuleH * 2, capsuleH);
-    } else {
-      ctx.rect(-capsuleW, -capsuleH, capsuleW * 2, capsuleH * 2);
-    }
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    ctx.fillStyle = `hsla(${this.hue}, 100%, 25%, 0.4)`;
-    ctx.beginPath();
-    if (typeof ctx.roundRect === "function") {
-      ctx.roundRect(-capsuleW, -capsuleH, capsuleW * 2, capsuleH * 2, capsuleH);
-    } else {
-      ctx.rect(-capsuleW, -capsuleH, capsuleW * 2, capsuleH * 2);
-    }
+    ctx.arc(this.pos.x, this.pos.y, this.radius * 3.2, 0, TAU);
     ctx.fill();
 
-    ctx.rotate(-this.rotation * 0.4);
-    ctx.fillStyle = `hsla(${this.hue}, 100%, 96%, ${0.95 * pulse})`;
-    ctx.font = `bold ${Math.round(this.radius * 1.1)}px system-ui, sans-serif`;
+    // 3D tumble: define an octahedron's six vertices, rotate them through
+    // three axes, then project orthographically. The crossing edges make
+    // the tumble legible even when only a few pixels move per frame.
+    const r = this.radius * 1.05;
+    const verts: [number, number, number][] = [
+      [r, 0, 0],
+      [-r, 0, 0],
+      [0, r, 0],
+      [0, -r, 0],
+      [0, 0, r],
+      [0, 0, -r],
+    ];
+    const cx = Math.cos(this.rotX), sx = Math.sin(this.rotX);
+    const cy = Math.cos(this.rotY), sy = Math.sin(this.rotY);
+    const cz = Math.cos(this.rotZ), sz = Math.sin(this.rotZ);
+    const projected = verts.map(([x, y, z]) => {
+      // Rotate around X
+      let y1 = y * cx - z * sx;
+      let z1 = y * sx + z * cx;
+      // Rotate around Y
+      let x2 = x * cy + z1 * sy;
+      let z2 = -x * sy + z1 * cy;
+      // Rotate around Z
+      let x3 = x2 * cz - y1 * sz;
+      let y3 = x2 * sz + y1 * cz;
+      return { x: x3, y: y3, z: z2 };
+    });
+
+    // Edges of the octahedron: each "equator" vertex (±x, ±y) connects to
+    // both "poles" (±z) — gives 12 edges total, enough wireframe to read
+    // as a solid tumbling shape without becoming visual noise.
+    const edges: [number, number][] = [
+      [0, 2], [0, 3], [0, 4], [0, 5],
+      [1, 2], [1, 3], [1, 4], [1, 5],
+      [2, 4], [2, 5], [3, 4], [3, 5],
+    ];
+
+    ctx.translate(this.pos.x, this.pos.y);
+    ctx.lineWidth = 1.4;
+    ctx.shadowColor = "rgba(255, 255, 255, 1)";
+    ctx.shadowBlur = 12;
+    for (const [a, b] of edges) {
+      const va = projected[a];
+      const vb = projected[b];
+      // Depth fade: edges with a vertex behind the "camera" plane dim a
+      // bit so the front faces pop. Cheap fake-shading that still sells
+      // the 3D read.
+      const depth = (va.z + vb.z) * 0.5;
+      const depthAlpha = 0.55 + 0.45 * ((depth + r) / (2 * r));
+      ctx.strokeStyle = `rgba(255, 255, 255, ${(0.85 * pulse * depthAlpha).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(va.x, va.y);
+      ctx.lineTo(vb.x, vb.y);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+
+    // Glyph stays upright (no counter-rotation needed since we never rotated
+    // the canvas) so the player can always read which powerup is incoming.
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.95 * pulse})`;
+    ctx.font = `bold ${Math.round(this.radius * 0.95)}px system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.shadowColor = `hsla(${this.hue}, 100%, 80%, 1)`;
+    ctx.shadowColor = "rgba(255, 255, 255, 1)";
     ctx.shadowBlur = 8;
     ctx.fillText(POWERUP_GLYPH[this.kind], 0, 1);
 
@@ -121,7 +180,7 @@ export const spawnCanister = (w: number, h: number, shipPos: Vec): Canister => {
     if (Math.hypot(dx, dy) > 220) break;
   }
   const driftAngle = rand(0, TAU);
-  const driftSpeed = rand(10, 25);
+  const driftSpeed = rand(60, 110);
   const kind = pick(POWERUP_KINDS);
   return new Canister(pos, fromAngle(driftAngle, driftSpeed), kind);
 };

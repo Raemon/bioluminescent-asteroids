@@ -4,15 +4,18 @@ import { Bullet } from "./Bullet";
 import { ParticleSystem } from "./Particle";
 import { Shard, shatterAsteroid } from "./Shard";
 import { Starfield } from "./Starfield";
+import { Pulsar } from "./Pulsar";
 import { Input } from "./Input";
 import { Sound } from "./Sound";
 import { Canister, spawnCanister } from "./Canister";
+import { Alien, AlienSize, ALIEN_FIRE_PERIOD_BEATS, spawnAlienAtEdge } from "./Alien";
+import { AlienBullet } from "./AlienBullet";
 import { v, fromAngle, dist, rand, TAU } from "./vec";
 
 type GameState = "title" | "playing" | "paused" | "dying" | "gameover";
 
 // Combo grid is one quarter-note (0.5s = 120 BPM quarter), the smallest
-// beat slot any bass asteroid can occupy after two splits. That keeps the
+// beat slot any bassteroid can occupy after two splits. That keeps the
 // rhythm gate aligned with every potential bass hit the player can hear.
 // Window is ±150ms — wide enough to absorb the 50ms dt cap in main.ts plus
 // normal human timing slop, narrow enough that random spam-firing only
@@ -35,12 +38,37 @@ const CANISTER_SPAWN_WINDOW: [number, number] = [8, 24];
 const SLOW_MO_DURATION = 8;
 const SLOW_MO_FACTOR = 0.45;
 
+// Alien saucer event: every few waves a saucer drops in mid-wave and starts
+// firing musical bullets at the player. Eligibility starts at wave 3 and
+// triggers ~every 3 waves on average; when it lands we pick a random size
+// (weighted toward smaller saucers early on, bigger ones later) and
+// schedule it somewhere in the wave's middle so it can't appear at the
+// very start or the very end.
+const ALIEN_FIRST_WAVE = 3;
+const ALIEN_CHANCE_PER_WAVE = 1 / 3;
+const ALIEN_SPAWN_WINDOW: [number, number] = [5, 22];
+
 // Rare crystal "tink" asteroid: rolled once per wave starting at wave 3.
 // Single small one-shot that emits the sharp glassy tink on destruction.
 // Kept off the standard specialUnlockOrder so its appearance feels like a
 // treat rather than a guaranteed wave fixture.
 const TINK_FIRST_WAVE = 3;
 const TINK_CHANCE_PER_WAVE = 1 / 3;
+
+// Pulsar shockwave: occasional mid-wave event where the pulsar vibrates and
+// flashes, releasing a ring that shatters every asteroid and jiggles the
+// ship. Rolled once per wave for an average of one shockwave per 5 waves.
+// When it lands, the actual detonation is scheduled at a random mid-wave
+// time so it doesn't always punctuate the wave's opening or closing seconds.
+// Gated to wave 3+ so the early game stays focused on learning the core
+// mechanics before the world starts rearranging itself.
+const SHOCKWAVE_FIRST_WAVE = 3;
+const SHOCKWAVE_CHANCE_PER_WAVE = 1 / 5;
+const SHOCKWAVE_SPAWN_WINDOW: [number, number] = [6, 22];
+// Velocity kick (px/s, modulated by distance falloff) applied to the ship on
+// the flash. Strong enough to noticeably redirect the player without
+// launching them into a hard-to-recover spin.
+const SHOCKWAVE_SHIP_IMPULSE = 320;
 
 // Tiny Fisher-Yates so the per-game bass intro order is properly random.
 // Returns a fresh array, leaving the input untouched.
@@ -64,12 +92,25 @@ const BASS_KIND_SOUND: Record<"bassA" | "bassB" | "bassC" | "bassD", "bassKick" 
   bassD: "bassSnap",
 };
 
+// Pitch factor applied to a bass voice based on the asteroid's split level.
+// Gen-0 large and gen-1 medium keep the parent pitch so the established
+// pattern stays familiar across the first split. Gen-2 small (the terminal
+// pieces) drops a minor third (≈ -3 semitones, 0.8409): every voice lands
+// on another note of the C major scale, so the whole field stays diatonic
+// but the terminal quarter-note subdivisions sit in a deeper register than
+// the parent voice. Resulting smalls — kick C2→A1, pluck G2→E2, boom F2→D2,
+// snap C3→A2 — give I/vi/V/ii flavor (relative minor + supertonic), which
+// pairs naturally with the C-F-G groundwork without sounding "wrong" when
+// stacked with siblings still at gen-0 or gen-1 pitch.
+const BASS_SPLIT_PITCH_RATIO = [1, 1, 0.8409] as const;
+
 export class Game {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   input: Input;
   sound: Sound;
   starfield: Starfield;
+  pulsar: Pulsar;
   particles = new ParticleSystem();
   shards: Shard[] = [];
   ship: Ship;
@@ -86,12 +127,17 @@ export class Game {
   h = 0;
   dpr = 1;
   time = 0;
-  // Shared bass-beat clock (seconds). All bass asteroids align to this grid
+  // Shared bass-beat clock (seconds). All bassteroids align to this grid
   // so their kicks and plucks interlock musically. Also serves as the source
   // of truth for on-beat detection — using the same clock the audio fires
   // from means a frame stutter slows beat audio and combo tracking together,
   // so they stay in lockstep.
   beatTime = 0;
+  // Last BEAT_GRID index we've already fired the background pulsar-approach
+  // beat for. Tracked separately from lastMarkedBeatIndex (which is the
+  // player's on-beat combo state) because the background beat fires every
+  // tick regardless of input.
+  lastBgBeatIndex = -1;
   // Index of the most recent beat the player marked with a fire or kill.
   // Marks arrive in increasing index order because BEAT_WINDOW < BEAT_GRID/2,
   // so consecutive windows never overlap.
@@ -102,10 +148,22 @@ export class Game {
   beatCombo = 0;
 
   canisters: Canister[] = [];
+  aliens: Alien[] = [];
+  alienBullets: AlienBullet[] = [];
+  // null when this wave didn't roll an alien or the alien has already been
+  // spawned. When non-null it's the in-wave time (seconds) at which to
+  // spawn, paired with the chosen size. Cleared the moment the saucer
+  // appears (Game.update).
+  alienSpawnAt: number | null = null;
+  alienSpawnSize: AlienSize = "small";
   // null when this wave didn't roll a canister or the canister has already
   // been spawned. When non-null it's the in-wave time (seconds) at which to
   // spawn. Set in spawnWave; cleared the moment the canister appears.
   canisterSpawnAt: number | null = null;
+  // Same shape as canisterSpawnAt, for the pulsar shockwave event. Rolled
+  // in spawnWave; cleared the moment we kick off the vibrate sequence on
+  // the Pulsar.
+  shockwaveTriggerAt: number | null = null;
   waveElapsed = 0;
   slowMoTimer = 0;
   // Per-game randomised intro order for the four bass kinds. Set in
@@ -133,6 +191,7 @@ export class Game {
     this.sound = new Sound();
     this.resize();
     this.starfield = new Starfield(this.w, this.h);
+    this.pulsar = new Pulsar(this.w, this.h);
     this.ship = new Ship(v(this.w / 2, this.h / 2));
     window.addEventListener("resize", () => this.resize());
 
@@ -182,6 +241,7 @@ export class Game {
     this.canvas.style.height = `${this.h}px`;
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     if (this.starfield) this.starfield.resize(this.w, this.h);
+    if (this.pulsar) this.pulsar.resize(this.w, this.h);
   }
 
   showTitle() {
@@ -193,8 +253,14 @@ export class Game {
     this.syncComboHud();
     this.asteroids = [];
     this.canisters = [];
+    this.sound.stopAllAlienDrones();
+    this.aliens = [];
+    this.alienBullets = [];
+    this.alienSpawnAt = null;
     this.canisterSpawnAt = null;
+    this.shockwaveTriggerAt = null;
     this.slowMoTimer = 0;
+    this.sound.bgBeatIntensity = 0;
     const decorativeAsteroidIndices = [0, 1, 2, 3, 4];
     for (const _ of decorativeAsteroidIndices) {
       this.asteroids.push(spawnAsteroidAtEdge(this.w, this.h));
@@ -208,20 +274,38 @@ export class Game {
     this.wave = 1;
     this.lives = 3;
     this.beatTime = 0;
+    this.lastBgBeatIndex = -1;
     this.lastMarkedBeatIndex = -1;
     this.nextBeatToEvaluate = 0;
     this.beatCombo = 0;
     this.bullets = [];
     this.shards = [];
     this.canisters = [];
+    this.sound.stopAllAlienDrones();
+    this.aliens = [];
+    this.alienBullets = [];
+    this.alienSpawnAt = null;
     this.slowMoTimer = 0;
     this.bassOrder = shuffled(BASS_KINDS);
     this.particles = new ParticleSystem();
     this.ship = new Ship(v(this.w / 2, this.h / 2));
     this.ship.invuln = 2.0;
+    this.pulsar.setWaveLevel(this.wave);
+    this.updateBgBeatIntensity();
     this.spawnWave();
     this.overlayEl.classList.add("hidden");
     this.syncHud();
+  }
+
+  // Ramp from wave 1 (faint but audible) to wave 30 (full ominous rumble).
+  // We reach the pulsar at wave 30, so the beat should feel maxed out by
+  // then; beyond that we hold at 1.0 in case the player overshoots. Floor
+  // is 0.08 so the very first beat is still perceptible — fainter than any
+  // other sound, but not silent. Sound reads bgBeatIntensity each time a
+  // beat fires, so just writing it here is enough.
+  updateBgBeatIntensity() {
+    const ramp = Math.max(0, Math.min(1, (this.wave - 1) / 29));
+    this.sound.bgBeatIntensity = 0.08 + ramp * 0.92;
   }
 
   // Snap an asteroid's next beat to its assigned within-measure slot on the
@@ -248,6 +332,12 @@ export class Game {
   spawnWave() {
     this.asteroids = [];
     this.canisters = [];
+    // Aliens persist across wave-clears only if still alive when the field
+    // empties — but spawnWave currently fires after the kill, so this just
+    // hard-resets any pending alien spawns to "none for this wave". The
+    // alien-bullet list is left alone so airborne shots aren't deleted out
+    // from under the player at the wave transition.
+    this.alienSpawnAt = null;
     this.waveElapsed = 0;
     // Roll once per wave. Any canister still on screen from a previous wave
     // is wiped above so the player never sees two at once.
@@ -255,6 +345,11 @@ export class Game {
       this.canisterSpawnAt = rand(CANISTER_SPAWN_WINDOW[0], CANISTER_SPAWN_WINDOW[1]);
     } else {
       this.canisterSpawnAt = null;
+    }
+    if (this.wave >= SHOCKWAVE_FIRST_WAVE && Math.random() < SHOCKWAVE_CHANCE_PER_WAVE) {
+      this.shockwaveTriggerAt = rand(SHOCKWAVE_SPAWN_WINDOW[0], SHOCKWAVE_SPAWN_WINDOW[1]);
+    } else {
+      this.shockwaveTriggerAt = null;
     }
     const wave = this.wave;
     // Total asteroid count grows by 1 every other wave: 4, 4, 5, 5, 6, 6, ...
@@ -279,6 +374,28 @@ export class Game {
     if (wave >= TINK_FIRST_WAVE && Math.random() < TINK_CHANCE_PER_WAVE) {
       this.asteroids.push(this.spawnTink());
     }
+
+    if (wave >= ALIEN_FIRST_WAVE && Math.random() < ALIEN_CHANCE_PER_WAVE) {
+      this.alienSpawnAt = rand(ALIEN_SPAWN_WINDOW[0], ALIEN_SPAWN_WINDOW[1]);
+      this.alienSpawnSize = this.rollAlienSize(wave);
+    }
+  }
+
+  // Earlier waves favour small/medium saucers; bigger ones become more common
+  // as runs go deep. Avoids the player getting hit with a 4-HP saucer on its
+  // first appearance.
+  rollAlienSize(wave: number): AlienSize {
+    if (wave < 5) return Math.random() < 0.7 ? "small" : "medium";
+    if (wave < 9) {
+      const r = Math.random();
+      if (r < 0.45) return "small";
+      if (r < 0.85) return "medium";
+      return "big";
+    }
+    const r = Math.random();
+    if (r < 0.3) return "small";
+    if (r < 0.65) return "medium";
+    return "big";
   }
 
   // Specials present in a given wave. The bass intro is special-cased per
@@ -308,6 +425,131 @@ export class Game {
       a = spawnAsteroidAtEdge(this.w, this.h, undefined, "tink", "small");
     }
     return a;
+  }
+
+  // Spawn a single saucer of the chosen size at a screen edge. Aligns the
+  // first fire to the next beat boundary on the global clock so its shots
+  // sync to the rhythm the player is already locked into. Starts the
+  // alien's continuous drone so it has an audible signature the moment it
+  // appears on screen.
+  spawnAlien(size: AlienSize) {
+    let a = spawnAlienAtEdge(this.w, this.h, size);
+    let attempts = 0;
+    while (dist(a.pos, this.ship.pos) < 260 && attempts < 6) {
+      a = spawnAlienAtEdge(this.w, this.h, size);
+      attempts += 1;
+    }
+    const period = ALIEN_FIRE_PERIOD_BEATS[size] * BEAT_GRID;
+    a.nextFireAt = Math.ceil((this.beatTime + 0.5) / period) * period;
+    this.aliens.push(a);
+    this.sound.startAlienDrone(a, size);
+  }
+
+  // Walk every alien and emit a bullet for any fire-time that's now in the
+  // past. Each shot is aimed at the player's current position at the moment
+  // it leaves the gun, so dodging works by moving between beats.
+  tickAlienFire() {
+    if (this.aliens.length === 0) return;
+    const period = (size: AlienSize) => ALIEN_FIRE_PERIOD_BEATS[size] * BEAT_GRID;
+    for (const a of this.aliens) {
+      while (this.beatTime >= a.nextFireAt) {
+        if (this.ship.alive) {
+          this.alienBullets.push(a.fireAt(this.ship.pos));
+          const fireSound = a.size === "big" ? "alienFireBig" : a.size === "medium" ? "alienFireMedium" : "alienFireSmall";
+          this.sound.play(fireSound);
+        } else {
+          a.fireFlash = 1;
+        }
+        a.nextFireAt += period(a.size);
+      }
+    }
+  }
+
+  // Player bullets hitting aliens. Big aliens reuse the same multi-hit /
+  // crack pipeline as bassteroids (4 HP, each hit shows another fracture);
+  // medium/small use the same Alien.applyDamage path so the bookkeeping is
+  // uniform. Killing hit awards score (combo-multiplied on on-beat) and
+  // ends the alien's drone.
+  handleAlienHits() {
+    const surviving: Alien[] = [];
+    for (const a of this.aliens) {
+      let killed = false;
+      for (const b of this.bullets) {
+        if (b.life <= 0) continue;
+        if (!a.collidesWith(b.pos, b.effectiveRadius())) continue;
+        if (!b.pierce) b.life = 0;
+        this.ship.fireCooldown = 0;
+        const hitMarkedBeat = this.markBeat(this.beatTime);
+        const isOnBeatHit = hitMarkedBeat || b.onBeat;
+        const { killed: alienKilled } = a.applyDamage();
+        if (!alienKilled) {
+          this.sound.play("alienHit");
+          this.shake = Math.min(this.shake + 0.18, 1.2);
+          if (isOnBeatHit) {
+            this.sound.play("comboSparkle");
+            if (hitMarkedBeat) this.pulseComboHud();
+          }
+          break;
+        }
+        let scoreEarned = a.scoreValue;
+        if (isOnBeatHit) {
+          const multiplier = Math.min(1 + this.beatCombo * COMBO_MULTIPLIER_STEP, COMBO_MULTIPLIER_MAX);
+          scoreEarned = Math.round(scoreEarned * multiplier);
+          this.sound.play("comboSparkle");
+          if (hitMarkedBeat) this.pulseComboHud();
+        }
+        this.score += scoreEarned;
+        this.shake = Math.min(this.shake + 0.5, 1.4);
+        this.sound.play("alienExplode");
+        this.sound.stopAlienDrone(a);
+        this.emitAlienExplosion(a);
+        killed = true;
+        break;
+      }
+      if (!killed) surviving.push(a);
+    }
+    this.aliens = surviving;
+  }
+
+  // Alien bullets hitting the player. Shield absorbs one; otherwise the
+  // ship dies like any other collision.
+  handleAlienBulletHits() {
+    if (!this.ship.alive || this.ship.invuln > 0) return;
+    const remaining: AlienBullet[] = [];
+    let hit = false;
+    for (const ab of this.alienBullets) {
+      if (!hit && Math.hypot(ab.pos.x - this.ship.pos.x, ab.pos.y - this.ship.pos.y) < this.ship.radius * 0.7 + ab.radius) {
+        hit = true;
+        if (this.ship.shieldActive) {
+          this.ship.shieldActive = false;
+          this.ship.invuln = 0.8;
+          this.popShield();
+        } else {
+          this.killShip();
+        }
+        continue;
+      }
+      remaining.push(ab);
+    }
+    this.alienBullets = remaining;
+  }
+
+  emitAlienExplosion(a: Alien) {
+    const burstIndices = Array.from({ length: a.size === "big" ? 70 : a.size === "medium" ? 48 : 30 }, (_, i) => i);
+    for (const _ of burstIndices) {
+      const angle = rand(0, TAU);
+      const speed = rand(80, 340);
+      this.particles.emit({
+        pos: { ...a.pos },
+        vel: fromAngle(angle, speed),
+        life: rand(0.5, 1.2),
+        maxLife: 1.2,
+        size: rand(1, 2.6),
+        hue: a.hue + rand(-15, 25),
+        shrink: 1,
+        drag: 1.4,
+      });
+    }
   }
 
   syncHud() {
@@ -358,9 +600,15 @@ export class Game {
     if (this.state !== "playing" && this.state !== "dying") return 0;
     const grid = this.comboGrid();
     const beatPhase = this.beatTime / grid;
-    const beatsFromNearestBeat = Math.abs(beatPhase - Math.round(beatPhase));
+    const signedBeatsFromNearestBeat = beatPhase - Math.round(beatPhase);
     const windowFractionOfGrid = BEAT_WINDOW / grid;
-    return Math.max(0, 1 - beatsFromNearestBeat / windowFractionOfGrid);
+    const normalized = signedBeatsFromNearestBeat / windowFractionOfGrid;
+    if (normalized < -1 || normalized > 1) return 0;
+    // Asymmetric envelope: snap up to full brightness on the approach (steep
+    // attack), then linger with a slow squared falloff after the beat passes.
+    return normalized <= 0
+      ? Math.sqrt(1 + normalized)
+      : (1 - normalized) * (1 - normalized);
   }
 
   // Try to associate `time` with the nearest beat on the combo grid (8ths
@@ -413,6 +661,7 @@ export class Game {
     }
 
     this.time += dt * 1000;
+    this.pulsar.update(dt, this.beatTime, BEAT_GRID);
 
     if (this.state === "title") {
       if (this.input.pressed("enter") || this.input.pressed("return")) {
@@ -439,6 +688,7 @@ export class Game {
       if (this.dyingTimer <= 0) {
         if (this.lives <= 0) {
           this.state = "gameover";
+          this.sound.stopAllAlienDrones();
           this.overlayTitleEl.textContent = "Game Over";
           this.overlayStartEl.innerHTML = `score <strong>${String(this.score).padStart(6, "0")}</strong> &nbsp;·&nbsp; press <span class="key">enter</span> to restart`;
           this.overlayEl.classList.remove("hidden");
@@ -466,11 +716,16 @@ export class Game {
         // emits 3 bullets per fire event, so the slice length can be >1.
         // They all share the same beat flag because they're one shot.
         const newBullets = this.bullets.slice(bulletsBeforeShipUpdate);
-        if (this.markBeat(this.beatTime)) {
+        const firedOnBeat = this.markBeat(this.beatTime);
+        if (firedOnBeat) {
           for (const newBullet of newBullets) newBullet.onBeat = true;
           this.sound.play("comboTick");
           this.pulseComboHud();
         }
+        // Fire sound picked based on whether the shot landed in a beat
+        // window. Deeper "fireBeat" pluck for rhythm shots; lighter "fire"
+        // pluck otherwise. Ship no longer plays the fire sound itself.
+        this.sound.play(firedOnBeat ? "fireBeat" : "fire");
       }
       if (this.ship.invuln > 0 && this.ship.invuln < 0.4) {
         const safeRadius = 130;
@@ -482,15 +737,33 @@ export class Game {
         this.canisters.push(spawnCanister(this.w, this.h, this.ship.pos));
         this.canisterSpawnAt = null;
       }
+      if (this.shockwaveTriggerAt !== null && this.waveElapsed >= this.shockwaveTriggerAt) {
+        this.pulsar.triggerShockwave();
+        this.sound.play("shockwaveCharge");
+        this.shockwaveTriggerAt = null;
+      }
+      if (this.pulsar.shockJustFired) this.detonateShockwave();
+      if (this.alienSpawnAt !== null && this.waveElapsed >= this.alienSpawnAt) {
+        this.spawnAlien(this.alienSpawnSize);
+        this.alienSpawnAt = null;
+      }
       for (const a of this.asteroids) a.update(musicDt, this.w, this.h);
+      for (const al of this.aliens) al.update(dt, this.w, this.h);
+      this.tickAlienFire();
       for (const b of this.bullets) b.update(dt, this.w, this.h);
       this.bullets = this.bullets.filter((b) => b.life > 0);
+      for (const ab of this.alienBullets) ab.update(dt, this.w, this.h);
+      this.alienBullets = this.alienBullets.filter((ab) => ab.life > 0);
       for (const s of this.shards) s.update(dt);
       this.shards = this.shards.filter((s) => s.life > 0);
       for (const c of this.canisters) c.update(dt, this.w, this.h);
+      this.canisters = this.canisters.filter((c) => c.alive);
       this.particles.update(dt);
       this.handleCollisions();
+      this.handleAlienHits();
+      this.handleAlienBulletHits();
       this.handleCanisterPickups();
+      this.handleCanisterShots();
       // Run after collisions so any beat marked by a kill this frame is
       // visible to the evaluator if its window happens to close on the same
       // frame (rare, but possible at the trailing edge).
@@ -498,6 +771,10 @@ export class Game {
       if (this.asteroids.length === 0) {
         this.wave += 1;
         this.sound.play("waveClear");
+        this.sound.play("pulsarHum");
+        this.pulsar.waveClear();
+        this.pulsar.setWaveLevel(this.wave);
+        this.updateBgBeatIntensity();
         this.spawnWave();
         this.syncHud();
       }
@@ -521,6 +798,21 @@ export class Game {
 
   tickBassBeats(musicDt: number) {
     this.beatTime += musicDt;
+    // Background pulsar-approach beat: fire once per BEAT_GRID tick,
+    // alternating downbeat (root) and offbeat (slightly higher pitch). Uses
+    // the same beatTime clock as bassteroids so it stays locked to slow-mo
+    // and frame stutters. Catches up if multiple beats elapsed in one frame.
+    const grid = BEAT_GRID;
+    const bgIdx = Math.floor(this.beatTime / grid);
+    if (bgIdx < this.lastBgBeatIndex) this.lastBgBeatIndex = bgIdx - 1;
+    while (this.lastBgBeatIndex < bgIdx) {
+      this.lastBgBeatIndex += 1;
+      const isOffbeat = (this.lastBgBeatIndex & 1) === 1;
+      // 1.122 = whole-step lift (~E1 → F#1) — audibly distinct from the
+      // downbeat without breaking the ominous mood.
+      const pitchRatio = isOffbeat ? 1.122 : 1;
+      this.sound.play("bgBeat", pitchRatio);
+    }
     for (const a of this.asteroids) {
       if (!a.isBass()) continue;
       // Fire any beats that have elapsed since the last frame (typically one,
@@ -532,10 +824,81 @@ export class Game {
       // timbre onto whichever beat they now occupy.
       while (this.beatTime >= a.nextBeatAt) {
         const sound = BASS_KIND_SOUND[a.kind as "bassA" | "bassB" | "bassC" | "bassD"];
-        this.sound.play(sound);
+        const pitchRatio = BASS_SPLIT_PITCH_RATIO[a.splitLevel] ?? 1;
+        this.sound.play(sound, pitchRatio);
         a.beatFlash = 1.0;
         a.nextBeatAt += BASS_MEASURE_LENGTH;
       }
+    }
+  }
+
+  // Pulsar shockwave just fired this frame: shatter every asteroid, kick
+  // the ship outward, and add a chunky screen-shake. Asteroids get treated
+  // as "hit" — non-bass pieces split into their children (small ones simply
+  // vanish), and bass pieces are zeroed-out so they split or die through
+  // their normal pipeline. The ring is a free-of-charge environment event,
+  // so no score or combo credit is awarded.
+  detonateShockwave() {
+    this.sound.play("shockwaveBoom");
+    this.shake = Math.min(this.shake + 1.4, 2.0);
+    const surviving: Asteroid[] = [];
+    for (const a of this.asteroids) {
+      if (a.isBass()) {
+        a.hp = 0;
+        a.flashAmount = 1;
+        this.emitExplosion(a, false);
+        const children = a.split();
+        for (const c of children) {
+          this.alignBassBeat(c);
+          // Kick children outward from the shock origin so the field reads
+          // as flung-apart by the wavefront rather than spawning in place.
+          const kick = this.pulsar.shockwaveImpulseAt(c.pos);
+          c.vel = { x: c.vel.x + kick.x * 220, y: c.vel.y + kick.y * 220 };
+          surviving.push(c);
+        }
+      } else {
+        a.flashAmount = 1;
+        this.emitExplosion(a, false);
+        const children = a.split();
+        for (const c of children) {
+          const kick = this.pulsar.shockwaveImpulseAt(c.pos);
+          c.vel = { x: c.vel.x + kick.x * 220, y: c.vel.y + kick.y * 220 };
+          surviving.push(c);
+        }
+      }
+    }
+    this.asteroids = surviving;
+
+    if (this.ship.alive) {
+      // Distance falloff: ships near the origin take a bigger kick than
+      // those at the far corner. Clamped so we always feel *something* and
+      // never overflow the ship's maxSpeed cap on a single frame.
+      const kick = this.pulsar.shockwaveImpulseAt(this.ship.pos);
+      const d = Math.hypot(this.ship.pos.x - this.pulsar.shockOriginX, this.ship.pos.y - this.pulsar.shockOriginY);
+      const falloff = Math.max(0.45, 1 - d / Math.max(this.w, this.h));
+      const mag = SHOCKWAVE_SHIP_IMPULSE * falloff;
+      this.ship.vel = { x: this.ship.vel.x + kick.x * mag, y: this.ship.vel.y + kick.y * mag };
+      // A brief grace-frame so the player isn't punished for being kicked
+      // straight into a freshly-shattered asteroid debris cluster.
+      this.ship.invuln = Math.max(this.ship.invuln, 0.6);
+    }
+
+    // Outward-radiating sparks centred on the origin sell the wavefront as
+    // having physical mass instead of being a pure light effect.
+    const sparkIndices = Array.from({ length: 64 }, (_, i) => i);
+    for (const _ of sparkIndices) {
+      const angle = rand(0, TAU);
+      const speed = rand(280, 520);
+      this.particles.emit({
+        pos: { x: this.pulsar.shockOriginX, y: this.pulsar.shockOriginY },
+        vel: fromAngle(angle, speed),
+        life: rand(0.5, 1.1),
+        maxLife: 1.1,
+        size: rand(1.4, 2.6),
+        hue: 200 + rand(-10, 20),
+        shrink: 1,
+        drag: 0.9,
+      });
     }
   }
 
@@ -545,7 +908,7 @@ export class Game {
       let killed = false;
       for (const b of this.bullets) {
         if (b.life <= 0) continue;
-        if (!a.collidesWith(b.pos, b.radius)) continue;
+        if (!a.collidesWith(b.pos, b.effectiveRadius())) continue;
         // Pierce bullets stay alive after a hit so a single shot can punch
         // through a row of asteroids. Their `life` timer still expires
         // normally, so they don't last forever.
@@ -562,36 +925,20 @@ export class Game {
         // rather than the trigger pull.
         const hitMarkedBeat = this.markBeat(this.beatTime);
         const isOnBeatHit = hitMarkedBeat || b.onBeat;
-        // Bass ships absorb multiple hits before dying. Non-killing hits
-        // still mark the beat and play crumple feedback, but only the
-        // killing hit awards score, splits, or fires the big explosion.
-        if (a.isBass()) {
-          const { killed: bassKilled } = a.applyBassDamage();
-          this.sound.play("bassHit");
-          this.shake = Math.min(this.shake + 0.2, 1.2);
-          this.emitBassCrumple(a, isOnBeatHit);
+        // Unified damage path: every asteroid carries HP now. Non-killing
+        // hits play crack feedback (cracks visible on the body via
+        // Asteroid.renderCracks) and only mark the beat — no score, no
+        // split. Killing hits award score, fire the explosion sound, and
+        // dispatch the split. Bassteroids layer on bassHit/bassEcho.
+        const { killed: didKill } = a.applyDamage(b.damage());
+        this.shake = Math.min(this.shake + (didKill ? 0.4 : 0.2), 1.2);
+        if (a.isBass()) this.sound.play("bassHit");
+        if (!didKill) {
+          this.emitCrackParticles(a, isOnBeatHit);
           if (isOnBeatHit) {
             this.sound.play("comboSparkle");
             if (hitMarkedBeat) this.pulseComboHud();
           }
-          if (!bassKilled) {
-            break;
-          }
-          let scoreEarned = a.scoreValue();
-          if (isOnBeatHit) {
-            const multiplier = Math.min(1 + this.beatCombo * COMBO_MULTIPLIER_STEP, COMBO_MULTIPLIER_MAX);
-            scoreEarned = Math.round(scoreEarned * multiplier);
-          }
-          this.score += scoreEarned;
-          this.shake = Math.min(this.shake + 0.4, 1.2);
-          this.sound.play("bassEcho");
-          this.emitExplosion(a, isOnBeatHit);
-          const children = a.split();
-          for (const c of children) {
-            this.alignBassBeat(c);
-            surviving.push(c);
-          }
-          killed = true;
           break;
         }
         let scoreEarned = a.scoreValue();
@@ -602,11 +949,14 @@ export class Game {
           if (hitMarkedBeat) this.pulseComboHud();
         }
         this.score += scoreEarned;
-        this.shake = Math.min(this.shake + 0.4, 1.2);
+        if (a.isBass()) this.sound.play("bassEcho");
         this.sound.play(this.hitSoundFor(a));
         this.emitExplosion(a, isOnBeatHit);
         const children = a.split();
-        for (const c of children) surviving.push(c);
+        for (const c of children) {
+          if (a.isBass()) this.alignBassBeat(c);
+          surviving.push(c);
+        }
         killed = true;
         break;
       }
@@ -664,6 +1014,45 @@ export class Game {
     this.canisters = remaining;
   }
 
+  handleCanisterShots() {
+    const remaining: Canister[] = [];
+    for (const c of this.canisters) {
+      let hit = false;
+      for (const b of this.bullets) {
+        if (b.life <= 0) continue;
+        if (!c.collidesWith(b.pos, b.effectiveRadius())) continue;
+        if (!b.pierce) b.life = 0;
+        this.explodeCanister(c);
+        hit = true;
+        break;
+      }
+      if (!hit) remaining.push(c);
+    }
+    this.canisters = remaining;
+  }
+
+  explodeCanister(c: Canister) {
+    this.sound.play("explosionSmall");
+    this.shake = Math.min(this.shake + 0.25, 1.2);
+    const burstIndices = Array.from({ length: 30 }, (_, i) => i);
+    for (const _ of burstIndices) {
+      const angle = rand(0, TAU);
+      const speed = rand(120, 320);
+      this.particles.emit({
+        pos: { ...c.pos },
+        vel: fromAngle(angle, speed),
+        life: rand(0.4, 0.9),
+        maxLife: 0.9,
+        size: rand(1.2, 2.4),
+        // White burst — match the pod's neutral look. Hue 0 with low
+        // saturation in the particle renderer reads as white/grey.
+        hue: 0,
+        shrink: 1,
+        drag: 1.8,
+      });
+    }
+  }
+
   collectCanister(c: Canister) {
     this.sound.play("powerup");
     if (c.kind === "slow") {
@@ -699,7 +1088,7 @@ export class Game {
   }
 
   hitSoundFor(a: Asteroid): "explosionLarge" | "explosionMedium" | "explosionSmall" | "chime" | "bell" | "warble" | "tink" {
-    // Bass ships have their own multi-hit handling in handleCollisions
+    // Bassteroids have their own multi-hit handling in handleCollisions
     // (bassHit on every hit, bassEcho + explosion on the killing hit), so
     // this helper only covers the non-bass kinds now.
     if (a.kind === "chime") return "chime";
@@ -709,31 +1098,32 @@ export class Game {
     return a.size === "large" ? "explosionLarge" : a.size === "medium" ? "explosionMedium" : "explosionSmall";
   }
 
-  // Sparkle/scorch burst for a non-killing bass hit. Smaller and snappier
-  // than emitExplosion so the player reads "I dinged it" rather than "I
-  // killed it" — no shards, no big particle bloom.
-  emitBassCrumple(a: Asteroid, onBeat: boolean) {
-    const sparkCount = onBeat ? 16 : 10;
-    const sparkIndices = Array.from({ length: sparkCount }, (_, i) => i);
-    for (const _ of sparkIndices) {
+  // Rock-shard burst for a non-killing bassteroid hit. Heavier and chunkier
+  // than the old crumple-spark — slow dark debris reading as fragments
+  // breaking off rather than sparks flying. Player reads "I cracked it" not
+  // "I killed it".
+  emitCrackParticles(a: Asteroid, onBeat: boolean) {
+    const chunkCount = onBeat ? 14 : 9;
+    const chunkIndices = Array.from({ length: chunkCount }, (_, i) => i);
+    for (const _ of chunkIndices) {
       const angle = rand(0, TAU);
-      const speed = rand(120, 260);
+      const speed = rand(60, 180);
       this.particles.emit({
         pos: { ...a.pos },
         vel: fromAngle(angle, speed),
-        life: rand(0.2, 0.45),
-        maxLife: 0.45,
-        size: rand(1.0, 1.8),
-        hue: a.hue + rand(-12, 22),
+        life: rand(0.35, 0.7),
+        maxLife: 0.7,
+        size: rand(1.6, 2.8),
+        hue: a.hue + rand(-8, 12),
         shrink: 1,
-        drag: 2.4,
+        drag: 3.0,
       });
     }
     if (onBeat) {
-      const sparkleIndices = Array.from({ length: 10 }, (_, i) => i);
+      const sparkleIndices = Array.from({ length: 8 }, (_, i) => i);
       for (const i of sparkleIndices) {
         const angle = (i / sparkleIndices.length) * TAU + rand(-0.08, 0.08);
-        const speed = rand(180, 280);
+        const speed = rand(140, 220);
         this.particles.emit({
           pos: { ...a.pos },
           vel: fromAngle(angle, speed),
@@ -742,7 +1132,7 @@ export class Game {
           size: rand(1.4, 2.0),
           hue: 48 + rand(-6, 12),
           shrink: 1,
-          drag: 2.0,
+          drag: 2.2,
         });
       }
     }
@@ -837,10 +1227,13 @@ export class Game {
     ctx.translate(shakeX, shakeY);
 
     this.starfield.render(ctx, this.time);
+    this.pulsar.render(ctx);
 
     for (const s of this.shards) s.render(ctx);
     for (const a of this.asteroids) a.render(ctx, this.time);
     for (const c of this.canisters) c.render(ctx, this.time);
+    for (const al of this.aliens) al.render(ctx, this.time);
+    for (const ab of this.alienBullets) ab.render(ctx);
     for (const b of this.bullets) b.render(ctx);
     this.particles.render(ctx);
     this.ship.renderReticules(ctx, BEAT_GRID, this.w, this.h);

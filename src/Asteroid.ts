@@ -20,22 +20,22 @@ type Nucleus = {
 
 export type AsteroidSize = "large" | "medium" | "small";
 
-// "bassA" / "bassB" / "bassC" / "bassD" are the four layered bass-track
-// "ships" — one per beat slot in a 4-beat measure (4 beats × 0.5s = 2s at
+// "bassA" / "bassB" / "bassC" / "bassD" are the four layered bassteroid
+// kinds — one per beat slot in a 4-beat measure (4 beats × 0.5s = 2s at
 // 120 BPM). Their gen-0 offsets stagger them: A→beat1, B→beat2, C→beat3,
 // D→beat4. Each kind has its own distinct percussive sound (kick / pluck /
 // boom / snap, all in or around C major) so multiple kinds layered on a
 // beat still harmonise.
 //
-// Unlike organic asteroids, bass ships are armoured: a large piece has 4 HP
+// Unlike organic asteroids, bassteroids are armoured: a large piece has 4 HP
 // and takes that many hits before exploding, each hit leaving visible
-// crumple damage. On the final hit it splits into two medium pieces
+// crack damage. On the final hit it splits into two medium pieces
 // (2 HP each) that share the parent's kind but sit half a measure apart —
 // gen-1 bassA fires beats 1+3, gen-1 bassB fires 2+4, gen-1 bassC fires
 // 3+1, gen-1 bassD fires 4+2. Splitting again subdivides further into
 // quarter-measure offsets: four gen-2 small pieces (1 HP each) cover all
-// four beats with the parent kind's voice. Every bass hit also triggers a
-// deeper bass-echo overlay sound on top of the regular hit.
+// four beats with the parent kind's voice. Every bassteroid hit also
+// triggers a deeper bass-echo overlay sound on top of the regular hit.
 //
 // "chime", "bell", "warble" are sound-decorator asteroids that behave exactly
 // like normal ones but trigger a distinctive musical hit sound.
@@ -84,7 +84,7 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
 };
 
 // Length of one musical measure (seconds). 4 beats at 120 BPM × 0.5s/beat.
-// Every bass asteroid fires exactly once per measure regardless of split
+// Every bassteroid fires exactly once per measure regardless of split
 // generation; what changes with splitting is which beat-slot in the measure
 // each piece occupies (see `split()` below).
 export const BASS_MEASURE_LENGTH = 2.0;
@@ -99,31 +99,43 @@ export const BASS_KIND_BASE_OFFSET: Record<"bassA" | "bassB" | "bassC" | "bassD"
   bassD: 1.5,
 };
 
-// Maximum number of times a bass ship can be split. 0 = gen-0 (large, 4 HP),
+// Maximum number of times a bassteroid can be split. 0 = gen-0 (large, 4 HP),
 // 1 = gen-1 (medium, 2 HP), 2 = gen-2 (small, 1 HP, terminal). Two splits
 // stops the subdivision at quarter-notes, which is the densest pattern that
 // still reads as rhythm rather than mush.
 export const BASS_MAX_SPLIT_LEVEL = 2;
 
-// Per-size hit point counts for bass ships. Large gen-0 takes 4 hits before
-// splitting into two mediums; mediums take 2 hits before splitting into two
-// smalls; smalls are terminal one-shots. Each non-killing hit leaves a
-// visible crumple dent on the body.
-export const BASS_HP: Record<AsteroidSize, number> = {
+// General per-size hit point counts. Every asteroid uses this table now —
+// each non-killing hit leaves a visible crack on the body, and the killing
+// hit explodes (and splits, for non-terminal sizes). Non-rhythm bullets deal
+// 1 damage so an unsynced run needs 4/2/1 shots for a large/medium/small;
+// rhythm bullets deal 4 damage so a well-timed shot one-shots anything in
+// this table.
+export const ASTEROID_HP: Record<AsteroidSize, number> = {
   large: 4,
   medium: 2,
   small: 1,
 };
 
+// Bassteroids are 4× tougher than the table above so the rhythm system has
+// real teeth — even a rhythm-bullet (4 damage) needs four hits to crack a
+// large bassteroid, matching the "armoured" silhouette they already wear.
+export const BASS_HP_MULTIPLIER = 4;
+export const BASS_HP: Record<AsteroidSize, number> = {
+  large: ASTEROID_HP.large * BASS_HP_MULTIPLIER,
+  medium: ASTEROID_HP.medium * BASS_HP_MULTIPLIER,
+  small: ASTEROID_HP.small * BASS_HP_MULTIPLIER,
+};
+
 // Vertex list (local-space, normalised to radius=1) for one armoured panel
-// of a bass ship. Each kind is a fixed cluster of these panels — drawn with
+// of a bassteroid. Each kind is a fixed cluster of these panels — drawn with
 // hard edges and bright outlines so they read as built-by-hand spaceships
 // rather than the organic Fourier blobs everything else uses.
 type BassModule = { vertices: Vec[] };
 
 // Per-kind hard-points: little glowing dots painted on top of the panels.
 // Treated as "running lights" so each kind has a memorable silhouette even
-// when crumple damage has gnawed at the panel outlines.
+// when crack damage has gnawed at the panel outlines.
 type BassLight = { pos: Vec; size: number };
 
 type BassShip = { modules: BassModule[]; lights: BassLight[] };
@@ -148,7 +160,7 @@ const hexagon = (cx: number, cy: number, r: number, rot = 0): BassModule => {
 //   bassC: "Cross"      — square core with four cardinal arms
 //   bassD: "Tower"      — vertical stack (engine block, tank, cockpit cone)
 // Coordinates are in radius-units; the renderer scales by this.radius.
-const buildBassShip = (kind: "bassA" | "bassB" | "bassC" | "bassD"): BassShip => {
+const buildBassteroidShape = (kind: "bassA" | "bassB" | "bassC" | "bassD"): BassShip => {
   if (kind === "bassA") {
     return {
       modules: [
@@ -222,19 +234,47 @@ const buildBassShip = (kind: "bassA" | "bassB" | "bassC" | "bassD"): BassShip =>
   };
 };
 
-// Pre-rolled local-space placements for crumple dents. We generate one extra
-// over the worst case (4 for large) so the layout's RNG settles before any
-// damage is taken — dents reveal in order as hits land so the same ship
-// gives a consistent, escalating wreck silhouette per playthrough.
-type BassDent = { pos: Vec; size: number; angle: number };
-const rollBassDents = (count: number): BassDent[] => {
-  const dents: BassDent[] = [];
+// Pre-rolled local-space placements for crack damage. We generate one entry
+// per HP — cracks reveal in order as hits land so the same bassteroid gives
+// a consistent, escalating fracture pattern per playthrough. Each crack is
+// a jagged poly-line through the impact point: `branches` are line segments
+// fanning outward from local origin, all in radius-units.
+type AsteroidCrack = {
+  pos: Vec;
+  size: number;
+  angle: number;
+  branches: { points: Vec[] }[];
+};
+const rollCracks = (count: number): AsteroidCrack[] => {
+  const cracks: AsteroidCrack[] = [];
   for (let i = 0; i < count; i++) {
     const a = rand(0, TAU);
     const r = rand(0.2, 0.78);
-    dents.push({ pos: v(Math.cos(a) * r, Math.sin(a) * r), size: rand(0.18, 0.28), angle: rand(0, TAU) });
+    const size = rand(0.28, 0.42);
+    // 3–4 jagged forks per impact, each a short zig-zag polyline radiating
+    // from the impact centre. Forks are stored in local crack-space; the
+    // renderer translates+rotates them into the bassteroid's frame.
+    const forkCount = 3 + Math.floor(Math.random() * 2);
+    const branches: { points: Vec[] }[] = [];
+    for (let f = 0; f < forkCount; f++) {
+      const baseAngle = (f / forkCount) * TAU + rand(-0.4, 0.4);
+      const segments = 3 + Math.floor(Math.random() * 2);
+      const points: Vec[] = [v(0, 0)];
+      let cx = 0;
+      let cy = 0;
+      let ang = baseAngle;
+      for (let s = 0; s < segments; s++) {
+        const len = size * rand(0.35, 0.7);
+        ang += rand(-0.7, 0.7);
+        cx += Math.cos(ang) * len;
+        cy += Math.sin(ang) * len;
+        points.push(v(cx, cy));
+      }
+      branches.push({ points });
+    }
+    cracks.push({ pos: v(Math.cos(a) * r, Math.sin(a) * r), size, angle: rand(0, TAU), branches });
   }
-  return dents;
+  return cracks;
 };
 
 export class Asteroid {
@@ -262,21 +302,22 @@ export class Asteroid {
   // inherit the parent's slot rather than subdividing, so the beat each
   // kind plays never moves. Unused for non-bass kinds.
   measureOffset = 0;
-  // Number of times this bass ship has already been split. 0 = gen-0 large,
+  // Number of times this bassteroid has already been split. 0 = gen-0 large,
   // 1 = gen-1 medium (terminal — its final hit destroys it outright).
   // Always 0 for non-bass kinds.
   splitLevel = 0;
-  // Game-time (seconds) at which this bass asteroid should fire its next
+  // Game-time (seconds) at which this bassteroid should fire its next
   // beat. Set by Game when the asteroid is spawned / split. Unused for
   // non-bass kinds.
   nextBeatAt = 0;
-  // Bass armour. Each non-killing bullet hit decrements `hp` by 1 and
-  // reveals one more entry in `dents`; the killing hit (hp → 0) either
-  // splits the ship (large → 2 medium) or destroys it outright (medium).
-  // Unused for non-bass kinds.
+  // Hitpoints. Every asteroid uses the HP/crack system now. Non-killing
+  // bullet hits decrement `hp` and reveal one more entry in `cracks`; the
+  // killing hit (hp → 0) explodes the asteroid (and splits it, for non-
+  // terminal sizes). Bassteroids carry a 4× multiplier on top of the size
+  // table — see `ASTEROID_HP` / `BASS_HP`.
   hp = 0;
   maxHp = 0;
-  dents: BassDent[] = [];
+  cracks: AsteroidCrack[] = [];
   bassShip: BassShip | null = null;
   // Lingering "I just played a beat" flare. Independent from `flashAmount`
   // (the bullet-hit flash) so a beat-flash and a hit-flash can co-exist
@@ -292,28 +333,21 @@ export class Asteroid {
     this.rotation = rand(0, TAU);
     this.rotSpeed = rand(-0.6, 0.6);
     this.kind = kind;
-    if (kind === "bassA" || kind === "bassB" || kind === "bassC" || kind === "bassD") {
+    const isBass = kind === "bassA" || kind === "bassB" || kind === "bassC" || kind === "bassD";
+    if (isBass) {
       this.measureOffset = BASS_KIND_BASE_OFFSET[kind];
-      this.bassShip = buildBassShip(kind);
-      this.maxHp = BASS_HP[size];
-      this.hp = this.maxHp;
-      this.dents = rollBassDents(this.maxHp);
-      // Bass ships orient by intent (engines/cockpit point a way) so a
+      this.bassShip = buildBassteroidShape(kind);
+      // Bassteroids orient by intent (engines/cockpit point a way) so a
       // wildly spinning silhouette would muddy the modular read. Keep them
       // drifting slowly.
       this.rotSpeed = rand(-0.18, 0.18);
     }
+    this.maxHp = isBass ? BASS_HP[size] : ASTEROID_HP[size];
+    this.hp = this.maxHp;
+    this.cracks = rollCracks(this.maxHp);
     const kindHue = KIND_HUE[kind];
     this.hue = hue ?? (kindHue !== undefined ? kindHue : nextWaveHue());
-    this.harmonics = [];
-    const harmonicLayerFrequencies = [2, 3, 5, 7];
-    for (const freq of harmonicLayerFrequencies) {
-      this.harmonics.push({
-        amp: rand(0.05, 0.18) / Math.sqrt(freq),
-        freq,
-        phase: rand(0, TAU),
-      });
-    }
+    this.harmonics = this.buildHarmonicsForKind(kind);
     this.outline = this.computeOutline();
     this.nuclei = [];
     const nucleusCount = size === "large" ? 5 : size === "medium" ? 3 : 2;
@@ -331,8 +365,48 @@ export class Asteroid {
     this.sprite = this.buildSprite();
   }
 
+  // Each non-bass kind gets a subtly distinct silhouette via its harmonic
+  // mix. "normal" stays the classic lumpy default; chime/bell/warble/tink
+  // each lean on different frequencies so they read as different shapes
+  // even before colour cues land.
+  buildHarmonicsForKind(kind: AsteroidKind): Harmonic[] {
+    const out: Harmonic[] = [];
+    // Per-kind frequency list and amplitude scale. Bass kinds keep the
+    // default since their actual silhouette is the modular ship sprite.
+    let freqs: number[];
+    let ampScale = 1;
+    if (kind === "chime") {
+      // Sharp crystalline shards: high frequencies, low amplitude.
+      freqs = [5, 7, 9, 11];
+      ampScale = 0.7;
+    } else if (kind === "bell") {
+      // Smooth rounded bell-curve body: dominant low harmonic, gentle.
+      freqs = [2, 4, 6];
+      ampScale = 0.55;
+    } else if (kind === "warble") {
+      // Wobbly elongated lobes: strong 3-fold + odd higher mode.
+      freqs = [3, 5, 8];
+      ampScale = 1.4;
+    } else if (kind === "tink") {
+      // Tiny faceted gem: very angular, many high frequencies.
+      freqs = [4, 6, 9, 13];
+      ampScale = 0.85;
+    } else {
+      // Default — classic asteroid lumpiness.
+      freqs = [2, 3, 5, 7];
+    }
+    for (const freq of freqs) {
+      out.push({
+        amp: (rand(0.05, 0.18) / Math.sqrt(freq)) * ampScale,
+        freq,
+        phase: rand(0, TAU),
+      });
+    }
+    return out;
+  }
+
   buildSprite(): HTMLCanvasElement {
-    if (this.isBass()) return this.buildBassSprite();
+    if (this.isBass()) return this.buildBassteroidSprite();
     const haloRadius = this.radius * 2.3;
     const padding = 14;
     const size = Math.ceil(2 * (haloRadius + padding));
@@ -345,11 +419,19 @@ export class Asteroid {
     ctx.translate(size / 2, size / 2);
     ctx.globalCompositeOperation = "lighter";
     const baseHue = this.hue;
+    // Normal asteroids are essentially monochrome rock — drop saturation
+    // hard so the special kinds (chime/bell/warble/tink/bass) are the only
+    // things drawing the eye with colour.
+    const isPlain = this.kind === "normal";
+    const sHi = isPlain ? 8 : 100;
+    const sMid = isPlain ? 6 : 80;
+    const sLo = isPlain ? 5 : 70;
+    const sFaint = isPlain ? 4 : 60;
 
     const halo = ctx.createRadialGradient(0, 0, this.radius * 0.7, 0, 0, haloRadius);
-    halo.addColorStop(0, `hsla(${baseHue}, 100%, 60%, 0.12)`);
-    halo.addColorStop(0.5, `hsla(${baseHue + 10}, 100%, 55%, 0.048)`);
-    halo.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
+    halo.addColorStop(0, `hsla(${baseHue}, ${sHi}%, 60%, 0.12)`);
+    halo.addColorStop(0.5, `hsla(${baseHue + 10}, ${sHi}%, 55%, 0.048)`);
+    halo.addColorStop(1, `hsla(${baseHue}, ${sHi}%, 60%, 0)`);
     ctx.fillStyle = halo;
     ctx.beginPath();
     ctx.arc(0, 0, haloRadius, 0, TAU);
@@ -368,15 +450,15 @@ export class Asteroid {
     ctx.closePath();
 
     const interior = ctx.createRadialGradient(0, 0, 0, 0, 0, this.radius);
-    interior.addColorStop(0, `hsla(${baseHue}, 80%, 30%, 0.35)`);
-    interior.addColorStop(0.7, `hsla(${baseHue - 10}, 70%, 18%, 0.25)`);
-    interior.addColorStop(1, `hsla(${baseHue}, 60%, 10%, 0.05)`);
+    interior.addColorStop(0, `hsla(${baseHue}, ${sMid}%, 30%, 0.35)`);
+    interior.addColorStop(0.7, `hsla(${baseHue - 10}, ${sLo}%, 18%, 0.25)`);
+    interior.addColorStop(1, `hsla(${baseHue}, ${sFaint}%, 10%, 0.05)`);
     ctx.fillStyle = interior;
     ctx.fill();
 
     ctx.lineWidth = 1.3;
-    ctx.strokeStyle = `hsla(${baseHue + 10}, 100%, 75%, 0.7)`;
-    ctx.shadowColor = `hsla(${baseHue}, 100%, 65%, 1)`;
+    ctx.strokeStyle = `hsla(${baseHue + 10}, ${sHi}%, 75%, 0.7)`;
+    ctx.shadowColor = `hsla(${baseHue}, ${sHi}%, 65%, 1)`;
     ctx.shadowBlur = 14;
     ctx.stroke();
     ctx.shadowBlur = 0;
@@ -384,7 +466,7 @@ export class Asteroid {
     ctx.save();
     ctx.clip();
     const filamentCount = this.size === "large" ? 6 : this.size === "medium" ? 4 : 3;
-    ctx.strokeStyle = `hsla(${baseHue + 5}, 90%, 70%, 0.18)`;
+    ctx.strokeStyle = `hsla(${baseHue + 5}, ${isPlain ? 6 : 90}%, 70%, 0.18)`;
     ctx.lineWidth = 0.6;
     const filamentIndexList = Array.from({ length: filamentCount }, (_, i) => i);
     for (const i of filamentIndexList) {
@@ -406,9 +488,9 @@ export class Asteroid {
       const ny = Math.sin(n.angle) * n.dist;
       const nucleusRadius = n.size * 6 * bakedNucleusPulse;
       const grad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nucleusRadius);
-      grad.addColorStop(0, `hsla(${baseHue + 15}, 100%, 90%, ${0.9 * bakedNucleusPulse})`);
-      grad.addColorStop(0.4, `hsla(${baseHue}, 100%, 65%, ${0.45 * bakedNucleusPulse})`);
-      grad.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
+      grad.addColorStop(0, `hsla(${baseHue + 15}, ${sHi}%, 90%, ${0.9 * bakedNucleusPulse})`);
+      grad.addColorStop(0.4, `hsla(${baseHue}, ${sHi}%, 65%, ${0.45 * bakedNucleusPulse})`);
+      grad.addColorStop(1, `hsla(${baseHue}, ${sHi}%, 60%, 0)`);
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(nx, ny, nucleusRadius, 0, TAU);
@@ -418,12 +500,12 @@ export class Asteroid {
     return canvas;
   }
 
-  // Pre-rendered modular spaceship body for bass kinds. Hard-edged panels
-  // with bright outlines, a tight halo, engine glow, and "running lights"
-  // give each kind a memorable silhouette distinct from the organic shapes
-  // everything else uses. Crumple dents and the beat-flash are drawn live
-  // in `render()` because they animate per frame.
-  buildBassSprite(): HTMLCanvasElement {
+  // Pre-rendered modular bassteroid body. Hard-edged panels with bright
+  // outlines, a tight halo, engine glow, and "running lights" give each kind
+  // a memorable silhouette distinct from the organic shapes everything else
+  // uses. Cracks and the beat-flash are drawn live in `render()` because
+  // they animate per frame.
+  buildBassteroidSprite(): HTMLCanvasElement {
     const haloRadius = this.radius * 1.6;
     const padding = 18;
     const size = Math.ceil(2 * (haloRadius + padding));
@@ -540,7 +622,7 @@ export class Asteroid {
     const dy = point.y - this.pos.y;
     const distance = Math.hypot(dx, dy);
     if (distance > this.radius * 1.3) return false;
-    // Bass ships are modular silhouettes, not organic blobs — use a tight
+    // Bassteroids are modular silhouettes, not organic blobs — use a tight
     // circle for the hitbox. 0.88 is a feel-tuned shrink so glancing shots
     // miss the gaps between modules instead of registering on empty space.
     if (this.isBass()) return distance < this.radius * 0.88 + pointRadius;
@@ -553,12 +635,13 @@ export class Asteroid {
     this.flashAmount = 1;
   }
 
-  // Apply one bullet's worth of damage to a bass ship. Decrements HP and
-  // returns whether the ship is now dead. Non-killing hits leave a visible
-  // crumple dent in `dents`. Caller (Game.handleCollisions) is responsible
-  // for emitting effects and dispatching to `split()` on a kill.
-  applyBassDamage(): { killed: boolean } {
-    this.hp = Math.max(0, this.hp - 1);
+  // Apply `amount` damage to this asteroid. Decrements HP and returns
+  // whether it's now dead. Non-killing hits reveal one or more cracks (the
+  // number revealed scales with the damage dealt so a 4-damage rhythm hit
+  // visibly cracks the asteroid harder than a 1-damage plain hit, even if
+  // it didn't kill). Caller is responsible for sound, particles, and split.
+  applyDamage(amount: number = 1): { killed: boolean } {
+    this.hp = Math.max(0, this.hp - amount);
     this.flashAmount = 1;
     return { killed: this.hp <= 0 };
   }
@@ -584,10 +667,10 @@ export class Asteroid {
   }
 
   split(): Asteroid[] {
-    // Bass: each split subdivides the parent's beat slot. Gen-0 (large) → 2
-    // gen-1 (medium) half a measure apart, gen-1 → 2 gen-2 (small) a quarter
-    // measure apart, gen-2 is terminal. Children keep the parent's kind
-    // (and therefore the parent's voice) so the four percussive timbres
+    // Bassteroid: each split subdivides the parent's beat slot. Gen-0 (large)
+    // → 2 gen-1 (medium) half a measure apart, gen-1 → 2 gen-2 (small) a
+    // quarter measure apart, gen-2 is terminal. Children keep the parent's
+    // kind (and therefore the parent's voice) so the four percussive timbres
     // spread across the measure as the field thickens. Fresh HP per the
     // child size — no carryover from the parent.
     if (this.isBass()) {
@@ -641,65 +724,155 @@ export class Asteroid {
       ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
     }
 
+    const isPlain = this.kind === "normal";
+    const nSat = isPlain ? 6 : 100;
     const nucleusList = this.nuclei;
     for (const n of nucleusList) {
       const driftR = n.dist + Math.sin(time * n.pulseSpeed + n.pulsePhase) * 2;
       const nx = Math.cos(n.angle) * driftR;
       const ny = Math.sin(n.angle) * driftR;
       const pulse = 0.6 + 0.4 * Math.sin(time * n.pulseSpeed * 2 + n.pulsePhase);
-      ctx.fillStyle = `hsla(${baseHue + 30}, 100%, 96%, ${pulse})`;
+      ctx.fillStyle = `hsla(${baseHue + 30}, ${nSat}%, 96%, ${pulse})`;
       ctx.beginPath();
       ctx.arc(nx, ny, n.size * 0.9, 0, TAU);
       ctx.fill();
     }
 
     if (this.flashAmount > 0) {
-      ctx.fillStyle = `hsla(${baseHue + 30}, 100%, 95%, ${this.flashAmount * 0.25})`;
+      ctx.fillStyle = `hsla(${baseHue + 30}, ${nSat}%, 95%, ${this.flashAmount * 0.25})`;
       ctx.beginPath();
       ctx.arc(0, 0, this.radius * 1.1, 0, TAU);
       ctx.fill();
     }
 
+    this.renderCracks(ctx);
+
     ctx.restore();
   }
 
-  // Render path for bass ships: pre-baked modular sprite + live crumple
-  // dents (one per HP lost) + a big bright beat flare on the beat. The
-  // beat flare gates the visual rhythm — when all four kinds are active
-  // it reads as a syncopated lighthouse sweep across the screen.
+  // Trace this asteroid's silhouette into the current path, in local space
+  // (assumes caller has already translated to pos and rotated by rotation),
+  // scaled by `scale` relative to radius=1. For bassteroids the path is the
+  // union of all module polygons (each module is a subpath); for organic
+  // asteroids it's the lumpy Fourier outline. Use this to draw silhouette-
+  // shaped pulses, halos, or hit flashes instead of a generic circle.
+  tracePath(ctx: CanvasRenderingContext2D, scale: number) {
+    ctx.beginPath();
+    if (this.isBass() && this.bassShip) {
+      for (const module of this.bassShip.modules) {
+        for (let i = 0; i < module.vertices.length; i++) {
+          const x = module.vertices[i].x * this.radius * scale;
+          const y = module.vertices[i].y * this.radius * scale;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+      }
+      return;
+    }
+    for (let i = 0; i < this.outlineSamples; i++) {
+      const angle = (i / this.outlineSamples) * TAU;
+      const r = this.outline[i] * scale;
+      const x = Math.cos(angle) * r;
+      const y = Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  }
+
+  // Generic crack overlay used by both organic asteroids and bassteroids.
+  // Draws one crack per HP lost (jagged fracture-lines radiating from the
+  // impact point) as a dark inner stroke plus a thin bright over-stroke
+  // (heat/strain glow). Caller must have already translated to the
+  // asteroid's centre and rotated into its frame.
+  renderCracks(ctx: CanvasRenderingContext2D) {
+    const cracksToDraw = Math.min(this.maxHp - this.hp, this.cracks.length);
+    if (cracksToDraw <= 0) return;
+    for (let i = 0; i < cracksToDraw; i++) {
+      const crack = this.cracks[i];
+      const dx = crack.pos.x * this.radius;
+      const dy = crack.pos.y * this.radius;
+      ctx.save();
+      ctx.translate(dx, dy);
+      ctx.rotate(crack.angle);
+
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = "rgba(6,2,1,0.95)";
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      for (const branch of crack.branches) {
+        ctx.beginPath();
+        for (let p = 0; p < branch.points.length; p++) {
+          const px = branch.points[p].x * this.radius;
+          const py = branch.points[p].y * this.radius;
+          if (p === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = `hsla(20, 100%, 70%, 0.55)`;
+      ctx.lineWidth = 0.8;
+      ctx.shadowColor = `hsla(15, 100%, 55%, 1)`;
+      ctx.shadowBlur = 5;
+      for (const branch of crack.branches) {
+        ctx.beginPath();
+        for (let p = 0; p < branch.points.length; p++) {
+          const px = branch.points[p].x * this.radius;
+          const py = branch.points[p].y * this.radius;
+          if (p === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+  }
+
+  // Render path for bassteroids: pre-baked modular sprite + live cracks
+  // (one per HP lost) + a big bright beat flare on the beat. The beat flare
+  // gates the visual rhythm — when all four kinds are active it reads as a
+  // syncopated lighthouse sweep across the screen.
   renderBass(ctx: CanvasRenderingContext2D) {
     const baseHue = this.hue;
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
+    ctx.rotate(this.rotation);
 
-    // Beat-time bloom that lives OUTSIDE the rotated/scaled body so it
-    // reads as a halo around the ship rather than a co-rotating disc.
+    // Beat-time bloom drawn as scaled copies of the bassteroid silhouette
+    // rather than a generic circle, so the pulse reads as "the shape getting
+    // bigger" instead of an unrelated disc. Two concentric scaled outlines
+    // (outer = soft glow, inner = bright rim) sell the shockwave.
     if (this.beatFlash > 0) {
-      ctx.globalCompositeOperation = "lighter";
-      const bloom = ctx.createRadialGradient(0, 0, this.radius * 0.4, 0, 0, this.radius * 2.6);
       const a = this.beatFlash;
-      bloom.addColorStop(0, `hsla(${baseHue + 30}, 100%, 90%, ${0.85 * a})`);
-      bloom.addColorStop(0.35, `hsla(${baseHue + 10}, 100%, 70%, ${0.45 * a})`);
-      bloom.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
-      ctx.fillStyle = bloom;
-      ctx.beginPath();
-      ctx.arc(0, 0, this.radius * 2.6, 0, TAU);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const outerScale = 1.7 + 0.6 * a;
+      ctx.fillStyle = `hsla(${baseHue + 25}, 100%, 70%, ${0.22 * a})`;
+      ctx.shadowColor = `hsla(${baseHue + 15}, 100%, 75%, 1)`;
+      ctx.shadowBlur = 28 + 16 * a;
+      this.tracePath(ctx, outerScale);
       ctx.fill();
-      // Bright kicked-up rim so the beat reads even against a busy field.
-      ctx.strokeStyle = `hsla(${baseHue + 25}, 100%, 88%, ${0.9 * a})`;
+      ctx.shadowBlur = 0;
+
+      const innerScale = 1.25 + 0.18 * a;
+      ctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 90%, ${0.95 * a})`;
       ctx.lineWidth = 2.4 + 2.6 * a;
-      ctx.shadowColor = `hsla(${baseHue + 15}, 100%, 80%, 1)`;
-      ctx.shadowBlur = 22 + 18 * a;
-      ctx.beginPath();
-      ctx.arc(0, 0, this.radius * (1.15 + 0.18 * a), 0, TAU);
+      ctx.shadowColor = `hsla(${baseHue + 20}, 100%, 85%, 1)`;
+      ctx.shadowBlur = 18 + 12 * a;
+      this.tracePath(ctx, innerScale);
       ctx.stroke();
       ctx.shadowBlur = 0;
+      ctx.restore();
     }
 
-    ctx.rotate(this.rotation);
     // A small scale-up on the beat (cosmetic only — collisions still use
-    // this.radius). Capped low enough that the ship doesn't appear to grow
-    // into the player's path during a rhythm window.
+    // this.radius). Capped low enough that the bassteroid doesn't appear to
+    // grow into the player's path during a rhythm window.
     const beatScale = 1 + 0.06 * this.beatFlash;
     ctx.scale(beatScale, beatScale);
     ctx.globalCompositeOperation = "lighter";
@@ -708,66 +881,11 @@ export class Asteroid {
       ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
     }
 
-    const dentsToDraw = this.maxHp - this.hp;
-    if (dentsToDraw > 0) {
-      // Crumple dent overlays. Drawn in source-over (a dark scorch blob on
-      // top of the panel) rather than destination-out so we don't punch
-      // holes through the starfield behind the ship. Then a bright ember
-      // dot in additive mode reads as the still-hot impact crater.
-      ctx.save();
-      ctx.globalCompositeOperation = "source-over";
-      for (let i = 0; i < dentsToDraw; i++) {
-        const dent = this.dents[i];
-        const dx = dent.pos.x * this.radius;
-        const dy = dent.pos.y * this.radius;
-        const ds = dent.size * this.radius;
-        ctx.save();
-        ctx.translate(dx, dy);
-        ctx.rotate(dent.angle);
-        const scorch = ctx.createRadialGradient(0, 0, 0, 0, 0, ds);
-        scorch.addColorStop(0, "rgba(8,4,2,0.95)");
-        scorch.addColorStop(0.6, "rgba(20,8,4,0.75)");
-        scorch.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = scorch;
-        ctx.beginPath();
-        ctx.moveTo(-ds, -ds * 0.35);
-        ctx.lineTo(ds * 0.4, -ds * 0.6);
-        ctx.lineTo(ds, -ds * 0.05);
-        ctx.lineTo(ds * 0.5, ds * 0.55);
-        ctx.lineTo(-ds * 0.25, ds * 0.4);
-        ctx.lineTo(-ds * 0.85, ds * 0.1);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      }
-      ctx.restore();
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = `hsla(${baseHue + 18}, 100%, 80%, 0.9)`;
-      ctx.lineWidth = 1.1;
-      ctx.shadowColor = `hsla(20, 100%, 60%, 1)`;
-      ctx.shadowBlur = 6;
-      for (let i = 0; i < dentsToDraw; i++) {
-        const dent = this.dents[i];
-        const dx = dent.pos.x * this.radius;
-        const dy = dent.pos.y * this.radius;
-        const ds = dent.size * this.radius;
-        ctx.beginPath();
-        ctx.arc(dx, dy, ds * 0.7, 0, TAU);
-        ctx.stroke();
-        ctx.fillStyle = `hsla(20, 100%, 75%, 0.85)`;
-        ctx.beginPath();
-        ctx.arc(dx, dy, ds * 0.18, 0, TAU);
-        ctx.fill();
-      }
-      ctx.shadowBlur = 0;
-      ctx.restore();
-    }
+    this.renderCracks(ctx);
 
     if (this.flashAmount > 0) {
       ctx.fillStyle = `hsla(${baseHue + 30}, 100%, 95%, ${this.flashAmount * 0.32})`;
-      ctx.beginPath();
-      ctx.arc(0, 0, this.radius * 1.05, 0, TAU);
+      this.tracePath(ctx, 1.05);
       ctx.fill();
     }
 

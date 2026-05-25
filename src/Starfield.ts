@@ -99,7 +99,7 @@ export class Starfield {
     }
     for (const starInField of this.stars) {
       const twinkle = 0.5 + 0.5 * Math.sin(t * 0.001 * starInField.twinkleSpeed + starInField.twinklePhase);
-      const alpha = 0.3 + 0.7 * twinkle * starInField.depth;
+      const alpha = 0.13 + 0.32 * twinkle * starInField.depth;
       const size = starInField.size * (0.7 + 0.3 * twinkle);
       ctx.fillStyle = `hsla(${starInField.hue}, 80%, 85%, ${alpha})`;
       ctx.beginPath();

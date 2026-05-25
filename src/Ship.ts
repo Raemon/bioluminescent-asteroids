@@ -71,7 +71,9 @@ export class Ship {
       this.fire(bullets);
       const effectiveFireRate = this.rapidActive ? this.fireRate * RAPID_FIRE_RATE_MULTIPLIER : this.fireRate;
       this.fireCooldown = effectiveFireRate;
-      sound.play("fire");
+      // Fire sound is played by Game after the on-beat detection runs so
+      // we can pick the deeper "fireBeat" voice for rhythm shots and the
+      // lighter "fire" voice for plain shots.
     }
 
     if (input.pressed("h") && this.hyperCooldown <= 0) {
@@ -165,9 +167,12 @@ export class Ship {
     const alpha = onCooldown ? 0.75 * 0.3 : 0.75;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.strokeStyle = `hsla(50, 100%, 78%, ${alpha})`;
+    // Dark-blue ring — matches the rhythm-bullet colour so the player reads
+    // "this is where my next rhythm shot would land" without needing a
+    // legend.
+    ctx.strokeStyle = `hsla(220, 100%, 78%, ${alpha})`;
     ctx.lineWidth = 1;
-    ctx.shadowColor = `hsla(50, 100%, 70%, ${alpha})`;
+    ctx.shadowColor = `hsla(220, 100%, 70%, ${alpha})`;
     ctx.shadowBlur = 7;
     ctx.beginPath();
     ctx.arc(reticulePos.x, reticulePos.y, 4.5, 0, TAU);
@@ -217,17 +222,17 @@ export class Ship {
 
     ctx.shadowBlur = 12;
     for (const vert of verticesOfShip) {
-      const grad = ctx.createRadialGradient(vert.x, vert.y, 0, vert.x, vert.y, 8);
+      const grad = ctx.createRadialGradient(vert.x, vert.y, 0, vert.x, vert.y, 4);
       grad.addColorStop(0, "hsla(195, 100%, 95%, 1)");
       grad.addColorStop(0.4, "hsla(195, 100%, 70%, 0.7)");
       grad.addColorStop(1, "hsla(195, 100%, 60%, 0)");
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(vert.x, vert.y, 8, 0, TAU);
+      ctx.arc(vert.x, vert.y, 4, 0, TAU);
       ctx.fill();
       ctx.fillStyle = "hsla(195, 100%, 98%, 1)";
       ctx.beginPath();
-      ctx.arc(vert.x, vert.y, 1.6, 0, TAU);
+      ctx.arc(vert.x, vert.y, 0.6, 0, TAU);
       ctx.fill();
     }
 

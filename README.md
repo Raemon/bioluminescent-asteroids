@@ -35,14 +35,14 @@ Then open the URL Vite prints.
 
 The whole game runs against a shared beat clock on a 0.5-second grid (120 BPM quarters). Two things happen on that clock:
 
-- **Bass ships play the song.** Four armoured bass kinds (`bassA`, `bassB`, `bassC`, `bassD`) sit on the four beats of a 4-beat measure — A on beat 1, B on beat 2, C on beat 3, D on beat 4. Each kind has its own percussive voice tuned to a different note in C major: A is the kick (C2 root), B the pluck (G2 fifth), C the boom (F2 fourth), D the snap (C3-area accent). With all four on the field the pattern reads as a clean kick-pluck-boom-snap, and any subset of them still harmonises. A large bass ship has 4 HP and takes that many shots before exploding, each hit leaving a visible crumple-and-scorch dent on the hull. The final hit splits it into two medium pieces (2 HP each); medium splits again into two small pieces (1 HP, terminal). Children inherit the parent's kind (so the parent's voice) but their beat slots subdivide the measure — gen-1 pieces sit half a measure apart, gen-2 pieces a quarter measure apart, so by the time a large is fully broken down its four small pieces carry that kind's voice onto every beat. Decorator asteroids — `chime`, `bell`, `warble`, and the rare `tink` crystal — sit on top with their own melodic timbres so each wave's soundscape is unique.
+- **Bassteroids play the song.** Four armoured bassteroid kinds (`bassA`, `bassB`, `bassC`, `bassD`) sit on the four beats of a 4-beat measure — A on beat 1, B on beat 2, C on beat 3, D on beat 4. Each kind has its own percussive voice tuned to a different note in C major: A is the kick (C2 root), B the pluck (G2 fifth), C the boom (F2 fourth), D the snap (C3-area accent). With all four on the field the pattern reads as a clean kick-pluck-boom-snap, and any subset of them still harmonises. A large bassteroid has 4 HP and takes that many shots before exploding, each hit leaving a visible crack across the hull. The final hit splits it into two medium pieces (2 HP each); medium splits again into two small pieces (1 HP, terminal). Children inherit the parent's kind (so the parent's voice) but their beat slots subdivide the measure — gen-1 pieces sit half a measure apart, gen-2 pieces a quarter measure apart, so by the time a large is fully broken down its four small pieces carry that kind's voice onto every beat. Decorator asteroids — `chime`, `bell`, `warble`, and the rare `tink` crystal — sit on top with their own melodic timbres so each wave's soundscape is unique.
 - **Your shots count toward combo.** Any shot fired (or any kill that lands) within ±150 ms of a beat center is an "on-beat" event. Consecutive on-beat events build a combo, scaling the score multiplier up to ×5. Miss a beat window and the combo resets. The ship's silhouette pulses *exactly* in the same window — that glow flare is a literal preview of the rhythm gate.
 
 The combo readout pops up on the HUD once you reach ×2, and a small gold sparkle ring fires off any on-beat kill so the bonus reads visually even when the underlying asteroid hue is similar to the explosion.
 
 ## Waves
 
-Wave 1 starts at 4 plain asteroids. The total count grows by one every other wave. Bass ships are seeded with a deliberate "learn one before you learn two" intro: a single random bass kind appears in wave 2, a *different* random bass kind in wave 3, and both of those appear together in wave 4. From wave 6 onward the every-other-wave unlock cadence resumes, adding `chime`, `bell`, `warble`, then the two remaining bass kinds. From wave 3 onward there's also a 1-in-3 chance per wave that a single small `tink` crystal will appear as a bonus. The result is that the audio bed layers up smoothly as you climb: a quiet field at wave 1, a full ensemble by the time you're 10 waves in.
+Wave 1 starts at 4 plain asteroids. The total count grows by one every other wave. Bassteroids are seeded with a deliberate "learn one before you learn two" intro: a single random bassteroid kind appears in wave 2, a *different* random kind in wave 3, and both of those appear together in wave 4. From wave 6 onward the every-other-wave unlock cadence resumes, adding `chime`, `bell`, `warble`, then the two remaining bassteroid kinds. From wave 3 onward there's also a 1-in-3 chance per wave that a single small `tink` crystal will appear as a bonus. The result is that the audio bed layers up smoothly as you climb: a quiet field at wave 1, a full ensemble by the time you're 10 waves in.
 
 ## Powerup canisters
 
@@ -54,7 +54,7 @@ Roughly one in three waves a glowing canister drifts in somewhere mid-level (8�
 | `R` | Rapid Pulse | Fires every 8th note (2× cadence) until you die, and 8th beats count for combo while it's active |
 | `P` | Piercing Plasma | Bullets punch through asteroids until you die |
 | `S` | Shield Bloom | Absorbs one collision, then pops |
-| `Z` | Slow Tide | The whole music side of the clock (beat, bass ships, asteroid motion) crawls at ~half speed for 8s while you and your bullets keep full speed — it's bullet-time, not pause |
+| `Z` | Slow Tide | The whole music side of the clock (beat, bassteroids, asteroid motion) crawls at ~half speed for 8s while you and your bullets keep full speed — it's bullet-time, not pause |
 
 ## Sound
 
@@ -66,7 +66,7 @@ All sound is procedurally synthesized at runtime via the Web Audio API — no as
 - **Hyperspace** is a glissando sine plus rising bandpass noise.
 - **Wave-clear** is a four-note ascending chord.
 - **Bass kick / pluck / boom / snap** are the four percussive voices of the bass kit: C2 sine-thump (bassA), G2 saw+triangle plucked-bass (bassB), F2 sine-with-sub punch (bassC), and a snare-leaning noise+C3-triangle accent (bassD). The notes form a I-IV-V triad with a percussive accent, so any combination of the four layered on a beat stays in key.
-- **Bass hit** is the bitcrushed downward sweep that announces every bass-ship hit (a "you dinged the armour" cue, played on damage hits as well as the killing hit).
+- **Bass hit** is a deep gravelly crunch — sub-bass sawtooth pair sweeping into the bass floor with a low-passed noise transient — that announces every bassteroid hit (a "you cracked the armour" cue, played on damage hits as well as the killing hit).
 - **Chime / bell / warble / tink** are the decorator hit sounds — wind-chime partials, inharmonic temple bell, vibrato'd vocal "ooo", and a high glassy fifth respectively.
 - **Combo tick** is a tiny high-passed noise click confirming an on-beat shot; **combo sparkle** is a warm mid-range fifth that rings out on an on-beat kill.
 - **Powerup** is an ascending C-major arpeggio with a sparkle overlay; **shield pop** is a glassy ting with a noise wash.
@@ -79,8 +79,8 @@ A few principles the code keeps coming back to:
 
 - **The wave is the music.** Every special asteroid kind is first a sound and second a sprite — the audio bed is the reward for surviving long enough to unlock it. New types unlock by *adding* a layer, not replacing one.
 - **No assets, ever.** Every pixel and every sample is generated at runtime: asteroid silhouettes from summed cosine harmonics, particle glow from cached radial gradients, music from raw `OscillatorNode`s. The repo has no `assets/` folder and there is no plan to add one.
-- **Feel is tuned in comments, not docs.** The beat window is ±150 ms because the dt cap is 50 ms plus normal human slop, but narrow enough that spam-firing only catches ~half of beats. The `tink` crystal is rare on purpose ("if you start seeing tink asteroids every wave, lower the per-wave spawn chance"). Slow-mo slows the music side of the clock (beat, bass ships, asteroid motion) while leaving the ship and its bullets at full speed, so it reads as "bullet-time advantage" rather than a global pause. These tradeoffs live next to the constants that encode them.
-- **Bioluminescent palette, organic shapes.** HSL hue rotation, additive blending, soft halos, and Fourier-sampled outlines instead of the classic Atari polygon. The asteroid field reads more like jellyfish drifting than rocks tumbling. The bass ships are the deliberate exception — hard-edged modular silhouettes (hauler, tri-cluster, cross-station, tower) so the "play the rhythm" pieces look like built objects against the organic field.
+- **Feel is tuned in comments, not docs.** The beat window is ±150 ms because the dt cap is 50 ms plus normal human slop, but narrow enough that spam-firing only catches ~half of beats. The `tink` crystal is rare on purpose ("if you start seeing tink asteroids every wave, lower the per-wave spawn chance"). Slow-mo slows the music side of the clock (beat, bassteroids, asteroid motion) while leaving the ship and its bullets at full speed, so it reads as "bullet-time advantage" rather than a global pause. These tradeoffs live next to the constants that encode them.
+- **Bioluminescent palette, organic shapes.** HSL hue rotation, additive blending, soft halos, and Fourier-sampled outlines instead of the classic Atari polygon. The asteroid field reads more like jellyfish drifting than rocks tumbling. The bassteroids are the deliberate exception — hard-edged modular silhouettes (hauler, tri-cluster, cross-station, tower) so the "play the rhythm" pieces look like built objects against the organic field.
 - **Aggressive sprite caching.** `glow.ts` caches per-hue radial gradients in 15° buckets, asteroids pre-render their static body to an offscreen canvas at construction time, and the nebula bakes once and translates per frame. The single biggest Canvas2D perf lever in the codebase is "don't allocate a gradient inside a render loop."
 - **Small, named vocabularies.** Five powerups, nine asteroid kinds, one hue palette — kept short on purpose so each member stays recognizable instead of disappearing into a long list.
 
@@ -88,7 +88,7 @@ A few principles the code keeps coming back to:
 
 - `src/Game.ts` — main state machine, waves, collisions, beat clock, HUD wiring
 - `src/Ship.ts` — player physics + glowing-triangle rendering with thrust plume and beat-pulse halo
-- `src/Asteroid.ts` — organic outline, drifting nuclei, filament weave, bass-tempo bookkeeping, modular bass-ship sprites + HP/crumple-damage rendering
+- `src/Asteroid.ts` — organic outline, drifting nuclei, filament weave, bass-tempo bookkeeping, modular bassteroid sprites + HP/crack-damage rendering
 - `src/Shard.ts` — Voronoi-style fragmentation when an asteroid dies
 - `src/Bullet.ts` — plasma droplets with trail; carries the on-beat flag from the firing frame
 - `src/Canister.ts` — drifting powerup canisters + pickup helpers
