@@ -48,9 +48,7 @@ export class Shard {
     ctx.fillStyle = `hsla(${this.hue}, 80%, 35%, ${alpha * 0.3})`;
     ctx.fill();
     ctx.lineWidth = 1.2;
-    ctx.strokeStyle = `hsla(${this.hue + 15}, 100%, 75%, ${alpha})`;
-    ctx.shadowColor = `hsla(${this.hue}, 100%, 70%, 1)`;
-    ctx.shadowBlur = 10 * alpha;
+    ctx.strokeStyle = `hsla(${this.hue + 15}, 100%, 80%, ${alpha})`;
     ctx.stroke();
     ctx.restore();
   }

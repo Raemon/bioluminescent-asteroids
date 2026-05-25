@@ -20,6 +20,20 @@ type Nucleus = {
 
 export type AsteroidSize = "large" | "medium" | "small";
 
+// "bassA" / "bassB" are the layered bass-track asteroids: they pulse on a
+// shared beat clock, and when hit they emit a "cool initial noise" and split
+// into two pieces that loop at twice the parent's tempo. Those split pieces
+// can't split further — shooting them destroys them entirely.
+//
+// "chime", "bell", "warble" are sound-decorator asteroids that behave exactly
+// like normal ones but trigger a distinctive musical hit sound.
+//
+// "tink" is a rare one-shot crystal: spawned occasionally as a small asteroid
+// (so it can't split) and emits the sharp glassy "tink" sound on destruction.
+// Treat it as a "sometimes-found" treat — if you start seeing tink asteroids
+// every wave, lower the per-wave spawn chance in Game.
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "chime" | "bell" | "warble" | "tink";
+
 const SIZE_RADIUS: Record<AsteroidSize, number> = {
   large: 56,
   medium: 32,
@@ -30,6 +44,24 @@ const SIZE_SCORE: Record<AsteroidSize, number> = {
   large: 20,
   medium: 50,
   small: 100,
+};
+
+const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
+  bassA: 0,
+  bassB: 28,
+  chime: 52,
+  bell: 285,
+  warble: 130,
+  tink: 195,
+};
+
+// Base interval (seconds) between beats at normal tempo. Half a second = a
+// 4/4 quarter at 120 BPM. The two bass kinds share this interval but with
+// different phase offsets so they interlock instead of stacking on each beat.
+export const BASS_BEAT_INTERVAL = 1.0;
+export const BASS_PHASE_OFFSET: Record<"bassA" | "bassB", number> = {
+  bassA: 0.0,
+  bassB: 0.5,
 };
 
 export class Asteroid {
@@ -46,15 +78,31 @@ export class Asteroid {
   outlineSamples = 60;
   membranePhase: number;
   flashAmount = 0;
+  // Pre-rendered offscreen sprite of the static body (halo, outline, interior,
+  // filaments, baseline nucleus glow). Built once in the constructor. Per-frame
+  // rendering is a single drawImage + a couple of cheap pulse/flash overlays.
+  sprite: HTMLCanvasElement | null = null;
+  spriteHalfSize = 0;
+  kind: AsteroidKind;
+  // For bass kinds, doubles each time the asteroid is hit-and-split. The
+  // split children inherit the doubled value so their beats land twice as
+  // often. Always 1 for non-bass kinds.
+  tempoMultiplier = 1;
+  // Game-time (seconds) at which this bass asteroid should fire its next
+  // beat. Set by Game when the asteroid is spawned / split. Unused for
+  // non-bass kinds.
+  nextBeatAt = 0;
 
-  constructor(pos: Vec, vel: Vec, size: AsteroidSize, hue?: number) {
+  constructor(pos: Vec, vel: Vec, size: AsteroidSize, hue?: number, kind: AsteroidKind = "normal") {
     this.pos = pos;
     this.vel = vel;
     this.size = size;
     this.radius = SIZE_RADIUS[size];
     this.rotation = rand(0, TAU);
     this.rotSpeed = rand(-0.6, 0.6);
-    this.hue = hue ?? nextWaveHue();
+    this.kind = kind;
+    const kindHue = KIND_HUE[kind];
+    this.hue = hue ?? (kindHue !== undefined ? kindHue : nextWaveHue());
     this.harmonics = [];
     const harmonicLayerFrequencies = [2, 3, 5, 7];
     for (const freq of harmonicLayerFrequencies) {
@@ -78,6 +126,93 @@ export class Asteroid {
       });
     }
     this.membranePhase = rand(0, TAU);
+    this.sprite = this.buildSprite();
+  }
+
+  buildSprite(): HTMLCanvasElement {
+    const haloRadius = this.radius * 2.3;
+    const padding = 14;
+    const size = Math.ceil(2 * (haloRadius + padding));
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d")!;
+    this.spriteHalfSize = size / 2;
+
+    ctx.translate(size / 2, size / 2);
+    ctx.globalCompositeOperation = "lighter";
+    const baseHue = this.hue;
+
+    const halo = ctx.createRadialGradient(0, 0, this.radius * 0.7, 0, 0, haloRadius);
+    halo.addColorStop(0, `hsla(${baseHue}, 100%, 60%, 0.12)`);
+    halo.addColorStop(0.5, `hsla(${baseHue + 10}, 100%, 55%, 0.048)`);
+    halo.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(0, 0, haloRadius, 0, TAU);
+    ctx.fill();
+
+    ctx.beginPath();
+    const outlineSampleIndices = Array.from({ length: this.outlineSamples }, (_, i) => i);
+    for (const i of outlineSampleIndices) {
+      const angle = (i / this.outlineSamples) * TAU;
+      const r = this.outline[i];
+      const x = Math.cos(angle) * r;
+      const y = Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+
+    const interior = ctx.createRadialGradient(0, 0, 0, 0, 0, this.radius);
+    interior.addColorStop(0, `hsla(${baseHue}, 80%, 30%, 0.35)`);
+    interior.addColorStop(0.7, `hsla(${baseHue - 10}, 70%, 18%, 0.25)`);
+    interior.addColorStop(1, `hsla(${baseHue}, 60%, 10%, 0.05)`);
+    ctx.fillStyle = interior;
+    ctx.fill();
+
+    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = `hsla(${baseHue + 10}, 100%, 75%, 0.7)`;
+    ctx.shadowColor = `hsla(${baseHue}, 100%, 65%, 1)`;
+    ctx.shadowBlur = 14;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    ctx.save();
+    ctx.clip();
+    const filamentCount = this.size === "large" ? 6 : this.size === "medium" ? 4 : 3;
+    ctx.strokeStyle = `hsla(${baseHue + 5}, 90%, 70%, 0.18)`;
+    ctx.lineWidth = 0.6;
+    const filamentIndexList = Array.from({ length: filamentCount }, (_, i) => i);
+    for (const i of filamentIndexList) {
+      const fa = (i / filamentCount) * TAU + this.membranePhase * 0.2;
+      ctx.beginPath();
+      ctx.moveTo(-this.radius, Math.sin(fa) * this.radius * 0.4);
+      ctx.bezierCurveTo(
+        -this.radius * 0.3, Math.cos(fa * 2) * this.radius * 0.5,
+        this.radius * 0.3, Math.sin(fa * 1.5 + 1) * this.radius * 0.5,
+        this.radius, Math.cos(fa) * this.radius * 0.4,
+      );
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    const bakedNucleusPulse = 0.7;
+    for (const n of this.nuclei) {
+      const nx = Math.cos(n.angle) * n.dist;
+      const ny = Math.sin(n.angle) * n.dist;
+      const nucleusRadius = n.size * 6 * bakedNucleusPulse;
+      const grad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nucleusRadius);
+      grad.addColorStop(0, `hsla(${baseHue + 15}, 100%, 90%, ${0.9 * bakedNucleusPulse})`);
+      grad.addColorStop(0.4, `hsla(${baseHue}, 100%, 65%, ${0.45 * bakedNucleusPulse})`);
+      grad.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(nx, ny, nucleusRadius, 0, TAU);
+      ctx.fill();
+    }
+
+    return canvas;
   }
 
   computeOutline(): number[] {
@@ -120,17 +255,35 @@ export class Asteroid {
     this.membranePhase += dt * 0.8;
     this.pos = wrap(add(this.pos, mul(this.vel, dt)), w, h);
     if (this.flashAmount > 0) this.flashAmount = Math.max(0, this.flashAmount - dt * 4);
-    const nucleusList = this.nuclei;
-    for (const nucleus of nucleusList) {
-      nucleus.angle += dt * 0.15;
-    }
+    // Nucleus orbital drift is baked into the sprite so we no longer rotate
+    // it here — the per-frame pulse highlight handles the only visible motion.
   }
 
   scoreValue(): number {
     return SIZE_SCORE[this.size];
   }
 
+  isBass(): boolean {
+    return this.kind === "bassA" || this.kind === "bassB";
+  }
+
   split(): Asteroid[] {
+    // Bass: large splits once into two medium pieces (no small stage). The
+    // medium pieces don't split — shooting them destroys them completely.
+    if (this.isBass()) {
+      if (this.size !== "large") return [];
+      const childSize: AsteroidSize = "medium";
+      const childTempo = this.tempoMultiplier * 2;
+      const fragmentList: Asteroid[] = [];
+      for (let i = 0; i < 2; i++) {
+        const a = Math.atan2(this.vel.y, this.vel.x) + rand(-0.9, 0.9) + (i === 0 ? -1 : 1) * 0.5;
+        const speedMag = Math.hypot(this.vel.x, this.vel.y) * rand(1.1, 1.6) + 30;
+        const child = new Asteroid({ ...this.pos }, fromAngle(a, speedMag), childSize, this.hue, this.kind);
+        child.tempoMultiplier = childTempo;
+        fragmentList.push(child);
+      }
+      return fragmentList;
+    }
     if (this.size === "small") return [];
     const nextSize: AsteroidSize = this.size === "large" ? "medium" : "small";
     const fragmentCount = 2;
@@ -138,7 +291,7 @@ export class Asteroid {
     for (let i = 0; i < fragmentCount; i++) {
       const a = Math.atan2(this.vel.y, this.vel.x) + rand(-0.9, 0.9) + (i === 0 ? -1 : 1) * 0.5;
       const speedMag = Math.hypot(this.vel.x, this.vel.y) * rand(1.1, 1.6) + 30;
-      fragmentList.push(new Asteroid({ ...this.pos }, fromAngle(a, speedMag), nextSize, this.hue));
+      fragmentList.push(new Asteroid({ ...this.pos }, fromAngle(a, speedMag), nextSize, this.hue, this.kind));
     }
     return fragmentList;
   }
@@ -151,65 +304,12 @@ export class Asteroid {
     const baseHue = this.hue;
     const time = t * 0.001;
     const membraneSwell = 1 + 0.025 * Math.sin(this.membranePhase * 0.5);
-
+    ctx.scale(membraneSwell, membraneSwell);
     ctx.globalCompositeOperation = "lighter";
 
-    const haloRadius = this.radius * 2.3;
-    const halo = ctx.createRadialGradient(0, 0, this.radius * 0.7, 0, 0, haloRadius);
-    const haloAlpha = 0.12 + this.flashAmount * 0.4;
-    halo.addColorStop(0, `hsla(${baseHue}, 100%, 60%, ${haloAlpha})`);
-    halo.addColorStop(0.5, `hsla(${baseHue + 10}, 100%, 55%, ${haloAlpha * 0.4})`);
-    halo.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
-    ctx.fillStyle = halo;
-    ctx.beginPath();
-    ctx.arc(0, 0, haloRadius, 0, TAU);
-    ctx.fill();
-
-    ctx.beginPath();
-    const outlineSampleIndices = Array.from({ length: this.outlineSamples }, (_, i) => i);
-    for (const i of outlineSampleIndices) {
-      const angle = (i / this.outlineSamples) * TAU;
-      const breathing = 1 + 0.03 * Math.sin(angle * 3 + this.membranePhase);
-      const r = this.outline[i] * membraneSwell * breathing;
-      const x = Math.cos(angle) * r;
-      const y = Math.sin(angle) * r;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+    if (this.sprite) {
+      ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
     }
-    ctx.closePath();
-
-    const interior = ctx.createRadialGradient(0, 0, 0, 0, 0, this.radius);
-    interior.addColorStop(0, `hsla(${baseHue}, 80%, 30%, 0.35)`);
-    interior.addColorStop(0.7, `hsla(${baseHue - 10}, 70%, 18%, 0.25)`);
-    interior.addColorStop(1, `hsla(${baseHue}, 60%, 10%, 0.05)`);
-    ctx.fillStyle = interior;
-    ctx.fill();
-
-    ctx.lineWidth = 1.3;
-    ctx.strokeStyle = `hsla(${baseHue + 10}, 100%, 75%, ${0.7 + this.flashAmount * 0.3})`;
-    ctx.shadowColor = `hsla(${baseHue}, 100%, 65%, 1)`;
-    ctx.shadowBlur = 14 + this.flashAmount * 24;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    ctx.save();
-    ctx.clip();
-    const filamentCount = this.size === "large" ? 6 : this.size === "medium" ? 4 : 3;
-    ctx.strokeStyle = `hsla(${baseHue + 5}, 90%, 70%, 0.18)`;
-    ctx.lineWidth = 0.6;
-    const filamentIndexList = Array.from({ length: filamentCount }, (_, i) => i);
-    for (const i of filamentIndexList) {
-      const fa = (i / filamentCount) * TAU + this.membranePhase * 0.2;
-      ctx.beginPath();
-      ctx.moveTo(-this.radius, Math.sin(fa) * this.radius * 0.4);
-      ctx.bezierCurveTo(
-        -this.radius * 0.3, Math.cos(fa * 2) * this.radius * 0.5,
-        this.radius * 0.3, Math.sin(fa * 1.5 + 1) * this.radius * 0.5,
-        this.radius, Math.cos(fa) * this.radius * 0.4,
-      );
-      ctx.stroke();
-    }
-    ctx.restore();
 
     const nucleusList = this.nuclei;
     for (const n of nucleusList) {
@@ -217,15 +317,6 @@ export class Asteroid {
       const nx = Math.cos(n.angle) * driftR;
       const ny = Math.sin(n.angle) * driftR;
       const pulse = 0.6 + 0.4 * Math.sin(time * n.pulseSpeed * 2 + n.pulsePhase);
-      const nucleusRadius = n.size * 6 * pulse;
-      const grad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nucleusRadius);
-      grad.addColorStop(0, `hsla(${baseHue + 15}, 100%, 90%, ${0.9 * pulse})`);
-      grad.addColorStop(0.4, `hsla(${baseHue}, 100%, 65%, ${0.45 * pulse})`);
-      grad.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(nx, ny, nucleusRadius, 0, TAU);
-      ctx.fill();
       ctx.fillStyle = `hsla(${baseHue + 30}, 100%, 96%, ${pulse})`;
       ctx.beginPath();
       ctx.arc(nx, ny, n.size * 0.9, 0, TAU);
@@ -243,7 +334,13 @@ export class Asteroid {
   }
 }
 
-export const spawnAsteroidAtEdge = (w: number, h: number, hue?: number): Asteroid => {
+export const spawnAsteroidAtEdge = (
+  w: number,
+  h: number,
+  hue?: number,
+  kind: AsteroidKind = "normal",
+  size: AsteroidSize = "large",
+): Asteroid => {
   const edge = Math.floor(Math.random() * 4);
   let pos: Vec;
   if (edge === 0) pos = v(rand(0, w), -40);
@@ -255,5 +352,5 @@ export const spawnAsteroidAtEdge = (w: number, h: number, hue?: number): Asteroi
   const dirY = center.y - pos.y;
   const norm = Math.hypot(dirX, dirY);
   const speed = rand(40, 90);
-  return new Asteroid(pos, v((dirX / norm) * speed, (dirY / norm) * speed), "large", hue);
+  return new Asteroid(pos, v((dirX / norm) * speed, (dirY / norm) * speed), size, hue, kind);
 };

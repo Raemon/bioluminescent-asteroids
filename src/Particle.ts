@@ -1,4 +1,5 @@
 import { Vec, add, mul } from "./vec";
+import { drawGlow } from "./glow";
 
 export type Particle = {
   pos: Vec;
@@ -37,14 +38,13 @@ export class ParticleSystem {
       const t = p.life / p.maxLife;
       const alpha = t * t;
       const r = p.size * (p.shrink ? t : 1);
-      const grad = ctx.createRadialGradient(p.pos.x, p.pos.y, 0, p.pos.x, p.pos.y, r * 4);
-      grad.addColorStop(0, `hsla(${p.hue}, 95%, 75%, ${alpha})`);
-      grad.addColorStop(0.3, `hsla(${p.hue}, 95%, 60%, ${alpha * 0.5})`);
-      grad.addColorStop(1, `hsla(${p.hue}, 95%, 60%, 0)`);
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(p.pos.x, p.pos.y, r * 4, 0, Math.PI * 2);
-      ctx.fill();
+      drawGlow(ctx, p.pos.x, p.pos.y, r * 4, p.hue, alpha);
+    }
+    ctx.globalAlpha = 1;
+    for (const p of this.particles) {
+      const t = p.life / p.maxLife;
+      const alpha = t * t;
+      const r = p.size * (p.shrink ? t : 1);
       ctx.fillStyle = `hsla(${p.hue}, 100%, 95%, ${alpha})`;
       ctx.beginPath();
       ctx.arc(p.pos.x, p.pos.y, r, 0, Math.PI * 2);

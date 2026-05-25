@@ -3,6 +3,11 @@ import { Input } from "./Input";
 import { ParticleSystem } from "./Particle";
 import { Bullet } from "./Bullet";
 import { Sound } from "./Sound";
+import { PowerupKind, POWERUP_HUE } from "./Canister";
+
+const RAPID_FIRE_RATE_MULTIPLIER = 0.4;
+const TRIDENT_SPREAD = 0.21;
+const POWERUP_DURATION = 10;
 
 export class Ship {
   pos: Vec;
@@ -21,6 +26,13 @@ export class Ship {
   bulletSpeed = 620;
   bulletLife = 0.85;
   hyperCooldown = 0;
+  // Active powerup state. The three timers count down toward 0 each frame
+  // and grant their effect while positive; the shield is a one-shot flag
+  // consumed on the next hit. Game.collectCanister sets these.
+  tridentTimer = 0;
+  rapidTimer = 0;
+  pierceTimer = 0;
+  shieldActive = false;
 
   constructor(pos: Vec) {
     this.pos = pos;
@@ -32,6 +44,9 @@ export class Ship {
     if (this.invuln > 0) this.invuln -= dt;
     if (this.fireCooldown > 0) this.fireCooldown -= dt;
     if (this.hyperCooldown > 0) this.hyperCooldown -= dt;
+    if (this.tridentTimer > 0) this.tridentTimer = Math.max(0, this.tridentTimer - dt);
+    if (this.rapidTimer > 0) this.rapidTimer = Math.max(0, this.rapidTimer - dt);
+    if (this.pierceTimer > 0) this.pierceTimer = Math.max(0, this.pierceTimer - dt);
 
     if (input.down("arrowleft") || input.down("a")) this.heading -= this.rotSpeed * dt;
     if (input.down("arrowright") || input.down("d")) this.heading += this.rotSpeed * dt;
@@ -49,7 +64,8 @@ export class Ship {
 
     if ((input.down(" ") || input.down("spacebar")) && this.fireCooldown <= 0) {
       this.fire(bullets);
-      this.fireCooldown = this.fireRate;
+      const effectiveFireRate = this.rapidTimer > 0 ? this.fireRate * RAPID_FIRE_RATE_MULTIPLIER : this.fireRate;
+      this.fireCooldown = effectiveFireRate;
       sound.play("fire");
     }
 
@@ -90,10 +106,24 @@ export class Ship {
   }
 
   fire(bullets: Bullet[]) {
-    const dir = fromAngle(this.heading, 1);
-    const muzzle = add(this.pos, mul(dir, this.radius + 4));
-    const vel = add(mul(dir, this.bulletSpeed), mul(this.vel, 0.4));
-    bullets.push(new Bullet(muzzle, vel, this.bulletLife));
+    const trident = this.tridentTimer > 0;
+    const pierce = this.pierceTimer > 0;
+    const bulletHeadingOffsets = trident ? [-TRIDENT_SPREAD, 0, TRIDENT_SPREAD] : [0];
+    for (const offset of bulletHeadingOffsets) {
+      const dir = fromAngle(this.heading + offset, 1);
+      const muzzle = add(this.pos, mul(dir, this.radius + 4));
+      const vel = add(mul(dir, this.bulletSpeed), mul(this.vel, 0.4));
+      const bullet = new Bullet(muzzle, vel, this.bulletLife);
+      bullet.pierce = pierce;
+      bullets.push(bullet);
+    }
+  }
+
+  applyPowerup(kind: PowerupKind) {
+    if (kind === "trident") this.tridentTimer = POWERUP_DURATION;
+    else if (kind === "rapid") this.rapidTimer = POWERUP_DURATION;
+    else if (kind === "pierce") this.pierceTimer = POWERUP_DURATION;
+    else if (kind === "shield") this.shieldActive = true;
   }
 
   emitThrust(particles: ParticleSystem, t: number) {
@@ -114,7 +144,7 @@ export class Ship {
     });
   }
 
-  render(ctx: CanvasRenderingContext2D, t: number) {
+  render(ctx: CanvasRenderingContext2D, t: number, beatPulse: number = 0) {
     if (!this.alive) return;
     const invulnFlicker = this.invuln > 0 ? 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(t * 0.025)) : 1;
 
@@ -126,21 +156,32 @@ export class Ship {
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
+    // Visual scale-up on the beat — purely cosmetic, collision still uses
+    // this.radius. Kept small (~8% max) so the silhouette doesn't appear to
+    // grow into asteroids during a rhythm window.
+    if (beatPulse > 0) {
+      const beatScale = 1 + 0.08 * beatPulse;
+      ctx.scale(beatScale, beatScale);
+    }
 
     ctx.globalCompositeOperation = "lighter";
-    const pulse = (0.7 + 0.3 * Math.sin(t * 0.005)) * invulnFlicker;
+    // Beat pulse rides on top of the slow breathing pulse and gets clamped
+    // so alpha never overflows. Outside the rhythm window beatPulse is 0,
+    // so the ship looks exactly as it did before.
+    const breathPulse = 0.7 + 0.3 * Math.sin(t * 0.005);
+    const pulse = Math.min(1, breathPulse + 0.7 * beatPulse) * invulnFlicker;
 
     ctx.strokeStyle = `hsla(195, 100%, 75%, ${0.95 * pulse})`;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.5 + 0.8 * beatPulse;
     ctx.shadowColor = "hsla(195, 100%, 70%, 1)";
-    ctx.shadowBlur = 18;
+    ctx.shadowBlur = 18 + 18 * beatPulse;
     ctx.beginPath();
     ctx.moveTo(verticesOfShip[0].x, verticesOfShip[0].y);
     for (const vert of verticesOfShip.slice(1)) ctx.lineTo(vert.x, vert.y);
     ctx.closePath();
     ctx.stroke();
 
-    ctx.fillStyle = `hsla(195, 100%, 60%, ${0.08 * pulse})`;
+    ctx.fillStyle = `hsla(195, 100%, 60%, ${(0.08 + 0.22 * beatPulse) * pulse})`;
     ctx.fill();
 
     ctx.shadowBlur = 12;
@@ -169,6 +210,20 @@ export class Ship {
       ctx.beginPath();
       ctx.arc(back.x, back.y, 18, 0, TAU);
       ctx.fill();
+    }
+
+    if (this.shieldActive) {
+      const shieldRadius = this.radius * 1.9;
+      const shieldPulse = 0.6 + 0.4 * Math.sin(t * 0.006);
+      const shieldHue = POWERUP_HUE.shield;
+      ctx.strokeStyle = `hsla(${shieldHue}, 100%, 80%, ${0.75 * shieldPulse})`;
+      ctx.lineWidth = 1.4;
+      ctx.shadowColor = `hsla(${shieldHue}, 100%, 70%, 1)`;
+      ctx.shadowBlur = 16;
+      ctx.beginPath();
+      ctx.arc(0, 0, shieldRadius, 0, TAU);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
     }
 
     ctx.restore();

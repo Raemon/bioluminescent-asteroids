@@ -7,7 +7,7 @@ export class Input {
       const k = e.key.toLowerCase();
       if (!this.keys.has(k)) this.justPressed.add(k);
       this.keys.add(k);
-      if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) {
+      if (["arrowup", "arrowdown", "arrowleft", "arrowright", " ", "escape", "esc"].includes(k)) {
         e.preventDefault();
       }
     });

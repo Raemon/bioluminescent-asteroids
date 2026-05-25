@@ -25,6 +25,10 @@ export class Starfield {
   nebula: NebulaBlob[] = [];
   w: number;
   h: number;
+  // Pre-rendered nebula layer. The nebula barely moves (a slow ±40px drift),
+  // so baking it once and translating the whole canvas per frame is visually
+  // indistinguishable from per-frame rebuilds at a fraction of the cost.
+  nebulaSprite: HTMLCanvasElement | null = null;
 
   constructor(w: number, h: number) {
     this.w = w;
@@ -59,25 +63,39 @@ export class Starfield {
         driftY: rand(-3, 3),
       });
     }
+    this.buildNebulaSprite();
+  }
+
+  buildNebulaSprite() {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.floor(this.w));
+    canvas.height = Math.max(1, Math.floor(this.h));
+    const ctx = canvas.getContext("2d")!;
+    ctx.globalCompositeOperation = "lighter";
+    for (const nebulaBlob of this.nebula) {
+      const grad = ctx.createRadialGradient(nebulaBlob.x, nebulaBlob.y, 0, nebulaBlob.x, nebulaBlob.y, nebulaBlob.radius);
+      grad.addColorStop(0, `hsla(${nebulaBlob.hue}, 90%, 60%, ${nebulaBlob.alpha})`);
+      grad.addColorStop(0.5, `hsla(${nebulaBlob.hue + 20}, 80%, 50%, ${nebulaBlob.alpha * 0.4})`);
+      grad.addColorStop(1, `hsla(${nebulaBlob.hue}, 90%, 60%, 0)`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(nebulaBlob.x - nebulaBlob.radius, nebulaBlob.y - nebulaBlob.radius, nebulaBlob.radius * 2, nebulaBlob.radius * 2);
+    }
+    this.nebulaSprite = canvas;
   }
 
   resize(w: number, h: number) {
     this.w = w;
     this.h = h;
+    this.buildNebulaSprite();
   }
 
   render(ctx: CanvasRenderingContext2D, t: number) {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    for (const nebulaBlob of this.nebula) {
-      const cx = nebulaBlob.x + Math.sin(t * 0.0003 + nebulaBlob.driftX) * 40;
-      const cy = nebulaBlob.y + Math.cos(t * 0.00025 + nebulaBlob.driftY) * 40;
-      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, nebulaBlob.radius);
-      grad.addColorStop(0, `hsla(${nebulaBlob.hue}, 90%, 60%, ${nebulaBlob.alpha})`);
-      grad.addColorStop(0.5, `hsla(${nebulaBlob.hue + 20}, 80%, 50%, ${nebulaBlob.alpha * 0.4})`);
-      grad.addColorStop(1, `hsla(${nebulaBlob.hue}, 90%, 60%, 0)`);
-      ctx.fillStyle = grad;
-      ctx.fillRect(cx - nebulaBlob.radius, cy - nebulaBlob.radius, nebulaBlob.radius * 2, nebulaBlob.radius * 2);
+    if (this.nebulaSprite) {
+      const driftX = Math.sin(t * 0.0003) * 20;
+      const driftY = Math.cos(t * 0.00025) * 20;
+      ctx.drawImage(this.nebulaSprite, driftX, driftY);
     }
     for (const starInField of this.stars) {
       const twinkle = 0.5 + 0.5 * Math.sin(t * 0.001 * starInField.twinkleSpeed + starInField.twinklePhase);
