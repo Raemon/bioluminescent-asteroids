@@ -1,5 +1,5 @@
 import { Ship } from "./Ship";
-import { Asteroid, AsteroidKind, BASS_BEAT_INTERVAL, BASS_PHASE_OFFSET, spawnAsteroidAtEdge } from "./Asteroid";
+import { Asteroid, AsteroidKind, BASS_MEASURE_LENGTH, spawnAsteroidAtEdge } from "./Asteroid";
 import { Bullet } from "./Bullet";
 import { ParticleSystem } from "./Particle";
 import { Shard, shatterAsteroid } from "./Shard";
@@ -11,11 +11,12 @@ import { v, fromAngle, dist, rand, TAU } from "./vec";
 
 type GameState = "title" | "playing" | "paused" | "dying" | "gameover";
 
-// Combo grid is half the bass interval so it lines up with the interlocked
-// bassA/bassB hits the player actually hears (bassA on whole seconds, bassB
-// on half-seconds). Window is ±150ms — wide enough to absorb the 50ms dt cap
-// in main.ts plus normal human timing slop, narrow enough that random
-// spam-firing only marks ~half of beats.
+// Combo grid is one quarter-note (0.5s = 120 BPM quarter), the smallest
+// beat slot any bass asteroid can occupy after two splits. That keeps the
+// rhythm gate aligned with every potential bass hit the player can hear.
+// Window is ±150ms — wide enough to absorb the 50ms dt cap in main.ts plus
+// normal human timing slop, narrow enough that random spam-firing only
+// marks ~half of beats.
 const BEAT_GRID = 0.5;
 const BEAT_WINDOW = 0.15;
 // Each successive on-beat step adds +0.5 to the kill multiplier, capped so a
@@ -195,15 +196,16 @@ export class Game {
     this.syncHud();
   }
 
-  // Snap an asteroid's next beat to the global grid for its kind, accounting
-  // for its current tempoMultiplier. Called when spawning bass asteroids or
-  // when bass parents split into doubled-tempo children.
+  // Snap an asteroid's next beat to its assigned within-measure slot on the
+  // global beat clock. The asteroid's `measureOffset` is set in the
+  // constructor (gen-0) or in `split()` (children inherit one half-measure
+  // / quarter-measure step from the parent), so all this has to do is find
+  // the next future measure boundary that aligns with that offset.
   alignBassBeat(asteroid: Asteroid) {
     if (asteroid.kind !== "bassA" && asteroid.kind !== "bassB") return;
-    const interval = BASS_BEAT_INTERVAL / asteroid.tempoMultiplier;
-    const offset = BASS_PHASE_OFFSET[asteroid.kind] / asteroid.tempoMultiplier;
-    const k = Math.ceil((this.beatTime - offset - 1e-6) / interval);
-    asteroid.nextBeatAt = k * interval + offset;
+    const offset = asteroid.measureOffset;
+    const k = Math.ceil((this.beatTime - offset - 1e-6) / BASS_MEASURE_LENGTH);
+    asteroid.nextBeatAt = k * BASS_MEASURE_LENGTH + offset;
   }
 
   spawnSpecial(kind: AsteroidKind): Asteroid {
@@ -453,13 +455,14 @@ export class Game {
     this.beatTime += dt;
     for (const a of this.asteroids) {
       if (a.kind !== "bassA" && a.kind !== "bassB") continue;
-      const interval = BASS_BEAT_INTERVAL / a.tempoMultiplier;
       // Fire any beats that have elapsed since the last frame (typically one,
-      // but defensively handle multi-step in case dt spiked).
+      // but defensively handle multi-step in case dt spiked). All bass
+      // asteroids share the same once-per-measure period now — the variation
+      // between siblings comes from their distinct `measureOffset`s.
       while (this.beatTime >= a.nextBeatAt) {
         this.sound.play(a.kind === "bassA" ? "bassKick" : "bassPluck");
         a.flashAmount = 1.0;
-        a.nextBeatAt += interval;
+        a.nextBeatAt += BASS_MEASURE_LENGTH;
       }
     }
   }
@@ -493,6 +496,10 @@ export class Game {
           this.score += scoreEarned;
           this.shake = Math.min(this.shake + 0.4, 1.2);
           this.sound.play(this.hitSoundFor(a));
+          // Deep echoing overlay that announces "you just hit a bass piece".
+          // Plays on every bass kill regardless of split level, so each
+          // subdivision still reads as part of the same bass family.
+          if (a.isBass()) this.sound.play("bassEcho");
           this.emitExplosion(a, isOnBeatKill);
           const children = a.split();
           for (const c of children) {
@@ -582,10 +589,13 @@ export class Game {
   }
 
   hitSoundFor(a: Asteroid): "explosionLarge" | "explosionMedium" | "explosionSmall" | "bassHit" | "chime" | "bell" | "warble" | "tink" {
-    // Bass-large emits the "cool initial noise" announcing the doubled-tempo
-    // split; the medium pieces fall back to a regular explosion thud.
+    // Splittable bass pieces (large + medium) emit the "cool initial noise"
+    // sweep that announces a new beat slot is being added to the measure.
+    // Terminal small pieces fall back to a regular small explosion. The
+    // deeper bass-echo overlay plays on top in handleCollisions for all
+    // three sizes.
     if (a.isBass()) {
-      return a.size === "large" ? "bassHit" : "explosionMedium";
+      return a.size === "small" ? "explosionSmall" : "bassHit";
     }
     if (a.kind === "chime") return "chime";
     if (a.kind === "bell") return "bell";

@@ -10,6 +10,7 @@ type SoundName =
   | "bassKick"
   | "bassPluck"
   | "bassHit"
+  | "bassEcho"
   | "chime"
   | "bell"
   | "warble"
@@ -86,6 +87,7 @@ export class Sound {
       case "bassKick": this.playBassKick(); break;
       case "bassPluck": this.playBassPluck(); break;
       case "bassHit": this.playBassHit(); break;
+      case "bassEcho": this.playBassEcho(); break;
       case "chime": this.playChime(); break;
       case "bell": this.playBell(); break;
       case "warble": this.playWarble(); break;
@@ -411,6 +413,42 @@ export class Sound {
     nGain.connect(this.master);
     noise.start(t);
     noise.stop(t + 0.2);
+  }
+
+  // Deep echoing tail that plays on every bass-asteroid hit, regardless of
+  // size. Implemented as four discrete sine thuds at decaying volume and an
+  // increasingly dark lowpass — that gives a clearly perceived "echo from a
+  // cave" character without dragging a Web Audio delay-feedback loop along
+  // (which would leak nodes if the page is held open for a long session).
+  // Stays sub-100 Hz so it sits below the kick/pluck without masking them.
+  private playBassEcho() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const echoCount = 4;
+    const echoSpacing = 0.22;
+    const echoIndices = Array.from({ length: echoCount }, (_, i) => i);
+    for (const i of echoIndices) {
+      const start = t + i * echoSpacing;
+      const decay = Math.pow(0.55, i);
+      const osc = this.ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(82.4, start); // E2
+      osc.frequency.exponentialRampToValueAtTime(45, start + 0.22);
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 600 * Math.pow(0.7, i);
+      filter.Q.value = 0.7;
+      const gain = this.ctx.createGain();
+      const peak = 0.34 * decay;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(peak, start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28);
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      osc.start(start);
+      osc.stop(start + 0.32);
+    }
   }
 
   // High shimmery bell — three sine partials at near-bell ratios.

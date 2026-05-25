@@ -20,10 +20,17 @@ type Nucleus = {
 
 export type AsteroidSize = "large" | "medium" | "small";
 
-// "bassA" / "bassB" are the layered bass-track asteroids: they pulse on a
-// shared beat clock, and when hit they emit a "cool initial noise" and split
-// into two pieces that loop at twice the parent's tempo. Those split pieces
-// can't split further — shooting them destroys them entirely.
+// "bassA" / "bassB" are the layered bass-track asteroids. Each piece sounds
+// exactly one beat per measure (4 beats × 0.5s = 2s at 120 BPM). The gen-0
+// offsets stagger the kinds: bassA lands on beat 1, bassB on beat 2.
+//
+// Splitting subdivides the measure rather than doubling the tempo: a hit
+// produces two children that share the parent's period but sit half a
+// measure apart, so two gen-1 pieces fill beats 1+3 (or 2+4 for bassB).
+// Hit those and you get four gen-2 pieces a quarter-measure apart, covering
+// all four beats. Two splits is the cap — gen-2 small pieces can't split
+// further, shooting them destroys them entirely. Every bass hit also
+// triggers a deeper bass-echo overlay sound on top of the regular hit.
 //
 // "chime", "bell", "warble" are sound-decorator asteroids that behave exactly
 // like normal ones but trigger a distinctive musical hit sound.
@@ -55,14 +62,26 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   tink: 195,
 };
 
-// Base interval (seconds) between beats at normal tempo. Half a second = a
-// 4/4 quarter at 120 BPM. The two bass kinds share this interval but with
-// different phase offsets so they interlock instead of stacking on each beat.
-export const BASS_BEAT_INTERVAL = 1.0;
-export const BASS_PHASE_OFFSET: Record<"bassA" | "bassB", number> = {
+// Length of one musical measure (seconds). 4 beats at 120 BPM × 0.5s/beat.
+// Every bass asteroid fires exactly once per measure regardless of split
+// generation; what changes with splitting is which beat-slot in the measure
+// each piece occupies (see `split()` below).
+export const BASS_MEASURE_LENGTH = 2.0;
+
+// Within-measure offset (seconds) for a freshly-spawned gen-0 asteroid of
+// each kind. bassA on beat 1 of the measure, bassB on beat 2 — so the two
+// kinds interleave instead of landing in unison.
+export const BASS_KIND_BASE_OFFSET: Record<"bassA" | "bassB", number> = {
   bassA: 0.0,
   bassB: 0.5,
 };
+
+// Maximum number of times a bass asteroid can be split. 0 = gen-0 (large),
+// 1 = gen-1 (medium, fires alongside its sibling at the half-measure mark),
+// 2 = gen-2 (small, four pieces covering all four beats). Two splits stops
+// the subdivision at quarter-notes, which is the densest pattern that still
+// reads as rhythm rather than mush.
+export const BASS_MAX_SPLIT_LEVEL = 2;
 
 export class Asteroid {
   pos: Vec;
@@ -84,10 +103,16 @@ export class Asteroid {
   sprite: HTMLCanvasElement | null = null;
   spriteHalfSize = 0;
   kind: AsteroidKind;
-  // For bass kinds, doubles each time the asteroid is hit-and-split. The
-  // split children inherit the doubled value so their beats land twice as
-  // often. Always 1 for non-bass kinds.
-  tempoMultiplier = 1;
+  // For bass kinds, the within-measure beat slot (seconds) this piece
+  // occupies. Gen-0 bass asteroids inherit `BASS_KIND_BASE_OFFSET[kind]`;
+  // splitting produces a child at the parent's offset and another at the
+  // parent's offset + measure / 2^childLevel (mod measure). Unused for
+  // non-bass kinds.
+  measureOffset = 0;
+  // Number of times this bass asteroid (or its parents collectively) has
+  // already been split. 0 = gen-0 large, 1 = gen-1 medium, 2 = gen-2 small
+  // (which can't be split further). Always 0 for non-bass kinds.
+  splitLevel = 0;
   // Game-time (seconds) at which this bass asteroid should fire its next
   // beat. Set by Game when the asteroid is spawned / split. Unused for
   // non-bass kinds.
@@ -101,6 +126,9 @@ export class Asteroid {
     this.rotation = rand(0, TAU);
     this.rotSpeed = rand(-0.6, 0.6);
     this.kind = kind;
+    if (kind === "bassA" || kind === "bassB") {
+      this.measureOffset = BASS_KIND_BASE_OFFSET[kind];
+    }
     const kindHue = KIND_HUE[kind];
     this.hue = hue ?? (kindHue !== undefined ? kindHue : nextWaveHue());
     this.harmonics = [];
@@ -268,18 +296,27 @@ export class Asteroid {
   }
 
   split(): Asteroid[] {
-    // Bass: large splits once into two medium pieces (no small stage). The
-    // medium pieces don't split — shooting them destroys them completely.
+    // Bass: each split subdivides the parent's beat slot rather than doubling
+    // tempo. Children share the parent's once-per-measure period but sit a
+    // half / quarter / eighth measure apart depending on generation. Two
+    // splits is the cap (BASS_MAX_SPLIT_LEVEL); after that, shooting the
+    // gen-2 small piece destroys it completely.
     if (this.isBass()) {
-      if (this.size !== "large") return [];
-      const childSize: AsteroidSize = "medium";
-      const childTempo = this.tempoMultiplier * 2;
+      if (this.splitLevel >= BASS_MAX_SPLIT_LEVEL) return [];
+      const childLevel = this.splitLevel + 1;
+      const childSize: AsteroidSize = childLevel === 1 ? "medium" : "small";
+      const splitDelta = BASS_MEASURE_LENGTH / Math.pow(2, childLevel);
+      const childOffsets = [
+        this.measureOffset,
+        (this.measureOffset + splitDelta) % BASS_MEASURE_LENGTH,
+      ];
       const fragmentList: Asteroid[] = [];
       for (let i = 0; i < 2; i++) {
         const a = Math.atan2(this.vel.y, this.vel.x) + rand(-0.9, 0.9) + (i === 0 ? -1 : 1) * 0.5;
         const speedMag = Math.hypot(this.vel.x, this.vel.y) * rand(1.1, 1.6) + 30;
         const child = new Asteroid({ ...this.pos }, fromAngle(a, speedMag), childSize, this.hue, this.kind);
-        child.tempoMultiplier = childTempo;
+        child.splitLevel = childLevel;
+        child.measureOffset = childOffsets[i];
         fragmentList.push(child);
       }
       return fragmentList;
