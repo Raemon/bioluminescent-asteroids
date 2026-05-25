@@ -6,7 +6,10 @@ import { Sound } from "./Sound";
 import { PowerupKind, POWERUP_HUE } from "./Canister";
 import { BEAT_GRID } from "./Game";
 
-const RAPID_FIRE_RATE_MULTIPLIER = 0.4;
+// Rapid fires at 8th notes (half the base BEAT_GRID quarter-note cadence),
+// which is the grid the combo evaluator switches to while rapid is active —
+// see Game.comboGrid.
+const RAPID_FIRE_RATE_MULTIPLIER = 0.5;
 const TRIDENT_SPREAD = 0.21;
 
 export class Ship {

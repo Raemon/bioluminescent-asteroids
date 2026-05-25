@@ -339,6 +339,15 @@ export class Game {
     this.comboEl.classList.add("beat-pulse");
   }
 
+  // The grid the rhythm gate runs on. Quarter notes (BEAT_GRID) normally;
+  // 8th notes (BEAT_GRID/2) while the player has rapid fire, so a rapid
+  // held-fire shot lands a beat every trigger pull. Stored beat indices
+  // in lastMarkedBeatIndex / nextBeatToEvaluate are always in the current
+  // grid — collectCanister and respawn rebase them on grid transitions.
+  comboGrid(): number {
+    return this.ship.rapidActive ? BEAT_GRID / 2 : BEAT_GRID;
+  }
+
   // Visual metronome strength at the current beatTime: 1 at a beat center,
   // falling linearly to 0 at the edge of the same ±BEAT_WINDOW used by
   // markBeat. Returning >0 here is exactly the condition under which a shot
@@ -347,19 +356,22 @@ export class Game {
   // because beatTime isn't advancing there and we don't want a frozen flash.
   currentBeatPulse(): number {
     if (this.state !== "playing" && this.state !== "dying") return 0;
-    const beatPhase = this.beatTime / BEAT_GRID;
+    const grid = this.comboGrid();
+    const beatPhase = this.beatTime / grid;
     const beatsFromNearestBeat = Math.abs(beatPhase - Math.round(beatPhase));
-    const windowFractionOfGrid = BEAT_WINDOW / BEAT_GRID;
+    const windowFractionOfGrid = BEAT_WINDOW / grid;
     return Math.max(0, 1 - beatsFromNearestBeat / windowFractionOfGrid);
   }
 
-  // Try to associate `time` with the nearest beat on the global 0.5s grid.
-  // Returns true iff this call is the first activity inside that beat's
-  // window — that's the signal we use to decide whether to play the on-beat
-  // tick / sparkle and to count the beat for combo display purposes.
+  // Try to associate `time` with the nearest beat on the combo grid (8ths
+  // under rapid, quarters otherwise). Returns true iff this call is the
+  // first activity inside that beat's window — that's the signal we use to
+  // decide whether to play the on-beat tick / sparkle and to count the
+  // beat for combo display purposes.
   markBeat(time: number): boolean {
-    const beatIndex = Math.round(time / BEAT_GRID);
-    const beatCenter = beatIndex * BEAT_GRID;
+    const grid = this.comboGrid();
+    const beatIndex = Math.round(time / grid);
+    const beatCenter = beatIndex * grid;
     if (Math.abs(time - beatCenter) > BEAT_WINDOW) return false;
     if (beatIndex < this.nextBeatToEvaluate) return false;
     if (beatIndex === this.lastMarkedBeatIndex) return false;
@@ -381,7 +393,8 @@ export class Game {
   // future change to main.ts's dt cap lets multiple beats close in a single
   // frame.
   evaluateClosedBeats() {
-    while (this.nextBeatToEvaluate * BEAT_GRID + BEAT_WINDOW <= this.beatTime) {
+    const grid = this.comboGrid();
+    while (this.nextBeatToEvaluate * grid + BEAT_WINDOW <= this.beatTime) {
       if (this.lastMarkedBeatIndex < this.nextBeatToEvaluate) {
         if (this.beatCombo !== 0) {
           this.beatCombo = 0;
@@ -436,12 +449,19 @@ export class Game {
     } else {
       const bulletsBeforeShipUpdate = this.bullets.length;
       this.ship.update(dt, this.input, this.particles, this.bullets, this.w, this.h, this.time, this.sound);
+      // Slow-mo slows the music side of the clock: beatTime, bass beats,
+      // and asteroid motion all step at musicDt while the player, bullets,
+      // and fire cooldown keep real-time speed. The slow-mo timer itself
+      // decrements in wall-clock so its lifespan isn't extended by its own
+      // effect.
+      if (this.slowMoTimer > 0) this.slowMoTimer = Math.max(0, this.slowMoTimer - dt);
+      const musicDt = this.slowMoTimer > 0 ? dt * SLOW_MO_FACTOR : dt;
       // tickBassBeats advances beatTime; we need that advance to land before
       // we time-stamp any shot fired this frame, so on-beat detection lines
       // up with the same beatTime that any bass audio on this frame fired at.
-      this.tickBassBeats(dt);
+      this.tickBassBeats(musicDt);
       if (this.bullets.length > bulletsBeforeShipUpdate) {
-        // Ship's fireRate (0.5s base, 0.2s under rapid) exceeds the dt cap
+        // Ship's fireRate (0.5s base, 0.25s under rapid) exceeds the dt cap
         // (0.05s) so at most ONE fire event lands per frame — but trident
         // emits 3 bullets per fire event, so the slice length can be >1.
         // They all share the same beat flag because they're one shot.
@@ -462,9 +482,7 @@ export class Game {
         this.canisters.push(spawnCanister(this.w, this.h, this.ship.pos));
         this.canisterSpawnAt = null;
       }
-      if (this.slowMoTimer > 0) this.slowMoTimer = Math.max(0, this.slowMoTimer - dt);
-      const asteroidDt = this.slowMoTimer > 0 ? dt * SLOW_MO_FACTOR : dt;
-      for (const a of this.asteroids) a.update(asteroidDt, this.w, this.h);
+      for (const a of this.asteroids) a.update(musicDt, this.w, this.h);
       for (const b of this.bullets) b.update(dt, this.w, this.h);
       this.bullets = this.bullets.filter((b) => b.life > 0);
       for (const s of this.shards) s.update(dt);
@@ -492,12 +510,17 @@ export class Game {
   respawn() {
     this.ship = new Ship(v(this.w / 2, this.h / 2));
     this.ship.invuln = 2.2;
+    // killShip already cleared lastMarkedBeatIndex and beatCombo; the
+    // combo grid may also have flipped (8ths → quarters if the previous
+    // life had rapid), so rebase nextBeatToEvaluate to the first un-closed
+    // beat in the new ship's grid.
+    this.nextBeatToEvaluate = Math.max(0, Math.floor((this.beatTime - BEAT_WINDOW) / this.comboGrid()) + 1);
     this.state = "playing";
     this.syncHud();
   }
 
-  tickBassBeats(dt: number) {
-    this.beatTime += dt;
+  tickBassBeats(musicDt: number) {
+    this.beatTime += musicDt;
     for (const a of this.asteroids) {
       if (!a.isBass()) continue;
       // Fire any beats that have elapsed since the last frame (typically one,
@@ -646,6 +669,16 @@ export class Game {
     if (c.kind === "slow") {
       this.slowMoTimer = SLOW_MO_DURATION;
     } else {
+      // Picking up rapid is the only mid-life event that flips comboGrid()
+      // (quarters → 8ths). Each quarter-beat index k points at the same
+      // musical moment as 8th-beat index 2k, so rescale the stored indices
+      // so an in-flight streak chains into the new grid without resetting.
+      if (c.kind === "rapid" && !this.ship.rapidActive) {
+        if (this.lastMarkedBeatIndex >= 0) this.lastMarkedBeatIndex *= 2;
+        const eighth = BEAT_GRID / 2;
+        const firstUnclosedEighth = Math.max(0, Math.floor((this.beatTime - BEAT_WINDOW) / eighth) + 1);
+        this.nextBeatToEvaluate = Math.max(this.lastMarkedBeatIndex + 1, firstUnclosedEighth);
+      }
       this.ship.applyPowerup(c.kind);
     }
     const burstIndices = Array.from({ length: 36 }, (_, i) => i);

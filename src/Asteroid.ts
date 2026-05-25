@@ -49,9 +49,21 @@ export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "c
 export const BASS_KINDS: ReadonlyArray<"bassA" | "bassB" | "bassC" | "bassD"> = ["bassA", "bassB", "bassC", "bassD"];
 
 const SIZE_RADIUS: Record<AsteroidSize, number> = {
-  large: 56,
-  medium: 32,
-  small: 18,
+  large: 50,
+  medium: 28,
+  small: 16,
+};
+
+const SIZE_SPAWN_SPEED: Record<AsteroidSize, [number, number]> = {
+  large: [40, 90],
+  medium: [55, 105],
+  small: [75, 125],
+};
+
+const splitChildSpeed = (parentVel: Vec, childSize: AsteroidSize): number => {
+  const parentSpeed = Math.hypot(parentVel.x, parentVel.y);
+  if (childSize === "medium") return parentSpeed * rand(1.2, 1.7) + 40;
+  return parentSpeed * rand(1.35, 1.9) + 55;
 };
 
 const SIZE_SCORE: Record<AsteroidSize, number> = {
@@ -590,7 +602,7 @@ export class Asteroid {
       const fragmentList: Asteroid[] = [];
       for (let i = 0; i < 2; i++) {
         const a = Math.atan2(this.vel.y, this.vel.x) + rand(-0.9, 0.9) + (i === 0 ? -1 : 1) * 0.5;
-        const speedMag = Math.hypot(this.vel.x, this.vel.y) * rand(1.1, 1.6) + 30;
+        const speedMag = splitChildSpeed(this.vel, childSize);
         const child = new Asteroid({ ...this.pos }, fromAngle(a, speedMag), childSize, this.hue, this.kind);
         child.splitLevel = childLevel;
         child.measureOffset = childOffsets[i];
@@ -604,7 +616,7 @@ export class Asteroid {
     const fragmentList: Asteroid[] = [];
     for (let i = 0; i < fragmentCount; i++) {
       const a = Math.atan2(this.vel.y, this.vel.x) + rand(-0.9, 0.9) + (i === 0 ? -1 : 1) * 0.5;
-      const speedMag = Math.hypot(this.vel.x, this.vel.y) * rand(1.1, 1.6) + 30;
+      const speedMag = splitChildSpeed(this.vel, nextSize);
       fragmentList.push(new Asteroid({ ...this.pos }, fromAngle(a, speedMag), nextSize, this.hue, this.kind));
     }
     return fragmentList;
@@ -780,6 +792,7 @@ export const spawnAsteroidAtEdge = (
   const dirX = center.x - pos.x;
   const dirY = center.y - pos.y;
   const norm = Math.hypot(dirX, dirY);
-  const speed = rand(40, 90);
+  const [speedMin, speedMax] = SIZE_SPAWN_SPEED[size];
+  const speed = rand(speedMin, speedMax);
   return new Asteroid(pos, v((dirX / norm) * speed, (dirY / norm) * speed), size, hue, kind);
 };

@@ -51,10 +51,10 @@ Roughly one in three waves a glowing canister drifts in somewhere mid-level (8�
 | Letter | Powerup | Effect |
 | --- | --- | --- |
 | `T` | Trident | Fires a 3-bullet spread until you die |
-| `R` | Rapid Pulse | Fires ~2.5× faster until you die |
+| `R` | Rapid Pulse | Fires every 8th note (2× cadence) until you die, and 8th beats count for combo while it's active |
 | `P` | Piercing Plasma | Bullets punch through asteroids until you die |
 | `S` | Shield Bloom | Absorbs one collision, then pops |
-| `Z` | Slow Tide | Asteroids crawl at ~half speed for 8s (you keep full speed — it's bullet-time, not pause) |
+| `Z` | Slow Tide | The whole music side of the clock (beat, bass ships, asteroid motion) crawls at ~half speed for 8s while you and your bullets keep full speed — it's bullet-time, not pause |
 
 ## Sound
 
@@ -79,7 +79,7 @@ A few principles the code keeps coming back to:
 
 - **The wave is the music.** Every special asteroid kind is first a sound and second a sprite — the audio bed is the reward for surviving long enough to unlock it. New types unlock by *adding* a layer, not replacing one.
 - **No assets, ever.** Every pixel and every sample is generated at runtime: asteroid silhouettes from summed cosine harmonics, particle glow from cached radial gradients, music from raw `OscillatorNode`s. The repo has no `assets/` folder and there is no plan to add one.
-- **Feel is tuned in comments, not docs.** The beat window is ±150 ms because the dt cap is 50 ms plus normal human slop, but narrow enough that spam-firing only catches ~half of beats. The `tink` crystal is rare on purpose ("if you start seeing tink asteroids every wave, lower the per-wave spawn chance"). Slow-mo affects asteroid `dt` only because a global slow would feel like a pause instead of a power. These tradeoffs live next to the constants that encode them.
+- **Feel is tuned in comments, not docs.** The beat window is ±150 ms because the dt cap is 50 ms plus normal human slop, but narrow enough that spam-firing only catches ~half of beats. The `tink` crystal is rare on purpose ("if you start seeing tink asteroids every wave, lower the per-wave spawn chance"). Slow-mo slows the music side of the clock (beat, bass ships, asteroid motion) while leaving the ship and its bullets at full speed, so it reads as "bullet-time advantage" rather than a global pause. These tradeoffs live next to the constants that encode them.
 - **Bioluminescent palette, organic shapes.** HSL hue rotation, additive blending, soft halos, and Fourier-sampled outlines instead of the classic Atari polygon. The asteroid field reads more like jellyfish drifting than rocks tumbling. The bass ships are the deliberate exception — hard-edged modular silhouettes (hauler, tri-cluster, cross-station, tower) so the "play the rhythm" pieces look like built objects against the organic field.
 - **Aggressive sprite caching.** `glow.ts` caches per-hue radial gradients in 15° buckets, asteroids pre-render their static body to an offscreen canvas at construction time, and the nebula bakes once and translates per frame. The single biggest Canvas2D perf lever in the codebase is "don't allocate a gradient inside a render loop."
 - **Small, named vocabularies.** Five powerups, nine asteroid kinds, one hue palette — kept short on purpose so each member stays recognizable instead of disappearing into a long list.
