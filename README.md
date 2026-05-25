@@ -1,6 +1,6 @@
 # Pulsar
 
-A TypeScript reimagining of the 1979 Atari classic, focused on rhythm. You are in the d
+A TypeScript reimagining of the 1979 Atari classic, focused on rhythm. You are in the da
 
 ## Stack
 
@@ -50,9 +50,9 @@ Roughly one in three waves a glowing canister drifts in somewhere mid-level (8�
 
 | Letter | Powerup | Effect |
 | --- | --- | --- |
-| `T` | Trident | Fires a 3-bullet spread for 10s |
-| `R` | Rapid Pulse | Fires ~2.5× faster for 10s |
-| `P` | Piercing Plasma | Bullets punch through asteroids for 10s |
+| `T` | Trident | Fires a 3-bullet spread until you die |
+| `R` | Rapid Pulse | Fires ~2.5× faster until you die |
+| `P` | Piercing Plasma | Bullets punch through asteroids until you die |
 | `S` | Shield Bloom | Absorbs one collision, then pops |
 | `Z` | Slow Tide | Asteroids crawl at ~half speed for 8s (you keep full speed — it's bullet-time, not pause) |
 

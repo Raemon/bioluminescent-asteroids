@@ -17,7 +17,7 @@ type GameState = "title" | "playing" | "paused" | "dying" | "gameover";
 // Window is ±150ms — wide enough to absorb the 50ms dt cap in main.ts plus
 // normal human timing slop, narrow enough that random spam-firing only
 // marks ~half of beats.
-const BEAT_GRID = 0.5;
+export const BEAT_GRID = 0.5;
 const BEAT_WINDOW = 0.15;
 // Each successive on-beat step adds +0.5 to the kill multiplier, capped so a
 // long streak doesn't trivialise high-wave scoring.
@@ -441,7 +441,7 @@ export class Game {
       // up with the same beatTime that any bass audio on this frame fired at.
       this.tickBassBeats(dt);
       if (this.bullets.length > bulletsBeforeShipUpdate) {
-        // Ship's fireRate (0.22s base, 0.088s under rapid) exceeds the dt cap
+        // Ship's fireRate (0.5s base, 0.2s under rapid) exceeds the dt cap
         // (0.05s) so at most ONE fire event lands per frame — but trident
         // emits 3 bullets per fire event, so the slice length can be >1.
         // They all share the same beat flag because they're one shot.
@@ -527,6 +527,10 @@ export class Game {
         // through a row of asteroids. Their `life` timer still expires
         // normally, so they don't last forever.
         if (!b.pierce) b.life = 0;
+        // Connecting a shot refunds the beat trigger lock so a player who's
+        // actually hitting things can keep up a faster cadence than the
+        // cooldown allows — missed shots are what cost you tempo.
+        this.ship.fireCooldown = 0;
         // A hit counts as on-beat if EITHER the bullet was fired on the
         // beat OR the impact itself lands in a beat window. The fire-time
         // case keeps long-range shots fair (a timed shot that drifts to a
@@ -806,6 +810,7 @@ export class Game {
     for (const c of this.canisters) c.render(ctx, this.time);
     for (const b of this.bullets) b.render(ctx);
     this.particles.render(ctx);
+    this.ship.renderReticules(ctx, BEAT_GRID, this.w, this.h);
     this.ship.render(ctx, this.time, this.currentBeatPulse());
 
     ctx.restore();

@@ -4,10 +4,10 @@ import { ParticleSystem } from "./Particle";
 import { Bullet } from "./Bullet";
 import { Sound } from "./Sound";
 import { PowerupKind, POWERUP_HUE } from "./Canister";
+import { BEAT_GRID } from "./Game";
 
 const RAPID_FIRE_RATE_MULTIPLIER = 0.4;
 const TRIDENT_SPREAD = 0.21;
-const POWERUP_DURATION = 10;
 
 export class Ship {
   pos: Vec;
@@ -22,16 +22,21 @@ export class Ship {
   invuln = 2.0;
   thrustOn = false;
   fireCooldown = 0;
-  fireRate = 0.22;
+  // One beat per shot: held-fire matches the beat clock, a single tap locks
+  // the trigger for one beat. A reticule in front of the ship previews where
+  // a beat-timed bullet will be at the next beat so the player can line up
+  // an on-beat impact rather than chase a sliding target.
+  fireRate = BEAT_GRID;
   bulletSpeed = 620;
   bulletLife = 0.85;
   hyperCooldown = 0;
-  // Active powerup state. The three timers count down toward 0 each frame
-  // and grant their effect while positive; the shield is a one-shot flag
+  // Active powerup state. Trident/rapid/pierce are persistent flags that
+  // last until the ship dies — a fresh Ship is constructed on respawn, so
+  // these naturally clear with the life. The shield is a one-shot flag
   // consumed on the next hit. Game.collectCanister sets these.
-  tridentTimer = 0;
-  rapidTimer = 0;
-  pierceTimer = 0;
+  tridentActive = false;
+  rapidActive = false;
+  pierceActive = false;
   shieldActive = false;
 
   constructor(pos: Vec) {
@@ -44,9 +49,6 @@ export class Ship {
     if (this.invuln > 0) this.invuln -= dt;
     if (this.fireCooldown > 0) this.fireCooldown -= dt;
     if (this.hyperCooldown > 0) this.hyperCooldown -= dt;
-    if (this.tridentTimer > 0) this.tridentTimer = Math.max(0, this.tridentTimer - dt);
-    if (this.rapidTimer > 0) this.rapidTimer = Math.max(0, this.rapidTimer - dt);
-    if (this.pierceTimer > 0) this.pierceTimer = Math.max(0, this.pierceTimer - dt);
 
     if (input.down("arrowleft") || input.down("a")) this.heading -= this.rotSpeed * dt;
     if (input.down("arrowright") || input.down("d")) this.heading += this.rotSpeed * dt;
@@ -64,7 +66,7 @@ export class Ship {
 
     if ((input.down(" ") || input.down("spacebar")) && this.fireCooldown <= 0) {
       this.fire(bullets);
-      const effectiveFireRate = this.rapidTimer > 0 ? this.fireRate * RAPID_FIRE_RATE_MULTIPLIER : this.fireRate;
+      const effectiveFireRate = this.rapidActive ? this.fireRate * RAPID_FIRE_RATE_MULTIPLIER : this.fireRate;
       this.fireCooldown = effectiveFireRate;
       sound.play("fire");
     }
@@ -106,8 +108,8 @@ export class Ship {
   }
 
   fire(bullets: Bullet[]) {
-    const trident = this.tridentTimer > 0;
-    const pierce = this.pierceTimer > 0;
+    const trident = this.tridentActive;
+    const pierce = this.pierceActive;
     const bulletHeadingOffsets = trident ? [-TRIDENT_SPREAD, 0, TRIDENT_SPREAD] : [0];
     for (const offset of bulletHeadingOffsets) {
       const dir = fromAngle(this.heading + offset, 1);
@@ -120,9 +122,9 @@ export class Ship {
   }
 
   applyPowerup(kind: PowerupKind) {
-    if (kind === "trident") this.tridentTimer = POWERUP_DURATION;
-    else if (kind === "rapid") this.rapidTimer = POWERUP_DURATION;
-    else if (kind === "pierce") this.pierceTimer = POWERUP_DURATION;
+    if (kind === "trident") this.tridentActive = true;
+    else if (kind === "rapid") this.rapidActive = true;
+    else if (kind === "pierce") this.pierceActive = true;
     else if (kind === "shield") this.shieldActive = true;
   }
 
@@ -142,6 +144,32 @@ export class Ship {
       shrink: 1,
       drag: 1.8,
     });
+  }
+
+  // Aim marker at the fixed offset a bullet fired ON a beat would occupy at
+  // the next beat. Sits at constant distance ahead of the ship (one beat
+  // of travel) so the player can line up an asteroid with the ring rather
+  // than chase a sliding target. Uses the same muzzle / velocity formula
+  // as `fire` so ship drift is reflected. Dim while on cooldown so the
+  // player can read at a glance when the next shot is available.
+  renderReticules(ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number) {
+    if (!this.alive) return;
+    const dir = fromAngle(this.heading, 1);
+    const muzzle = add(this.pos, mul(dir, this.radius + 4));
+    const bulletVel = add(mul(dir, this.bulletSpeed), mul(this.vel, 0.4));
+    const reticulePos = wrap(add(muzzle, mul(bulletVel, beatGrid)), w, h);
+    const onCooldown = this.fireCooldown > 0;
+    const alpha = onCooldown ? 0.75 * 0.3 : 0.75;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = `hsla(50, 100%, 78%, ${alpha})`;
+    ctx.lineWidth = 1;
+    ctx.shadowColor = `hsla(50, 100%, 70%, ${alpha})`;
+    ctx.shadowBlur = 7;
+    ctx.beginPath();
+    ctx.arc(reticulePos.x, reticulePos.y, 4.5, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
   }
 
   render(ctx: CanvasRenderingContext2D, t: number, beatPulse: number = 0) {
