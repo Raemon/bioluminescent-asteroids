@@ -1,5 +1,5 @@
 import { Ship } from "./Ship";
-import { Asteroid, AsteroidKind, BASS_MEASURE_LENGTH, spawnAsteroidAtEdge } from "./Asteroid";
+import { Asteroid, AsteroidKind, BASS_KINDS, BASS_MEASURE_LENGTH, spawnAsteroidAtEdge } from "./Asteroid";
 import { Bullet } from "./Bullet";
 import { ParticleSystem } from "./Particle";
 import { Shard, shatterAsteroid } from "./Shard";
@@ -41,6 +41,28 @@ const SLOW_MO_FACTOR = 0.45;
 // treat rather than a guaranteed wave fixture.
 const TINK_FIRST_WAVE = 3;
 const TINK_CHANCE_PER_WAVE = 1 / 3;
+
+// Tiny Fisher-Yates so the per-game bass intro order is properly random.
+// Returns a fresh array, leaving the input untouched.
+const shuffled = <T,>(arr: ReadonlyArray<T>): T[] => {
+  const out = arr.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+};
+
+// One percussive voice per bass kind. The four sounds are tuned to harmonise
+// when stacked: kick (C2 root), pluck (G2 fifth), boom (F2 fourth), snap
+// (C3-area percussive accent), so I-IV-V-percussion is the worst case even
+// when split children spread voices across every beat of the measure.
+const BASS_KIND_SOUND: Record<"bassA" | "bassB" | "bassC" | "bassD", "bassKick" | "bassPluck" | "bassBoom" | "bassSnap"> = {
+  bassA: "bassKick",
+  bassB: "bassPluck",
+  bassC: "bassBoom",
+  bassD: "bassSnap",
+};
 
 export class Game {
   canvas: HTMLCanvasElement;
@@ -86,6 +108,11 @@ export class Game {
   canisterSpawnAt: number | null = null;
   waveElapsed = 0;
   slowMoTimer = 0;
+  // Per-game randomised intro order for the four bass kinds. Set in
+  // startGame so the wave-2/3 pick (and the wave-4 "both previous" rule)
+  // varies between runs. Index 0 = wave-2 unlock, index 1 = wave-3 unlock,
+  // index 2/3 = remaining kinds revealed later (see activeSpecialsForWave).
+  bassOrder: AsteroidKind[] = [];
 
   scoreEl: HTMLElement;
   comboEl: HTMLElement;
@@ -188,6 +215,7 @@ export class Game {
     this.shards = [];
     this.canisters = [];
     this.slowMoTimer = 0;
+    this.bassOrder = shuffled(BASS_KINDS);
     this.particles = new ParticleSystem();
     this.ship = new Ship(v(this.w / 2, this.h / 2));
     this.ship.invuln = 2.0;
@@ -198,11 +226,11 @@ export class Game {
 
   // Snap an asteroid's next beat to its assigned within-measure slot on the
   // global beat clock. The asteroid's `measureOffset` is set in the
-  // constructor (gen-0) or in `split()` (children inherit one half-measure
-  // / quarter-measure step from the parent), so all this has to do is find
-  // the next future measure boundary that aligns with that offset.
+  // constructor (gen-0) or carried over by `split()` (children inherit the
+  // parent's slot), so all this has to do is find the next future measure
+  // boundary that aligns with that offset.
   alignBassBeat(asteroid: Asteroid) {
-    if (asteroid.kind !== "bassA" && asteroid.kind !== "bassB") return;
+    if (!asteroid.isBass()) return;
     const offset = asteroid.measureOffset;
     const k = Math.ceil((this.beatTime - offset - 1e-6) / BASS_MEASURE_LENGTH);
     asteroid.nextBeatAt = k * BASS_MEASURE_LENGTH + offset;
@@ -232,11 +260,7 @@ export class Game {
     // Total asteroid count grows by 1 every other wave: 4, 4, 5, 5, 6, 6, ...
     const totalCount = 4 + Math.floor((wave - 1) / 2);
 
-    // Special types unlock one at a time, every other wave, alternating bass
-    // and decorative so the soundscape layers in gradually. Caps at 5 so the
-    // field never tips over into all-specials.
-    const specialUnlockOrder: AsteroidKind[] = ["bassA", "chime", "bassB", "bell", "warble"];
-    const activeSpecials = specialUnlockOrder.slice(0, Math.min(specialUnlockOrder.length, Math.floor(wave / 2)));
+    const activeSpecials = this.activeSpecialsForWave(wave);
     const normalCount = Math.max(0, totalCount - activeSpecials.length);
 
     const newAsteroidIndices = Array.from({ length: normalCount }, (_, i) => i);
@@ -255,6 +279,27 @@ export class Game {
     if (wave >= TINK_FIRST_WAVE && Math.random() < TINK_CHANCE_PER_WAVE) {
       this.asteroids.push(this.spawnTink());
     }
+  }
+
+  // Specials present in a given wave. The bass intro is special-cased per
+  // the new design:
+  //   wave 2: bassOrder[0]   — one random bass kind
+  //   wave 3: bassOrder[1]   — a different random bass kind
+  //   wave 4+: bassOrder[0] + bassOrder[1] (both previous kinds permanent)
+  // From wave 6 on we resume the every-other-wave unlock cadence with the
+  // decorators (chime/bell/warble) and finally the two remaining bass
+  // kinds, so the audio bed keeps thickening as runs go deep.
+  activeSpecialsForWave(wave: number): AsteroidKind[] {
+    if (wave < 2) return [];
+    if (wave === 2) return [this.bassOrder[0]];
+    if (wave === 3) return [this.bassOrder[1]];
+    const specials: AsteroidKind[] = [this.bassOrder[0], this.bassOrder[1]];
+    const lateUnlockOrder: AsteroidKind[] = ["chime", "bell", "warble", this.bassOrder[2], this.bassOrder[3]];
+    // wave 4 → 0 late unlocks, wave 6 → 1, wave 8 → 2, etc. Pairs of waves
+    // hold steady so the player has time to learn each new sound.
+    const lateCount = Math.max(0, Math.min(lateUnlockOrder.length, Math.floor((wave - 4) / 2)));
+    for (let i = 0; i < lateCount; i++) specials.push(lateUnlockOrder[i]);
+    return specials;
   }
 
   spawnTink(): Asteroid {
@@ -454,14 +499,18 @@ export class Game {
   tickBassBeats(dt: number) {
     this.beatTime += dt;
     for (const a of this.asteroids) {
-      if (a.kind !== "bassA" && a.kind !== "bassB") continue;
+      if (!a.isBass()) continue;
       // Fire any beats that have elapsed since the last frame (typically one,
       // but defensively handle multi-step in case dt spiked). All bass
-      // asteroids share the same once-per-measure period now — the variation
-      // between siblings comes from their distinct `measureOffset`s.
+      // asteroids share the same once-per-measure period — what varies is
+      // their `measureOffset`, which subdivides the measure as the ship is
+      // split. The voice each piece plays is bound to its KIND, not its
+      // current beat slot: split children carry their parent's percussive
+      // timbre onto whichever beat they now occupy.
       while (this.beatTime >= a.nextBeatAt) {
-        this.sound.play(a.kind === "bassA" ? "bassKick" : "bassPluck");
-        a.flashAmount = 1.0;
+        const sound = BASS_KIND_SOUND[a.kind as "bassA" | "bassB" | "bassC" | "bassD"];
+        this.sound.play(sound);
+        a.beatFlash = 1.0;
         a.nextBeatAt += BASS_MEASURE_LENGTH;
       }
     }
@@ -473,34 +522,43 @@ export class Game {
       let killed = false;
       for (const b of this.bullets) {
         if (b.life <= 0) continue;
-        if (a.collidesWith(b.pos, b.radius)) {
-          // Pierce bullets stay alive after a kill so a single shot can punch
-          // through a row of asteroids. Their `life` timer still expires
-          // normally, so they don't last forever.
-          if (!b.pierce) b.life = 0;
-          // A kill counts as on-beat if EITHER the bullet was fired on the
-          // beat OR the impact itself lands in a beat window. The fire-time
-          // case keeps long-range shots fair (a timed shot that drifts to a
-          // far asteroid still earns its bonus), and the impact-time case
-          // covers point-blank kills where the player times the destruction
-          // rather than the trigger pull.
-          const killMarkedBeat = this.markBeat(this.beatTime);
-          const isOnBeatKill = killMarkedBeat || b.onBeat;
+        if (!a.collidesWith(b.pos, b.radius)) continue;
+        // Pierce bullets stay alive after a hit so a single shot can punch
+        // through a row of asteroids. Their `life` timer still expires
+        // normally, so they don't last forever.
+        if (!b.pierce) b.life = 0;
+        // A hit counts as on-beat if EITHER the bullet was fired on the
+        // beat OR the impact itself lands in a beat window. The fire-time
+        // case keeps long-range shots fair (a timed shot that drifts to a
+        // far asteroid still earns its bonus), and the impact-time case
+        // covers point-blank kills where the player times the destruction
+        // rather than the trigger pull.
+        const hitMarkedBeat = this.markBeat(this.beatTime);
+        const isOnBeatHit = hitMarkedBeat || b.onBeat;
+        // Bass ships absorb multiple hits before dying. Non-killing hits
+        // still mark the beat and play crumple feedback, but only the
+        // killing hit awards score, splits, or fires the big explosion.
+        if (a.isBass()) {
+          const { killed: bassKilled } = a.applyBassDamage();
+          this.sound.play("bassHit");
+          this.shake = Math.min(this.shake + 0.2, 1.2);
+          this.emitBassCrumple(a, isOnBeatHit);
+          if (isOnBeatHit) {
+            this.sound.play("comboSparkle");
+            if (hitMarkedBeat) this.pulseComboHud();
+          }
+          if (!bassKilled) {
+            break;
+          }
           let scoreEarned = a.scoreValue();
-          if (isOnBeatKill) {
+          if (isOnBeatHit) {
             const multiplier = Math.min(1 + this.beatCombo * COMBO_MULTIPLIER_STEP, COMBO_MULTIPLIER_MAX);
             scoreEarned = Math.round(scoreEarned * multiplier);
-            this.sound.play("comboSparkle");
-            if (killMarkedBeat) this.pulseComboHud();
           }
           this.score += scoreEarned;
           this.shake = Math.min(this.shake + 0.4, 1.2);
-          this.sound.play(this.hitSoundFor(a));
-          // Deep echoing overlay that announces "you just hit a bass piece".
-          // Plays on every bass kill regardless of split level, so each
-          // subdivision still reads as part of the same bass family.
-          if (a.isBass()) this.sound.play("bassEcho");
-          this.emitExplosion(a, isOnBeatKill);
+          this.sound.play("bassEcho");
+          this.emitExplosion(a, isOnBeatHit);
           const children = a.split();
           for (const c of children) {
             this.alignBassBeat(c);
@@ -509,6 +567,21 @@ export class Game {
           killed = true;
           break;
         }
+        let scoreEarned = a.scoreValue();
+        if (isOnBeatHit) {
+          const multiplier = Math.min(1 + this.beatCombo * COMBO_MULTIPLIER_STEP, COMBO_MULTIPLIER_MAX);
+          scoreEarned = Math.round(scoreEarned * multiplier);
+          this.sound.play("comboSparkle");
+          if (hitMarkedBeat) this.pulseComboHud();
+        }
+        this.score += scoreEarned;
+        this.shake = Math.min(this.shake + 0.4, 1.2);
+        this.sound.play(this.hitSoundFor(a));
+        this.emitExplosion(a, isOnBeatHit);
+        const children = a.split();
+        for (const c of children) surviving.push(c);
+        killed = true;
+        break;
       }
       if (!killed) surviving.push(a);
     }
@@ -588,20 +661,54 @@ export class Game {
     }
   }
 
-  hitSoundFor(a: Asteroid): "explosionLarge" | "explosionMedium" | "explosionSmall" | "bassHit" | "chime" | "bell" | "warble" | "tink" {
-    // Splittable bass pieces (large + medium) emit the "cool initial noise"
-    // sweep that announces a new beat slot is being added to the measure.
-    // Terminal small pieces fall back to a regular small explosion. The
-    // deeper bass-echo overlay plays on top in handleCollisions for all
-    // three sizes.
-    if (a.isBass()) {
-      return a.size === "small" ? "explosionSmall" : "bassHit";
-    }
+  hitSoundFor(a: Asteroid): "explosionLarge" | "explosionMedium" | "explosionSmall" | "chime" | "bell" | "warble" | "tink" {
+    // Bass ships have their own multi-hit handling in handleCollisions
+    // (bassHit on every hit, bassEcho + explosion on the killing hit), so
+    // this helper only covers the non-bass kinds now.
     if (a.kind === "chime") return "chime";
     if (a.kind === "bell") return "bell";
     if (a.kind === "warble") return "warble";
     if (a.kind === "tink") return "tink";
     return a.size === "large" ? "explosionLarge" : a.size === "medium" ? "explosionMedium" : "explosionSmall";
+  }
+
+  // Sparkle/scorch burst for a non-killing bass hit. Smaller and snappier
+  // than emitExplosion so the player reads "I dinged it" rather than "I
+  // killed it" — no shards, no big particle bloom.
+  emitBassCrumple(a: Asteroid, onBeat: boolean) {
+    const sparkCount = onBeat ? 16 : 10;
+    const sparkIndices = Array.from({ length: sparkCount }, (_, i) => i);
+    for (const _ of sparkIndices) {
+      const angle = rand(0, TAU);
+      const speed = rand(120, 260);
+      this.particles.emit({
+        pos: { ...a.pos },
+        vel: fromAngle(angle, speed),
+        life: rand(0.2, 0.45),
+        maxLife: 0.45,
+        size: rand(1.0, 1.8),
+        hue: a.hue + rand(-12, 22),
+        shrink: 1,
+        drag: 2.4,
+      });
+    }
+    if (onBeat) {
+      const sparkleIndices = Array.from({ length: 10 }, (_, i) => i);
+      for (const i of sparkleIndices) {
+        const angle = (i / sparkleIndices.length) * TAU + rand(-0.08, 0.08);
+        const speed = rand(180, 280);
+        this.particles.emit({
+          pos: { ...a.pos },
+          vel: fromAngle(angle, speed),
+          life: rand(0.25, 0.5),
+          maxLife: 0.5,
+          size: rand(1.4, 2.0),
+          hue: 48 + rand(-6, 12),
+          shrink: 1,
+          drag: 2.0,
+        });
+      }
+    }
   }
 
   emitExplosion(a: Asteroid, onBeat: boolean) {

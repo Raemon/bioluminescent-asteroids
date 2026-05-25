@@ -9,6 +9,8 @@ type SoundName =
   | "waveClear"
   | "bassKick"
   | "bassPluck"
+  | "bassBoom"
+  | "bassSnap"
   | "bassHit"
   | "bassEcho"
   | "chime"
@@ -86,6 +88,8 @@ export class Sound {
       case "waveClear": this.playWaveClear(); break;
       case "bassKick": this.playBassKick(); break;
       case "bassPluck": this.playBassPluck(); break;
+      case "bassBoom": this.playBassBoom(); break;
+      case "bassSnap": this.playBassSnap(); break;
       case "bassHit": this.playBassHit(); break;
       case "bassEcho": this.playBassEcho(); break;
       case "chime": this.playChime(); break;
@@ -337,6 +341,97 @@ export class Sound {
     clickGain.connect(this.master);
     click.start(t);
     click.stop(t + 0.05);
+  }
+
+  // Sub-bass "boom" on F2 (the IV of C major). Sine body with a brief
+  // pitch sweep for thump, an F1 sub layer for body, and a short bandpassed
+  // noise clack for attack. Heftier than the pluck, darker than the kick,
+  // and stays inside the C-F-G chord pocket so layering with kick/pluck
+  // reads as a I/IV/V bassline rather than a dissonant pile.
+  private playBassBoom() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(180, t);
+    osc.frequency.exponentialRampToValueAtTime(87.3, t + 0.06);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.5, t + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(t);
+    osc.stop(t + 0.45);
+
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    sub.type = "sine";
+    sub.frequency.value = 43.65; // F1
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.28, t + 0.01);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + 0.55);
+
+    const clackBuf = this.makeNoiseBuffer(0.035);
+    if (!clackBuf) return;
+    const clack = this.ctx.createBufferSource();
+    clack.buffer = clackBuf;
+    const clackFilter = this.ctx.createBiquadFilter();
+    clackFilter.type = "bandpass";
+    clackFilter.frequency.value = 1100;
+    clackFilter.Q.value = 1.4;
+    const clackGain = this.ctx.createGain();
+    clackGain.gain.setValueAtTime(0.14, t);
+    clackGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+    clack.connect(clackFilter);
+    clackFilter.connect(clackGain);
+    clackGain.connect(this.master);
+    clack.start(t);
+    clack.stop(t + 0.04);
+  }
+
+  // Percussive "snap" — a snare-leaning hybrid that gives beat 4 a sharp
+  // accent without piling another sub onto the bottom. Bandpassed noise
+  // body + a short tonal triangle at C3 that pitches down for a snare-like
+  // body. Sits an octave above the kick/pluck/boom region so the four-voice
+  // pattern reads as kick-pluck-boom-snap rather than a wall of low end.
+  private playBassSnap() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const noiseBuf = this.makeNoiseBuffer(0.13);
+    if (!noiseBuf) return;
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const nFilter = this.ctx.createBiquadFilter();
+    nFilter.type = "bandpass";
+    nFilter.frequency.setValueAtTime(1700, t);
+    nFilter.frequency.exponentialRampToValueAtTime(700, t + 0.13);
+    nFilter.Q.value = 1.1;
+    const nGain = this.ctx.createGain();
+    nGain.gain.setValueAtTime(0.28, t);
+    nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    noise.connect(nFilter);
+    nFilter.connect(nGain);
+    nGain.connect(this.master);
+    noise.start(t);
+    noise.stop(t + 0.16);
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(330, t);
+    osc.frequency.exponentialRampToValueAtTime(130.8, t + 0.09); // → C3
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.22, t + 0.003);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(t);
+    osc.stop(t + 0.14);
   }
 
   // Plucked sub-bass at G2 with a closing lowpass filter — distinct timbre
