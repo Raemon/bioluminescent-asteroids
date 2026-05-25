@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bioluminescent Asteroids</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+    <div id="hud">
+      <div id="score">0</div>
+      <div id="wave">WAVE 1</div>
+      <div id="hud-right">
+        <button id="mute" type="button" title="Mute (M)" aria-label="Mute">♪</button>
+        <div id="lives">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+    </div>
+    <div id="overlay" class="hidden">
+      <h1 id="overlay-title">Bioluminescent Asteroids</h1>
+      <p id="overlay-sub">
+        <span class="key">←</span> <span class="key">→</span> rotate &nbsp;·&nbsp;
+        <span class="key">↑</span> thrust &nbsp;·&nbsp;
+        <span class="key">space</span> fire &nbsp;·&nbsp;
+        <span class="key">H</span> hyperspace
+      </p>
+      <p id="overlay-start">press <span class="key">enter</span> to begin</p>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
