@@ -161,13 +161,38 @@ the new wave starts. Subtle, very beautiful.
    params, so a slightly larger plumbing change. Save it for when the
    other three are landed and you want to feel the rhythm section breathe.
 
-## Audit before plugging in
+## Performance / cache compatibility
 
-The current `Sound.ts` has a baked-buffer cache (`bakedBuffers`) that pre-
-renders fixed-pitch sounds. Mode-aware stingers can't be baked the same way
-because their pitches change per wave. Two options:
+Quick read on each module vs. the existing `bakedBuffers` cache in `Sound.ts`:
 
-- (a) Skip baking for stingers (their cost is small — they fire once per kill).
-- (b) Bake them per-mode (6 modes × the existing pitch buckets). Probably overkill.
+| Module | Per-trigger cost | Cache impact |
+|---|---|---|
+| `Mode` | ~5 ns | N/A — pure pitch math |
+| `Groove` | ~50 ns + extra triggers, but ghost notes are auto-suppressed when `fieldDensity > 3` | unchanged |
+| `CometMelody` | unchanged (comet melody isn't baked today — it goes through `cometMelodySynth.triggerAttackRelease` live) | unchanged |
+| `StingerBank` | the cache-relevant module — see below | needs lazy per-mode bake |
 
-Recommend (a) for simplicity.
+### Lazy per-mode bake protocol
+
+`StingerBank.ts` exports `MODAL_STINGERS`, `modalBakeKey()`, and
+`recipesForMode()` for this. The integration is small:
+
+1. Extend `bakedBuffers` keys for modal stingers using `modalBakeKey(name, mode)`
+   (e.g. `"chime|mode=lydian"`). Non-modal sounds (bgBeat, bass kit, fireBeat)
+   keep their existing keys — they stay fixed-pitch and stay pre-baked at boot.
+2. When the wave-change handler calls `mode.setWave(wave)`, also call
+   `sound.bakeModeStingers(mode)` which iterates `recipesForMode(mode)` and
+   kicks off background bakes for any (stinger, mode) pair not already cached
+   or in-flight. Reuses the existing `bakeChain` so renders stay serialized.
+3. In each `playChime` / `playBell` / etc., look up the buffer under the
+   modal key. Cache hit → play baked buffer. Cache miss → synthesize live
+   with the pitches from the corresponding `chimePitches(mode)` / etc. helper.
+
+Net cost across a 30-wave run: 6 modes × 6 stingers = 36 buffers, rendered
+lazily as the player crosses mode boundaries (waves 5/12/18/24/28). At each
+boundary, ~50ms of background CPU. Cold-cache triggers immediately after a
+mode shift fall back to live synthesis — same cost as the pre-bake-cache
+era, lasting only until the bakes finish (typically a few hundred ms).
+
+The non-modal hot path (bgBeat, bass kit, fireBeat — the most-frequently-fired
+sounds) is untouched. Those keep their existing eager pre-bake at startup.

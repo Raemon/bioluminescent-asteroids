@@ -615,6 +615,9 @@ export class Game {
         if (isOnBeatHit && this.beatCombo >= 1) {
           this.beatCombo = Math.min(this.beatCombo + 1, COMBO_MULTIPLIER_MAX);
           this.syncComboHud();
+        } else if (!isOnBeatHit && this.beatCombo !== 0) {
+          this.beatCombo = 0;
+          this.syncComboHud();
         }
         if (!alienKilled) {
           this.sound.play("alienHit");
@@ -1175,6 +1178,9 @@ export class Game {
         if (a.isBass()) this.sound.play("bassHit");
         if (isOnBeatHit && this.beatCombo >= 1) {
           this.beatCombo = Math.min(this.beatCombo + 1, COMBO_MULTIPLIER_MAX);
+          this.syncComboHud();
+        } else if (!isOnBeatHit && this.beatCombo !== 0) {
+          this.beatCombo = 0;
           this.syncComboHud();
         }
         if (!didKill) {
