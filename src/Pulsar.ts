@@ -116,7 +116,7 @@ export class Pulsar {
   shockJustFired = false;
   // Tuning constants. The vibrate-then-flash beat is critical — players need
   // a beat of warning before the screen reorganises around them.
-  static readonly SHOCK_VIBRATE_DURATION = 1.2;
+  static readonly SHOCK_VIBRATE_DURATION = 2.0;
   static readonly SHOCK_FLASH_DURATION = 0.18;
   static readonly SHOCK_EXPAND_DURATION = 1.5;
 

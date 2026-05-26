@@ -8,6 +8,7 @@ import { Pulsar } from "./Pulsar";
 import { Input } from "./Input";
 import { Sound } from "./Sound";
 import { Canister, spawnCanister } from "./Canister";
+import { Comet, spawnComet } from "./Comet";
 import { Alien, AlienSize, ALIEN_FIRE_PERIOD_BEATS, spawnAlienAtEdge } from "./Alien";
 import { AlienBullet } from "./AlienBullet";
 import { v, fromAngle, dist, rand, TAU } from "./vec";
@@ -63,6 +64,17 @@ const TINK_CHANCE_PER_WAVE = 1 / 3;
 // solidifies into play" handoff.
 const BOSS_WAVES = [10] as const;
 const BOSS_FORESHADOW_WAVES = [9] as const;
+
+// Melodic comet: a glowing, beatless visitor that drifts across the field
+// playing a slow C-major motif locked to the bass-beat grid. Rolled once per
+// non-boss wave starting at wave 2 (the wave bassteroids first appear, so
+// the comet melody always has a bass bed to weave over). Spawned mid-wave
+// and given a generous lifetime so the player typically hears 2-3 cycles
+// of the 8-second phrase per visit.
+const COMET_FIRST_WAVE = 2;
+const COMET_CHANCE_PER_WAVE = 0.6;
+const COMET_SPAWN_WINDOW: [number, number] = [4, 16];
+const COMET_LIFETIME: [number, number] = [22, 30];
 
 // Pulsar shockwave: occasional mid-wave event where the pulsar vibrates and
 // flashes, releasing a ring that shatters every asteroid and jiggles the
@@ -157,6 +169,10 @@ export class Game {
   beatCombo = 0;
 
   canisters: Canister[] = [];
+  comets: Comet[] = [];
+  // null when this wave didn't roll a comet or it has already spawned. When
+  // non-null it's the in-wave time (seconds) at which to release the comet.
+  cometSpawnAt: number | null = null;
   aliens: Alien[] = [];
   alienBullets: AlienBullet[] = [];
   // null when this wave didn't roll an alien or the alien has already been
@@ -263,6 +279,9 @@ export class Game {
     this.asteroids = [];
     this.canisters = [];
     this.sound.stopAllAlienDrones();
+    this.sound.stopAllBassteroidDrones();
+    this.sound.stopAllCometShimmers();
+    this.comets = [];
     this.aliens = [];
     this.alienBullets = [];
     this.alienSpawnAt = null;
@@ -292,6 +311,9 @@ export class Game {
     this.shards = [];
     this.canisters = [];
     this.sound.stopAllAlienDrones();
+    this.sound.stopAllBassteroidDrones();
+    this.sound.stopAllCometShimmers();
+    this.comets = [];
     this.aliens = [];
     this.alienBullets = [];
     this.alienSpawnAt = null;
@@ -382,6 +404,7 @@ export class Game {
       this.asteroids.push(spawnBossAt(pos, this.w, this.h));
       this.canisterSpawnAt = null;
       this.shockwaveTriggerAt = null;
+      this.cometSpawnAt = null;
       return;
     }
 
@@ -408,6 +431,11 @@ export class Game {
       this.shockwaveTriggerAt = rand(SHOCKWAVE_SPAWN_WINDOW[0], SHOCKWAVE_SPAWN_WINDOW[1]);
     } else {
       this.shockwaveTriggerAt = null;
+    }
+    if (this.wave >= COMET_FIRST_WAVE && Math.random() < COMET_CHANCE_PER_WAVE) {
+      this.cometSpawnAt = rand(COMET_SPAWN_WINDOW[0], COMET_SPAWN_WINDOW[1]);
+    } else {
+      this.cometSpawnAt = null;
     }
     const wave = this.wave;
     // Total asteroid count grows by 1 every other wave: 4, 4, 5, 5, 6, 6, ...
@@ -503,6 +531,17 @@ export class Game {
     this.sound.startAlienDrone(a, size);
   }
 
+  spawnComet() {
+    const c = spawnComet(this.w, this.h);
+    c.lifetime = rand(COMET_LIFETIME[0], COMET_LIFETIME[1]);
+    // Snap the comet's first note to the next BEAT_GRID boundary so the
+    // melody enters in lockstep with the bass kit and the shimmer chord
+    // fades up about a beat ahead of the first note.
+    c.nextNoteBeatTime = Math.ceil((this.beatTime + 0.6) / BEAT_GRID) * BEAT_GRID;
+    this.comets.push(c);
+    this.sound.startCometShimmer(c);
+  }
+
   // Walk every alien and emit a bullet for any fire-time that's now in the
   // past. Each shot is aimed at the player's current position at the moment
   // it leaves the gun, so dodging works by moving between beats.
@@ -536,7 +575,6 @@ export class Game {
         if (b.life <= 0) continue;
         if (!a.collidesWith(b.pos, b.effectiveRadius())) continue;
         if (!b.pierce) b.life = 0;
-        this.ship.fireCooldown = 0;
         const hitMarkedBeat = this.markBeat(this.beatTime);
         const isOnBeatHit = hitMarkedBeat || b.onBeat;
         const { killed: alienKilled } = a.applyDamage();
@@ -756,6 +794,9 @@ export class Game {
         if (this.lives <= 0) {
           this.state = "gameover";
           this.sound.stopAllAlienDrones();
+          this.sound.stopAllBassteroidDrones();
+          this.sound.stopAllCometShimmers();
+          this.comets = [];
           this.overlayTitleEl.textContent = "Game Over";
           this.overlayStartEl.innerHTML = `score <strong>${String(this.score).padStart(6, "0")}</strong> &nbsp;·&nbsp; press <span class="key">enter</span> to restart`;
           this.overlayEl.classList.remove("hidden");
@@ -818,6 +859,23 @@ export class Game {
         this.spawnAlien(this.alienSpawnSize);
         this.alienSpawnAt = null;
       }
+      if (this.cometSpawnAt !== null && this.waveElapsed >= this.cometSpawnAt) {
+        this.spawnComet();
+        this.cometSpawnAt = null;
+      }
+      // Comets drift in real-time (the music slows naturally with slow-mo via
+      // the beat-time gate below, so the visual streak shouldn't double-slow).
+      for (const c of this.comets) c.update(dt, this.w, this.h);
+      // Remove finished comets and tear down their shimmer pads.
+      const survivingComets: Comet[] = [];
+      for (const c of this.comets) {
+        if (c.alive) {
+          survivingComets.push(c);
+        } else {
+          this.sound.stopCometShimmer(c);
+        }
+      }
+      this.comets = survivingComets;
       for (const a of this.asteroids) a.update(musicDt, this.w, this.h);
       for (const al of this.aliens) al.update(dt, this.w, this.h);
       this.tickAlienFire();
@@ -907,6 +965,18 @@ export class Game {
         a.nextBeatAt = Math.round((a.nextBeatAt + BASS_MEASURE_LENGTH) / BEAT_GRID) * BEAT_GRID;
       }
     }
+    // Comet melody: each comet fires the next note of its phrase whenever
+    // beatTime crosses the comet's scheduled beat. Sharing the same beat
+    // clock as the bass voices above means a comet note always lands on the
+    // exact same audio frame as any coincident bass hit, so the melody and
+    // percussion read as one ensemble.
+    for (const c of this.comets) {
+      while (this.beatTime >= c.nextNoteBeatTime) {
+        this.sound.play("cometNote", c.noteIndex);
+        c.noteIndex += 1;
+        c.nextNoteBeatTime = Math.round((c.nextNoteBeatTime + BEAT_GRID) / BEAT_GRID) * BEAT_GRID;
+      }
+    }
   }
 
   // Pulsar shockwave just fired this frame: shatter every asteroid, kick
@@ -935,9 +1005,13 @@ export class Game {
         a.hp = 0;
         a.flashAmount = 1;
         this.emitExplosion(a, false);
+        this.sound.stopBassteroidDrone(a);
         const children = a.split();
         for (const c of children) {
           this.alignBassBeat(c);
+          if (c.size === "medium" || c.size === "small") {
+            this.sound.startBassteroidDrone(c, c.kind as "bassA" | "bassB" | "bassC" | "bassD", c.size);
+          }
           // Kick children outward from the shock origin so the field reads
           // as flung-apart by the wavefront rather than spawning in place.
           const kick = this.pulsar.shockwaveImpulseAt(c.pos);
@@ -1001,10 +1075,6 @@ export class Game {
         // through a row of asteroids. Their `life` timer still expires
         // normally, so they don't last forever.
         if (!b.pierce) b.life = 0;
-        // Connecting a shot refunds the beat trigger lock so a player who's
-        // actually hitting things can keep up a faster cadence than the
-        // cooldown allows — missed shots are what cost you tempo.
-        this.ship.fireCooldown = 0;
         // A hit counts as on-beat if EITHER the bullet was fired on the
         // beat OR the impact itself lands in a beat window. The fire-time
         // case keeps long-range shots fair (a timed shot that drifts to a
@@ -1040,9 +1110,15 @@ export class Game {
         if (a.isBass()) this.sound.play("bassEcho");
         this.sound.play(this.hitSoundFor(a));
         this.emitExplosion(a, isOnBeatHit);
+        if (a.isBass()) this.sound.stopBassteroidDrone(a);
         const children = a.split();
         for (const c of children) {
-          if (a.isBass()) this.alignBassBeat(c);
+          if (a.isBass()) {
+            this.alignBassBeat(c);
+            if (c.size === "medium" || c.size === "small") {
+              this.sound.startBassteroidDrone(c, c.kind as "bassA" | "bassB" | "bassC" | "bassD", c.size);
+            }
+          }
           surviving.push(c);
         }
         killed = true;
@@ -1316,6 +1392,7 @@ export class Game {
 
     this.starfield.render(ctx, this.time);
     this.pulsar.render(ctx);
+    for (const c of this.comets) c.render(ctx);
 
     for (const s of this.shards) s.render(ctx);
     for (const a of this.asteroids) a.render(ctx, this.time);

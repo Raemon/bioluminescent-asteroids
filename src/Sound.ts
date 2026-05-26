@@ -12,6 +12,26 @@ type AlienDroneNode = {
   mainGain: GainNode;
 };
 
+// Per-bassteroid ambient drone. Opened when a large bassteroid breaks open
+// into mediums (and again when mediums break into smalls), held for the
+// lifetime of that piece. Each (kind, size) pairs to one of 8 voices in a
+// C-major bed — see startBassteroidDrone for the assignment.
+type BassDroneNode = {
+  oscs: OscillatorNode[];
+  lfos: OscillatorNode[];
+  noise?: AudioBufferSourceNode;
+  mainGain: GainNode;
+};
+
+// Per-comet shimmer pad. Underlies the comet melody for the entire lifetime
+// of one comet — a soft chord wash that thickens whenever a comet is on
+// screen. Set up once at spawn, torn down on despawn.
+type CometShimmerNode = {
+  oscs: OscillatorNode[];
+  lfos: OscillatorNode[];
+  mainGain: GainNode;
+};
+
 type SoundName =
   | "fire"
   | "fireBeat"
@@ -44,7 +64,8 @@ type SoundName =
   | "alienFireMedium"
   | "alienFireSmall"
   | "alienHit"
-  | "alienExplode";
+  | "alienExplode"
+  | "cometNote";
 
 export class Sound {
   ctx: AudioContext | null = null;
@@ -67,6 +88,12 @@ export class Sound {
   // Per-alien continuous theremin drone. Keyed by the Alien instance so the
   // Game side can start/stop without us needing an ID scheme.
   alienDrones: Map<object, AlienDroneNode> = new Map();
+  // Per-bassteroid ambient drone, keyed by the Asteroid instance. Only
+  // populated for medium/small bass pieces (a large piece is "sealed" — it
+  // hasn't been broken open yet).
+  bassDrones: Map<object, BassDroneNode> = new Map();
+  // Per-comet shimmer pad, keyed by the Comet instance.
+  cometShimmers: Map<object, CometShimmerNode> = new Map();
 
   ensureContext() {
     if (this.ctx) return;
@@ -94,6 +121,8 @@ export class Sound {
     this.enabled = on;
     if (!on && this.thrustNode) this.stopThrust();
     if (!on) this.stopAllAlienDrones();
+    if (!on) this.stopAllBassteroidDrones();
+    if (!on) this.stopAllCometShimmers();
   }
 
   // Start a continuous theremin-ish drone for an alien. The `key` is the
@@ -195,6 +224,339 @@ export class Sound {
     for (const key of Array.from(this.alienDrones.keys())) this.stopAlienDrone(key);
   }
 
+  // Ambient drone played for the lifetime of a broken-open bassteroid. There
+  // are 8 voices (4 kinds × 2 sizes), all sitting in a C-major bed so any
+  // combination layers without dissonance. Voices are deliberately soft and
+  // beatless — they're a *bed* underneath the rhythmic bass hits, not part
+  // of the rhythm itself.
+  //
+  // Pitch map (medium voices sit a fifth below their small counterpart so a
+  // medium and its eventual small children form a stacked fifth chord while
+  // the field is shattering):
+  //   bassA medium = C3 (130.81), small = G4 (392.00)
+  //   bassB medium = G3 (196.00), small = D5 (587.33)
+  //   bassC medium = E3 (164.81), small = B4 (493.88)
+  //   bassD medium = A3 (220.00), small = E5 (659.25)
+  //
+  // Per-kind timbre (chosen to evoke each kind's percussive voice without
+  // repeating it):
+  //   bassA = warm filtered sine pad (soft hum)
+  //   bassB = detuned sine pair with vibrato (breathy choir)
+  //   bassC = sine + sine-fifth (open chorale)
+  //   bassD = sine + bandpassed noise (wind-through-metal)
+  startBassteroidDrone(key: object, kind: "bassA" | "bassB" | "bassC" | "bassD", size: "medium" | "small") {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    if (this.bassDrones.has(key)) return;
+    const t = this.ctx.currentTime;
+
+    const mediumFreq: Record<"bassA" | "bassB" | "bassC" | "bassD", number> = {
+      bassA: 130.81, bassB: 196.00, bassC: 164.81, bassD: 220.00,
+    };
+    const smallFreq: Record<"bassA" | "bassB" | "bassC" | "bassD", number> = {
+      bassA: 392.00, bassB: 587.33, bassC: 493.88, bassD: 659.25,
+    };
+    const baseFreq = size === "medium" ? mediumFreq[kind] : smallFreq[kind];
+
+    // Per-size base loudness. Several drones will commonly stack (a single
+    // medium that splits gives 2 smalls, two mediums give 4 smalls, etc.),
+    // so each voice is intentionally quiet. Mediums get a touch more body
+    // than smalls so the lower octave still anchors the mix when present.
+    const peakBase = size === "medium" ? 0.035 : 0.022;
+
+    // Lowpass kept conservative so even the brighter D voice never bites.
+    // The cutoff sits one octave above the fundamental for mediums and a
+    // little tighter (×1.6) for smalls to keep the high voices from getting
+    // shrill when several are present.
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = 1.2;
+    filter.frequency.value = size === "medium" ? baseFreq * 2.2 : baseFreq * 1.6;
+
+    // Slow amplitude swell — each kind gets a different LFO rate so two
+    // pieces of different kinds don't beat in lockstep. Rates are all in the
+    // 0.07–0.18 Hz range (5–14 second period) so the bed reads as gently
+    // breathing rather than pulsing.
+    const pulseRate: Record<"bassA" | "bassB" | "bassC" | "bassD", number> = {
+      bassA: 0.09, bassB: 0.13, bassC: 0.07, bassD: 0.17,
+    };
+    const pulseLfo = this.ctx.createOscillator();
+    pulseLfo.type = "sine";
+    pulseLfo.frequency.value = pulseRate[kind];
+    const pulseDepth = this.ctx.createGain();
+    pulseDepth.gain.value = 0.35;
+    const pulseGain = this.ctx.createGain();
+    pulseGain.gain.value = 0.65;
+    pulseLfo.connect(pulseDepth);
+    pulseDepth.connect(pulseGain.gain);
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.setValueAtTime(0.0001, t);
+    // ~1.4s fade-in so the drone arrives as the piece settles, not as a pop.
+    mainGain.gain.exponentialRampToValueAtTime(peakBase, t + 1.4);
+
+    filter.connect(pulseGain);
+    pulseGain.connect(mainGain);
+    mainGain.connect(this.master);
+
+    const oscs: OscillatorNode[] = [];
+    const lfos: OscillatorNode[] = [pulseLfo];
+    let noise: AudioBufferSourceNode | undefined;
+
+    if (kind === "bassA") {
+      // Warm filtered sine pad — single sine, soft.
+      const osc = this.ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = baseFreq;
+      osc.connect(filter);
+      osc.start(t);
+      oscs.push(osc);
+    } else if (kind === "bassB") {
+      // Detuned sine pair with slow vibrato → breathy choir character.
+      const oscA = this.ctx.createOscillator();
+      const oscB = this.ctx.createOscillator();
+      oscA.type = "sine";
+      oscB.type = "sine";
+      oscA.frequency.value = baseFreq;
+      oscB.frequency.value = baseFreq * 1.008;
+      const vib = this.ctx.createOscillator();
+      vib.type = "sine";
+      vib.frequency.value = 0.6;
+      const vibDepth = this.ctx.createGain();
+      vibDepth.gain.value = baseFreq * 0.004;
+      vib.connect(vibDepth);
+      vibDepth.connect(oscA.frequency);
+      vibDepth.connect(oscB.frequency);
+      oscA.connect(filter);
+      oscB.connect(filter);
+      oscA.start(t);
+      oscB.start(t);
+      vib.start(t);
+      oscs.push(oscA, oscB);
+      lfos.push(vib);
+    } else if (kind === "bassC") {
+      // Open chorale — root + perfect fifth above. Both sines so the
+      // interval reads as harmonic colour rather than a separate voice.
+      const root = this.ctx.createOscillator();
+      const fifth = this.ctx.createOscillator();
+      root.type = "sine";
+      fifth.type = "sine";
+      root.frequency.value = baseFreq;
+      fifth.frequency.value = baseFreq * 1.5;
+      const fifthGain = this.ctx.createGain();
+      fifthGain.gain.value = 0.45; // fifth quieter than root so it just tints
+      root.connect(filter);
+      fifth.connect(fifthGain);
+      fifthGain.connect(filter);
+      root.start(t);
+      fifth.start(t);
+      oscs.push(root, fifth);
+    } else {
+      // bassD — sine + narrow bandpassed noise for a wind-through-metal hush.
+      const osc = this.ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = baseFreq;
+      osc.connect(filter);
+      osc.start(t);
+      oscs.push(osc);
+
+      const noiseBuf = this.makeNoiseBuffer(6);
+      if (noiseBuf) {
+        const n = this.ctx.createBufferSource();
+        n.buffer = noiseBuf;
+        n.loop = true;
+        const nBp = this.ctx.createBiquadFilter();
+        nBp.type = "bandpass";
+        nBp.Q.value = 8;
+        nBp.frequency.value = baseFreq * 2;
+        const nGain = this.ctx.createGain();
+        nGain.gain.value = 0.18; // breath, not hiss
+        n.connect(nBp);
+        nBp.connect(nGain);
+        nGain.connect(filter);
+        n.start(t);
+        noise = n;
+      }
+    }
+
+    pulseLfo.start(t);
+
+    this.bassDrones.set(key, { oscs, lfos, noise, mainGain });
+  }
+
+  stopBassteroidDrone(key: object) {
+    if (!this.ctx) return;
+    const node = this.bassDrones.get(key);
+    if (!node) return;
+    const t = this.ctx.currentTime;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    const stopAt = t + 0.4;
+    for (const o of node.oscs) o.stop(stopAt);
+    for (const l of node.lfos) l.stop(stopAt);
+    if (node.noise) node.noise.stop(stopAt);
+    this.bassDrones.delete(key);
+  }
+
+  stopAllBassteroidDrones() {
+    for (const key of Array.from(this.bassDrones.keys())) this.stopBassteroidDrone(key);
+  }
+
+  // Comet melody: a slow, sparse C-major motif designed to weave over the
+  // bassteroid percussion and the broken-open drone bed. Pitches are picked
+  // from C major (with one expressive 6th and 9th) so any note can land on
+  // top of any combination of the bass voices (rooted at C2) and the medium/
+  // small drone chord (C/E/G/A at C3-octave; C/B/D/E at C5-octave) without
+  // dissonance. Rests (null) leave breathing room — the bass kit is doing
+  // the rhythmic heavy lifting, so the comet should feel airy.
+  //
+  // The melody is 16 steps long; one step plays per BEAT_GRID tick (0.5s), so
+  // the full phrase is 8 seconds = 4 bass measures. Long-form: rises through
+  // a pentatonic-ish ascent, lingers on the 9th, falls back to the tonic.
+  private static readonly COMET_MELODY: (number | null)[] = [
+    // C5  E5  G5   -   A5   G5  E5   -    F5  A5  C6   -    B5   G5  E5  -
+    523.25, 659.25, 783.99, null, 880.00, 783.99, 659.25, null,
+    698.46, 880.00, 1046.5, null, 987.77, 783.99, 659.25, null,
+  ];
+
+  // Fire one note of the comet melody. `step` is the global step index since
+  // the comet appeared; we modulo into the melody table so the phrase loops
+  // smoothly for as long as the comet is on screen. Bell-like timbre — sine
+  // fundamental with two soft inharmonic partials and a slow exponential
+  // decay so each note rings into the next.
+  playCometNote(step: number) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const melody = Sound.COMET_MELODY;
+    const freq = melody[((step % melody.length) + melody.length) % melody.length];
+    if (freq === null) return;
+    const t = this.ctx.currentTime;
+
+    // Three sine partials with mild inharmonic ratios — glassy/bell-like
+    // without the metallic clang of true bell ratios. Each partial gets
+    // its own envelope so the highs decay faster than the fundamental,
+    // giving the note a soft "ping → hum → silence" shape.
+    const partials = [1, 2.005, 3.012];
+    const partialPeaks = [0.18, 0.08, 0.035];
+    const partialDecays = [3.2, 2.0, 1.2];
+    for (let i = 0; i < partials.length; i++) {
+      const osc = this.ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = freq * partials[i];
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(partialPeaks[i], t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + partialDecays[i]);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      osc.stop(t + partialDecays[i] + 0.05);
+    }
+
+    // A second voice an octave up at a much lower level, panned-feeling via
+    // slight detune. Adds shimmer to the top of each note so the melody
+    // reads as "ethereal" rather than just "soft bell".
+    const high = this.ctx.createOscillator();
+    high.type = "sine";
+    high.frequency.value = freq * 2.001;
+    const highGain = this.ctx.createGain();
+    highGain.gain.setValueAtTime(0.0001, t);
+    highGain.gain.exponentialRampToValueAtTime(0.04, t + 0.03);
+    highGain.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
+    high.connect(highGain);
+    highGain.connect(this.master);
+    high.start(t);
+    high.stop(t + 2.5);
+  }
+
+  // Soft chord pad held under the comet's entire lifetime. Adds a continuous
+  // C-major ninth wash (C - E - G - D) that fills in the spaces between
+  // melody notes and the bass percussion. Very quiet — it's *atmosphere*,
+  // not a lead voice.
+  startCometShimmer(key: object) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    if (this.cometShimmers.has(key)) return;
+    const t = this.ctx.currentTime;
+
+    // C major add-9 voicing: C4, E4, G4, D5. Each note gets a very slight
+    // detune partner and an independent slow tremolo so the chord shimmers
+    // continuously instead of sitting as a flat pad.
+    const chordFreqs = [261.63, 329.63, 392.00, 587.33];
+    const tremRates = [0.11, 0.17, 0.13, 0.19];
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = 0.8;
+    filter.frequency.value = 1800;
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.setValueAtTime(0.0001, t);
+    mainGain.gain.exponentialRampToValueAtTime(0.05, t + 1.6 /* COMET_FADE_IN */);
+    filter.connect(mainGain);
+    mainGain.connect(this.master);
+
+    const oscs: OscillatorNode[] = [];
+    const lfos: OscillatorNode[] = [];
+
+    for (let i = 0; i < chordFreqs.length; i++) {
+      const f = chordFreqs[i];
+      const oscA = this.ctx.createOscillator();
+      const oscB = this.ctx.createOscillator();
+      oscA.type = "sine";
+      oscB.type = "sine";
+      oscA.frequency.value = f;
+      oscB.frequency.value = f * 1.005;
+
+      // Per-voice tremolo so the four chord tones beat against each other
+      // at different rates — gives the pad its breathing, drifting quality.
+      const trem = this.ctx.createOscillator();
+      trem.type = "sine";
+      trem.frequency.value = tremRates[i];
+      const tremDepth = this.ctx.createGain();
+      tremDepth.gain.value = 0.35;
+      const voiceGain = this.ctx.createGain();
+      voiceGain.gain.value = 0.65;
+      trem.connect(tremDepth);
+      tremDepth.connect(voiceGain.gain);
+
+      oscA.connect(voiceGain);
+      oscB.connect(voiceGain);
+      voiceGain.connect(filter);
+
+      oscA.start(t);
+      oscB.start(t);
+      trem.start(t);
+
+      oscs.push(oscA, oscB);
+      lfos.push(trem);
+    }
+
+    this.cometShimmers.set(key, { oscs, lfos, mainGain });
+  }
+
+  stopCometShimmer(key: object) {
+    if (!this.ctx) return;
+    const node = this.cometShimmers.get(key);
+    if (!node) return;
+    const t = this.ctx.currentTime;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 2.0 /* COMET_FADE_OUT */);
+    const stopAt = t + 2.0 /* COMET_FADE_OUT */ + 0.1;
+    for (const o of node.oscs) o.stop(stopAt);
+    for (const l of node.lfos) l.stop(stopAt);
+    this.cometShimmers.delete(key);
+  }
+
+  stopAllCometShimmers() {
+    for (const key of Array.from(this.cometShimmers.keys())) this.stopCometShimmer(key);
+  }
+
   private makeNoiseBuffer(duration: number): AudioBuffer | null {
     if (!this.ctx) return null;
     const length = Math.floor(this.ctx.sampleRate * duration);
@@ -241,6 +603,7 @@ export class Sound {
       case "alienFireSmall": this.playAlienFireSmall(); break;
       case "alienHit": this.playAlienHit(); break;
       case "alienExplode": this.playAlienExplode(); break;
+      case "cometNote": this.playCometNote(Math.round(pitchRatio)); break;
     }
   }
 
@@ -463,11 +826,11 @@ export class Sound {
   // Warm-up tone played when the pulsar starts vibrating. Rising sawtooth
   // sweep with a parallel high partial — "winding up" the way an emergency
   // siren announces itself. Length matches Pulsar.SHOCK_VIBRATE_DURATION
-  // (1.2s) so it tops out exactly as the flash fires.
+  // (2.0s) so it tops out exactly as the flash fires.
   private playShockwaveCharge() {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    const duration = 1.2;
+    const duration = 2.0;
 
     // Sub carrier: deep sawtooth that rises only into the low bass, never
     // breaking into mid-range. Keeping the top end well under 200 Hz is what
@@ -704,8 +1067,13 @@ export class Sound {
     osc.frequency.setValueAtTime(baseFreq * 1.4, t);
     osc.frequency.exponentialRampToValueAtTime(baseFreq, t + 0.08);
     const gain = this.ctx.createGain();
+    // 5 ms attack matches the bass voices (bassKick 4 ms, bassBoom 5 ms,
+    // bassPluck 6 ms, bassSnap 3 ms) so the perceived "thump" lands on the
+    // same instant as the bassteroid voices triggered on the same beat.
+    // Earlier value was 40 ms — long enough that the pulsar's hit was clearly
+    // trailing the bass section.
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(peak, t + 0.04);
+    gain.gain.exponentialRampToValueAtTime(peak, t + 0.005);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
     osc.connect(gain);
     gain.connect(this.master);
@@ -715,14 +1083,15 @@ export class Sound {
     // Sub-octave reinforcement (~32 Hz). Mostly inaudible as a pitch on
     // small speakers but adds the chest-rumble body on headphones/subwoofer.
     // Scaled aggressively with intensity so it barely contributes at wave 1
-    // and dominates the low spectrum by wave 30.
+    // and dominates the low spectrum by wave 30. Attack tightened from 50 ms
+    // to 8 ms so the sub doesn't smear in late behind the body transient.
     const sub = this.ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.value = baseFreq * 0.5;
     const subGain = this.ctx.createGain();
     const subPeak = peak * (0.3 + 0.7 * intensity);
     subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(subPeak, t + 0.05);
+    subGain.gain.exponentialRampToValueAtTime(subPeak, t + 0.008);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
     sub.connect(subGain);
     subGain.connect(this.master);
