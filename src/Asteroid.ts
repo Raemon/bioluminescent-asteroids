@@ -44,7 +44,7 @@ export type AsteroidSize = "large" | "medium" | "small";
 // (so it can't split) and emits the sharp glassy "tink" sound on destruction.
 // Treat it as a "sometimes-found" treat — if you start seeing tink asteroids
 // every wave, lower the per-wave spawn chance in Game.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "tink";
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "tink" | "boss";
 
 export const BASS_KINDS: ReadonlyArray<"bassA" | "bassB" | "bassC" | "bassD"> = ["bassA", "bassB", "bassC", "bassD"];
 
@@ -53,6 +53,25 @@ const SIZE_RADIUS: Record<AsteroidSize, number> = {
   medium: 28,
   small: 16,
 };
+
+// The boss asteroid is the first end-of-arc fight: a cratered planetoid that
+// solidifies out of the looming background planet on wave 10. It's roughly
+// 3× the diameter of a large asteroid, splits into 3 medium children, and
+// each medium splits into 3 smalls (smalls don't split). HP per tier is
+// generous so a rhythm-locked player still needs a sustained engagement.
+export const BOSS_RADIUS: Record<AsteroidSize, number> = {
+  large: 160,
+  medium: 70,
+  small: 36,
+};
+export const BOSS_HP: Record<AsteroidSize, number> = {
+  large: 60,
+  medium: 18,
+  small: 6,
+};
+// Boss hue. Matches the menace-rim red used by the foreshadowing planet so
+// the "the planetoid just dropped in" read is unbroken. Children inherit.
+export const BOSS_HUE = 12;
 
 const SIZE_SPAWN_SPEED: Record<AsteroidSize, [number, number]> = {
   large: [40, 90],
@@ -334,6 +353,7 @@ export class Asteroid {
     this.rotSpeed = rand(-0.6, 0.6);
     this.kind = kind;
     const isBass = kind === "bassA" || kind === "bassB" || kind === "bassC" || kind === "bassD";
+    const isBoss = kind === "boss";
     if (isBass) {
       this.measureOffset = BASS_KIND_BASE_OFFSET[kind];
       this.bassShip = buildBassteroidShape(kind);
@@ -342,11 +362,27 @@ export class Asteroid {
       // drifting slowly.
       this.rotSpeed = rand(-0.18, 0.18);
     }
-    this.maxHp = isBass ? BASS_HP[size] : ASTEROID_HP[size];
+    if (isBoss) {
+      // Boss is huge — override the size table so its physical footprint
+      // matches its visual identity as a planetoid that just dropped in.
+      this.radius = BOSS_RADIUS[size];
+      // Slow majestic spin. Even the small bosses keep a heavier rotation
+      // than ordinary asteroids — these are chunks of broken planet, not
+      // pebbles.
+      this.rotSpeed = rand(-0.12, 0.12) * (size === "large" ? 0.5 : 1);
+    }
+    this.maxHp = isBoss ? BOSS_HP[size] : isBass ? BASS_HP[size] : ASTEROID_HP[size];
     this.hp = this.maxHp;
-    this.cracks = rollCracks(this.maxHp);
+    // For most asteroids each HP gets its own pre-rolled crack so the
+    // damage state escalates predictably. The boss has a much higher HP
+    // budget (60 large) — drawing 60 multi-branch overlays every frame is
+    // wasteful and looks like noise, so cap the boss at a handful of
+    // distinct fractures and let `renderBossCracks` interpolate brightness
+    // with the damage fraction instead.
+    const crackCount = isBoss ? (size === "large" ? 12 : size === "medium" ? 8 : 5) : this.maxHp;
+    this.cracks = rollCracks(crackCount);
     const kindHue = KIND_HUE[kind];
-    this.hue = hue ?? (kindHue !== undefined ? kindHue : nextWaveHue());
+    this.hue = hue ?? (isBoss ? BOSS_HUE : kindHue !== undefined ? kindHue : nextWaveHue());
     this.harmonics = this.buildHarmonicsForKind(kind);
     this.outline = this.computeOutline();
     this.nuclei = [];
@@ -406,6 +442,7 @@ export class Asteroid {
   }
 
   buildSprite(): HTMLCanvasElement {
+    if (this.isBoss()) return this.buildBossSprite();
     if (this.isBass()) return this.buildBassteroidSprite();
     const haloRadius = this.radius * 2.3;
     const padding = 14;
@@ -626,6 +663,8 @@ export class Asteroid {
     // circle for the hitbox. 0.88 is a feel-tuned shrink so glancing shots
     // miss the gaps between modules instead of registering on empty space.
     if (this.isBass()) return distance < this.radius * 0.88 + pointRadius;
+    // Boss planetoid is a round body — circle hitbox at near-full radius.
+    if (this.isBoss()) return distance < this.radius * 0.95 + pointRadius;
     const localAngle = Math.atan2(dy, dx) - this.rotation;
     const surface = this.radiusAtAngle(localAngle);
     return distance < surface + pointRadius;
@@ -659,6 +698,14 @@ export class Asteroid {
   }
 
   scoreValue(): number {
+    if (this.isBoss()) {
+      // Boss scoring rewards the sustained engagement: large piece dwarfs a
+      // normal kill, mediums and smalls are still chunky. Combo multiplier
+      // applies on top at the call site.
+      if (this.size === "large") return 2500;
+      if (this.size === "medium") return 800;
+      return 300;
+    }
     return SIZE_SCORE[this.size];
   }
 
@@ -666,7 +713,38 @@ export class Asteroid {
     return this.kind === "bassA" || this.kind === "bassB" || this.kind === "bassC" || this.kind === "bassD";
   }
 
+  isBoss(): boolean {
+    return this.kind === "boss";
+  }
+
   split(): Asteroid[] {
+    // Boss: large → 3 medium, medium → 3 small, small → terminal. Children
+    // fan outward from the parent's velocity in evenly-spaced cones so the
+    // post-split field reads as a clean shatter rather than a dust cloud.
+    if (this.isBoss()) {
+      if (this.size === "small") return [];
+      const nextSize: AsteroidSize = this.size === "large" ? "medium" : "small";
+      const baseAngle = Math.atan2(this.vel.y, this.vel.x);
+      // Eject from a position offset out toward each child's direction so
+      // mediums/smalls don't all start stacked on top of each other (which
+      // would let one shot near the centre clip several at once before they
+      // separated). Offset distance is half the parent radius.
+      const ejectDist = this.radius * 0.5;
+      const fragmentList: Asteroid[] = [];
+      for (let i = 0; i < 3; i++) {
+        // Spread of ±1.2 rad with a small per-child jitter so the three
+        // children aren't perfectly symmetrical.
+        const childAngle = baseAngle + (i - 1) * 1.2 + rand(-0.15, 0.15);
+        const childPos = {
+          x: this.pos.x + Math.cos(childAngle) * ejectDist,
+          y: this.pos.y + Math.sin(childAngle) * ejectDist,
+        };
+        const speedMag = Math.hypot(this.vel.x, this.vel.y) * rand(0.9, 1.4) + 60;
+        const child = new Asteroid(childPos, fromAngle(childAngle, speedMag), nextSize, this.hue, this.kind);
+        fragmentList.push(child);
+      }
+      return fragmentList;
+    }
     // Bassteroid: each split subdivides the parent's beat slot. Gen-0 (large)
     // → 2 gen-1 (medium) half a measure apart, gen-1 → 2 gen-2 (small) a
     // quarter measure apart, gen-2 is terminal. Children keep the parent's
@@ -706,6 +784,10 @@ export class Asteroid {
   }
 
   render(ctx: CanvasRenderingContext2D, t: number) {
+    if (this.isBoss()) {
+      this.renderBoss(ctx, t);
+      return;
+    }
     if (this.isBass()) {
       this.renderBass(ctx);
       return;
@@ -891,7 +973,274 @@ export class Asteroid {
 
     ctx.restore();
   }
+
+  // Pre-rendered cratered planetoid sprite for the boss. Heavy dark body
+  // with a strong red rim glow (matches the foreshadowing planet's menace
+  // hue), pitted with craters, fractured by deep canyon lines, and lit from
+  // the side by an off-screen sun so it reads as a 3D sphere rather than a
+  // flat disc. Cracks and the live damage state are drawn per-frame in
+  // renderBoss.
+  buildBossSprite(): HTMLCanvasElement {
+    const r = this.radius;
+    const haloRadius = r * 1.55;
+    const padding = 24;
+    const size = Math.ceil(2 * (haloRadius + padding));
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d")!;
+    this.spriteHalfSize = size / 2;
+    const baseHue = this.hue;
+
+    ctx.translate(size / 2, size / 2);
+
+    // Wide outer corona — red/orange wash so the boss carries its menace
+    // colour signature out into the surrounding space.
+    ctx.globalCompositeOperation = "lighter";
+    const corona = ctx.createRadialGradient(0, 0, r * 0.7, 0, 0, haloRadius);
+    corona.addColorStop(0, `hsla(${baseHue}, 100%, 50%, 0.18)`);
+    corona.addColorStop(0.55, `hsla(${baseHue - 8}, 100%, 45%, 0.08)`);
+    corona.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
+    ctx.fillStyle = corona;
+    ctx.beginPath();
+    ctx.arc(0, 0, haloRadius, 0, TAU);
+    ctx.fill();
+
+    // Body — dark molten rock with a directional gradient (the "sun" is up
+    // and to the left). source-over so the body genuinely occludes the
+    // corona behind it instead of glowing through it.
+    ctx.globalCompositeOperation = "source-over";
+    const body = ctx.createRadialGradient(-r * 0.4, -r * 0.4, r * 0.1, 0, 0, r);
+    body.addColorStop(0, `hsl(${baseHue + 8}, 70%, 32%)`);
+    body.addColorStop(0.45, `hsl(${baseHue + 4}, 75%, 18%)`);
+    body.addColorStop(0.85, `hsl(${baseHue - 6}, 80%, 8%)`);
+    body.addColorStop(1, `hsl(${baseHue - 10}, 80%, 4%)`);
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+
+    // Craters — randomly placed dark pits with bright south-east rims (the
+    // sun is up-left, so the lit side of each crater is opposite). Smaller
+    // bosses get fewer craters proportionally so the silhouette stays
+    // readable.
+    const craterCount = this.size === "large" ? 14 : this.size === "medium" ? 8 : 5;
+    for (let i = 0; i < craterCount; i++) {
+      const a = rand(0, TAU);
+      const d = rand(0, r * 0.78);
+      const cx = Math.cos(a) * d;
+      const cy = Math.sin(a) * d;
+      const cr = rand(r * 0.06, r * 0.16);
+      // Pit
+      const pit = ctx.createRadialGradient(cx - cr * 0.2, cy - cr * 0.2, 0, cx, cy, cr);
+      pit.addColorStop(0, `hsl(${baseHue - 6}, 75%, 4%)`);
+      pit.addColorStop(0.7, `hsl(${baseHue}, 70%, 9%)`);
+      pit.addColorStop(1, `hsl(${baseHue + 8}, 65%, 20%)`);
+      ctx.fillStyle = pit;
+      ctx.beginPath();
+      ctx.arc(cx, cy, cr, 0, TAU);
+      ctx.fill();
+      // Sun-lit rim crescent on the lower-right of each crater. A thin
+      // bright arc sells the depth without burying the body in noise.
+      ctx.strokeStyle = `hsla(${baseHue + 25}, 90%, 65%, 0.8)`;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(cx, cy, cr * 0.95, -0.4, 1.7);
+      ctx.stroke();
+    }
+
+    // Glowing magma fault lines — bright canyons running across the body
+    // suggesting the planetoid is unstable. Clipped to the disc.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.clip();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.shadowColor = `hsla(${baseHue + 20}, 100%, 55%, 1)`;
+    ctx.shadowBlur = 14;
+    const faultCount = this.size === "large" ? 5 : this.size === "medium" ? 3 : 2;
+    for (let i = 0; i < faultCount; i++) {
+      const a = rand(0, TAU);
+      const offset = rand(-r * 0.5, r * 0.5);
+      ctx.strokeStyle = `hsla(${baseHue + 18 + i * 4}, 100%, 60%, 0.85)`;
+      ctx.lineWidth = rand(1.2, 2.4);
+      ctx.beginPath();
+      let px = Math.cos(a) * -r * 1.2 + Math.cos(a + Math.PI / 2) * offset;
+      let py = Math.sin(a) * -r * 1.2 + Math.sin(a + Math.PI / 2) * offset;
+      ctx.moveTo(px, py);
+      const segs = 6;
+      for (let s = 1; s <= segs; s++) {
+        const t = -1 + (s / segs) * 2;
+        const jitter = (Math.random() - 0.5) * r * 0.08;
+        px = Math.cos(a) * r * 1.2 * t + Math.cos(a + Math.PI / 2) * (offset + jitter);
+        py = Math.sin(a) * r * 1.2 * t + Math.sin(a + Math.PI / 2) * (offset + jitter);
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // Terminator — dark crescent on the lower-right where the body falls
+    // into shadow. Sells the spherical lighting model harder than the body
+    // gradient alone.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.clip();
+    ctx.globalCompositeOperation = "source-over";
+    const term = ctx.createRadialGradient(r * 0.5, r * 0.5, r * 0.2, r * 0.5, r * 0.5, r * 1.3);
+    term.addColorStop(0, `hsla(0, 0%, 0%, 0)`);
+    term.addColorStop(0.6, `hsla(0, 0%, 0%, 0.45)`);
+    term.addColorStop(1, `hsla(0, 0%, 0%, 0.85)`);
+    ctx.fillStyle = term;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // Outline rim — thin bright ring so the boss reads cleanly against the
+    // starfield even when the corona is washed out.
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = `hsla(${baseHue + 15}, 100%, 75%, 0.85)`;
+    ctx.lineWidth = 2.2;
+    ctx.shadowColor = `hsla(${baseHue}, 100%, 60%, 1)`;
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    return canvas;
+  }
+
+  // Per-frame boss draw. Sprite carries the body and craters; we paint live
+  // damage cracks, hit flash, and a slow rotation on top. Damage cracks
+  // escalate from hairlines to wide molten gashes as HP drops, so the
+  // player gets clear feedback that they're chipping at this monster.
+  renderBoss(ctx: CanvasRenderingContext2D, t: number) {
+    const baseHue = this.hue;
+    const damageT = 1 - this.hp / Math.max(1, this.maxHp);
+
+    ctx.save();
+    ctx.translate(this.pos.x, this.pos.y);
+    ctx.rotate(this.rotation);
+
+    // Slow corona pulse driven by clock so the boss feels alive even when
+    // nothing is happening. Drawn before the sprite so it sits behind.
+    const breath = 0.5 + 0.5 * Math.sin(t * 0.0018);
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const breathAlpha = 0.18 + 0.12 * breath + 0.35 * damageT;
+    const breathR = this.radius * (1.35 + 0.05 * breath + 0.15 * damageT);
+    const grad = ctx.createRadialGradient(0, 0, this.radius * 0.7, 0, 0, breathR);
+    grad.addColorStop(0, `hsla(${baseHue}, 100%, 50%, ${breathAlpha * 0.4})`);
+    grad.addColorStop(0.6, `hsla(${baseHue + 8}, 100%, 55%, ${breathAlpha})`);
+    grad.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, breathR, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    if (this.sprite) {
+      ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
+    }
+
+    // Live damage cracks — same system as regular asteroids but with a
+    // brighter, redder over-stroke so they read on the boss body. Number
+    // shown scales with damage taken (one per HP lost, capped at crack
+    // count).
+    this.renderBossCracks(ctx, damageT);
+
+    if (this.flashAmount > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = `hsla(${baseHue + 30}, 100%, 90%, ${this.flashAmount * 0.35})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.radius * 1.05, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  // Boss-specific crack overlay. We draw a dramatic radial-fracture pattern
+  // proportional to damage taken — at low damage just a few hairline
+  // fractures, at high damage the body is criss-crossed with glowing
+  // molten gashes. Different look from the bassteroid renderCracks because
+  // the boss is a planetoid, not an armoured ship.
+  renderBossCracks(ctx: CanvasRenderingContext2D, damageT: number) {
+    if (damageT <= 0.01) return;
+    const cracksToDraw = Math.min(Math.ceil(damageT * this.cracks.length * 1.4), this.cracks.length);
+    for (let i = 0; i < cracksToDraw; i++) {
+      const crack = this.cracks[i];
+      const dx = crack.pos.x * this.radius;
+      const dy = crack.pos.y * this.radius;
+      ctx.save();
+      ctx.translate(dx, dy);
+      ctx.rotate(crack.angle);
+
+      // Dark fracture line (the crack itself).
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = `rgba(2, 0, 0, ${0.85 + 0.15 * damageT})`;
+      ctx.lineWidth = 2.6 + damageT * 1.8;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      for (const branch of crack.branches) {
+        ctx.beginPath();
+        for (let p = 0; p < branch.points.length; p++) {
+          const px = branch.points[p].x * this.radius;
+          const py = branch.points[p].y * this.radius;
+          if (p === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+
+      // Molten glow inside the crack — gets brighter and wider as the boss
+      // takes more damage so the planetoid visibly heats up before it
+      // shatters.
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = `hsla(${this.hue + 20}, 100%, ${55 + damageT * 25}%, ${0.5 + 0.45 * damageT})`;
+      ctx.lineWidth = 1.0 + damageT * 1.4;
+      ctx.shadowColor = `hsla(${this.hue + 10}, 100%, 55%, 1)`;
+      ctx.shadowBlur = 8 + damageT * 14;
+      for (const branch of crack.branches) {
+        ctx.beginPath();
+        for (let p = 0; p < branch.points.length; p++) {
+          const px = branch.points[p].x * this.radius;
+          const py = branch.points[p].y * this.radius;
+          if (p === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+  }
 }
+
+// Drop the boss directly at the screen position the looming planetoid was
+// occupying, with a slow drift toward the screen centre. We don't aim at
+// the ship — the boss is a planetoid, not a hunter — and we pick a gentle
+// speed so the player has time to react to the new threat.
+export const spawnBossAt = (
+  pos: Vec,
+  w: number,
+  h: number,
+): Asteroid => {
+  const cx = w / 2;
+  const cy = h / 2;
+  const dx = cx - pos.x;
+  const dy = cy - pos.y;
+  const norm = Math.max(1, Math.hypot(dx, dy));
+  const speed = 24;
+  const vel = v((dx / norm) * speed, (dy / norm) * speed);
+  return new Asteroid({ x: pos.x, y: pos.y }, vel, "large", undefined, "boss");
+};
 
 export const spawnAsteroidAtEdge = (
   w: number,

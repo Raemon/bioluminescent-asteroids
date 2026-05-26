@@ -1,5 +1,5 @@
 import { Ship } from "./Ship";
-import { Asteroid, AsteroidKind, BASS_KINDS, BASS_MEASURE_LENGTH, spawnAsteroidAtEdge } from "./Asteroid";
+import { Asteroid, AsteroidKind, BASS_KINDS, BASS_MEASURE_LENGTH, spawnAsteroidAtEdge, spawnBossAt } from "./Asteroid";
 import { Bullet } from "./Bullet";
 import { ParticleSystem } from "./Particle";
 import { Shard, shatterAsteroid } from "./Shard";
@@ -54,6 +54,15 @@ const ALIEN_SPAWN_WINDOW: [number, number] = [5, 22];
 // treat rather than a guaranteed wave fixture.
 const TINK_FIRST_WAVE = 3;
 const TINK_CHANCE_PER_WAVE = 1 / 3;
+
+// Boss-wave plumbing. The first boss is a planetoid that's been creeping
+// forward in the background since wave 1 (planets[0] on Pulsar). On the
+// foreshadow wave, Pulsar swells that planet so it visibly looms; on the
+// boss wave itself we hide the planet and spawn a boss asteroid in the
+// foreground at the same screen position, completing the "planetoid
+// solidifies into play" handoff.
+const BOSS_WAVES = [10] as const;
+const BOSS_FORESHADOW_WAVES = [9] as const;
 
 // Pulsar shockwave: occasional mid-wave event where the pulsar vibrates and
 // flashes, releasing a ring that shatters every asteroid and jiggles the
@@ -261,6 +270,7 @@ export class Game {
     this.shockwaveTriggerAt = null;
     this.slowMoTimer = 0;
     this.sound.bgBeatIntensity = 0;
+    this.pulsar.setBossPlanetState("idle");
     const decorativeAsteroidIndices = [0, 1, 2, 3, 4];
     for (const _ of decorativeAsteroidIndices) {
       this.asteroids.push(spawnAsteroidAtEdge(this.w, this.h));
@@ -290,6 +300,7 @@ export class Game {
     this.particles = new ParticleSystem();
     this.ship = new Ship(v(this.w / 2, this.h / 2));
     this.ship.invuln = 2.0;
+    this.pulsar.setBossPlanetState("idle");
     this.pulsar.setWaveLevel(this.wave);
     this.updateBgBeatIntensity();
     this.spawnWave();
@@ -313,11 +324,27 @@ export class Game {
   // constructor (gen-0) or carried over by `split()` (children inherit the
   // parent's slot), so all this has to do is find the next future measure
   // boundary that aligns with that offset.
+  isBossWave(wave: number): boolean {
+    return (BOSS_WAVES as readonly number[]).includes(wave);
+  }
+
+  isBossForeshadowWave(wave: number): boolean {
+    return (BOSS_FORESHADOW_WAVES as readonly number[]).includes(wave);
+  }
+
+  // Snap an asteroid's next-beat clock to the next within-measure slot that
+  // also lands on the central pulsar's BEAT_GRID. The base offsets and split
+  // deltas are already grid-multiples by construction, but we round both
+  // `measureOffset` and the final `nextBeatAt` to the grid anyway so the
+  // invariant "every bassteroid fires on a pulsar beat" survives float drift,
+  // future tuning changes, or any spawn path that bypasses BASS_KIND_BASE_OFFSET.
   alignBassBeat(asteroid: Asteroid) {
     if (!asteroid.isBass()) return;
-    const offset = asteroid.measureOffset;
-    const k = Math.ceil((this.beatTime - offset - 1e-6) / BASS_MEASURE_LENGTH);
-    asteroid.nextBeatAt = k * BASS_MEASURE_LENGTH + offset;
+    const gridSnappedOffset = Math.round(asteroid.measureOffset / BEAT_GRID) * BEAT_GRID;
+    asteroid.measureOffset = gridSnappedOffset;
+    const k = Math.ceil((this.beatTime - gridSnappedOffset - 1e-6) / BASS_MEASURE_LENGTH);
+    const raw = k * BASS_MEASURE_LENGTH + gridSnappedOffset;
+    asteroid.nextBeatAt = Math.round(raw / BEAT_GRID) * BEAT_GRID;
   }
 
   spawnSpecial(kind: AsteroidKind): Asteroid {
@@ -339,6 +366,37 @@ export class Game {
     // from under the player at the wave transition.
     this.alienSpawnAt = null;
     this.waveElapsed = 0;
+
+    // Boss-wave branch: skip the normal asteroid / specials / events
+    // pipeline and just spawn the boss at the looming planet's current
+    // screen position. No canister, no shockwave, no alien — the fight is
+    // the wave. Also flip pulsar into "active" so the foreshadowing planet
+    // disappears the moment the boss materialises.
+    if (this.isBossWave(this.wave)) {
+      // Capture the looming planet's current position *before* flipping the
+      // pulsar state — once we hide the planet we still want the boss to
+      // materialise where the player last saw it, not where its base
+      // (non-foreshadowed) orbit would put it.
+      const pos = this.pulsar.bossPlanetPos();
+      this.pulsar.setBossPlanetState("active");
+      this.asteroids.push(spawnBossAt(pos, this.w, this.h));
+      this.canisterSpawnAt = null;
+      this.shockwaveTriggerAt = null;
+      return;
+    }
+
+    // Foreshadow wave: regular wave, but pulsar swells planets[0] so the
+    // player sees the boss looming. We otherwise let everything else
+    // proceed normally — this is the "still obviously not in play" beat.
+    if (this.isBossForeshadowWave(this.wave)) {
+      this.pulsar.setBossPlanetState("foreshadow");
+    } else if (this.pulsar.bossPlanetState === "foreshadow") {
+      // Defensive: leaving the foreshadow window without entering the boss
+      // wave (e.g. via state restart) — drop back to idle so the planet
+      // resumes its normal drift.
+      this.pulsar.setBossPlanetState("idle");
+    }
+
     // Roll once per wave. Any canister still on screen from a previous wave
     // is wiped above so the player never sees two at once.
     if (Math.random() < CANISTER_CHANCE_PER_WAVE) {
@@ -661,7 +719,16 @@ export class Game {
     }
 
     this.time += dt * 1000;
-    this.pulsar.update(dt, this.beatTime, BEAT_GRID);
+    // Pulsar.update fires the pulsar's per-beat pulse off the SAME beatTime
+    // that tickBassBeats reads. To keep the visual pulsar beat and the bass
+    // voices firing on the same frame (instead of the pulsar trailing by one
+    // frame because we called update before advancing the clock), we defer
+    // the pulsar update inside the "playing" branch until after tickBassBeats.
+    // In all other states beatTime is frozen, so we can update the pulsar
+    // here against the current value.
+    if (this.state !== "playing") {
+      this.pulsar.update(dt, this.beatTime, BEAT_GRID);
+    }
 
     if (this.state === "title") {
       if (this.input.pressed("enter") || this.input.pressed("return")) {
@@ -710,6 +777,10 @@ export class Game {
       // we time-stamp any shot fired this frame, so on-beat detection lines
       // up with the same beatTime that any bass audio on this frame fired at.
       this.tickBassBeats(musicDt);
+      // Run the pulsar against the freshly-advanced beatTime so its per-beat
+      // flash lands on the same frame as the bassteroid voices that share
+      // the beat, instead of one frame later.
+      this.pulsar.update(dt, this.beatTime, BEAT_GRID);
       if (this.bullets.length > bulletsBeforeShipUpdate) {
         // Ship's fireRate (0.5s base, 0.25s under rapid) exceeds the dt cap
         // (0.05s) so at most ONE fire event lands per frame — but trident
@@ -769,12 +840,16 @@ export class Game {
       // frame (rare, but possible at the trailing edge).
       this.evaluateClosedBeats();
       if (this.asteroids.length === 0) {
+        const wasBossWave = this.isBossWave(this.wave);
         this.wave += 1;
         this.sound.play("waveClear");
         this.sound.play("pulsarHum");
         this.pulsar.waveClear();
         this.pulsar.setWaveLevel(this.wave);
         this.updateBgBeatIntensity();
+        // Boss just died — lock the planet hidden so the cleared boss
+        // doesn't pop back into the sky as a planet on the next wave.
+        if (wasBossWave) this.pulsar.setBossPlanetState("defeated");
         this.spawnWave();
         this.syncHud();
       }
@@ -827,7 +902,9 @@ export class Game {
         const pitchRatio = BASS_SPLIT_PITCH_RATIO[a.splitLevel] ?? 1;
         this.sound.play(sound, pitchRatio);
         a.beatFlash = 1.0;
-        a.nextBeatAt += BASS_MEASURE_LENGTH;
+        // Re-snap to BEAT_GRID after each advance so accumulated float error
+        // can never drift the bass voice off the pulsar's beat over a long run.
+        a.nextBeatAt = Math.round((a.nextBeatAt + BASS_MEASURE_LENGTH) / BEAT_GRID) * BEAT_GRID;
       }
     }
   }
@@ -843,6 +920,17 @@ export class Game {
     this.shake = Math.min(this.shake + 1.4, 2.0);
     const surviving: Asteroid[] = [];
     for (const a of this.asteroids) {
+      // Bosses survive the shockwave intact — the planetoid is too massive
+      // to be shattered by a pulsar ring, and instant-killing the fight via
+      // an environmental event would feel cheap. The ring does still nudge
+      // the boss outward so the player gets some visible feedback.
+      if (a.isBoss()) {
+        const kick = this.pulsar.shockwaveImpulseAt(a.pos);
+        a.vel = { x: a.vel.x + kick.x * 120, y: a.vel.y + kick.y * 120 };
+        a.flashAmount = 1;
+        surviving.push(a);
+        continue;
+      }
       if (a.isBass()) {
         a.hp = 0;
         a.flashAmount = 1;
