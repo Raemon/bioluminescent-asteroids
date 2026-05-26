@@ -223,6 +223,12 @@ export class Game {
   overlayTitleEl: HTMLElement;
   overlayStartEl: HTMLElement;
   muteEl: HTMLButtonElement;
+  abortEl: HTMLButtonElement;
+  killedRowEl: HTMLCanvasElement;
+  // Per-run trophy snapshots. Each entry is a small offscreen canvas of the
+  // enemy rendered at its representative pose, captured the moment it died.
+  // Cleared on startGame; rendered to #killed-row when the run ends.
+  killedSnapshots: HTMLCanvasElement[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -247,6 +253,9 @@ export class Game {
     this.overlayStartEl = document.getElementById("overlay-start")!;
     this.muteEl = document.getElementById("mute") as HTMLButtonElement;
     this.muteEl.addEventListener("click", () => this.toggleMute());
+    this.abortEl = document.getElementById("abort-mission") as HTMLButtonElement;
+    this.abortEl.addEventListener("click", () => this.abortMission());
+    this.killedRowEl = document.getElementById("killed-row") as HTMLCanvasElement;
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();
       if (k === "m" && this.state !== "title") this.toggleMute();
@@ -283,10 +292,28 @@ export class Game {
       this.overlayTitleEl.textContent = "Paused";
       this.overlayStartEl.innerHTML = 'press <span class="key">esc</span> to resume';
       this.overlayEl.classList.remove("hidden");
+      this.abortEl.classList.remove("hidden");
     } else if (this.state === "paused") {
       this.state = "playing";
       this.overlayEl.classList.add("hidden");
+      this.abortEl.classList.add("hidden");
     }
+  }
+
+  abortMission() {
+    if (this.state !== "paused") return;
+    this.state = "gameover";
+    this.ship.thrustOn = false;
+    this.sound.stopThrust();
+    this.sound.stopAllAlienDrones();
+    this.sound.stopAllBassteroidDrones();
+    this.sound.stopAllCometShimmers();
+    this.comets = [];
+    this.abortEl.classList.add("hidden");
+    this.overlayTitleEl.textContent = "Mission Aborted";
+    this.overlayStartEl.innerHTML = `score <strong>${String(this.score).padStart(6, "0")}</strong> &nbsp;·&nbsp; press <span class="key">enter</span> to restart`;
+    this.overlayEl.classList.remove("hidden");
+    this.renderKilledRow();
   }
 
   resize() {
@@ -307,6 +334,10 @@ export class Game {
     this.overlayTitleEl.textContent = "Pulsar";
     this.overlayStartEl.innerHTML = 'press <span class="key">enter</span> to begin';
     this.overlayEl.classList.remove("hidden");
+    // Carry the previous-run trophy lineup onto the title screen so a player
+    // returning from a Game Over still sees what they took down. Cleared on
+    // the next startGame.
+    this.renderKilledRow();
     this.beatCombo = 0;
     this.firedOffBeatSinceLastBeat = false;
     this.syncComboHud();
@@ -345,6 +376,8 @@ export class Game {
     this.comboPopups = [];
     this.shards = [];
     this.canisters = [];
+    this.killedSnapshots = [];
+    this.killedRowEl.classList.add("hidden");
     this.sound.stopAllAlienDrones();
     this.sound.stopAllBassteroidDrones();
     this.sound.stopAllCometShimmers();
@@ -637,6 +670,7 @@ export class Game {
         this.sound.play("alienExplode");
         this.sound.stopAlienDrone(a);
         this.emitAlienExplosion(a);
+        this.snapshotAlienKill(a);
         killed = true;
         break;
       }
@@ -870,6 +904,7 @@ export class Game {
           this.overlayTitleEl.textContent = "Game Over";
           this.overlayStartEl.innerHTML = `score <strong>${String(this.score).padStart(6, "0")}</strong> &nbsp;·&nbsp; press <span class="key">enter</span> to restart`;
           this.overlayEl.classList.remove("hidden");
+          this.renderKilledRow();
         } else {
           this.respawn();
         }
@@ -893,6 +928,10 @@ export class Game {
       // flash lands on the same frame as the bassteroid voices that share
       // the beat, instead of one frame later.
       this.pulsar.update(dt, this.beatTime, BEAT_GRID);
+      // Tick combo halo after tickBassBeats so the rising-edge detector sees
+      // the same beat pulse the audio fires on. musicDt so rings expand at
+      // the music's pace under slow-mo, keeping them synced to the beat.
+      this.ship.tickComboHalo(musicDt, this.currentBeatPulse());
       if (this.bullets.length > bulletsBeforeShipUpdate) {
         // Ship's fireRate (0.5s base, 0.25s under rapid) exceeds the dt cap
         // (0.05s) so at most ONE fire event lands per frame — but trident
@@ -1200,6 +1239,7 @@ export class Game {
         this.sound.play(this.hitSoundFor(a));
         this.emitExplosion(a, isOnBeatHit);
         if (a.isBass()) this.sound.stopBassteroidDrone(a);
+        this.snapshotAsteroidKill(a);
         const children = a.split(b.vel);
         for (const c of children) {
           if (a.isBass()) {
@@ -1429,6 +1469,106 @@ export class Game {
         });
       }
     }
+  }
+
+  // Snapshot a freshly-killed enemy into a small offscreen canvas, sized so
+  // the enemy's natural radius fills most of the trophy tile. The thumbnail
+  // is captured at a frozen rotation/state so the post-game lineup reads as
+  // a uniform parade of silhouettes regardless of where they were in the
+  // field when they died. Each tile keeps the enemy's hue/kind so the row
+  // shows the actual variety of what the player took down this run.
+  snapshotAsteroidKill(a: Asteroid) {
+    const tile = 64;
+    const margin = 6;
+    const c = document.createElement("canvas");
+    c.width = tile;
+    c.height = tile;
+    const cx = c.getContext("2d");
+    if (!cx) return;
+    const drawRadius = tile / 2 - margin;
+    const scale = drawRadius / a.radius;
+    cx.translate(tile / 2, tile / 2);
+    cx.scale(scale, scale);
+    // Freeze visual state so the snapshot doesn't show mid-flash or a half
+    // ruptured body. Save and restore the live values around the render call.
+    const prevPos = a.pos;
+    const prevRot = a.rotation;
+    const prevFlash = a.flashAmount;
+    const prevBeatFlash = a.beatFlash;
+    a.pos = v(0, 0);
+    a.rotation = 0;
+    a.flashAmount = 0;
+    a.beatFlash = 0;
+    a.render(cx, 0);
+    a.pos = prevPos;
+    a.rotation = prevRot;
+    a.flashAmount = prevFlash;
+    a.beatFlash = prevBeatFlash;
+    this.killedSnapshots.push(c);
+  }
+
+  snapshotAlienKill(al: Alien) {
+    const tile = 64;
+    const margin = 6;
+    const c = document.createElement("canvas");
+    c.width = tile;
+    c.height = tile;
+    const cx = c.getContext("2d");
+    if (!cx) return;
+    const drawRadius = tile / 2 - margin;
+    const scale = drawRadius / al.radius;
+    cx.translate(tile / 2, tile / 2);
+    cx.scale(scale, scale);
+    const prevPos = al.pos;
+    const prevRot = al.rotation;
+    const prevFlash = al.flashAmount;
+    const prevFire = al.fireFlash;
+    al.pos = v(0, 0);
+    al.rotation = 0;
+    al.flashAmount = 0;
+    al.fireFlash = 0;
+    al.render(cx, 0);
+    al.pos = prevPos;
+    al.rotation = prevRot;
+    al.flashAmount = prevFlash;
+    al.fireFlash = prevFire;
+    this.killedSnapshots.push(c);
+  }
+
+  renderKilledRow() {
+    const canvas = this.killedRowEl;
+    if (this.killedSnapshots.length === 0) {
+      canvas.classList.add("hidden");
+      return;
+    }
+    const tile = 64;
+    const gap = 10;
+    const padX = 16;
+    const padY = 12;
+    const maxRowWidth = Math.min(window.innerWidth * 0.9, 1080);
+    const tilesPerRow = Math.max(1, Math.floor((maxRowWidth - padX * 2 + gap) / (tile + gap)));
+    const total = this.killedSnapshots.length;
+    const rows = Math.max(1, Math.ceil(total / tilesPerRow));
+    const cols = Math.min(total, tilesPerRow);
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = padX * 2 + cols * tile + (cols - 1) * gap;
+    const cssH = padY * 2 + rows * tile + (rows - 1) * gap;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    for (let i = 0; i < total; i++) {
+      const r = Math.floor(i / tilesPerRow);
+      const c = i % tilesPerRow;
+      const x = padX + c * (tile + gap);
+      const y = padY + r * (tile + gap);
+      ctx.drawImage(this.killedSnapshots[i], x, y, tile, tile);
+    }
+    canvas.classList.remove("hidden");
   }
 
   killShip() {

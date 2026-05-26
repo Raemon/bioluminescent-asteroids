@@ -193,6 +193,41 @@ html, body {
   background: rgba(106, 215, 255, 0.06);
 }
 
+#abort-mission {
+  pointer-events: auto;
+  margin-top: 10px;
+  padding: 10px 22px;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: #ffb8b8;
+  background: rgba(255, 80, 80, 0.08);
+  border: 1px solid rgba(255, 120, 120, 0.4);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+#abort-mission:hover {
+  background: rgba(255, 80, 80, 0.2);
+  color: #fff;
+  border-color: rgba(255, 160, 160, 0.7);
+}
+
+#abort-mission.hidden { display: none; }
+
+#killed-row {
+  display: block;
+  margin-top: 18px;
+  max-width: min(92vw, 1100px);
+  height: auto;
+  filter: drop-shadow(0 0 14px rgba(106, 215, 255, 0.18));
+  opacity: 0.95;
+}
+
+#killed-row.hidden { display: none; }
+
 @keyframes pulse {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }

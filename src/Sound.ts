@@ -85,7 +85,6 @@ type SoundName =
   | "explosionSmall"
   | "thrust"
   | "death"
-  | "hyperspace"
   | "waveClear"
   | "bassKick"
   | "bassPluck"
@@ -1195,7 +1194,6 @@ export class Sound {
       case "explosionSmall": this.playExplosion(0.4, 340, 0.3); break;
       case "thrust": this.startThrust(); break;
       case "death": this.playDeath(); break;
-      case "hyperspace": this.playHyperspace(); break;
       case "waveClear": this.playWaveClear(); break;
       case "bassKick": this.playBassKick(pitchRatio); break;
       case "bassPluck": this.playBassPluck(pitchRatio); break;
@@ -2009,43 +2007,6 @@ export class Sound {
     gain.connect(this.master);
     osc.start(t);
     osc.stop(t + 0.95);
-  }
-
-  private playHyperspace() {
-    if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(120, t);
-    osc.frequency.exponentialRampToValueAtTime(1800, t + 0.25);
-    osc.frequency.exponentialRampToValueAtTime(180, t + 0.55);
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.25, t + 0.05);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
-    osc.connect(gain);
-    gain.connect(this.master);
-    osc.start(t);
-    osc.stop(t + 0.65);
-
-    const noiseBuf = this.makeNoiseBuffer(0.5);
-    if (!noiseBuf) return;
-    const noise = this.ctx.createBufferSource();
-    noise.buffer = noiseBuf;
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.frequency.setValueAtTime(400, t);
-    filter.frequency.exponentialRampToValueAtTime(4000, t + 0.3);
-    filter.Q.value = 4;
-    const nGain = this.ctx.createGain();
-    nGain.gain.setValueAtTime(0.0001, t);
-    nGain.gain.exponentialRampToValueAtTime(0.22, t + 0.05);
-    nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
-    noise.connect(filter);
-    filter.connect(nGain);
-    nGain.connect(this.master);
-    noise.start(t);
-    noise.stop(t + 0.5);
   }
 
   private playWaveClear() {

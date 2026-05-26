@@ -16,7 +16,7 @@ export class Ship {
   pos: Vec;
   vel: Vec = v(0, 0);
   heading = -Math.PI / 2;
-  rotSpeed = 3.4;
+  rotSpeed = 4.6;
   thrustPower = 320;
   drag = 0.6;
   maxSpeed = 460;
@@ -32,7 +32,6 @@ export class Ship {
   fireRate = BEAT_GRID;
   bulletSpeed = 620;
   bulletLife = 0.85;
-  hyperCooldown = 0;
   // Active powerup state. Trident/rapid/pierce are persistent flags that
   // last until the ship dies — a fresh Ship is constructed on respawn, so
   // these naturally clear with the life. The shield is a one-shot flag
@@ -48,104 +47,134 @@ export class Ship {
   // the halo fades in/out cleanly on streak break, rather than popping.
   comboHaloTier = 0;
   comboHaloIntensity = 0;
+  // Expanding shockwave rings emitted once per beat while a streak is live.
+  // age=0 spawns hugging the silhouette, grows outward, dies at 1. Stored as
+  // a small ring buffer; capped because at most ~3 rings can be visible at
+  // any time given the ringLife / beat rate.
+  private comboRings: { age: number; gold: boolean }[] = [];
+  // Last beatPulse seen by tickComboHalo, for rising-edge ring emission.
+  private prevBeatPulse = 0;
 
   constructor(pos: Vec) {
     this.pos = pos;
   }
 
-  // Builds the same vertex pattern as the inner ship but at a given scale.
-  // Pulled out so the halo and ship outline stay congruent if the silhouette
-  // ever changes.
-  private comboHaloVertices(scale: number): Vec[] {
-    return [
-      fromAngle(this.heading, this.radius * 1.4 * scale),
-      fromAngle(this.heading + Math.PI * 0.78, this.radius * 1.0 * scale),
-      fromAngle(this.heading - Math.PI * 0.78, this.radius * 1.0 * scale),
-    ];
-  }
-
-  private renderComboHalo(ctx: CanvasRenderingContext2D, t: number) {
+  // Combo halo: a soft silhouette-hugging bloom plus thin shockwave rings that
+  // emanate outward on each beat and dissolve as they grow. The bloom hugs the
+  // hit radius so it never reads as "my hitbox is bigger"; the rings expand
+  // and dissolve, so they read as resonance with the beat rather than armor.
+  //
+  // tier1 (combo 2–3): cyan bloom + cyan shockwave per beat.
+  // tier2 (combo ≥ 4): + gold core, gold echo shockwave, star spikes on beat.
+  private renderComboHalo(ctx: CanvasRenderingContext2D, beatPulse: number) {
     const i = this.comboHaloIntensity;
-    // Tier 1 contribution rises 0→1 as intensity crosses 0→1; tier 2 rises
-    // 0→1 as intensity crosses 1→2. Both layers can be active simultaneously
-    // during the climb from tier 1 to tier 2.
     const tier1 = Math.min(1, i);
     const tier2 = Math.max(0, Math.min(1, i - 1));
+    const bloomBeat = 0.4 * beatPulse;
 
-    // Slow sine pulse for the faint outer ring (tier 1). 1.3 Hz keeps it
-    // breathing without feeling jittery.
-    const slowPulse = 0.55 + 0.45 * Math.sin(t * 0.004);
-    if (tier1 > 0.01) {
-      const verts = this.comboHaloVertices(1.8);
-      ctx.strokeStyle = `hsla(195, 100%, 75%, ${0.32 * tier1 * slowPulse})`;
-      ctx.lineWidth = 1.2;
-      ctx.shadowColor = "hsla(195, 100%, 70%, 1)";
-      ctx.shadowBlur = 10 * tier1;
+    // Cyan bloom hugging the ship's silhouette. Outer radius is just past the
+    // visual outline (~1.6× vs the outline at ~1.4×) so the glow looks like
+    // it belongs to the ship's body, not a wider boundary.
+    const bloomRadius = this.radius * 1.6;
+    const cyanGrad = ctx.createRadialGradient(0, 0, this.radius * 0.4, 0, 0, bloomRadius);
+    cyanGrad.addColorStop(0, `hsla(195, 100%, 80%, ${(0.18 + bloomBeat * 0.25) * tier1})`);
+    cyanGrad.addColorStop(0.55, `hsla(200, 100%, 65%, ${(0.10 + bloomBeat * 0.15) * tier1})`);
+    cyanGrad.addColorStop(1, "hsla(200, 100%, 60%, 0)");
+    ctx.fillStyle = cyanGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, bloomRadius, 0, TAU);
+    ctx.fill();
+
+    // Tier-2 gold core nested inside the cyan bloom — reads as "molten" heat
+    // at the heart of the ship rather than a second boundary.
+    if (tier2 > 0.01) {
+      const goldGrad = ctx.createRadialGradient(0, 0, this.radius * 0.2, 0, 0, this.radius * 1.3);
+      goldGrad.addColorStop(0, `hsla(45, 100%, 80%, ${(0.18 + bloomBeat * 0.2) * tier2})`);
+      goldGrad.addColorStop(0.6, `hsla(45, 100%, 70%, ${(0.08 + bloomBeat * 0.1) * tier2})`);
+      goldGrad.addColorStop(1, "hsla(45, 100%, 65%, 0)");
+      ctx.fillStyle = goldGrad;
       ctx.beginPath();
-      ctx.moveTo(verts[0].x, verts[0].y);
-      for (const vert of verts.slice(1)) ctx.lineTo(vert.x, vert.y);
-      ctx.closePath();
-      ctx.stroke();
+      ctx.arc(0, 0, this.radius * 1.3, 0, TAU);
+      ctx.fill();
     }
 
-    // Tier 2: a brighter, gold-cyan double-line at a wider radius, with a
-    // faster pulse. The mid-ring sits between the tier-1 outline and the
-    // outer flare so the layers read as a coherent halo rather than two
-    // unrelated rings. Also adds short radial spokes from each vertex for
-    // the "fancier" read.
-    if (tier2 > 0.01) {
-      const fastPulse = 0.55 + 0.45 * Math.sin(t * 0.009);
-      const goldPulse = 0.7 + 0.3 * Math.sin(t * 0.007 + 1.3);
-
-      const midVerts = this.comboHaloVertices(2.1);
-      ctx.strokeStyle = `hsla(195, 100%, 85%, ${0.55 * tier2 * fastPulse})`;
-      ctx.lineWidth = 1.6;
-      ctx.shadowColor = "hsla(195, 100%, 80%, 1)";
-      ctx.shadowBlur = 16 * tier2;
+    // Shockwave rings — spawn hugging the silhouette and expand outward with
+    // eased radius and fading alpha. Constant outward motion makes them read
+    // as a pulse, not a hitbox boundary.
+    for (const ring of this.comboRings) {
+      if (ring.age < 0) continue;
+      const eased = 1 - (1 - ring.age) * (1 - ring.age);
+      const startR = this.radius * 1.25;
+      const endR = this.radius * 5.0;
+      const r = startR + (endR - startR) * eased;
+      const alpha = (1 - ring.age) * (1 - ring.age);
+      const hue = ring.gold ? 45 : 195;
+      const intensityScale = ring.gold ? tier2 : tier1;
+      if (intensityScale <= 0.01) continue;
+      ctx.strokeStyle = `hsla(${hue}, 100%, 80%, ${0.65 * alpha * intensityScale})`;
+      ctx.lineWidth = 1.3 * (0.5 + 0.5 * (1 - ring.age));
+      ctx.shadowColor = `hsla(${hue}, 100%, 75%, 1)`;
+      ctx.shadowBlur = 12 * alpha * intensityScale;
       ctx.beginPath();
-      ctx.moveTo(midVerts[0].x, midVerts[0].y);
-      for (const vert of midVerts.slice(1)) ctx.lineTo(vert.x, vert.y);
-      ctx.closePath();
+      ctx.arc(0, 0, r, 0, TAU);
       ctx.stroke();
-
-      const outerVerts = this.comboHaloVertices(2.5);
-      ctx.strokeStyle = `hsla(45, 100%, 70%, ${0.55 * tier2 * goldPulse})`;
-      ctx.lineWidth = 1.4;
-      ctx.shadowColor = "hsla(45, 100%, 65%, 1)";
-      ctx.shadowBlur = 18 * tier2;
-      ctx.beginPath();
-      ctx.moveTo(outerVerts[0].x, outerVerts[0].y);
-      for (const vert of outerVerts.slice(1)) ctx.lineTo(vert.x, vert.y);
-      ctx.closePath();
-      ctx.stroke();
-
-      // Radiating spokes from each outer vertex — short, gold, pulsing.
-      // Gives the tier-2 halo a "charged" feel without adding particles.
-      ctx.strokeStyle = `hsla(45, 100%, 75%, ${0.7 * tier2 * goldPulse})`;
-      ctx.lineWidth = 1.2;
-      ctx.shadowBlur = 10 * tier2;
-      const spokeLen = this.radius * 0.55 * (0.8 + 0.4 * goldPulse);
-      for (const vert of outerVerts) {
-        const mag = Math.hypot(vert.x, vert.y);
-        const ux = vert.x / mag;
-        const uy = vert.y / mag;
-        ctx.beginPath();
-        ctx.moveTo(vert.x + ux * 2, vert.y + uy * 2);
-        ctx.lineTo(vert.x + ux * (2 + spokeLen), vert.y + uy * (2 + spokeLen));
-        ctx.stroke();
-      }
     }
     ctx.shadowBlur = 0;
+
+    // Tier-2 star spikes — four short rays at the apex / sides that flash
+    // on each beat. Oriented to heading so they anchor to the silhouette.
+    if (tier2 > 0.01 && beatPulse > 0.05) {
+      const spikeAlpha = 0.85 * tier2 * beatPulse;
+      const spikeLen = this.radius * (0.7 + 0.5 * beatPulse);
+      ctx.strokeStyle = `hsla(45, 100%, 88%, ${spikeAlpha})`;
+      ctx.lineWidth = 1.1;
+      ctx.shadowColor = "hsla(45, 100%, 75%, 1)";
+      ctx.shadowBlur = 10 * beatPulse;
+      for (let k = 0; k < 4; k++) {
+        const a = this.heading + (k * Math.PI) / 2;
+        const inner = this.radius * 1.35;
+        const cosA = Math.cos(a);
+        const sinA = Math.sin(a);
+        ctx.beginPath();
+        ctx.moveTo(cosA * inner, sinA * inner);
+        ctx.lineTo(cosA * (inner + spikeLen), sinA * (inner + spikeLen));
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
+    }
   }
 
   // Game pushes the current beatCombo here every frame. Maps to halo tiers:
   //   combo < 2 → tier 0 (no halo)
-  //   combo 2–3 → tier 1 (faint pulsing outline)
-  //   combo ≥ 4 → tier 2 (bright, two-layer halo with gold accent)
+  //   combo 2–3 → tier 1 (cyan bloom + cyan shockwave on beat)
+  //   combo ≥ 4 → tier 2 (+ gold core, gold echo shockwave, star spikes)
   setCombo(combo: number) {
     if (combo >= 4) this.comboHaloTier = 2;
     else if (combo >= 2) this.comboHaloTier = 1;
     else this.comboHaloTier = 0;
+  }
+
+  // Game calls this once per frame with dt and the rhythm-window pulse
+  // (Game.currentBeatPulse). Advances ring ages and emits a fresh ring on the
+  // rising edge of beatPulse (window entry — guaranteed to fire once per
+  // beat). Kept separate from update() so we don't have to thread beatPulse
+  // through input handling.
+  tickComboHalo(dt: number, beatPulse: number) {
+    // Ring lifetime ~0.55s — long enough for the wave to fully expand before
+    // the next beat at the slowest combo rate, short enough that simultaneous
+    // rings don't pile into a confusing layered halo.
+    for (const ring of this.comboRings) ring.age += dt / 0.55;
+    this.comboRings = this.comboRings.filter((r) => r.age < 1);
+
+    if (this.prevBeatPulse <= 0 && beatPulse > 0 && this.comboHaloIntensity > 0.05) {
+      this.comboRings.push({ age: 0, gold: false });
+      if (this.comboHaloIntensity > 1.0) {
+        // Slight negative age so the gold echo trails the cyan ring by ~50ms
+        // — reads as a resonant echo rather than a duplicate.
+        this.comboRings.push({ age: -0.08, gold: true });
+      }
+    }
+    this.prevBeatPulse = beatPulse;
   }
 
   update(dt: number, input: Input, particles: ParticleSystem, bullets: Bullet[], w: number, h: number, t: number, sound: Sound) {
@@ -153,7 +182,6 @@ export class Ship {
 
     if (this.invuln > 0) this.invuln -= dt;
     if (this.fireCooldown > 0) this.fireCooldown -= dt;
-    if (this.hyperCooldown > 0) this.hyperCooldown -= dt;
 
     // Ease combo halo intensity toward the current tier. Rising (gaining a
     // tier) snaps quickly so the player sees the celebration land on the
@@ -186,40 +214,10 @@ export class Ship {
       // lighter "fire" voice for plain shots.
     }
 
-    if (input.pressed("h") && this.hyperCooldown <= 0) {
-      this.hyperspace(particles, w, h);
-      sound.play("hyperspace");
-    }
-
     this.vel = mul(this.vel, 1 - this.drag * dt);
     const speed = Math.hypot(this.vel.x, this.vel.y);
     if (speed > this.maxSpeed) this.vel = mul(this.vel, this.maxSpeed / speed);
     this.pos = wrap(add(this.pos, mul(this.vel, dt)), w, h);
-  }
-
-  hyperspace(particles: ParticleSystem, w: number, h: number) {
-    this.emitHyperFlash(particles);
-    this.pos = v(Math.random() * w, Math.random() * h);
-    this.vel = v(0, 0);
-    this.invuln = 0.6;
-    this.hyperCooldown = 2.5;
-    this.emitHyperFlash(particles);
-  }
-
-  emitHyperFlash(particles: ParticleSystem) {
-    for (let i = 0; i < 30; i++) {
-      const a = (i / 30) * TAU;
-      particles.emit({
-        pos: { ...this.pos },
-        vel: fromAngle(a, 120 + Math.random() * 80),
-        life: 0.5,
-        maxLife: 0.5,
-        size: 1.5,
-        hue: 280 + Math.random() * 40,
-        shrink: 1,
-        drag: 1.4,
-      });
-    }
   }
 
   fire(bullets: Bullet[]) {
@@ -312,13 +310,12 @@ export class Ship {
 
     ctx.globalCompositeOperation = "lighter";
 
-    // Combo halo: faint outer triangle outline that appears once a streak
-    // begins (tier 1 at combo 2-3) and intensifies at combo ≥ 4 (tier 2).
-    // Renders BEFORE the inner ship so the ship silhouette sits over it.
-    // Intensity is a smoothed value so the halo fades cleanly when the
-    // streak breaks rather than popping out.
-    if (this.comboHaloIntensity > 0.01) {
-      this.renderComboHalo(ctx, t);
+    // Combo halo: silhouette-hugging bloom plus expanding shockwave rings.
+    // Renders before the ship outline so the ship sits cleanly over the bloom.
+    // Intensity is smoothed so the halo fades rather than popping when the
+    // streak breaks. Rings are advanced in tickComboHalo, not here.
+    if (this.comboHaloIntensity > 0.01 || this.comboRings.length > 0) {
+      this.renderComboHalo(ctx, beatPulse);
     }
 
     // Beat pulse rides on top of the slow breathing pulse and gets clamped
