@@ -1,4 +1,5 @@
 import { Vec, v, add, mul, fromAngle, wrap, rand, TAU } from "./vec";
+import { Trail } from "./Trail";
 
 const HUE_PALETTE = [185, 200, 220, 250, 280, 310, 330];
 
@@ -343,6 +344,11 @@ export class Asteroid {
   // without overwriting each other. Set to 1.0 in tickBassBeats and decays
   // a little slower so the visual beat actually lands.
   beatFlash = 0;
+  // Bioluminescent glow trail, only allocated for bassteroids (the only
+  // long-lasting drone source among asteroid kinds). One pre-baked sprite
+  // stamp per ring-buffer sample under additive blend — no shadowBlur, no
+  // per-frame allocation. See Trail.ts.
+  trail: Trail | null = null;
 
   constructor(pos: Vec, vel: Vec, size: AsteroidSize, hue?: number, kind: AsteroidKind = "normal") {
     this.pos = pos;
@@ -399,6 +405,22 @@ export class Asteroid {
     }
     this.membranePhase = rand(0, TAU);
     this.sprite = this.buildSprite();
+    // Bassteroid drone trail. Pulse rate is loosely keyed to the kind's
+    // pitch — A (root, lowest) breathes slowest, D (highest) fastest — so
+    // the visual rhythm reads as "deeper voice = slower throb". Trail hue
+    // matches the bassteroid's own hue (set above from KIND_HUE).
+    if (isBass) {
+      const bassRateByKind: Record<string, number> = {
+        bassA: 0.65,
+        bassB: 0.85,
+        bassC: 0.75,
+        bassD: 1.05,
+      };
+      const rate = bassRateByKind[kind] ?? 0.8;
+      // Trail radius scales with asteroid radius; alpha kept modest so a
+      // field of four overlapping drones doesn't wash the screen out.
+      this.trail = new Trail(this.hue, this.radius * 0.65, 0.28, "bass", rate);
+    }
   }
 
   // Each non-bass kind gets a subtly distinct silhouette via its harmonic
@@ -689,6 +711,10 @@ export class Asteroid {
     this.rotation += this.rotSpeed * dt;
     this.membranePhase += dt * 0.8;
     this.pos = wrap(add(this.pos, mul(this.vel, dt)), w, h);
+    // Stamp/age the drone trail (bassteroids only). Done after the wrap so
+    // a screen-wrap teleport is caught by Trail's own jump detector and the
+    // trail restarts cleanly on the new side.
+    if (this.trail) this.trail.update(dt, this.pos.x, this.pos.y);
     if (this.flashAmount > 0) this.flashAmount = Math.max(0, this.flashAmount - dt * 4);
     // Beat flare decays a touch slower than the hit flash so the visible
     // pulse rides the audio kick all the way through the beat window.
@@ -717,14 +743,26 @@ export class Asteroid {
     return this.kind === "boss";
   }
 
-  split(): Asteroid[] {
+  // `impactDir` is the bullet's velocity direction at the moment of the kill.
+  // When provided, fragments fan out into the forward hemisphere relative to
+  // that direction — i.e., mostly away from where the bullet came from. The
+  // two pieces split off to either side of the bullet's path (like a wedge
+  // cleaving the rock) with a small forward bias, which reads as physically
+  // resonant: the kinetic momentum of the impactor pushes the debris through.
+  // Falls back to the parent's velocity direction when no impactDir is given
+  // (e.g. shockwave splits).
+  split(impactDir?: Vec): Asteroid[] {
     // Boss: large → 3 medium, medium → 3 small, small → terminal. Children
     // fan outward from the parent's velocity in evenly-spaced cones so the
     // post-split field reads as a clean shatter rather than a dust cloud.
     if (this.isBoss()) {
       if (this.size === "small") return [];
       const nextSize: AsteroidSize = this.size === "large" ? "medium" : "small";
-      const baseAngle = Math.atan2(this.vel.y, this.vel.x);
+      // Boss is huge and ponderous, so the bullet's direction dominates the
+      // shatter axis when available; otherwise fall back to parent velocity.
+      const baseAngle = impactDir
+        ? Math.atan2(impactDir.y, impactDir.x)
+        : Math.atan2(this.vel.y, this.vel.x);
       // Eject from a position offset out toward each child's direction so
       // mediums/smalls don't all start stacked on top of each other (which
       // would let one shot near the centre clip several at once before they
@@ -761,8 +799,15 @@ export class Asteroid {
         (this.measureOffset + splitDelta) % BASS_MEASURE_LENGTH,
       ];
       const fragmentList: Asteroid[] = [];
+      const baseAngle = impactDir
+        ? Math.atan2(impactDir.y, impactDir.x)
+        : Math.atan2(this.vel.y, this.vel.x);
       for (let i = 0; i < 2; i++) {
-        const a = Math.atan2(this.vel.y, this.vel.x) + rand(-0.9, 0.9) + (i === 0 ? -1 : 1) * 0.5;
+        // Fan ±~0.9 rad off the bullet's heading (one to each side), forward
+        // of the impact point — within ~±π/2, so both pieces head away from
+        // where the bullet came from.
+        const sideOffset = (i === 0 ? -1 : 1) * (0.9 + rand(-0.2, 0.2));
+        const a = baseAngle + sideOffset + rand(-0.2, 0.2);
         const speedMag = splitChildSpeed(this.vel, childSize);
         const child = new Asteroid({ ...this.pos }, fromAngle(a, speedMag), childSize, this.hue, this.kind);
         child.splitLevel = childLevel;
@@ -775,8 +820,16 @@ export class Asteroid {
     const nextSize: AsteroidSize = this.size === "large" ? "medium" : "small";
     const fragmentCount = 2;
     const fragmentList: Asteroid[] = [];
+    const baseAngle = impactDir
+      ? Math.atan2(impactDir.y, impactDir.x)
+      : Math.atan2(this.vel.y, this.vel.x);
     for (let i = 0; i < fragmentCount; i++) {
-      const a = Math.atan2(this.vel.y, this.vel.x) + rand(-0.9, 0.9) + (i === 0 ? -1 : 1) * 0.5;
+      // Two pieces flank the bullet's path, forward of the impact. Each
+      // child's heading is bullet-direction ±~0.9 rad with jitter, so the
+      // debris fans away from where the bullet came from rather than
+      // streaming back through it.
+      const sideOffset = (i === 0 ? -1 : 1) * (0.9 + rand(-0.2, 0.2));
+      const a = baseAngle + sideOffset + rand(-0.25, 0.25);
       const speedMag = splitChildSpeed(this.vel, nextSize);
       fragmentList.push(new Asteroid({ ...this.pos }, fromAngle(a, speedMag), nextSize, this.hue, this.kind));
     }

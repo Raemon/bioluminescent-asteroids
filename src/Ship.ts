@@ -42,8 +42,110 @@ export class Ship {
   pierceActive = false;
   shieldActive = false;
 
+  // Combo halo state. `comboHaloTier` is the target tier (0/1/2) derived from
+  // the current beatCombo: tier 0 = no streak, tier 1 = combo 2-3, tier 2 =
+  // combo >= 4. `comboHaloIntensity` smoothly eases toward the target tier so
+  // the halo fades in/out cleanly on streak break, rather than popping.
+  comboHaloTier = 0;
+  comboHaloIntensity = 0;
+
   constructor(pos: Vec) {
     this.pos = pos;
+  }
+
+  // Builds the same vertex pattern as the inner ship but at a given scale.
+  // Pulled out so the halo and ship outline stay congruent if the silhouette
+  // ever changes.
+  private comboHaloVertices(scale: number): Vec[] {
+    return [
+      fromAngle(this.heading, this.radius * 1.4 * scale),
+      fromAngle(this.heading + Math.PI * 0.78, this.radius * 1.0 * scale),
+      fromAngle(this.heading - Math.PI * 0.78, this.radius * 1.0 * scale),
+    ];
+  }
+
+  private renderComboHalo(ctx: CanvasRenderingContext2D, t: number) {
+    const i = this.comboHaloIntensity;
+    // Tier 1 contribution rises 0→1 as intensity crosses 0→1; tier 2 rises
+    // 0→1 as intensity crosses 1→2. Both layers can be active simultaneously
+    // during the climb from tier 1 to tier 2.
+    const tier1 = Math.min(1, i);
+    const tier2 = Math.max(0, Math.min(1, i - 1));
+
+    // Slow sine pulse for the faint outer ring (tier 1). 1.3 Hz keeps it
+    // breathing without feeling jittery.
+    const slowPulse = 0.55 + 0.45 * Math.sin(t * 0.004);
+    if (tier1 > 0.01) {
+      const verts = this.comboHaloVertices(1.8);
+      ctx.strokeStyle = `hsla(195, 100%, 75%, ${0.32 * tier1 * slowPulse})`;
+      ctx.lineWidth = 1.2;
+      ctx.shadowColor = "hsla(195, 100%, 70%, 1)";
+      ctx.shadowBlur = 10 * tier1;
+      ctx.beginPath();
+      ctx.moveTo(verts[0].x, verts[0].y);
+      for (const vert of verts.slice(1)) ctx.lineTo(vert.x, vert.y);
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    // Tier 2: a brighter, gold-cyan double-line at a wider radius, with a
+    // faster pulse. The mid-ring sits between the tier-1 outline and the
+    // outer flare so the layers read as a coherent halo rather than two
+    // unrelated rings. Also adds short radial spokes from each vertex for
+    // the "fancier" read.
+    if (tier2 > 0.01) {
+      const fastPulse = 0.55 + 0.45 * Math.sin(t * 0.009);
+      const goldPulse = 0.7 + 0.3 * Math.sin(t * 0.007 + 1.3);
+
+      const midVerts = this.comboHaloVertices(2.1);
+      ctx.strokeStyle = `hsla(195, 100%, 85%, ${0.55 * tier2 * fastPulse})`;
+      ctx.lineWidth = 1.6;
+      ctx.shadowColor = "hsla(195, 100%, 80%, 1)";
+      ctx.shadowBlur = 16 * tier2;
+      ctx.beginPath();
+      ctx.moveTo(midVerts[0].x, midVerts[0].y);
+      for (const vert of midVerts.slice(1)) ctx.lineTo(vert.x, vert.y);
+      ctx.closePath();
+      ctx.stroke();
+
+      const outerVerts = this.comboHaloVertices(2.5);
+      ctx.strokeStyle = `hsla(45, 100%, 70%, ${0.55 * tier2 * goldPulse})`;
+      ctx.lineWidth = 1.4;
+      ctx.shadowColor = "hsla(45, 100%, 65%, 1)";
+      ctx.shadowBlur = 18 * tier2;
+      ctx.beginPath();
+      ctx.moveTo(outerVerts[0].x, outerVerts[0].y);
+      for (const vert of outerVerts.slice(1)) ctx.lineTo(vert.x, vert.y);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Radiating spokes from each outer vertex — short, gold, pulsing.
+      // Gives the tier-2 halo a "charged" feel without adding particles.
+      ctx.strokeStyle = `hsla(45, 100%, 75%, ${0.7 * tier2 * goldPulse})`;
+      ctx.lineWidth = 1.2;
+      ctx.shadowBlur = 10 * tier2;
+      const spokeLen = this.radius * 0.55 * (0.8 + 0.4 * goldPulse);
+      for (const vert of outerVerts) {
+        const mag = Math.hypot(vert.x, vert.y);
+        const ux = vert.x / mag;
+        const uy = vert.y / mag;
+        ctx.beginPath();
+        ctx.moveTo(vert.x + ux * 2, vert.y + uy * 2);
+        ctx.lineTo(vert.x + ux * (2 + spokeLen), vert.y + uy * (2 + spokeLen));
+        ctx.stroke();
+      }
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  // Game pushes the current beatCombo here every frame. Maps to halo tiers:
+  //   combo < 2 → tier 0 (no halo)
+  //   combo 2–3 → tier 1 (faint pulsing outline)
+  //   combo ≥ 4 → tier 2 (bright, two-layer halo with gold accent)
+  setCombo(combo: number) {
+    if (combo >= 4) this.comboHaloTier = 2;
+    else if (combo >= 2) this.comboHaloTier = 1;
+    else this.comboHaloTier = 0;
   }
 
   update(dt: number, input: Input, particles: ParticleSystem, bullets: Bullet[], w: number, h: number, t: number, sound: Sound) {
@@ -52,6 +154,14 @@ export class Ship {
     if (this.invuln > 0) this.invuln -= dt;
     if (this.fireCooldown > 0) this.fireCooldown -= dt;
     if (this.hyperCooldown > 0) this.hyperCooldown -= dt;
+
+    // Ease combo halo intensity toward the current tier. Rising (gaining a
+    // tier) snaps quickly so the player sees the celebration land on the
+    // beat; falling (streak broken) fades over ~0.4s so it doesn't pop out.
+    const haloTarget = this.comboHaloTier;
+    const rising = haloTarget > this.comboHaloIntensity;
+    const rate = rising ? 14 : 2.5;
+    this.comboHaloIntensity += (haloTarget - this.comboHaloIntensity) * Math.min(1, rate * dt);
 
     if (input.down("arrowleft") || input.down("a")) this.heading -= this.rotSpeed * dt;
     if (input.down("arrowright") || input.down("d")) this.heading += this.rotSpeed * dt;
@@ -201,6 +311,16 @@ export class Ship {
     }
 
     ctx.globalCompositeOperation = "lighter";
+
+    // Combo halo: faint outer triangle outline that appears once a streak
+    // begins (tier 1 at combo 2-3) and intensifies at combo ≥ 4 (tier 2).
+    // Renders BEFORE the inner ship so the ship silhouette sits over it.
+    // Intensity is a smoothed value so the halo fades cleanly when the
+    // streak breaks rather than popping out.
+    if (this.comboHaloIntensity > 0.01) {
+      this.renderComboHalo(ctx, t);
+    }
+
     // Beat pulse rides on top of the slow breathing pulse and gets clamped
     // so alpha never overflows. Outside the rhythm window beatPulse is 0,
     // so the ship looks exactly as it did before.

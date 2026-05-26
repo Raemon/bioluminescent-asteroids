@@ -1,3 +1,48 @@
+import * as Tone from "tone";
+
+// Tone.js-based engine wiring. When `Sound.engine === "tone"`, sounds opt
+// into a separate signal path: synths → fxBus (chorus → reverb) + dry →
+// toneMaster → compressor → limiter → destination. The plain WebAudio
+// `master` node still exists in parallel for legacy voices, but Tone routes
+// through its own master so we can shape its sound independently.
+type ToneEngineNodes = {
+  toneMaster: Tone.Gain;
+  reverbSend: Tone.Gain;
+  reverb: Tone.Reverb;
+  chorus: Tone.Chorus;
+  compressor: Tone.Compressor;
+  limiter: Tone.Limiter;
+  // Input nodes for the legacy WebAudio chain. The hand-written voices all
+  // target Sound.master; we route master → legacyBusDry + legacyBusWet so
+  // every legacy sound gets the polished master chain when engine === "tone".
+  legacyBusDry: Tone.Gain;
+  legacyBusWet: Tone.Gain;
+  cometMelodySynth: Tone.PolySynth;
+  cometShimmerByKey: Map<object, ToneCometShimmer>;
+  // Per-voice synths for the highest-impact sounds — the ones the player
+  // hears most often or that most differentiate "polished" from "raw
+  // oscillators". Everything else still uses the legacy WebAudio code; in
+  // tone-engine mode it routes through the same master bus for shared
+  // compressor/limiter/reverb polish.
+  bgBeatKick: Tone.MembraneSynth;
+  bassKick: Tone.MembraneSynth;
+  bassBoom: Tone.MembraneSynth;
+  bassPluck: Tone.MonoSynth;
+  bassSnap: Tone.MetalSynth;
+  fireBeatBody: Tone.MembraneSynth;
+  fireBeatPluck: Tone.PluckSynth;
+  chimeSynth: Tone.PolySynth;
+  powerupSynth: Tone.PolySynth;
+  waveClearSynth: Tone.PolySynth;
+};
+
+type ToneCometShimmer = {
+  synth: Tone.PolySynth;
+  chord: string[];
+  fadeGain: Tone.Gain;
+  lfos: Tone.LFO[];
+};
+
 // Per-alien drone voice. Two detuned sines through a slow-sweeping lowpass,
 // modulated by an LFO on amplitude for the theremin pulse. Held open for the
 // lifetime of an alien; torn down on death or mute.
@@ -94,6 +139,16 @@ export class Sound {
   bassDrones: Map<object, BassDroneNode> = new Map();
   // Per-comet shimmer pad, keyed by the Comet instance.
   cometShimmers: Map<object, CometShimmerNode> = new Map();
+  // Which engine routes the audio. Toggle in-game with B to A/B legacy hand-
+  // built WebAudio vs the Tone.js polished path. In tone mode, *every* sound
+  // (including hand-written synthesis that targets `this.master`) is siphoned
+  // through the Tone fx bus → compressor → limiter, so the global character
+  // changes engine-wide without rewriting each voice individually.
+  engine: "legacy" | "tone" = "tone";
+  toneEngine: ToneEngineNodes | null = null;
+  // Legacy master compressor — held so we can disconnect it when switching to
+  // tone mode (where the Tone chain owns mastering instead).
+  legacyCompressor: DynamicsCompressorNode | null = null;
 
   ensureContext() {
     if (this.ctx) return;
@@ -110,6 +165,496 @@ export class Sound {
     compressor.release.value = 0.15;
     this.master.connect(compressor);
     compressor.connect(this.ctx.destination);
+    this.legacyCompressor = compressor;
+    // Direct-to-destination bus for pre-baked buffers (whose tail already
+    // contains the full Tone master chain). Mirrors the master gain level so
+    // baked and live voices sit at a comparable loudness.
+    this.bakedOut = this.ctx.createGain();
+    this.bakedOut.gain.value = 0.6;
+    this.bakedOut.connect(this.ctx.destination);
+    // If we boot with the tone engine active, build it now so the master bus
+    // is hot before the first voice plays. ensureToneEngine ends by calling
+    // applyEngineRouting, which swaps master off the legacy compressor and
+    // onto the tone bus.
+    if (this.engine === "tone") this.ensureToneEngine();
+  }
+
+  // Lazy-build the Tone.js master bus and shared synths. Shares our existing
+  // AudioContext via Tone.setContext so a single ctx drives both engines
+  // (browsers cap how many AudioContexts you can have open).
+  ensureToneEngine(): ToneEngineNodes | null {
+    if (this.toneEngine) return this.toneEngine;
+    this.ensureContext();
+    if (!this.ctx) return null;
+
+    // Adopt our existing AudioContext. Tone wraps it; Tone destination ===
+    // ctx.destination so we can either route through Tone or stay on the
+    // raw WebAudio path within the same session.
+    Tone.setContext(this.ctx as unknown as BaseAudioContext as never);
+
+    // Master chain: dry + wet fx, summed → compressor → limiter → out.
+    // Compressor glues transients together; limiter is a brick-wall safety
+    // net so layered hits never clip even when many sources fire at once.
+    const toneMaster = new Tone.Gain(0.7);
+    const compressor = new Tone.Compressor({
+      threshold: -18,
+      ratio: 3,
+      attack: 0.01,
+      release: 0.18,
+      knee: 12,
+    });
+    const limiter = new Tone.Limiter(-1);
+    toneMaster.connect(compressor);
+    compressor.connect(limiter);
+    limiter.toDestination();
+
+    // Shared fx send. Voices either connect dry to toneMaster or wet via
+    // reverbSend → chorus → reverb → toneMaster. Decay shortened from 3.5s to
+    // 1.5s — convolution cost scales linearly with decay length, and 1.5s
+    // still gives comet bells a clear tail without the smear on rhythmic
+    // bass-grid hits. Wet level controlled at reverbSend so the reverb itself
+    // doesn't convolve the full signal at unity.
+    const reverbSend = new Tone.Gain(0.5);
+    const chorus = new Tone.Chorus({
+      frequency: 0.6,
+      delayTime: 3.5,
+      depth: 0.6,
+      type: "sine",
+      spread: 180,
+      wet: 0.5,
+    }).start();
+    const reverb = new Tone.Reverb({ decay: 1.5, preDelay: 0.02, wet: 1 });
+    reverbSend.connect(chorus);
+    chorus.connect(reverb);
+    reverb.connect(toneMaster);
+
+    // Legacy-bus inputs. Sound.master (the WebAudio GainNode every legacy
+    // voice writes into) connects to both: dry sums straight into toneMaster
+    // for presence; wet sends to the fx bus. The wet level is intentionally
+    // subtle (~25%) so legacy percussion (bass kit, bg-beat) doesn't get
+    // washed out in reverb. Comet voices already have a heavier wet send via
+    // their own dedicated Tone synth path.
+    const legacyBusDry = new Tone.Gain(0.95);
+    const legacyBusWet = new Tone.Gain(0.25);
+    legacyBusDry.connect(toneMaster);
+    legacyBusWet.connect(reverbSend);
+
+    // Comet melody voice: FM synth with a slow-attack envelope and a touch
+    // of harmonic content from the modulator. Routed mostly wet (heavy
+    // reverb + chorus) to give each note a glassy, bell-like halo that
+    // bleeds into the next.
+    const cometMelodySynth = new Tone.PolySynth(Tone.FMSynth, {
+      harmonicity: 3.01,
+      modulationIndex: 6,
+      oscillator: { type: "sine" },
+      modulation: { type: "sine" },
+      envelope: { attack: 0.005, decay: 0.4, sustain: 0.2, release: 2.6 },
+      modulationEnvelope: { attack: 0.01, decay: 0.3, sustain: 0, release: 1.2 },
+      volume: -10,
+    });
+    // Dry path (small amount, for presence) and wet (lush tail).
+    const cometDry = new Tone.Gain(0.35);
+    const cometWet = new Tone.Gain(0.9);
+    cometMelodySynth.connect(cometDry);
+    cometMelodySynth.connect(cometWet);
+    cometDry.connect(toneMaster);
+    cometWet.connect(reverbSend);
+
+    // Helper to wire a synth (or chain end) into the bus with a dry/wet split.
+    // Returns the synth so chained `.set(...)` style calls still work upstream.
+    const wireToBus = <T extends Tone.ToneAudioNode>(node: T, dry = 1.0, wet = 0.18): T => {
+      const dryG = new Tone.Gain(dry);
+      const wetG = new Tone.Gain(wet);
+      node.connect(dryG);
+      node.connect(wetG);
+      dryG.connect(toneMaster);
+      wetG.connect(reverbSend);
+      return node;
+    };
+
+    // Background pulsar-approach beat. Tone's MembraneSynth is purpose-built
+    // for kick-style hits — pitched body that sweeps down, with adjustable
+    // decay and "octaves" (sweep range) we tune for the bgBeat's signature
+    // deep heartbeat character.
+    const bgBeatKick = wireToBus(new Tone.MembraneSynth({
+      pitchDecay: 0.06,
+      octaves: 6,
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.001, decay: 0.45, sustain: 0, release: 0.5 },
+      volume: -6,
+    }), 1, 0.1);
+
+    // Bassteroid kick on C2 — same MembraneSynth shape, slightly faster pitch
+    // decay so the body reads as percussive rather than melodic.
+    const bassKick = wireToBus(new Tone.MembraneSynth({
+      pitchDecay: 0.04,
+      octaves: 4,
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.001, decay: 0.32, sustain: 0, release: 0.3 },
+      volume: -4,
+    }));
+
+    // Bassteroid boom (F2/IV chord tone). Longer pitch tail and a touch more
+    // sustain than the kick so the boom sits deeper in the mix.
+    const bassBoom = wireToBus(new Tone.MembraneSynth({
+      pitchDecay: 0.08,
+      octaves: 5,
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.002, decay: 0.42, sustain: 0, release: 0.4 },
+      volume: -4,
+    }));
+
+    // Bassteroid pluck (G2 sub-bass with closing filter). MonoSynth gives us a
+    // proper voice with built-in lowpass that the envelope can sweep.
+    const bassPluck = wireToBus(new Tone.MonoSynth({
+      oscillator: { type: "sawtooth" },
+      filter: { type: "lowpass", Q: 6 },
+      envelope: { attack: 0.005, decay: 0.18, sustain: 0.15, release: 0.45 },
+      filterEnvelope: { attack: 0.005, decay: 0.4, sustain: 0.05, release: 0.6, baseFrequency: 220, octaves: 3 },
+      volume: -8,
+    }));
+
+    // Bassteroid snap — metal synth for the percussive bandpassed snap timbre.
+    const bassSnap = wireToBus(new Tone.MetalSynth({
+      envelope: { attack: 0.001, decay: 0.12, release: 0.15 },
+      harmonicity: 5.1,
+      modulationIndex: 16,
+      resonance: 1700,
+      octaves: 0.7,
+      volume: -16,
+    }), 1, 0.25);
+
+    // Rhythm-shot pluck. Two voices: a MembraneSynth body for the C3 thump
+    // and a PluckSynth for the bright pluck-noise character at attack.
+    const fireBeatBody = wireToBus(new Tone.MembraneSynth({
+      pitchDecay: 0.04,
+      octaves: 3,
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.002, decay: 0.22, sustain: 0, release: 0.25 },
+      volume: -8,
+    }));
+    const fireBeatPluck = wireToBus(new Tone.PluckSynth({
+      attackNoise: 0.9,
+      dampening: 3200,
+      resonance: 0.7,
+      volume: -16,
+    }), 1, 0.25);
+
+    // Chime (bright sparkle) — PolySynth around FMSynth gives a bell-like
+    // partials with controlled inharmonicity.
+    const chimeSynth = wireToBus(new Tone.PolySynth(Tone.FMSynth, {
+      harmonicity: 3.5,
+      modulationIndex: 8,
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.002, decay: 0.4, sustain: 0, release: 0.9 },
+      modulationEnvelope: { attack: 0.005, decay: 0.3, sustain: 0, release: 0.6 },
+      volume: -12,
+    }), 0.6, 0.7);
+
+    // Powerup arpeggio — sine PolySynth with bright attack, heavy reverb
+    // since this is a celebratory cue and shouldn't sit dry.
+    const powerupSynth = wireToBus(new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.005, decay: 0.2, sustain: 0.1, release: 0.45 },
+      volume: -10,
+    }), 0.5, 0.7);
+
+    // Wave-clear chord — sine pad PolySynth, also heavily wet for celebration.
+    const waveClearSynth = wireToBus(new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.02, decay: 0.3, sustain: 0.2, release: 0.7 },
+      volume: -10,
+    }), 0.5, 0.7);
+
+    this.toneEngine = {
+      toneMaster,
+      reverbSend,
+      reverb,
+      chorus,
+      compressor,
+      limiter,
+      legacyBusDry,
+      legacyBusWet,
+      cometMelodySynth,
+      cometShimmerByKey: new Map(),
+      bgBeatKick,
+      bassKick,
+      bassBoom,
+      bassPluck,
+      bassSnap,
+      fireBeatBody,
+      fireBeatPluck,
+      chimeSynth,
+      powerupSynth,
+      waveClearSynth,
+    };
+    this.applyEngineRouting();
+    // Warm the baked-buffer cache immediately so the first in-game trigger
+    // hits the cache instead of paying for live synthesis. Bakes run async
+    // in parallel; total wall time is dominated by the longest single recipe
+    // (waveClear/chime ~50ms on desktop). Sounds that fire before their bake
+    // lands still fall back to live Tone synthesis transparently.
+    this.warmBakedCache();
+    return this.toneEngine;
+  }
+
+  // Kick off offline-render for every recipe (and every quantized pitch
+  // variant) we know about. Fire-and-forget; results land in bakedBuffers as
+  // each promise resolves. Safe to call repeatedly — playBaked's in-flight
+  // guard de-dupes.
+  private warmBakedCache() {
+    // Per-sound list of pitch ratios to pre-bake. Mirrors the values Game
+    // passes at runtime: bassteroid split levels use BASS_SPLIT_PITCH_RATIO
+    // ([1, 1, 0.8409]); bgBeat uses 1 or 1.122 (offbeats), composited with
+    // an intensity bucket (0..1 in 0.1 steps → ~11 buckets).
+    const standardPitches = [1, 0.8409];
+    const oneShots: Array<[SoundName, number[]]> = [
+      ["fireBeat", [1]],
+      ["chime", [1]],
+      ["powerup", [1]],
+      ["waveClear", [1]],
+      ["bassKick", standardPitches],
+      ["bassBoom", standardPitches],
+      ["bassPluck", standardPitches],
+      ["bassSnap", standardPitches],
+    ];
+    for (const [name, pitches] of oneShots) {
+      for (const p of pitches) {
+        this.queueBake(name, p);
+      }
+    }
+    // bgBeat: 2 base pitches (1 = downbeat C2, 1.122 = offbeat D2) × 11
+    // intensity buckets. Encoded key is `actualPitch * 100 + intensityBucket`
+    // — matches the call-site in playBgBeat.
+    for (const basePitch of [1, 1.122]) {
+      for (let bucket = 0; bucket <= 10; bucket++) {
+        const intensityBucket = bucket / 10;
+        this.queueBake("bgBeat", basePitch * 100 + intensityBucket);
+      }
+    }
+  }
+
+  // Trigger a bake for one (sound, pitchKey) pair if it isn't cached or in
+  // flight. Bakes are serialized via bakeChain so Tone.setContext doesn't
+  // race between concurrent renders.
+  private queueBake(name: SoundName, pitchRatio: number) {
+    const key = this.bakedKey(name, pitchRatio);
+    if (this.bakedBuffers.has(key) || this.bakingInFlight.has(key)) return;
+    this.bakingInFlight.add(key);
+    this.bakeChain = this.bakeChain.then(() => this.bakeSound(name, pitchRatio).then((rendered) => {
+      if (rendered) this.bakedBuffers.set(key, rendered);
+      this.bakingInFlight.delete(key);
+    }).catch(() => { this.bakingInFlight.delete(key); }));
+  }
+
+  // Swap the master-out connections so Sound.master either goes through the
+  // legacy compressor (engine = "legacy") or through Tone's bus + master
+  // chain (engine = "tone"). Both paths share the same Sound.master input
+  // node, so individual voices don't care which engine is active.
+  applyEngineRouting() {
+    if (!this.ctx || !this.master) return;
+    // Always start from a disconnected master to avoid double-routing.
+    this.master.disconnect();
+    if (this.engine === "tone" && this.toneEngine) {
+      // Tone owns mastering: tap master into both dry and wet inputs of the
+      // Tone bus. The Tone chain ends at ctx.destination via its limiter.
+      // Use the underlying input AudioNode (Tone wraps a GainNode internally).
+      this.master.connect(this.toneEngine.legacyBusDry.input as AudioNode);
+      this.master.connect(this.toneEngine.legacyBusWet.input as AudioNode);
+    } else if (this.legacyCompressor) {
+      // Legacy: master → compressor → destination, as it has always been.
+      this.master.connect(this.legacyCompressor);
+    }
+  }
+
+  // ── Pre-rendered Tone one-shots ─────────────────────────────────────────
+  // The biggest perf cost of the Tone engine is per-trigger voice allocation
+  // inside PolySynth/MembraneSynth/etc. plus the live convolution reverb.
+  // For one-shot sounds (kick, fire, chime, etc.) the synth recipe is fixed,
+  // so we render it once into an AudioBuffer via OfflineAudioContext and just
+  // play that buffer on every subsequent trigger. The reverb/chorus tail is
+  // baked into the buffer, so even the wet path costs nothing at runtime.
+  //
+  // Cache keyed by `${name}|${quantizedPitchRatio}` — pitch ratios from Game
+  // are a tiny finite set (1, 0.8409, 1.122 for bassteroids; 1 for everything
+  // else), so the cache stays small.
+  bakedBuffers: Map<string, AudioBuffer> = new Map();
+  // Sounds we're currently baking — guards against double-bake when the same
+  // sound fires several times before the first bake completes.
+  bakingInFlight: Set<string> = new Set();
+  // Serialized bake queue. bakeSound swaps Tone's global context to the
+  // OfflineAudioContext for the duration of the render, so running two
+  // bakes concurrently would race on Tone.setContext. We chain promises
+  // here so each bake completes (and restores Tone's context) before the
+  // next starts.
+  bakeChain: Promise<unknown> = Promise.resolve();
+  // Dedicated GainNode for baked-buffer playback. Baked buffers already
+  // contain the full Tone bus chain (compressor+chorus+reverb+limiter), so
+  // they bypass this.master (which is itself routed through the Tone bus in
+  // tone mode) and go straight to destination via this gain — otherwise the
+  // bus chain would be applied twice.
+  bakedOut: GainNode | null = null;
+
+  private bakedKey(name: SoundName, pitchRatio: number): string {
+    // Quantize to 4 decimals so floating-point noise doesn't fragment the cache.
+    return `${name}|${pitchRatio.toFixed(4)}`;
+  }
+
+  // Play a pre-rendered buffer through the live master bus. Returns true if
+  // a baked buffer was found and played; false if the caller should fall
+  // back to live synthesis (typically while the first bake is still running).
+  private playBaked(name: SoundName, pitchRatio: number): boolean {
+    if (!this.ctx || !this.bakedOut) return false;
+    const key = this.bakedKey(name, pitchRatio);
+    const buf = this.bakedBuffers.get(key);
+    if (buf) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(this.bakedOut);
+      src.start();
+      return true;
+    }
+    // Kick off async bake; subsequent calls will hit the cache.
+    this.queueBake(name, pitchRatio);
+    return false;
+  }
+
+  // Render a single Tone-engine sound recipe into an AudioBuffer. We build
+  // the same synth chain (incl. the fx bus + reverb tail) inside an
+  // OfflineAudioContext, trigger the voice at t=0, and let it render its
+  // full natural decay. Duration is chosen per-sound to fit the longest
+  // envelope+release+reverb tail.
+  private async bakeSound(name: SoundName, pitchRatio: number): Promise<AudioBuffer | null> {
+    if (!this.ctx) return null;
+    const sr = this.ctx.sampleRate;
+    // Total duration to render. Longer than the dry note so the reverb tail
+    // (1.5s decay in the bus) lands inside the buffer.
+    const durations: Partial<Record<SoundName, number>> = {
+      fireBeat: 1.0,
+      bgBeat: 1.2,
+      bassKick: 1.2,
+      bassBoom: 1.4,
+      bassPluck: 1.2,
+      bassSnap: 0.9,
+      chime: 2.0,
+      powerup: 1.6,
+      waveClear: 2.4,
+    };
+    const dur = durations[name] ?? 1.5;
+    const length = Math.ceil(sr * dur);
+    const OAC = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
+    if (!OAC) return null;
+    const offline = new OAC(2, length, sr);
+
+    // Mirror the live tone-engine fx bus into the offline context. This is
+    // a stripped-down copy of ensureToneEngine — same chain (compressor +
+    // limiter + chorus + reverb) so the baked tail matches the live mix.
+    Tone.setContext(offline as unknown as BaseAudioContext as never);
+    const toneMaster = new Tone.Gain(0.7);
+    const compressor = new Tone.Compressor({ threshold: -18, ratio: 3, attack: 0.01, release: 0.18, knee: 12 });
+    const limiter = new Tone.Limiter(-1);
+    toneMaster.connect(compressor);
+    compressor.connect(limiter);
+    limiter.toDestination();
+    const reverbSend = new Tone.Gain(0.5);
+    const chorus = new Tone.Chorus({ frequency: 0.6, delayTime: 3.5, depth: 0.6, type: "sine", spread: 180, wet: 0.5 }).start();
+    const reverb = new Tone.Reverb({ decay: 1.5, preDelay: 0.02, wet: 1 });
+    reverbSend.connect(chorus);
+    chorus.connect(reverb);
+    reverb.connect(toneMaster);
+    // Pre-generate the reverb IR — required before rendering.
+    await reverb.generate();
+
+    const wire = <T extends Tone.ToneAudioNode>(node: T, dry: number, wet: number): T => {
+      const d = new Tone.Gain(dry); const w = new Tone.Gain(wet);
+      node.connect(d); node.connect(w);
+      d.connect(toneMaster); w.connect(reverbSend);
+      return node;
+    };
+
+    // Per-sound recipe: build synth, trigger at offline time 0.
+    switch (name) {
+      case "fireBeat": {
+        const body = wire(new Tone.MembraneSynth({ pitchDecay: 0.03, octaves: 3, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.18, sustain: 0, release: 0.2 }, volume: -6 }), 1, 0.12);
+        const pluck = wire(new Tone.PluckSynth({ attackNoise: 0.5, dampening: 4000, resonance: 0.7 }), 0.9, 0.25);
+        body.triggerAttackRelease("C3", "16n", 0, 0.9);
+        pluck.triggerAttack("G4", 0.001);
+        break;
+      }
+      case "bgBeat": {
+        // The composite key is `actualPitch * 100 + intensityBucket`. Decode:
+        const intensity = pitchRatio - Math.floor(pitchRatio);
+        const actualPitch = Math.floor(pitchRatio) / 100;
+        const kick = wire(new Tone.MembraneSynth({ pitchDecay: 0.06, octaves: 6, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.45, sustain: 0, release: 0.5 }, volume: -6 }), 1, 0.1);
+        const isOffbeat = actualPitch !== 1;
+        const offbeatMul = isOffbeat ? 0.35 + intensity * 0.45 : 1;
+        const levelMul = (0.35 + 0.65 * intensity) * offbeatMul;
+        const velocity = (0.25 + intensity * 0.75) * levelMul;
+        const note = actualPitch === 1 ? "C2" : "D2";
+        kick.triggerAttackRelease(note, "8n", 0, velocity);
+        break;
+      }
+      case "bassKick": {
+        const kick = wire(new Tone.MembraneSynth({ pitchDecay: 0.04, octaves: 4, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.32, sustain: 0, release: 0.3 }, volume: -4 }), 1, 0.18);
+        kick.triggerAttackRelease(65.4 * pitchRatio, "16n", 0, 0.95);
+        break;
+      }
+      case "bassBoom": {
+        const boom = wire(new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 5, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.45, sustain: 0.05, release: 0.4 }, volume: -3 }), 1, 0.18);
+        boom.triggerAttackRelease(87.3 * pitchRatio, "8n", 0, 0.9);
+        break;
+      }
+      case "bassPluck": {
+        const pluck = wire(new Tone.MonoSynth({ oscillator: { type: "sawtooth" }, filter: { Q: 6, type: "lowpass", rolloff: -24 }, envelope: { attack: 0.005, decay: 0.18, sustain: 0, release: 0.25 }, filterEnvelope: { attack: 0.005, decay: 0.18, sustain: 0.1, release: 0.3, baseFrequency: 90, octaves: 3 }, volume: -8 }), 1, 0.18);
+        pluck.triggerAttackRelease(98 * pitchRatio, "8n", 0, 0.85);
+        break;
+      }
+      case "bassSnap": {
+        const snap = wire(new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.1 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5, volume: -16 }), 1, 0.18);
+        snap.triggerAttackRelease("C3", "16n", 0, 0.7);
+        break;
+      }
+      case "chime": {
+        const chime = wire(new Tone.PolySynth(Tone.FMSynth, { harmonicity: 3.5, modulationIndex: 8, oscillator: { type: "sine" }, envelope: { attack: 0.002, decay: 0.4, sustain: 0, release: 0.9 }, modulationEnvelope: { attack: 0.005, decay: 0.3, sustain: 0, release: 0.6 }, volume: -12 }), 0.6, 0.7);
+        chime.triggerAttackRelease(["C6", "G6"], "8n", 0, 0.65);
+        break;
+      }
+      case "powerup": {
+        const synth = wire(new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sine" }, envelope: { attack: 0.005, decay: 0.2, sustain: 0.1, release: 0.45 }, volume: -10 }), 0.5, 0.7);
+        const notes = ["C5", "E5", "G5", "C6"];
+        for (let i = 0; i < notes.length; i++) synth.triggerAttackRelease(notes[i], "16n", i * 0.06, 0.7);
+        break;
+      }
+      case "waveClear": {
+        const synth = wire(new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sine" }, envelope: { attack: 0.02, decay: 0.3, sustain: 0.2, release: 0.7 }, volume: -10 }), 0.5, 0.7);
+        const notes = ["E4", "G#4", "B4", "Eb5"];
+        for (let i = 0; i < notes.length; i++) synth.triggerAttackRelease(notes[i], "4n", i * 0.06, 0.7);
+        break;
+      }
+      default:
+        // Restore live context before bailing.
+        Tone.setContext(this.ctx as unknown as BaseAudioContext as never);
+        return null;
+    }
+
+    try {
+      const rendered = await offline.startRendering();
+      return rendered;
+    } finally {
+      // Always swap Tone back to the live AudioContext, even if rendering throws.
+      Tone.setContext(this.ctx as unknown as BaseAudioContext as never);
+    }
+  }
+
+  // Cycle through engines: legacy <-> tone. Tears down active comet voices
+  // on whichever side we just left so we don't double-trigger, then rewires
+  // the master output.
+  cycleEngine(): "legacy" | "tone" {
+    this.stopAllCometShimmers();
+    this.engine = this.engine === "legacy" ? "tone" : "legacy";
+    if (this.engine === "tone") this.ensureToneEngine();
+    this.applyEngineRouting();
+    return this.engine;
   }
 
   resume() {
@@ -433,6 +978,19 @@ export class Sound {
     const melody = Sound.COMET_MELODY;
     const freq = melody[((step % melody.length) + melody.length) % melody.length];
     if (freq === null) return;
+
+    if (this.engine === "tone") {
+      const eng = this.ensureToneEngine();
+      if (!eng) return;
+      // Light velocity variation per step so the looping melody breathes
+      // instead of mechanically repeating. Step 0/4/8/12 (the downbeats) hit
+      // a touch harder.
+      const isDownbeat = step % 4 === 0;
+      const velocity = isDownbeat ? 0.85 : 0.6;
+      eng.cometMelodySynth.triggerAttackRelease(freq, "2n", undefined, velocity);
+      return;
+    }
+
     const t = this.ctx.currentTime;
 
     // Three sine partials with mild inharmonic ratios — glassy/bell-like
@@ -480,6 +1038,43 @@ export class Sound {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
+
+    if (this.engine === "tone") {
+      const eng = this.ensureToneEngine();
+      if (!eng) return;
+      if (eng.cometShimmerByKey.has(key)) return;
+
+      // Add9 voicing across two octaves, soft sine pad with chorus on the
+      // shared fx bus + heavy reverb. Independent LFOs per-voice are baked
+      // into the chorus.
+      const chord = ["C4", "E4", "G4", "D5"];
+      const pad = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: "sine" },
+        envelope: { attack: 1.6, decay: 0.2, sustain: 1, release: 2.0 },
+        volume: -22,
+      });
+      const fadeGain = new Tone.Gain(1);
+      // Slow amplitude wobble so the pad breathes — done at the pad gain
+      // level instead of per-voice so we don't fight tone's polysynth.
+      const breath = new Tone.LFO({ frequency: 0.13, min: 0.75, max: 1.0 });
+      breath.connect(fadeGain.gain);
+      breath.start();
+
+      pad.connect(fadeGain);
+      // Pad sits mostly in the wet bus — it's atmosphere, not a lead.
+      const dry = new Tone.Gain(0.25);
+      const wet = new Tone.Gain(1.0);
+      fadeGain.connect(dry);
+      fadeGain.connect(wet);
+      dry.connect(eng.toneMaster);
+      wet.connect(eng.reverbSend);
+
+      pad.triggerAttack(chord);
+
+      eng.cometShimmerByKey.set(key, { synth: pad, chord, fadeGain, lfos: [breath] });
+      return;
+    }
+
     if (this.cometShimmers.has(key)) return;
     const t = this.ctx.currentTime;
 
@@ -540,6 +1135,25 @@ export class Sound {
   }
 
   stopCometShimmer(key: object) {
+    if (this.toneEngine) {
+      const shimmer = this.toneEngine.cometShimmerByKey.get(key);
+      if (shimmer) {
+        const fadeOut = 2.0;
+        shimmer.fadeGain.gain.rampTo(0, fadeOut);
+        const now = Tone.now();
+        shimmer.synth.triggerRelease(shimmer.chord, now);
+        // Dispose after release tail clears, plus a small safety margin.
+        const cleanupAt = now + fadeOut + 0.5;
+        Tone.getTransport().scheduleOnce(() => {
+          for (const l of shimmer.lfos) l.dispose();
+          shimmer.synth.dispose();
+          shimmer.fadeGain.dispose();
+        }, cleanupAt);
+        this.toneEngine.cometShimmerByKey.delete(key);
+        // Fall through in case the legacy map also holds this key (it won't,
+        // but defensive — we're in the middle of an engine switch sometimes).
+      }
+    }
     if (!this.ctx) return;
     const node = this.cometShimmers.get(key);
     if (!node) return;
@@ -555,6 +1169,9 @@ export class Sound {
 
   stopAllCometShimmers() {
     for (const key of Array.from(this.cometShimmers.keys())) this.stopCometShimmer(key);
+    if (this.toneEngine) {
+      for (const key of Array.from(this.toneEngine.cometShimmerByKey.keys())) this.stopCometShimmer(key);
+    }
   }
 
   private makeNoiseBuffer(duration: number): AudioBuffer | null {
@@ -1047,14 +1664,42 @@ export class Sound {
   private playBgBeat(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
     if (this.bgBeatIntensity <= 0) return;
-    const t = this.ctx.currentTime;
     const intensity = Math.max(0, Math.min(1, this.bgBeatIntensity));
+    // Offbeats (2nd/4th beat) are further attenuated so the heartbeat reads
+    // as a strong-weak pattern instead of a flat metronome. The reduction is
+    // strongest at low intensity (where the beat should feel barely-there)
+    // and eases as the pulsar gets close — at wave 30 the offbeat is only
+    // slightly softer than the downbeat.
+    const isOffbeat = pitchRatio !== 1;
+    const offbeatMul = isOffbeat ? 0.35 + intensity * 0.45 : 1;
+    // Overall level is scaled down at low intensity so the early-wave beat is
+    // much quieter than before. Quadratic intensity squashes the floor hard
+    // (0.35x at wave 1) while still reaching full level by wave 30.
+    const levelMul = (0.35 + 0.65 * intensity) * offbeatMul;
+
+    if (this.engine === "tone") {
+      // bgBeat amplitude depends on bgBeatIntensity, which changes per wave.
+      // Quantize intensity to 0.1 buckets so we cache ~10 buffers instead of
+      // baking a new one for every float drift, but still track wave-to-wave
+      // intensity ramping.
+      const intensityBucket = Math.round(intensity * 10) / 10;
+      const bgBeatPitchKey = pitchRatio * 100 + intensityBucket;
+      if (this.playBaked("bgBeat", bgBeatPitchKey)) return;
+      const eng = this.ensureToneEngine();
+      if (!eng) return;
+      const velocity = (0.25 + intensity * 0.75) * levelMul;
+      const note = pitchRatio === 1 ? "C2" : "D2";
+      eng.bgBeatKick.triggerAttackRelease(note, "8n", undefined, velocity);
+      return;
+    }
+
+    const t = this.ctx.currentTime;
     // Peak amplitude scales concavely with intensity. Floor (0.06) is below
     // every other gameplay sound (comboTick 0.18, chime partials 0.07) but
     // still clearly audible on laptop/phone speakers. Peak (~0.55) at full
     // intensity is heavier than explosions, which sells "ominous rumble" at
     // wave 30.
-    const peak = 0.06 + intensity * intensity * 0.5;
+    const peak = (0.06 + intensity * intensity * 0.5) * levelMul;
 
     // Body: sine at 65 Hz (C2) for downbeats, lifted by pitchRatio on
     // offbeats. C2 is high enough that even small speakers reproduce it,
@@ -1182,6 +1827,16 @@ export class Sound {
   // player can feel the weight of a timed shot.
   private playFireBeat() {
     if (!this.ctx || !this.master) return;
+
+    if (this.engine === "tone") {
+      if (this.playBaked("fireBeat", 1)) return;
+      const eng = this.ensureToneEngine();
+      if (!eng) return;
+      eng.fireBeatBody.triggerAttackRelease("C3", "16n", undefined, 0.9);
+      eng.fireBeatPluck.triggerAttack("G4");
+      return;
+    }
+
     const t = this.ctx.currentTime;
 
     const body = this.ctx.createOscillator();
@@ -1395,6 +2050,19 @@ export class Sound {
 
   private playWaveClear() {
     if (!this.ctx || !this.master) return;
+
+    if (this.engine === "tone") {
+      if (this.playBaked("waveClear", 1)) return;
+      const eng = this.ensureToneEngine();
+      if (!eng) return;
+      const notes = ["E4", "G#4", "B4", "Eb5"];
+      const now = Tone.now();
+      for (let i = 0; i < notes.length; i++) {
+        eng.waveClearSynth.triggerAttackRelease(notes[i], "4n", now + i * 0.06, 0.7);
+      }
+      return;
+    }
+
     const t = this.ctx.currentTime;
     const chordFrequencies = [330, 415, 494, 622];
     for (let i = 0; i < chordFrequencies.length; i++) {
@@ -1419,6 +2087,16 @@ export class Sound {
   // can sound a fourth/octave below the parent (see Game.bassPitchRatio).
   private playBassKick(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
+
+    if (this.engine === "tone") {
+      if (this.playBaked("bassKick", pitchRatio)) return;
+      const eng = this.ensureToneEngine();
+      if (!eng) return;
+      const note = 65.4 * pitchRatio;
+      eng.bassKick.triggerAttackRelease(note, "16n", undefined, 0.95);
+      return;
+    }
+
     const t = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
@@ -1457,6 +2135,16 @@ export class Sound {
   // reads as a I/IV/V bassline rather than a dissonant pile.
   private playBassBoom(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
+
+    if (this.engine === "tone") {
+      if (this.playBaked("bassBoom", pitchRatio)) return;
+      const eng = this.ensureToneEngine();
+      if (!eng) return;
+      const note = 87.3 * pitchRatio;
+      eng.bassBoom.triggerAttackRelease(note, "8n", undefined, 0.9);
+      return;
+    }
+
     const t = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
@@ -1508,6 +2196,15 @@ export class Sound {
   // pattern reads as kick-pluck-boom-snap rather than a wall of low end.
   private playBassSnap(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
+
+    if (this.engine === "tone") {
+      if (this.playBaked("bassSnap", pitchRatio)) return;
+      const eng = this.ensureToneEngine();
+      if (!eng) return;
+      eng.bassSnap.triggerAttackRelease("C3", "16n", undefined, 0.7 + pitchRatio * 0.0);
+      return;
+    }
+
     const t = this.ctx.currentTime;
     const noiseBuf = this.makeNoiseBuffer(0.13);
     if (!noiseBuf) return;
@@ -1545,6 +2242,16 @@ export class Sound {
   // from the kick so the two layer rather than mask each other.
   private playBassPluck(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
+
+    if (this.engine === "tone") {
+      if (this.playBaked("bassPluck", pitchRatio)) return;
+      const eng = this.ensureToneEngine();
+      if (!eng) return;
+      const note = 98 * pitchRatio;
+      eng.bassPluck.triggerAttackRelease(note, "8n", undefined, 0.85);
+      return;
+    }
+
     const t = this.ctx.currentTime;
     const osc1 = this.ctx.createOscillator();
     const osc2 = this.ctx.createOscillator();
@@ -1672,6 +2379,15 @@ export class Sound {
   // High shimmery bell — three sine partials at near-bell ratios.
   private playChime() {
     if (!this.ctx || !this.master) return;
+
+    if (this.engine === "tone") {
+      if (this.playBaked("chime", 1)) return;
+      const eng = this.ensureToneEngine();
+      if (!eng) return;
+      eng.chimeSynth.triggerAttackRelease(["C6", "G6"], "8n", undefined, 0.65);
+      return;
+    }
+
     const t = this.ctx.currentTime;
     const fundamentalFreq = 1046.5; // C6
     const partialRatios = [1, 2.005, 3.01];
@@ -1790,6 +2506,19 @@ export class Sound {
   // good" jingle that plays when the ship flies over a canister.
   private playPowerup() {
     if (!this.ctx || !this.master) return;
+
+    if (this.engine === "tone") {
+      if (this.playBaked("powerup", 1)) return;
+      const eng = this.ensureToneEngine();
+      if (!eng) return;
+      const notes = ["C5", "E5", "G5", "C6"];
+      const now = Tone.now();
+      for (let i = 0; i < notes.length; i++) {
+        eng.powerupSynth.triggerAttackRelease(notes[i], "16n", now + i * 0.06, 0.7);
+      }
+      return;
+    }
+
     const t = this.ctx.currentTime;
     const arpeggioFrequencies = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
     for (let i = 0; i < arpeggioFrequencies.length; i++) {

@@ -11,7 +11,20 @@ import { Canister, spawnCanister } from "./Canister";
 import { Comet, spawnComet } from "./Comet";
 import { Alien, AlienSize, ALIEN_FIRE_PERIOD_BEATS, spawnAlienAtEdge } from "./Alien";
 import { AlienBullet } from "./AlienBullet";
-import { v, fromAngle, dist, rand, TAU } from "./vec";
+import { v, Vec, fromAngle, dist, rand, TAU } from "./vec";
+
+// Floating "x{multiplier}" label that spawns at the impact point of an
+// on-beat kill, drifts upward, and fades out. Replaces the corner-pulse
+// flash so the player sees the multiplier where the hit landed.
+type ComboPopup = {
+  pos: Vec;
+  vel: Vec;
+  life: number;
+  maxLife: number;
+  text: string;
+};
+
+const COMBO_POPUP_LIFE = 0.9;
 
 type GameState = "title" | "playing" | "paused" | "dying" | "gameover";
 
@@ -23,9 +36,12 @@ type GameState = "title" | "playing" | "paused" | "dying" | "gameover";
 // marks ~half of beats.
 export const BEAT_GRID = 0.5;
 const BEAT_WINDOW = 0.15;
-// Each successive on-beat step adds +0.5 to the kill multiplier, capped so a
-// long streak doesn't trivialise high-wave scoring.
-const COMBO_MULTIPLIER_STEP = 0.5;
+// On-beat kill multiplier equals the current beatCombo value. The combo
+// counts hits-in-a-row since the player primed the streak by firing on-beat;
+// combo=1 means "primed but no hits yet" (multiplier 1×, no bonus shown),
+// combo=2 means "one on-beat hit since priming" (the first multiplier the
+// player sees, displayed as x2), and so on. Capped so long streaks don't
+// trivialise high-wave scoring.
 const COMBO_MULTIPLIER_MAX = 5;
 
 // Powerup canister spawn rules. We roll once per wave; if it lands, we
@@ -137,6 +153,7 @@ export class Game {
   ship: Ship;
   asteroids: Asteroid[] = [];
   bullets: Bullet[] = [];
+  comboPopups: ComboPopup[] = [];
   score = 0;
   wave = 1;
   lives = 3;
@@ -155,18 +172,18 @@ export class Game {
   // so they stay in lockstep.
   beatTime = 0;
   // Last BEAT_GRID index we've already fired the background pulsar-approach
-  // beat for. Tracked separately from lastMarkedBeatIndex (which is the
-  // player's on-beat combo state) because the background beat fires every
-  // tick regardless of input.
+  // beat for. The background beat fires every tick regardless of input.
   lastBgBeatIndex = -1;
-  // Index of the most recent beat the player marked with a fire or kill.
-  // Marks arrive in increasing index order because BEAT_WINDOW < BEAT_GRID/2,
-  // so consecutive windows never overlap.
-  lastMarkedBeatIndex = -1;
   // Next beat index whose closing-window time we haven't yet checked. Beats
-  // are evaluated in order; an unmarked beat that closes resets the combo.
+  // are evaluated in order — each closure either advances the combo (if the
+  // player hasn't fired off-beat since the last closure) or resets it.
   nextBeatToEvaluate = 0;
   beatCombo = 0;
+  // Latches true the moment the player commits an off-beat shot. The next
+  // beat closure resets the combo to 0 and clears this flag; on-beat shots
+  // and not-firing-at-all leave it alone, so silence still maintains the
+  // combo. Cleared on respawn / wave start / death.
+  firedOffBeatSinceLastBeat = false;
 
   canisters: Canister[] = [];
   comets: Comet[] = [];
@@ -231,7 +248,11 @@ export class Game {
     this.muteEl = document.getElementById("mute") as HTMLButtonElement;
     this.muteEl.addEventListener("click", () => this.toggleMute());
     window.addEventListener("keydown", (e) => {
-      if (e.key.toLowerCase() === "m" && this.state !== "title") this.toggleMute();
+      const k = e.key.toLowerCase();
+      if (k === "m" && this.state !== "title") this.toggleMute();
+      // B = swap audio engine (legacy hand-built vs Tone.js bus). Available
+      // during gameplay only, not the title screen.
+      if (k === "b" && this.state !== "title") this.toggleEngine();
     });
     this.showTitle();
   }
@@ -240,6 +261,18 @@ export class Game {
     this.sound.setEnabled(!this.sound.enabled);
     this.muteEl.classList.toggle("muted", !this.sound.enabled);
     this.muteEl.textContent = this.sound.enabled ? "♪" : "✕";
+  }
+
+  toggleEngine() {
+    const which = this.sound.cycleEngine();
+    const toast = document.getElementById("engine-toast");
+    if (!toast) return;
+    toast.textContent = which === "tone" ? "Audio: Tone.js" : "Audio: Legacy";
+    toast.classList.remove("hidden");
+    window.clearTimeout((this as unknown as { _engineToastTimer?: number })._engineToastTimer);
+    (this as unknown as { _engineToastTimer?: number })._engineToastTimer = window.setTimeout(() => {
+      toast.classList.add("hidden");
+    }, 1400);
   }
 
   togglePause() {
@@ -275,6 +308,7 @@ export class Game {
     this.overlayStartEl.innerHTML = 'press <span class="key">enter</span> to begin';
     this.overlayEl.classList.remove("hidden");
     this.beatCombo = 0;
+    this.firedOffBeatSinceLastBeat = false;
     this.syncComboHud();
     this.asteroids = [];
     this.canisters = [];
@@ -304,10 +338,11 @@ export class Game {
     this.lives = 3;
     this.beatTime = 0;
     this.lastBgBeatIndex = -1;
-    this.lastMarkedBeatIndex = -1;
     this.nextBeatToEvaluate = 0;
     this.beatCombo = 0;
+    this.firedOffBeatSinceLastBeat = false;
     this.bullets = [];
+    this.comboPopups = [];
     this.shards = [];
     this.canisters = [];
     this.sound.stopAllAlienDrones();
@@ -575,24 +610,24 @@ export class Game {
         if (b.life <= 0) continue;
         if (!a.collidesWith(b.pos, b.effectiveRadius())) continue;
         if (!b.pierce) b.life = 0;
-        const hitMarkedBeat = this.markBeat(this.beatTime);
-        const isOnBeatHit = hitMarkedBeat || b.onBeat;
+        const isOnBeatHit = this.isInBeatWindow(this.beatTime) || b.onBeat;
         const { killed: alienKilled } = a.applyDamage();
+        if (isOnBeatHit && this.beatCombo >= 1) {
+          this.beatCombo = Math.min(this.beatCombo + 1, COMBO_MULTIPLIER_MAX);
+          this.syncComboHud();
+        }
         if (!alienKilled) {
           this.sound.play("alienHit");
           this.shake = Math.min(this.shake + 0.18, 1.2);
-          if (isOnBeatHit) {
-            this.sound.play("comboSparkle");
-            if (hitMarkedBeat) this.pulseComboHud();
-          }
+          if (isOnBeatHit) this.sound.play("comboSparkle");
           break;
         }
         let scoreEarned = a.scoreValue;
         if (isOnBeatHit) {
-          const multiplier = Math.min(1 + this.beatCombo * COMBO_MULTIPLIER_STEP, COMBO_MULTIPLIER_MAX);
+          const multiplier = this.beatCombo;
           scoreEarned = Math.round(scoreEarned * multiplier);
           this.sound.play("comboSparkle");
-          if (hitMarkedBeat) this.pulseComboHud();
+          if (multiplier >= 2) this.spawnComboPopup(b.pos, multiplier);
         }
         this.score += scoreEarned;
         this.shake = Math.min(this.shake + 0.5, 1.4);
@@ -666,29 +701,69 @@ export class Game {
     }
   }
 
-  // Re-trigger the combo CSS keyframe by toggling the class. Reading
-  // offsetWidth forces a synchronous reflow between remove and add, which is
-  // the standard idiom for restarting a CSS animation on demand.
-  pulseComboHud() {
-    this.syncComboHud();
-    if (this.comboEl.classList.contains("hidden")) return;
-    this.comboEl.classList.remove("beat-pulse");
-    void this.comboEl.offsetWidth;
-    this.comboEl.classList.add("beat-pulse");
+  // Spawn a floating "x{N}" label at an on-beat hit. Drifts upward and fades
+  // out over ~0.9s. Replaces the old corner-pulse flash: feedback now lives
+  // at the place the player actually struck.
+  spawnComboPopup(pos: Vec, multiplier: number) {
+    const text = `x${multiplier % 1 === 0 ? multiplier.toFixed(0) : multiplier.toFixed(1)}`;
+    this.comboPopups.push({
+      pos: { x: pos.x, y: pos.y - 6 },
+      vel: { x: rand(-12, 12), y: -70 },
+      life: COMBO_POPUP_LIFE,
+      maxLife: COMBO_POPUP_LIFE,
+      text,
+    });
+  }
+
+  updateComboPopups(dt: number) {
+    for (const p of this.comboPopups) {
+      p.life -= dt;
+      p.pos.x += p.vel.x * dt;
+      p.pos.y += p.vel.y * dt;
+      // Slight deceleration so they don't drift off-screen too fast.
+      p.vel.x *= 0.94;
+      p.vel.y *= 0.94;
+    }
+    this.comboPopups = this.comboPopups.filter((p) => p.life > 0);
+  }
+
+  renderComboPopups(ctx: CanvasRenderingContext2D) {
+    if (this.comboPopups.length === 0) return;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "600 22px 'Space Grotesk', system-ui, sans-serif";
+    for (const p of this.comboPopups) {
+      const t = p.life / p.maxLife;
+      // Pop in, then fade. Scale eases up to ~1.25 at birth, settles to 1.0.
+      const age = 1 - t;
+      const scale = age < 0.15 ? 1 + (0.15 - age) * 2.5 : 1.0;
+      const alpha = Math.min(1, t * 1.4);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = "#ffd86a";
+      ctx.shadowColor = "rgba(255, 200, 80, 0.85)";
+      ctx.shadowBlur = 14;
+      ctx.save();
+      ctx.translate(p.pos.x, p.pos.y);
+      ctx.scale(scale, scale);
+      ctx.fillText(p.text, 0, 0);
+      ctx.restore();
+    }
+    ctx.restore();
   }
 
   // The grid the rhythm gate runs on. Quarter notes (BEAT_GRID) normally;
   // 8th notes (BEAT_GRID/2) while the player has rapid fire, so a rapid
-  // held-fire shot lands a beat every trigger pull. Stored beat indices
-  // in lastMarkedBeatIndex / nextBeatToEvaluate are always in the current
-  // grid — collectCanister and respawn rebase them on grid transitions.
+  // held-fire shot lands a beat every trigger pull. nextBeatToEvaluate is
+  // always in the current grid — collectCanister rebases it on grid
+  // transitions.
   comboGrid(): number {
     return this.ship.rapidActive ? BEAT_GRID / 2 : BEAT_GRID;
   }
 
   // Visual metronome strength at the current beatTime: 1 at a beat center,
   // falling linearly to 0 at the edge of the same ±BEAT_WINDOW used by
-  // markBeat. Returning >0 here is exactly the condition under which a shot
+  // isInBeatWindow. Returning >0 here is exactly the condition under which a shot
   // fired this frame would be counted as a rhythm-shot, so the ship's pulse
   // is a literal preview of the rhythm window. Zero on title/pause/gameover
   // because beatTime isn't advancing there and we don't want a frozen flash.
@@ -707,46 +782,38 @@ export class Game {
       : (1 - normalized) * (1 - normalized);
   }
 
-  // Try to associate `time` with the nearest beat on the combo grid (8ths
-  // under rapid, quarters otherwise). Returns true iff this call is the
-  // first activity inside that beat's window — that's the signal we use to
-  // decide whether to play the on-beat tick / sparkle and to count the
-  // beat for combo display purposes.
-  markBeat(time: number): boolean {
+  // True iff `time` sits inside the ±BEAT_WINDOW around any beat on the
+  // current combo grid (8ths under rapid, quarters otherwise). Used to
+  // classify shots and hits as on-beat or off-beat. Pure predicate — no
+  // side effects; combo accumulation now lives entirely in
+  // evaluateClosedBeats, driven by whether the player fired off-beat
+  // since the previous beat closed.
+  isInBeatWindow(time: number): boolean {
     const grid = this.comboGrid();
     const beatIndex = Math.round(time / grid);
     const beatCenter = beatIndex * grid;
-    if (Math.abs(time - beatCenter) > BEAT_WINDOW) return false;
-    if (beatIndex < this.nextBeatToEvaluate) return false;
-    if (beatIndex === this.lastMarkedBeatIndex) return false;
-    if (beatIndex === this.lastMarkedBeatIndex + 1) {
-      this.beatCombo += 1;
-    } else {
-      // A gap means at least one beat between the previous mark and now
-      // closed unmarked; the evaluator will already have reset combo to 0
-      // when that closure was processed, so we restart the streak at 1.
-      this.beatCombo = 1;
-    }
-    this.lastMarkedBeatIndex = beatIndex;
-    return true;
+    return Math.abs(time - beatCenter) <= BEAT_WINDOW;
   }
 
-  // Walk through every beat whose closing edge has passed beatTime. Marked
-  // beats are no-ops (combo was already incremented in markBeat); unmarked
-  // beats reset the combo. The while-loop catches up cleanly even if a
-  // future change to main.ts's dt cap lets multiple beats close in a single
-  // frame.
+  // Walk through every beat whose closing edge has passed beatTime. The
+  // only rule that runs here is the off-beat punishment: if the player fired
+  // off-beat at any point during the closed beat, reset combo to 0. Silence
+  // holds the current combo (closure with no off-beat fire does nothing);
+  // combo only grows via on-beat hits (handled at impact time).
   evaluateClosedBeats() {
     const grid = this.comboGrid();
+    let changed = false;
     while (this.nextBeatToEvaluate * grid + BEAT_WINDOW <= this.beatTime) {
-      if (this.lastMarkedBeatIndex < this.nextBeatToEvaluate) {
+      if (this.firedOffBeatSinceLastBeat) {
         if (this.beatCombo !== 0) {
           this.beatCombo = 0;
-          this.syncComboHud();
+          changed = true;
         }
       }
+      this.firedOffBeatSinceLastBeat = false;
       this.nextBeatToEvaluate += 1;
     }
+    if (changed) this.syncComboHud();
   }
 
   update(dt: number) {
@@ -806,6 +873,7 @@ export class Game {
       }
     } else {
       const bulletsBeforeShipUpdate = this.bullets.length;
+      this.ship.setCombo(this.beatCombo);
       this.ship.update(dt, this.input, this.particles, this.bullets, this.w, this.h, this.time, this.sound);
       // Slow-mo slows the music side of the clock: beatTime, bass beats,
       // and asteroid motion all step at musicDt while the player, bullets,
@@ -828,11 +896,25 @@ export class Game {
         // emits 3 bullets per fire event, so the slice length can be >1.
         // They all share the same beat flag because they're one shot.
         const newBullets = this.bullets.slice(bulletsBeforeShipUpdate);
-        const firedOnBeat = this.markBeat(this.beatTime);
+        const firedOnBeat = this.isInBeatWindow(this.beatTime);
         if (firedOnBeat) {
           for (const newBullet of newBullets) newBullet.onBeat = true;
           this.sound.play("comboTick");
-          this.pulseComboHud();
+          // Establishing fire: 0 → 1. Above 1 the combo only grows via
+          // passive beat closures, so a player who's already locked in can
+          // keep firing on-beat without it bumping the meter past 1 on its
+          // own.
+          if (this.beatCombo === 0) {
+            this.beatCombo = 1;
+            this.syncComboHud();
+          }
+        } else {
+          // Off-beat shot: latch the break flag so the next beat closure
+          // drops the combo to 0. Doing it on closure (rather than instantly)
+          // lets the score multiplier for a kill landing on this same frame
+          // still benefit from the streak you were riding into the shot —
+          // the punishment is the *next* beat, not retroactive.
+          this.firedOffBeatSinceLastBeat = true;
         }
         // Fire sound picked based on whether the shot landed in a beat
         // window. Deeper "fireBeat" pluck for rhythm shots; lighter "fire"
@@ -888,6 +970,7 @@ export class Game {
       for (const c of this.canisters) c.update(dt, this.w, this.h);
       this.canisters = this.canisters.filter((c) => c.alive);
       this.particles.update(dt);
+      this.updateComboPopups(dt);
       this.handleCollisions();
       this.handleAlienHits();
       this.handleAlienBulletHits();
@@ -920,10 +1003,9 @@ export class Game {
   respawn() {
     this.ship = new Ship(v(this.w / 2, this.h / 2));
     this.ship.invuln = 2.2;
-    // killShip already cleared lastMarkedBeatIndex and beatCombo; the
-    // combo grid may also have flipped (8ths → quarters if the previous
-    // life had rapid), so rebase nextBeatToEvaluate to the first un-closed
-    // beat in the new ship's grid.
+    // killShip already cleared beatCombo; the combo grid may also have
+    // flipped (8ths → quarters if the previous life had rapid), so rebase
+    // nextBeatToEvaluate to the first un-closed beat in the new ship's grid.
     this.nextBeatToEvaluate = Math.max(0, Math.floor((this.beatTime - BEAT_WINDOW) / this.comboGrid()) + 1);
     this.state = "playing";
     this.syncHud();
@@ -1081,37 +1163,38 @@ export class Game {
         // far asteroid still earns its bonus), and the impact-time case
         // covers point-blank kills where the player times the destruction
         // rather than the trigger pull.
-        const hitMarkedBeat = this.markBeat(this.beatTime);
-        const isOnBeatHit = hitMarkedBeat || b.onBeat;
+        const isOnBeatHit = this.isInBeatWindow(this.beatTime) || b.onBeat;
         // Unified damage path: every asteroid carries HP now. Non-killing
         // hits play crack feedback (cracks visible on the body via
-        // Asteroid.renderCracks) and only mark the beat — no score, no
-        // split. Killing hits award score, fire the explosion sound, and
-        // dispatch the split. Bassteroids layer on bassHit/bassEcho.
+        // Asteroid.renderCracks). Killing hits award score and dispatch the
+        // split. On-beat hits advance the combo (once the player has primed
+        // it by firing on-beat), and the resulting beatCombo is the kill
+        // multiplier. Crack hits and kills both count as hits for the streak.
         const { killed: didKill } = a.applyDamage(b.damage());
         this.shake = Math.min(this.shake + (didKill ? 0.4 : 0.2), 1.2);
         if (a.isBass()) this.sound.play("bassHit");
+        if (isOnBeatHit && this.beatCombo >= 1) {
+          this.beatCombo = Math.min(this.beatCombo + 1, COMBO_MULTIPLIER_MAX);
+          this.syncComboHud();
+        }
         if (!didKill) {
           this.emitCrackParticles(a, isOnBeatHit);
-          if (isOnBeatHit) {
-            this.sound.play("comboSparkle");
-            if (hitMarkedBeat) this.pulseComboHud();
-          }
+          if (isOnBeatHit) this.sound.play("comboSparkle");
           break;
         }
         let scoreEarned = a.scoreValue();
         if (isOnBeatHit) {
-          const multiplier = Math.min(1 + this.beatCombo * COMBO_MULTIPLIER_STEP, COMBO_MULTIPLIER_MAX);
+          const multiplier = this.beatCombo;
           scoreEarned = Math.round(scoreEarned * multiplier);
           this.sound.play("comboSparkle");
-          if (hitMarkedBeat) this.pulseComboHud();
+          if (multiplier >= 2) this.spawnComboPopup(b.pos, multiplier);
         }
         this.score += scoreEarned;
         if (a.isBass()) this.sound.play("bassEcho");
         this.sound.play(this.hitSoundFor(a));
         this.emitExplosion(a, isOnBeatHit);
         if (a.isBass()) this.sound.stopBassteroidDrone(a);
-        const children = a.split();
+        const children = a.split(b.vel);
         for (const c of children) {
           if (a.isBass()) {
             this.alignBassBeat(c);
@@ -1223,14 +1306,13 @@ export class Game {
       this.slowMoTimer = SLOW_MO_DURATION;
     } else {
       // Picking up rapid is the only mid-life event that flips comboGrid()
-      // (quarters → 8ths). Each quarter-beat index k points at the same
-      // musical moment as 8th-beat index 2k, so rescale the stored indices
-      // so an in-flight streak chains into the new grid without resetting.
+      // (quarters → 8ths). Rebase nextBeatToEvaluate to the first un-closed
+      // 8th-note beat so the closure schedule keeps marching from "now" in
+      // the new grid — any active streak (which lives in beatCombo, not in
+      // any beat index) carries over.
       if (c.kind === "rapid" && !this.ship.rapidActive) {
-        if (this.lastMarkedBeatIndex >= 0) this.lastMarkedBeatIndex *= 2;
         const eighth = BEAT_GRID / 2;
-        const firstUnclosedEighth = Math.max(0, Math.floor((this.beatTime - BEAT_WINDOW) / eighth) + 1);
-        this.nextBeatToEvaluate = Math.max(this.lastMarkedBeatIndex + 1, firstUnclosedEighth);
+        this.nextBeatToEvaluate = Math.max(0, Math.floor((this.beatTime - BEAT_WINDOW) / eighth) + 1);
       }
       this.ship.applyPowerup(c.kind);
     }
@@ -1352,7 +1434,7 @@ export class Game {
     // current streak would otherwise stay pinned on the HUD until respawn.
     // Drop it now: the player wasn't shooting on beats while dying.
     this.beatCombo = 0;
-    this.lastMarkedBeatIndex = -1;
+    this.firedOffBeatSinceLastBeat = false;
     this.syncComboHud();
     this.sound.stopThrust();
     this.sound.play("death");
@@ -1374,6 +1456,97 @@ export class Game {
     this.ship.alive = false;
   }
 
+  // Pre-allocated scratch arrays for the trail-cap selection. Reused across
+  // frames so renderTrails never allocates. Section tags: 0 = asteroid,
+  // 1 = alien, 2 = comet. Distance is squared px from screen centre.
+  private trailScratchIdx: Int32Array = new Int32Array(128);
+  private trailScratchSection: Int8Array = new Int8Array(128);
+  private trailScratchDist: Float32Array = new Float32Array(128);
+  // Hard cap on the number of trails we'll draw in one frame. With each
+  // trail at 48 stamps that's a worst case of 1920 drawImage calls — well
+  // inside what Canvas2D handles comfortably, while still letting a packed
+  // boss/alien-swarm field of >40 trails fall back gracefully by dropping
+  // the ones farthest from the screen centre.
+  static readonly MAX_VISIBLE_TRAILS = 40;
+
+  renderTrails(ctx: CanvasRenderingContext2D) {
+    const cx = this.w * 0.5;
+    const cy = this.h * 0.5;
+    let n = 0;
+    const idx = this.trailScratchIdx;
+    const sect = this.trailScratchSection;
+    const dist = this.trailScratchDist;
+    const cap = idx.length;
+
+    const ast = this.asteroids;
+    for (let i = 0; i < ast.length && n < cap; i++) {
+      if (!ast[i].trail) continue;
+      const dx = ast[i].pos.x - cx;
+      const dy = ast[i].pos.y - cy;
+      idx[n] = i; sect[n] = 0; dist[n] = dx * dx + dy * dy;
+      n++;
+    }
+    const aliens = this.aliens;
+    for (let i = 0; i < aliens.length && n < cap; i++) {
+      if (!aliens[i].alive) continue;
+      const dx = aliens[i].pos.x - cx;
+      const dy = aliens[i].pos.y - cy;
+      idx[n] = i; sect[n] = 1; dist[n] = dx * dx + dy * dy;
+      n++;
+    }
+    const comets = this.comets;
+    for (let i = 0; i < comets.length && n < cap; i++) {
+      const dx = comets[i].pos.x - cx;
+      const dy = comets[i].pos.y - cy;
+      idx[n] = i; sect[n] = 2; dist[n] = dx * dx + dy * dy;
+      n++;
+    }
+
+    if (n === 0) return;
+
+    // Over-cap fallback: partial-selection-sort so the closest
+    // MAX_VISIBLE_TRAILS land in the first n slots, then truncate. Trail
+    // load this high (>40 simultaneous) is rare so the O(maxN * n) cost
+    // here is bounded and only kicks in under unusual density.
+    const maxN = Game.MAX_VISIBLE_TRAILS;
+    if (n > maxN) {
+      for (let i = 0; i < maxN; i++) {
+        let minJ = i;
+        let minD = dist[i];
+        for (let j = i + 1; j < n; j++) {
+          if (dist[j] < minD) { minD = dist[j]; minJ = j; }
+        }
+        if (minJ !== i) {
+          const td = dist[i]; dist[i] = dist[minJ]; dist[minJ] = td;
+          const ti = idx[i]; idx[i] = idx[minJ]; idx[minJ] = ti;
+          const ts = sect[i]; sect[i] = sect[minJ]; sect[minJ] = ts;
+        }
+      }
+      n = maxN;
+    }
+
+    // One composite-mode change, one save/restore for the whole batch.
+    // globalAlpha is touched inside drawGlow (per stamp) but we reset it to
+    // 1 before restoring so the restore-stack stays tidy.
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const tSec = this.time * 0.001;
+    for (let i = 0; i < n; i++) {
+      const k = idx[i];
+      const s = sect[i];
+      if (s === 0) {
+        const t = ast[k].trail;
+        if (t) t.render(ctx, tSec);
+      } else if (s === 1) {
+        aliens[k].trail.render(ctx, tSec);
+      } else {
+        comets[k].glowTrail.render(ctx, tSec);
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   render() {
     const { ctx, w, h } = this;
     let shakeX = 0;
@@ -1392,6 +1565,14 @@ export class Game {
 
     this.starfield.render(ctx, this.time);
     this.pulsar.render(ctx);
+
+    // Glow-trail pass for every long-lasting drone source (bassteroids,
+    // aliens, comets). Drawn BEFORE the object bodies so the bodies sit on
+    // top of their own trails. Grouped under one globalCompositeOperation
+    // change so the additive-blend mode is set/restored once for the whole
+    // pass instead of toggling per object.
+    this.renderTrails(ctx);
+
     for (const c of this.comets) c.render(ctx);
 
     for (const s of this.shards) s.render(ctx);
@@ -1403,6 +1584,7 @@ export class Game {
     this.particles.render(ctx);
     this.ship.renderReticules(ctx, BEAT_GRID, this.w, this.h);
     this.ship.render(ctx, this.time, this.currentBeatPulse());
+    this.renderComboPopups(ctx);
 
     ctx.restore();
   }

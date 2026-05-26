@@ -1,4 +1,5 @@
 import { Vec, v, add, mul, fromAngle, rand, TAU } from "./vec";
+import { Trail } from "./Trail";
 
 // Ethereal background event that wanders across the field over ~25-40 seconds
 // playing a slow melodic phrase locked to the bass-beat grid. Doesn't collide
@@ -33,6 +34,10 @@ export class Comet {
   // narrow cyan/violet band so multiple comets in successive waves all read
   // as the same "musical visitor" species.
   hue: number;
+  // Shimmer-pad glow trail, layered behind the line-streak head. Multi-LFO
+  // pulse mode produces the glittery breathing that visually echoes the
+  // shimmer-pad audio. See Trail.ts.
+  glowTrail: Trail;
   // How long the comet visibly fades in and out. Used for both the streak
   // bloom and the audio shimmer pad amplitude.
   static readonly FADE_IN = 1.6;
@@ -42,6 +47,7 @@ export class Comet {
     this.pos = pos;
     this.vel = vel;
     this.hue = hue;
+    this.glowTrail = new Trail(hue, 18, 0.32, "shimmer", 1.6);
   }
 
   // Brightness envelope: rises during FADE_IN, holds at 1, eases out during
@@ -57,6 +63,7 @@ export class Comet {
   update(dt: number, w: number, h: number) {
     this.age += dt;
     this.pos = add(this.pos, mul(this.vel, dt));
+    this.glowTrail.update(dt, this.pos.x, this.pos.y);
 
     // Sample the current position every frame so the trail is dense enough
     // to read as a smooth streak. Trim the tail when the oldest sample has

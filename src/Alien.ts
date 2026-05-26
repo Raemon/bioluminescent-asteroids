@@ -1,5 +1,6 @@
 import { Vec, v, add, mul, fromAngle, wrap, rand, TAU } from "./vec";
 import { AlienBullet } from "./AlienBullet";
+import { Trail } from "./Trail";
 
 // Three sizes, each with its own role in the rhythm:
 //   "big"    : 4 HP, fires every other beat (every 2× BEAT_GRID).
@@ -121,6 +122,9 @@ export class Alien {
   // Score awarded on kill.
   scoreValue: number;
   alive = true;
+  // Theremin-drone glow trail. Vibrato pulse mode lines up loosely with the
+  // alien voice's amplitude LFO. See Trail.ts.
+  trail: Trail;
 
   constructor(pos: Vec, vel: Vec, size: AlienSize) {
     this.pos = pos;
@@ -136,6 +140,11 @@ export class Alien {
     this.rotation = rand(0, TAU);
     this.rotSpeed = rand(-0.4, 0.4);
     this.scoreValue = SIZE_SCORE[size];
+    // Trail tuned per size — bigger aliens have a thicker, slower-pulsing
+    // wake; small ones flicker faster, matching their tighter firing rate.
+    const trailRadius = this.radius * 0.7;
+    const trailRate = size === "big" ? 0.9 : size === "medium" ? 1.2 : 1.5;
+    this.trail = new Trail(this.hue, trailRadius, 0.26, "theremin", trailRate);
   }
 
   update(dt: number, w: number, h: number) {
@@ -149,6 +158,7 @@ export class Alien {
     const swayMag = Math.sin(this.weavePhase) * 18;
     const drift = mul(perp, swayMag);
     this.pos = wrap(add(add(this.pos, mul(this.vel, dt)), mul(drift, dt)), w, h);
+    this.trail.update(dt, this.pos.x, this.pos.y);
     if (this.flashAmount > 0) this.flashAmount = Math.max(0, this.flashAmount - dt * 4);
     if (this.fireFlash > 0) this.fireFlash = Math.max(0, this.fireFlash - dt * 2.4);
   }

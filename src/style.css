@@ -79,14 +79,6 @@ html, body {
   text-transform: uppercase;
 }
 
-#combo.beat-pulse { animation: comboPulse 0.32s ease-out; }
-
-@keyframes comboPulse {
-  0%   { transform: scale(1.0);  filter: brightness(1.0); }
-  35%  { transform: scale(1.22); filter: brightness(1.6); }
-  100% { transform: scale(1.0);  filter: brightness(1.0); }
-}
-
 #hud-right {
   display: flex;
   align-items: center;
@@ -113,6 +105,27 @@ html, body {
 
 #mute:hover { color: #d8f3ff; }
 #mute.muted { color: rgba(106, 215, 255, 0.35); text-shadow: none; }
+
+#engine-toast {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: rgba(2, 3, 10, 0.85);
+  border: 1px solid rgba(106, 215, 255, 0.4);
+  color: #6ad7ff;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 10;
+  text-shadow: 0 0 8px rgba(106, 215, 255, 0.5);
+  transition: opacity 0.3s;
+  opacity: 1;
+}
+#engine-toast.hidden { opacity: 0; }
 
 #lives {
   display: flex;
