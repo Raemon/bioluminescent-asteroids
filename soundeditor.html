@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pulsar / sound editor</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/soundeditor/editor.css" />
+  </head>
+  <body class="soundeditor-body">
+    <header class="se-header">
+      <div class="se-title">
+        <span class="se-logo">PULSAR</span>
+        <span class="se-sep">/</span>
+        <span class="se-sub">sound editor</span>
+      </div>
+      <div class="se-header-actions">
+        <label class="se-engine">
+          engine
+          <select id="se-engine-select">
+            <option value="tone">tone</option>
+            <option value="legacy">legacy</option>
+          </select>
+        </label>
+        <button id="se-recapture-all" type="button">re-capture all</button>
+        <a class="se-back" href="/">← game</a>
+      </div>
+    </header>
+
+    <main class="se-main">
+      <aside class="se-globals">
+        <h2 class="se-aside-title">global</h2>
+        <div class="se-knob-group" id="se-globals-knobs"></div>
+        <p class="se-aside-hint">
+          knobs apply to the next playback. master volume and brightness are
+          live taps on the editor's capture bus — they don't mutate the game's
+          Sound class.
+        </p>
+      </aside>
+
+      <section class="se-list" id="se-list">
+        <!-- rows injected by editor.ts -->
+      </section>
+    </main>
+
+    <script type="module" src="/src/soundeditor/editor.ts"></script>
+  </body>
+</html>

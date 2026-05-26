@@ -11,12 +11,41 @@ import { BEAT_GRID } from "./Game";
 // see Game.comboGrid.
 const RAPID_FIRE_RATE_MULTIPLIER = 0.5;
 const TRIDENT_SPREAD = 0.21;
+const RETICULE_LINE_DASH: [number, number] = [4, 4];
+// Shared colour for every dashed element in the reticule family (hitbox rings
+// + radar circle) so they read as one system. HSL only — opacity is applied
+// per-element via the alpha constants below.
+const RETICULE_DASH_HSL = "220, 100%, 85%";
+// Opacity for the two dashed hitbox rings (off-beat + on-beat). Tuned to sit
+// just above the radar circle's visibility — faint but definitely present.
+const RETICULE_HITBOX_ALPHA = 0.28;
+// Opacity for the outer rhythm-radar circle. Kept barely visible so it hints
+// at the rhythm window without competing with gameplay for attention.
+const RETICULE_RADAR_ALPHA = 0.2;
+// Fire-cooldown dim factor applied to the hitbox rings so the player can read
+// at a glance when the next shot is available.
+const RETICULE_COOLDOWN_DIM = 0.3;
+// Peak opacity for trajectory-preview lines projected from targets inside the
+// radar. Lines fade from this value to 0 over RETICULE_TRAJECTORY_FADE_DURATION
+// seconds, so fresh entries draw bright and lingerers dissolve.
+const RETICULE_TRAJECTORY_ALPHA = 1;
+const RETICULE_TRAJECTORY_FADE_DURATION = 0.1;
+// Mirrors Bullet.hitRadius() for an on-beat shot: base radius 1.8 × on-beat
+// scale 2.38 × hit multiplier 2.5. Hard-coded here so the reticule preview
+// doesn't need a live bullet to size itself.
+const BULLET_HIT_RADIUS_ON_BEAT = 1.8 * 2.38 * 2.5;
+// Off-beat hit radius: base 1.8 × 1 × 2.5. Shown as the inner reticule ring.
+const BULLET_HIT_RADIUS_OFF_BEAT = 1.8 * 2.5;
 
 export class Ship {
   pos: Vec;
   vel: Vec = v(0, 0);
   heading = -Math.PI / 2;
   rotSpeed = 4.6;
+  // Ramp-up factor for rotation: starts low when a turn key is first pressed
+  // and quickly climbs to 1 (full rotSpeed). Lets the player nudge their
+  // heading with a quick tap while still pulling 180s when they hold the key.
+  rotRamp = 0;
   thrustPower = 320;
   drag = 0.6;
   maxSpeed = 460;
@@ -54,6 +83,11 @@ export class Ship {
   private comboRings: { age: number; gold: boolean }[] = [];
   // Last beatPulse seen by tickComboHalo, for rising-edge ring emission.
   private prevBeatPulse = 0;
+  // First time each target was seen inside the rhythm-radar circle. Used to
+  // fade its trajectory line out as it lingers — fresh entries draw bright,
+  // old ones fade so the radar reads as a forecast that decays rather than a
+  // permanent tether. WeakMap so dead targets get GC'd automatically.
+  private trajectoryFirstSeen = new WeakMap<object, number>();
 
   constructor(pos: Vec) {
     this.pos = pos;
@@ -191,8 +225,20 @@ export class Ship {
     const rate = rising ? 14 : 2.5;
     this.comboHaloIntensity += (haloTarget - this.comboHaloIntensity) * Math.min(1, rate * dt);
 
-    if (input.down("arrowleft") || input.down("a")) this.heading -= this.rotSpeed * dt;
-    if (input.down("arrowright") || input.down("d")) this.heading += this.rotSpeed * dt;
+    // Rotation ramp-up: ramp starts at ~0.18 of full speed and climbs to 1
+    // within ~0.18s of holding a turn key, so a tap nudges the heading
+    // slightly while a hold quickly reaches the full turn rate. Released
+    // keys snap the ramp back to 0 immediately.
+    const turnLeft = input.down("arrowleft") || input.down("a");
+    const turnRight = input.down("arrowright") || input.down("d");
+    if (turnLeft || turnRight) {
+      this.rotRamp = Math.min(1, this.rotRamp + dt / 0.18);
+    } else {
+      this.rotRamp = 0;
+    }
+    const turnScale = 0.18 + 0.82 * this.rotRamp;
+    if (turnLeft) this.heading -= this.rotSpeed * turnScale * dt;
+    if (turnRight) this.heading += this.rotSpeed * turnScale * dt;
 
     const wasThrusting = this.thrustOn;
     this.thrustOn = input.down("arrowup") || input.down("w");
@@ -265,26 +311,138 @@ export class Ship {
   // than chase a sliding target. Uses the same muzzle / velocity formula
   // as `fire` so ship drift is reflected. Dim while on cooldown so the
   // player can read at a glance when the next shot is available.
-  renderReticules(ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number) {
+  //
+  // Surrounded by a 150px dotted "rhythm radar" circle. Any object whose
+  // centre falls inside that circle gets a short dashed trajectory line
+  // projected from its front, teaching the player to read incoming motion
+  // and pre-aim for an on-beat kill.
+  renderReticules(
+    ctx: CanvasRenderingContext2D,
+    beatGrid: number,
+    w: number,
+    h: number,
+    targets: ReadonlyArray<{ pos: Vec; vel: Vec; radius?: number }> = []
+  ) {
     if (!this.alive) return;
     const dir = fromAngle(this.heading, 1);
     const muzzle = add(this.pos, mul(dir, this.radius + 4));
     const bulletVel = add(mul(dir, this.bulletSpeed), mul(this.vel, 0.4));
     const reticulePos = wrap(add(muzzle, mul(bulletVel, beatGrid)), w, h);
     const onCooldown = this.fireCooldown > 0;
-    const alpha = onCooldown ? 0.75 * 0.3 : 0.75;
+    const RADAR_RADIUS = 150;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    // Dark-blue ring — matches the rhythm-bullet colour so the player reads
-    // "this is where my next rhythm shot would land" without needing a
-    // legend.
-    ctx.strokeStyle = `hsla(220, 100%, 78%, ${alpha})`;
+
+    // Two concentric dashed circles at the aim point: inner ring is the
+    // off-beat bullet hitbox, outer ring is the larger on-beat hitbox. Same
+    // dash pattern and colour as the radar ring so the three circles read as
+    // a single family.
+    const hitAlpha = RETICULE_HITBOX_ALPHA * (onCooldown ? RETICULE_COOLDOWN_DIM : 1);
+    ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${hitAlpha})`;
     ctx.lineWidth = 1;
-    ctx.shadowColor = `hsla(220, 100%, 70%, ${alpha})`;
-    ctx.shadowBlur = 7;
+    ctx.setLineDash(RETICULE_LINE_DASH);
     ctx.beginPath();
-    ctx.arc(reticulePos.x, reticulePos.y, 4.5, 0, TAU);
+    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_OFF_BEAT, 0, TAU);
     ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_ON_BEAT, 0, TAU);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Dotted radar circle — kept barely visible so it hints at the rhythm
+    // window without competing with gameplay elements for attention.
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.setLineDash(RETICULE_LINE_DASH);
+    ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${RETICULE_RADAR_ALPHA})`;
+    ctx.beginPath();
+    ctx.arc(reticulePos.x, reticulePos.y, RADAR_RADIUS, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
+
+    // Trajectory previews for anything inside the radar. Extends from the
+    // leading edge of the object out to the radar boundary along its
+    // velocity vector, dashed so it reads as a forecast rather than a
+    // permanent tether. Each line fades out the longer its target has been
+    // inside the radar — fresh entries are bright, lingerers dissolve so the
+    // radar reads as a decaying forecast rather than a permanent tether.
+    if (targets.length > 0) {
+      ctx.save();
+      ctx.setLineDash(RETICULE_LINE_DASH);
+      ctx.shadowBlur = 4;
+      const radarR2 = RADAR_RADIUS * RADAR_RADIUS;
+      const now = performance.now() / 1000;
+      for (const t of targets) {
+        // Account for screen-wrap: pick whichever toroidal image of the
+        // target sits closest to the reticule so objects near a seam still
+        // show their trajectory.
+        let dx = t.pos.x - reticulePos.x;
+        let dy = t.pos.y - reticulePos.y;
+        if (dx > w / 2) dx -= w;
+        else if (dx < -w / 2) dx += w;
+        if (dy > h / 2) dy -= h;
+        else if (dy < -h / 2) dy += h;
+        // Treat any object whose silhouette overlaps the radar disc as "in
+        // range" so large asteroids whose centres sit just outside still get
+        // a trajectory preview the moment their edge crosses the ring.
+        const tr = t.radius ?? 0;
+        const inclusionR = RADAR_RADIUS + tr;
+        if (dx * dx + dy * dy > inclusionR * inclusionR) {
+          // Out of range — clear the timestamp so a re-entry starts a fresh
+          // fade rather than picking up where the previous visit left off.
+          this.trajectoryFirstSeen.delete(t as unknown as object);
+          continue;
+        }
+        let firstSeen = this.trajectoryFirstSeen.get(t as unknown as object);
+        if (firstSeen === undefined) {
+          firstSeen = now;
+          this.trajectoryFirstSeen.set(t as unknown as object, now);
+        }
+        const age = now - firstSeen;
+        if (age >= RETICULE_TRAJECTORY_FADE_DURATION) continue;
+        const fade = 1 - age / RETICULE_TRAJECTORY_FADE_DURATION;
+        ctx.globalAlpha = RETICULE_TRAJECTORY_ALPHA * fade;
+        const cx = reticulePos.x + dx;
+        const cy = reticulePos.y + dy;
+        const speed = Math.hypot(t.vel.x, t.vel.y);
+        if (speed < 1) continue;
+        const ux = t.vel.x / speed;
+        const uy = t.vel.y / speed;
+        // Start the dash just past the leading edge of the object so it
+        // visibly emerges from its front, not its centre. For objects whose
+        // centre sits outside the radar (only their silhouette overlaps),
+        // we'll clip this start forward to wherever the ray enters the disc.
+        const r = t.radius ?? 0;
+        const rawStartX = cx + ux * (r + 2);
+        const rawStartY = cy + uy * (r + 2);
+        // Solve for the segment of the ray that lies inside the radar disc.
+        // |(rawStart + s*u) - reticule|^2 = RADAR_RADIUS^2 → s^2 + 2b s + c = 0.
+        const sx = rawStartX - reticulePos.x;
+        const sy = rawStartY - reticulePos.y;
+        const b = sx * ux + sy * uy;
+        const c = sx * sx + sy * sy - radarR2;
+        const disc = b * b - c;
+        if (disc <= 0) continue;
+        const sqrtDisc = Math.sqrt(disc);
+        const sExit = -b + sqrtDisc;
+        if (sExit <= 0) continue;
+        // Clip the start to whichever is further along the ray: the leading
+        // edge itself, or the disc-entry point. This handles objects whose
+        // centre is outside the radar but body overlaps it — the trajectory
+        // is drawn only from the moment it crosses into the circle.
+        const sEntry = Math.max(0, -b - sqrtDisc);
+        const startX = rawStartX + ux * sEntry;
+        const startY = rawStartY + uy * sEntry;
+        const endX = rawStartX + ux * sExit;
+        const endY = rawStartY + uy * sExit;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     ctx.restore();
   }
 

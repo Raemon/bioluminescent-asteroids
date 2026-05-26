@@ -1,4 +1,5 @@
 import * as Tone from "tone";
+import { cfgN, cfgU } from "./soundConfig";
 
 // Tone.js-based engine wiring. When `Sound.engine === "tone"`, sounds opt
 // into a separate signal path: synths → fxBus (chorus → reverb) + dry →
@@ -77,7 +78,7 @@ type CometShimmerNode = {
   mainGain: GainNode;
 };
 
-type SoundName =
+export type SoundName =
   | "fire"
   | "fireBeat"
   | "explosionLarge"
@@ -1186,19 +1187,38 @@ export class Sound {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
+
+    // Universal volume + pitch knobs (from sounds/config.json). Volume is
+    // applied by routing all voices of this call through a per-call gain
+    // node sitting between master and the rest of the chain; we swap
+    // this.master temporarily, run the play method (which connects its
+    // voices into "master" — actually our voice gain), then restore. The
+    // voice gain stays connected to the real master so its nodes outlive
+    // the swap.
+    const u = cfgU(name);
+    const effectivePitch = pitchRatio * u.pitch;
+    const realMaster = this.master;
+    let voiceGain: GainNode | null = null;
+    if (u.volume !== 1) {
+      voiceGain = this.ctx.createGain();
+      voiceGain.gain.value = u.volume;
+      voiceGain.connect(realMaster);
+      this.master = voiceGain;
+    }
+
     switch (name) {
       case "fire": this.playFire(); break;
       case "fireBeat": this.playFireBeat(); break;
-      case "explosionLarge": this.playExplosion(0.7, 160, 0.55); break;
-      case "explosionMedium": this.playExplosion(0.55, 230, 0.42); break;
-      case "explosionSmall": this.playExplosion(0.4, 340, 0.3); break;
+      case "explosionLarge": this.playExplosion(cfgN("explosionLarge", "volume", 0.7), cfgN("explosionLarge", "lowpassStart", 160), cfgN("explosionLarge", "duration", 0.55)); break;
+      case "explosionMedium": this.playExplosion(cfgN("explosionMedium", "volume", 0.55), cfgN("explosionMedium", "lowpassStart", 230), cfgN("explosionMedium", "duration", 0.42)); break;
+      case "explosionSmall": this.playExplosion(cfgN("explosionSmall", "volume", 0.4), cfgN("explosionSmall", "lowpassStart", 340), cfgN("explosionSmall", "duration", 0.3)); break;
       case "thrust": this.startThrust(); break;
       case "death": this.playDeath(); break;
       case "waveClear": this.playWaveClear(); break;
-      case "bassKick": this.playBassKick(pitchRatio); break;
-      case "bassPluck": this.playBassPluck(pitchRatio); break;
-      case "bassBoom": this.playBassBoom(pitchRatio); break;
-      case "bassSnap": this.playBassSnap(pitchRatio); break;
+      case "bassKick": this.playBassKick(effectivePitch); break;
+      case "bassPluck": this.playBassPluck(effectivePitch); break;
+      case "bassBoom": this.playBassBoom(effectivePitch); break;
+      case "bassSnap": this.playBassSnap(effectivePitch); break;
       case "bassHit": this.playBassHit(); break;
       case "bassEcho": this.playBassEcho(); break;
       case "chime": this.playChime(); break;
@@ -1210,7 +1230,7 @@ export class Sound {
       case "powerup": this.playPowerup(); break;
       case "shieldPop": this.playShieldPop(); break;
       case "pulsarHum": this.playPulsarHum(); break;
-      case "bgBeat": this.playBgBeat(pitchRatio); break;
+      case "bgBeat": this.playBgBeat(effectivePitch); break;
       case "shockwaveCharge": this.playShockwaveCharge(); break;
       case "shockwaveBoom": this.playShockwaveBoom(); break;
       case "alienFireBig": this.playAlienFireBig(); break;
@@ -1218,8 +1238,10 @@ export class Sound {
       case "alienFireSmall": this.playAlienFireSmall(); break;
       case "alienHit": this.playAlienHit(); break;
       case "alienExplode": this.playAlienExplode(); break;
-      case "cometNote": this.playCometNote(Math.round(pitchRatio)); break;
+      case "cometNote": this.playCometNote(Math.round(effectivePitch)); break;
     }
+
+    if (voiceGain) this.master = realMaster;
   }
 
   // Three alien-fire voices, harmonically related so they layer cleanly with
@@ -1773,47 +1795,57 @@ export class Sound {
   private playFire() {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
+    const bodyHz = cfgN("fire", "bodyHz", 392);
+    const bodyPeak = cfgN("fire", "bodyPeak", 0.16);
+    const bodyDecay = cfgN("fire", "bodyDecay", 0.11);
+    const partialHz = cfgN("fire", "partialHz", 784);
+    const partialPeak = cfgN("fire", "partialPeak", 0.07);
+    const partialDecay = cfgN("fire", "partialDecay", 0.05);
+    const tickHz = cfgN("fire", "tickHz", 1600);
+    const tickQ = cfgN("fire", "tickQ", 1.2);
+    const tickPeak = cfgN("fire", "tickPeak", 0.04);
+    const tickDecay = cfgN("fire", "tickDecay", 0.02);
 
     const body = this.ctx.createOscillator();
     const bodyGain = this.ctx.createGain();
     body.type = "sine";
-    body.frequency.value = 392; // G4
+    body.frequency.value = bodyHz;
     bodyGain.gain.setValueAtTime(0.0001, t);
-    bodyGain.gain.exponentialRampToValueAtTime(0.16, t + 0.004);
-    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+    bodyGain.gain.exponentialRampToValueAtTime(bodyPeak, t + 0.004);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + bodyDecay);
     body.connect(bodyGain);
     bodyGain.connect(this.master);
     body.start(t);
-    body.stop(t + 0.13);
+    body.stop(t + bodyDecay + 0.02);
 
     const partial = this.ctx.createOscillator();
     const partialGain = this.ctx.createGain();
     partial.type = "sine";
-    partial.frequency.value = 784; // G5
+    partial.frequency.value = partialHz;
     partialGain.gain.setValueAtTime(0.0001, t);
-    partialGain.gain.exponentialRampToValueAtTime(0.07, t + 0.003);
-    partialGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    partialGain.gain.exponentialRampToValueAtTime(partialPeak, t + 0.003);
+    partialGain.gain.exponentialRampToValueAtTime(0.0001, t + partialDecay);
     partial.connect(partialGain);
     partialGain.connect(this.master);
     partial.start(t);
-    partial.stop(t + 0.07);
+    partial.stop(t + partialDecay + 0.02);
 
-    const tickBuf = this.makeNoiseBuffer(0.02);
+    const tickBuf = this.makeNoiseBuffer(Math.max(tickDecay, 0.005));
     if (!tickBuf) return;
     const tick = this.ctx.createBufferSource();
     tick.buffer = tickBuf;
     const tickFilter = this.ctx.createBiquadFilter();
     tickFilter.type = "bandpass";
-    tickFilter.frequency.value = 1600;
-    tickFilter.Q.value = 1.2;
+    tickFilter.frequency.value = tickHz;
+    tickFilter.Q.value = tickQ;
     const tickGain = this.ctx.createGain();
-    tickGain.gain.setValueAtTime(0.04, t);
-    tickGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.02);
+    tickGain.gain.setValueAtTime(tickPeak, t);
+    tickGain.gain.exponentialRampToValueAtTime(0.0001, t + tickDecay);
     tick.connect(tickFilter);
     tickFilter.connect(tickGain);
     tickGain.connect(this.master);
     tick.start(t);
-    tick.stop(t + 0.025);
+    tick.stop(t + tickDecay + 0.005);
   }
 
   // Deeper "thump" pluck for rhythm shots — same musical-pluck shape as
@@ -1836,59 +1868,72 @@ export class Sound {
     }
 
     const t = this.ctx.currentTime;
+    const bodyHz = cfgN("fireBeat", "bodyHz", 130.8);
+    const bodyPeak = cfgN("fireBeat", "bodyPeak", 0.38);
+    const bodyDecay = cfgN("fireBeat", "bodyDecay", 0.24);
+    const subHz = cfgN("fireBeat", "subHz", 65.4);
+    const subPeak = cfgN("fireBeat", "subPeak", 0.28);
+    const subDecay = cfgN("fireBeat", "subDecay", 0.28);
+    const partialHz = cfgN("fireBeat", "partialHz", 196);
+    const partialPeak = cfgN("fireBeat", "partialPeak", 0.12);
+    const partialDecay = cfgN("fireBeat", "partialDecay", 0.1);
+    const tickHz = cfgN("fireBeat", "tickHz", 600);
+    const tickQ = cfgN("fireBeat", "tickQ", 1.0);
+    const tickPeak = cfgN("fireBeat", "tickPeak", 0.09);
+    const tickDecay = cfgN("fireBeat", "tickDecay", 0.03);
 
     const body = this.ctx.createOscillator();
     const bodyGain = this.ctx.createGain();
     body.type = "sine";
-    body.frequency.value = 130.8; // C3
+    body.frequency.value = bodyHz;
     bodyGain.gain.setValueAtTime(0.0001, t);
-    bodyGain.gain.exponentialRampToValueAtTime(0.38, t + 0.005);
-    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+    bodyGain.gain.exponentialRampToValueAtTime(bodyPeak, t + 0.005);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + bodyDecay);
     body.connect(bodyGain);
     bodyGain.connect(this.master);
     body.start(t);
-    body.stop(t + 0.27);
+    body.stop(t + bodyDecay + 0.03);
 
     const sub = this.ctx.createOscillator();
     const subGain = this.ctx.createGain();
     sub.type = "sine";
-    sub.frequency.value = 65.4; // C2
+    sub.frequency.value = subHz;
     subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(0.28, t + 0.008);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+    subGain.gain.exponentialRampToValueAtTime(subPeak, t + 0.008);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + subDecay);
     sub.connect(subGain);
     subGain.connect(this.master);
     sub.start(t);
-    sub.stop(t + 0.31);
+    sub.stop(t + subDecay + 0.03);
 
     const partial = this.ctx.createOscillator();
     const partialGain = this.ctx.createGain();
     partial.type = "sine";
-    partial.frequency.value = 196; // G3 (perfect fifth above carrier)
+    partial.frequency.value = partialHz;
     partialGain.gain.setValueAtTime(0.0001, t);
-    partialGain.gain.exponentialRampToValueAtTime(0.12, t + 0.004);
-    partialGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    partialGain.gain.exponentialRampToValueAtTime(partialPeak, t + 0.004);
+    partialGain.gain.exponentialRampToValueAtTime(0.0001, t + partialDecay);
     partial.connect(partialGain);
     partialGain.connect(this.master);
     partial.start(t);
-    partial.stop(t + 0.12);
+    partial.stop(t + partialDecay + 0.02);
 
-    const tickBuf = this.makeNoiseBuffer(0.03);
+    const tickBuf = this.makeNoiseBuffer(Math.max(tickDecay, 0.005));
     if (!tickBuf) return;
     const tick = this.ctx.createBufferSource();
     tick.buffer = tickBuf;
     const tickFilter = this.ctx.createBiquadFilter();
     tickFilter.type = "bandpass";
-    tickFilter.frequency.value = 600;
-    tickFilter.Q.value = 1.0;
+    tickFilter.frequency.value = tickHz;
+    tickFilter.Q.value = tickQ;
     const tickGain = this.ctx.createGain();
-    tickGain.gain.setValueAtTime(0.09, t);
-    tickGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+    tickGain.gain.setValueAtTime(tickPeak, t);
+    tickGain.gain.exponentialRampToValueAtTime(0.0001, t + tickDecay);
     tick.connect(tickFilter);
     tickFilter.connect(tickGain);
     tickGain.connect(this.master);
     tick.start(t);
-    tick.stop(t + 0.035);
+    tick.stop(t + tickDecay + 0.005);
   }
 
   private playExplosion(volume: number, lowpassStart: number, duration: number) {
@@ -2059,18 +2104,23 @@ export class Sound {
     }
 
     const t = this.ctx.currentTime;
+    const startHz = cfgN("bassKick", "startHz", 140);
+    const endHz = cfgN("bassKick", "endHz", 55);
+    const sweepTime = cfgN("bassKick", "sweepTime", 0.09);
+    const peak = cfgN("bassKick", "peak", 0.55);
+    const decay = cfgN("bassKick", "decay", 0.32);
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = "sine";
-    osc.frequency.setValueAtTime(140 * pitchRatio, t);
-    osc.frequency.exponentialRampToValueAtTime(55 * pitchRatio, t + 0.09);
+    osc.frequency.setValueAtTime(startHz * pitchRatio, t);
+    osc.frequency.exponentialRampToValueAtTime(endHz * pitchRatio, t + sweepTime);
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.55, t + 0.004);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+    gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
     osc.connect(gain);
     gain.connect(this.master);
     osc.start(t);
-    osc.stop(t + 0.34);
+    osc.stop(t + decay + 0.02);
 
     const clickBuf = this.makeNoiseBuffer(0.04);
     if (!clickBuf) return;
@@ -2107,30 +2157,38 @@ export class Sound {
     }
 
     const t = this.ctx.currentTime;
+    const startHz = cfgN("bassBoom", "startHz", 180);
+    const endHz = cfgN("bassBoom", "endHz", 87.3);
+    const sweepTime = cfgN("bassBoom", "sweepTime", 0.06);
+    const peak = cfgN("bassBoom", "peak", 0.5);
+    const decay = cfgN("bassBoom", "decay", 0.42);
+    const subHz = cfgN("bassBoom", "subHz", 43.65);
+    const subPeak = cfgN("bassBoom", "subPeak", 0.28);
+    const subDecay = cfgN("bassBoom", "subDecay", 0.5);
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = "sine";
-    osc.frequency.setValueAtTime(180 * pitchRatio, t);
-    osc.frequency.exponentialRampToValueAtTime(87.3 * pitchRatio, t + 0.06);
+    osc.frequency.setValueAtTime(startHz * pitchRatio, t);
+    osc.frequency.exponentialRampToValueAtTime(endHz * pitchRatio, t + sweepTime);
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.5, t + 0.005);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+    gain.gain.exponentialRampToValueAtTime(peak, t + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
     osc.connect(gain);
     gain.connect(this.master);
     osc.start(t);
-    osc.stop(t + 0.45);
+    osc.stop(t + decay + 0.03);
 
     const sub = this.ctx.createOscillator();
     const subGain = this.ctx.createGain();
     sub.type = "sine";
-    sub.frequency.value = 43.65 * pitchRatio; // F1
+    sub.frequency.value = subHz * pitchRatio;
     subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(0.28, t + 0.01);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    subGain.gain.exponentialRampToValueAtTime(subPeak, t + 0.01);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + subDecay);
     sub.connect(subGain);
     subGain.connect(this.master);
     sub.start(t);
-    sub.stop(t + 0.55);
+    sub.stop(t + subDecay + 0.05);
 
     const clackBuf = this.makeNoiseBuffer(0.035);
     if (!clackBuf) return;
@@ -2167,36 +2225,45 @@ export class Sound {
     }
 
     const t = this.ctx.currentTime;
-    const noiseBuf = this.makeNoiseBuffer(0.13);
+    const noiseStartHz = cfgN("bassSnap", "noiseStartHz", 1700);
+    const noiseEndHz = cfgN("bassSnap", "noiseEndHz", 700);
+    const noiseQ = cfgN("bassSnap", "noiseQ", 1.1);
+    const noisePeak = cfgN("bassSnap", "noisePeak", 0.28);
+    const noiseDecay = cfgN("bassSnap", "noiseDecay", 0.15);
+    const bodyStartHz = cfgN("bassSnap", "bodyStartHz", 330);
+    const bodyEndHz = cfgN("bassSnap", "bodyEndHz", 130.8);
+    const bodyPeak = cfgN("bassSnap", "bodyPeak", 0.22);
+    const bodyDecay = cfgN("bassSnap", "bodyDecay", 0.12);
+    const noiseBuf = this.makeNoiseBuffer(Math.max(0.05, noiseDecay - 0.02));
     if (!noiseBuf) return;
     const noise = this.ctx.createBufferSource();
     noise.buffer = noiseBuf;
     const nFilter = this.ctx.createBiquadFilter();
     nFilter.type = "bandpass";
-    nFilter.frequency.setValueAtTime(1700, t);
-    nFilter.frequency.exponentialRampToValueAtTime(700, t + 0.13);
-    nFilter.Q.value = 1.1;
+    nFilter.frequency.setValueAtTime(noiseStartHz, t);
+    nFilter.frequency.exponentialRampToValueAtTime(noiseEndHz, t + noiseDecay - 0.02);
+    nFilter.Q.value = noiseQ;
     const nGain = this.ctx.createGain();
-    nGain.gain.setValueAtTime(0.28, t);
-    nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    nGain.gain.setValueAtTime(noisePeak, t);
+    nGain.gain.exponentialRampToValueAtTime(0.0001, t + noiseDecay);
     noise.connect(nFilter);
     nFilter.connect(nGain);
     nGain.connect(this.master);
     noise.start(t);
-    noise.stop(t + 0.16);
+    noise.stop(t + noiseDecay + 0.01);
 
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = "triangle";
-    osc.frequency.setValueAtTime(330 * pitchRatio, t);
-    osc.frequency.exponentialRampToValueAtTime(130.8 * pitchRatio, t + 0.09); // → C3
+    osc.frequency.setValueAtTime(bodyStartHz * pitchRatio, t);
+    osc.frequency.exponentialRampToValueAtTime(bodyEndHz * pitchRatio, t + Math.max(0.02, bodyDecay - 0.03));
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.22, t + 0.003);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    gain.gain.exponentialRampToValueAtTime(bodyPeak, t + 0.003);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + bodyDecay);
     osc.connect(gain);
     gain.connect(this.master);
     osc.start(t);
-    osc.stop(t + 0.14);
+    osc.stop(t + bodyDecay + 0.02);
   }
 
   // Plucked sub-bass at G2 with a closing lowpass filter — distinct timbre
@@ -2214,23 +2281,29 @@ export class Sound {
     }
 
     const t = this.ctx.currentTime;
+    const fundamentalHz = cfgN("bassPluck", "fundamentalHz", 98);
+    const filterStartHz = cfgN("bassPluck", "filterStartHz", 1400);
+    const filterEndHz = cfgN("bassPluck", "filterEndHz", 220);
+    const filterQ = cfgN("bassPluck", "filterQ", 6);
+    const peak = cfgN("bassPluck", "peak", 0.28);
+    const decay = cfgN("bassPluck", "decay", 0.45);
     const osc1 = this.ctx.createOscillator();
     const osc2 = this.ctx.createOscillator();
     osc1.type = "sawtooth";
     osc2.type = "triangle";
-    osc1.frequency.value = 98.0 * pitchRatio;
-    osc2.frequency.value = 98.3 * pitchRatio;
+    osc1.frequency.value = fundamentalHz * pitchRatio;
+    osc2.frequency.value = (fundamentalHz + 0.3) * pitchRatio;
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.Q.value = 6;
-    filter.frequency.setValueAtTime(1400, t);
-    filter.frequency.exponentialRampToValueAtTime(220, t + 0.4);
+    filter.Q.value = filterQ;
+    filter.frequency.setValueAtTime(filterStartHz, t);
+    filter.frequency.exponentialRampToValueAtTime(filterEndHz, t + decay * 0.89);
 
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.28, t + 0.006);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+    gain.gain.exponentialRampToValueAtTime(peak, t + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
 
     osc1.connect(filter);
     osc2.connect(filter);
@@ -2238,8 +2311,8 @@ export class Sound {
     gain.connect(this.master);
     osc1.start(t);
     osc2.start(t);
-    osc1.stop(t + 0.48);
-    osc2.stop(t + 0.48);
+    osc1.stop(t + decay + 0.03);
+    osc2.stop(t + decay + 0.03);
   }
 
   // Crunch played when a bassteroid is shot. Deep, gravelly, sub-200 Hz —
@@ -2350,21 +2423,27 @@ export class Sound {
     }
 
     const t = this.ctx.currentTime;
-    const fundamentalFreq = 1046.5; // C6
-    const partialRatios = [1, 2.005, 3.01];
+    const fundamentalFreq = cfgN("chime", "fundamentalHz", 1046.5);
+    const peakBase = cfgN("chime", "peak", 0.16);
+    const decayBase = cfgN("chime", "decay", 0.9);
+    const partialRatios = [
+      1,
+      cfgN("chime", "partial1Ratio", 2.005),
+      cfgN("chime", "partial2Ratio", 3.01),
+    ];
     for (let i = 0; i < partialRatios.length; i++) {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = "sine";
       osc.frequency.value = fundamentalFreq * partialRatios[i];
-      const peak = 0.16 / (i + 1);
+      const peak = peakBase / (i + 1);
       gain.gain.setValueAtTime(0.0001, t);
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.008);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.9 - i * 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(0.1, decayBase - i * 0.15));
       osc.connect(gain);
       gain.connect(this.master);
       osc.start(t);
-      osc.stop(t + 1.0);
+      osc.stop(t + decayBase + 0.1);
     }
   }
 
@@ -2373,15 +2452,22 @@ export class Sound {
   private playBell() {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    const fundamentalFreq = 220; // A3
-    const partialRatios = [1, 2.76, 5.4, 8.93];
+    const fundamentalFreq = cfgN("bell", "fundamentalHz", 220);
+    const peakBase = cfgN("bell", "peak", 0.22);
+    const decayBase = cfgN("bell", "decay", 1.4);
+    const partialRatios = [
+      1,
+      cfgN("bell", "partial1Ratio", 2.76),
+      cfgN("bell", "partial2Ratio", 5.4),
+      cfgN("bell", "partial3Ratio", 8.93),
+    ];
     for (let i = 0; i < partialRatios.length; i++) {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = "sine";
       osc.frequency.value = fundamentalFreq * partialRatios[i];
-      const peak = 0.22 / (i + 1.2);
-      const decay = 1.4 - i * 0.22;
+      const peak = peakBase / (i + 1.2);
+      const decay = Math.max(0.15, decayBase - i * 0.22);
       gain.gain.setValueAtTime(0.0001, t);
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
@@ -2446,20 +2532,25 @@ export class Sound {
   private playTink() {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    const partialFrequencies = [1760, 2637]; // A6, E7 (perfect fifth)
+    const peakBase = cfgN("tink", "peak", 0.18);
+    const decay = cfgN("tink", "decay", 0.4);
+    const partialFrequencies = [
+      cfgN("tink", "partial1Hz", 1760),
+      cfgN("tink", "partial2Hz", 2637),
+    ];
     for (let i = 0; i < partialFrequencies.length; i++) {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = "sine";
       osc.frequency.setValueAtTime(partialFrequencies[i], t);
-      const peak = 0.18 / (i + 1);
+      const peak = peakBase / (i + 1);
       gain.gain.setValueAtTime(0.0001, t);
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
       osc.connect(gain);
       gain.connect(this.master);
       osc.start(t);
-      osc.stop(t + 0.42);
+      osc.stop(t + decay + 0.02);
     }
   }
 

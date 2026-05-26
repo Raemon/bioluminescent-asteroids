@@ -220,7 +220,8 @@ html, body {
 #killed-row {
   display: block;
   margin-top: 18px;
-  max-width: min(92vw, 1100px);
+  width: 100vw;
+  max-width: 100vw;
   height: auto;
   filter: drop-shadow(0 0 14px rgba(106, 215, 255, 0.18));
   opacity: 0.95;

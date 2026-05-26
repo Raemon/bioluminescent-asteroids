@@ -1,0 +1,297 @@
+{
+  "_comment": "Auto-edited by /soundeditor. Hand-edits welcome. Each entry is { universal: {...}, semantic?: {...} }. Universal knobs apply post-fx via gain/playbackRate hints — semantic knobs are read directly inside Sound.ts.",
+  "_version": 1,
+  "sounds": {
+    "fire": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "bodyHz": 500,
+        "bodyPeak": 0.16,
+        "bodyDecay": 0.11,
+        "partialHz": 784,
+        "partialPeak": 0.07,
+        "partialDecay": 0.05,
+        "tickHz": 1600,
+        "tickQ": 1.2,
+        "tickPeak": 0.04,
+        "tickDecay": 0.02
+      }
+    },
+    "fireBeat": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "bodyHz": 130.8,
+        "bodyPeak": 0.38,
+        "bodyDecay": 0.24,
+        "subHz": 65.4,
+        "subPeak": 0.28,
+        "subDecay": 0.28,
+        "partialHz": 196,
+        "partialPeak": 0.12,
+        "partialDecay": 0.1,
+        "tickHz": 600,
+        "tickQ": 1,
+        "tickPeak": 0.09,
+        "tickDecay": 0.03
+      }
+    },
+    "explosionLarge": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "volume": 0.7,
+        "lowpassStart": 160,
+        "duration": 0.55
+      }
+    },
+    "explosionMedium": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "volume": 0.55,
+        "lowpassStart": 230,
+        "duration": 0.42
+      }
+    },
+    "explosionSmall": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "volume": 0.4,
+        "lowpassStart": 340,
+        "duration": 0.3
+      }
+    },
+    "thrust": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "death": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "waveClear": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "bassKick": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "startHz": 140,
+        "endHz": 55,
+        "sweepTime": 0.09,
+        "peak": 0.55,
+        "decay": 0.32
+      }
+    },
+    "bassPluck": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "fundamentalHz": 98,
+        "filterStartHz": 1400,
+        "filterEndHz": 220,
+        "filterQ": 6,
+        "peak": 0.28,
+        "decay": 0.45
+      }
+    },
+    "bassBoom": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "startHz": 180,
+        "endHz": 87.3,
+        "sweepTime": 0.06,
+        "peak": 0.5,
+        "decay": 0.42,
+        "subHz": 43.65,
+        "subPeak": 0.28,
+        "subDecay": 0.5
+      }
+    },
+    "bassSnap": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "noiseStartHz": 1700,
+        "noiseEndHz": 700,
+        "noiseQ": 1.1,
+        "noisePeak": 0.28,
+        "noiseDecay": 0.15,
+        "bodyStartHz": 330,
+        "bodyEndHz": 130.8,
+        "bodyPeak": 0.22,
+        "bodyDecay": 0.12
+      }
+    },
+    "bassHit": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "bassEcho": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "chime": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "fundamentalHz": 1046.5,
+        "partial1Ratio": 2.005,
+        "partial2Ratio": 3.01,
+        "peak": 0.16,
+        "decay": 0.9
+      }
+    },
+    "bell": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "fundamentalHz": 220,
+        "partial1Ratio": 2.76,
+        "partial2Ratio": 5.4,
+        "partial3Ratio": 8.93,
+        "peak": 0.22,
+        "decay": 1.4
+      }
+    },
+    "warble": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "comboTick": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "comboSparkle": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "tink": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      },
+      "semantic": {
+        "partial1Hz": 1760,
+        "partial2Hz": 2637,
+        "peak": 0.18,
+        "decay": 0.4
+      }
+    },
+    "powerup": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "shieldPop": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "pulsarHum": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "bgBeat": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "shockwaveCharge": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "shockwaveBoom": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "alienFireBig": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "alienFireMedium": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "alienFireSmall": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "alienHit": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "alienExplode": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
+    "cometNote": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    }
+  }
+}

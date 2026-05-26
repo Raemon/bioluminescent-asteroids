@@ -6,7 +6,7 @@ import { Shard, shatterAsteroid } from "./Shard";
 import { Starfield } from "./Starfield";
 import { Pulsar } from "./Pulsar";
 import { Input } from "./Input";
-import { Sound } from "./Sound";
+import { Sound, SoundName } from "./Sound";
 import { Canister, spawnCanister } from "./Canister";
 import { Comet, spawnComet } from "./Comet";
 import { Alien, AlienSize, ALIEN_FIRE_PERIOD_BEATS, spawnAlienAtEdge } from "./Alien";
@@ -28,14 +28,24 @@ const COMBO_POPUP_LIFE = 0.9;
 
 type GameState = "title" | "playing" | "paused" | "dying" | "gameover";
 
+// Per-kill record captured at the moment an enemy dies. Used by the
+// end-of-mission parade: each enemy is rendered at full size and laid out
+// along a beat-aligned timeline so its kill sound replays as the sprite
+// crosses the centre of the screen.
+type KilledSnapshot = {
+  full: HTMLCanvasElement; // full-size render with margin around the body
+  fullRadius: number; // visual radius (CSS px) of the enemy inside `full`
+  killSound: SoundName; // sound to play when this sprite crosses centre
+  maxHp: number; // determines beat spacing (maxHp/4 beats after)
+};
+
 // Combo grid is one quarter-note (0.5s = 120 BPM quarter), the smallest
 // beat slot any bassteroid can occupy after two splits. That keeps the
 // rhythm gate aligned with every potential bass hit the player can hear.
-// Window is ±150ms — wide enough to absorb the 50ms dt cap in main.ts plus
-// normal human timing slop, narrow enough that random spam-firing only
-// marks ~half of beats.
+// Window is ±80ms — wide enough to absorb the 50ms dt cap in main.ts plus
+// a little timing slop, narrow enough that on-beat play needs real timing.
 export const BEAT_GRID = 0.5;
-const BEAT_WINDOW = 0.15;
+const BEAT_WINDOW = 0.08;
 // On-beat kill multiplier equals the current beatCombo value. The combo
 // counts hits-in-a-row since the player primed the streak by firing on-beat;
 // combo=1 means "primed but no hits yet" (multiplier 1×, no bonus shown),
@@ -225,10 +235,24 @@ export class Game {
   muteEl: HTMLButtonElement;
   abortEl: HTMLButtonElement;
   killedRowEl: HTMLCanvasElement;
-  // Per-run trophy snapshots. Each entry is a small offscreen canvas of the
-  // enemy rendered at its representative pose, captured the moment it died.
+  // Per-run trophy snapshots. Each entry holds a full-size render of the
+  // enemy plus the sound it played when killed and its maxHp (used to pace
+  // the post-run parade — spacing is maxHp/4 beats after each sprite).
   // Cleared on startGame; rendered to #killed-row when the run ends.
-  killedSnapshots: HTMLCanvasElement[] = [];
+  killedSnapshots: KilledSnapshot[] = [];
+  // End-of-run parade animation state. parade* fields drive the sliding
+  // killed-row canvas: each entry has a beat-position along the timeline,
+  // we scroll the timeline leftward at PARADE_PX_PER_BEAT, and play each
+  // entry's kill sound the frame its centre crosses the canvas centre.
+  paradeActive = false;
+  paradeStartTime = 0; // ms (performance.now) when the parade began
+  paradeRafId: number | null = null;
+  // Cached layout: each entry's centre offset in beats from the first sprite,
+  // plus the canvas dimensions chosen for the parade.
+  paradeEntries: { snap: KilledSnapshot; beatOffset: number; played: boolean }[] = [];
+  paradeTotalBeats = 0;
+  paradeCanvasW = 0;
+  paradeCanvasH = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -377,6 +401,7 @@ export class Game {
     this.shards = [];
     this.canisters = [];
     this.killedSnapshots = [];
+    this.stopParade();
     this.killedRowEl.classList.add("hidden");
     this.sound.stopAllAlienDrones();
     this.sound.stopAllBassteroidDrones();
@@ -506,8 +531,8 @@ export class Game {
       this.cometSpawnAt = null;
     }
     const wave = this.wave;
-    // Total asteroid count grows by 1 every other wave: 4, 4, 5, 5, 6, 6, ...
-    const totalCount = 4 + Math.floor((wave - 1) / 2);
+    // Total asteroid count grows by 1 every other wave: 3, 3, 4, 4, 5, 5, ...
+    const totalCount = 3 + Math.floor((wave - 1) / 2);
 
     const activeSpecials = this.activeSpecialsForWave(wave);
     const normalCount = Math.max(0, totalCount - activeSpecials.length);
@@ -641,7 +666,7 @@ export class Game {
       let killed = false;
       for (const b of this.bullets) {
         if (b.life <= 0) continue;
-        if (!a.collidesWith(b.pos, b.effectiveRadius())) continue;
+        if (!a.collidesWith(b.pos, b.hitRadius())) continue;
         if (!b.pierce) b.life = 0;
         const isOnBeatHit = this.isInBeatWindow(this.beatTime) || b.onBeat;
         const { killed: alienKilled } = a.applyDamage();
@@ -670,7 +695,7 @@ export class Game {
         this.sound.play("alienExplode");
         this.sound.stopAlienDrone(a);
         this.emitAlienExplosion(a);
-        this.snapshotAlienKill(a);
+        this.snapshotAlienKill(a, "alienExplode");
         killed = true;
         break;
       }
@@ -1194,7 +1219,7 @@ export class Game {
       let killed = false;
       for (const b of this.bullets) {
         if (b.life <= 0) continue;
-        if (!a.collidesWith(b.pos, b.effectiveRadius())) continue;
+        if (!a.collidesWith(b.pos, b.hitRadius())) continue;
         // Pierce bullets stay alive after a hit so a single shot can punch
         // through a row of asteroids. Their `life` timer still expires
         // normally, so they don't last forever.
@@ -1236,10 +1261,13 @@ export class Game {
         }
         this.score += scoreEarned;
         if (a.isBass()) this.sound.play("bassEcho");
-        this.sound.play(this.hitSoundFor(a));
+        const asteroidHit = this.hitSoundFor(a);
+        this.sound.play(asteroidHit);
         this.emitExplosion(a, isOnBeatHit);
         if (a.isBass()) this.sound.stopBassteroidDrone(a);
-        this.snapshotAsteroidKill(a);
+        // Record bass kills under bassEcho (the "killing" voice), everything
+        // else under the hit-sound mapped to its kind/size.
+        this.snapshotAsteroidKill(a, a.isBass() ? "bassEcho" : asteroidHit);
         const children = a.split(b.vel);
         for (const c of children) {
           if (a.isBass()) {
@@ -1313,7 +1341,7 @@ export class Game {
       let hit = false;
       for (const b of this.bullets) {
         if (b.life <= 0) continue;
-        if (!c.collidesWith(b.pos, b.effectiveRadius())) continue;
+        if (!c.collidesWith(b.pos, b.hitRadius())) continue;
         if (!b.pierce) b.life = 0;
         this.explodeCanister(c);
         hit = true;
@@ -1471,26 +1499,21 @@ export class Game {
     }
   }
 
-  // Snapshot a freshly-killed enemy into a small offscreen canvas, sized so
-  // the enemy's natural radius fills most of the trophy tile. The thumbnail
-  // is captured at a frozen rotation/state so the post-game lineup reads as
-  // a uniform parade of silhouettes regardless of where they were in the
-  // field when they died. Each tile keeps the enemy's hue/kind so the row
-  // shows the actual variety of what the player took down this run.
-  snapshotAsteroidKill(a: Asteroid) {
-    const tile = 64;
-    const margin = 6;
+  // Snapshot a freshly-killed enemy at its NATURAL radius into a square
+  // offscreen canvas. The post-mission parade slides these sprites across
+  // the screen at full size, so we render once at the moment of death
+  // (frozen pose, no mid-flash) and replay later. We also stash the kill
+  // sound and maxHp so the parade can re-play the sound and pace its
+  // spacing by maxHp/4 beats per entry.
+  snapshotAsteroidKill(a: Asteroid, killSound: SoundName) {
+    const margin = 8;
+    const tile = Math.ceil(a.radius * 2 + margin * 2);
     const c = document.createElement("canvas");
     c.width = tile;
     c.height = tile;
     const cx = c.getContext("2d");
     if (!cx) return;
-    const drawRadius = tile / 2 - margin;
-    const scale = drawRadius / a.radius;
     cx.translate(tile / 2, tile / 2);
-    cx.scale(scale, scale);
-    // Freeze visual state so the snapshot doesn't show mid-flash or a half
-    // ruptured body. Save and restore the live values around the render call.
     const prevPos = a.pos;
     const prevRot = a.rotation;
     const prevFlash = a.flashAmount;
@@ -1504,21 +1527,23 @@ export class Game {
     a.rotation = prevRot;
     a.flashAmount = prevFlash;
     a.beatFlash = prevBeatFlash;
-    this.killedSnapshots.push(c);
+    this.killedSnapshots.push({
+      full: c,
+      fullRadius: a.radius,
+      killSound,
+      maxHp: a.maxHp,
+    });
   }
 
-  snapshotAlienKill(al: Alien) {
-    const tile = 64;
-    const margin = 6;
+  snapshotAlienKill(al: Alien, killSound: SoundName) {
+    const margin = 8;
+    const tile = Math.ceil(al.radius * 2 + margin * 2);
     const c = document.createElement("canvas");
     c.width = tile;
     c.height = tile;
     const cx = c.getContext("2d");
     if (!cx) return;
-    const drawRadius = tile / 2 - margin;
-    const scale = drawRadius / al.radius;
     cx.translate(tile / 2, tile / 2);
-    cx.scale(scale, scale);
     const prevPos = al.pos;
     const prevRot = al.rotation;
     const prevFlash = al.flashAmount;
@@ -1532,43 +1557,116 @@ export class Game {
     al.rotation = prevRot;
     al.flashAmount = prevFlash;
     al.fireFlash = prevFire;
-    this.killedSnapshots.push(c);
+    this.killedSnapshots.push({
+      full: c,
+      fullRadius: al.radius,
+      killSound,
+      maxHp: al.maxHp,
+    });
   }
 
+  // End-of-mission parade: render every killed enemy at full size in a
+  // horizontal line that scrolls past the centre of the screen. Each entry
+  // plays its kill sound the moment it crosses centre, and the next entry
+  // is spaced (prev.maxHp / 4) beats behind — i.e. the number of on-rhythm
+  // shots it would have taken to kill the previous enemy. So a 16-HP
+  // bassteroid leaves 4 beats of empty space before the next sound fires.
   renderKilledRow() {
+    this.stopParade();
     const canvas = this.killedRowEl;
     if (this.killedSnapshots.length === 0) {
       canvas.classList.add("hidden");
       return;
     }
-    const tile = 64;
-    const gap = 10;
-    const padX = 16;
-    const padY = 12;
-    const maxRowWidth = Math.min(window.innerWidth * 0.9, 1080);
-    const tilesPerRow = Math.max(1, Math.floor((maxRowWidth - padX * 2 + gap) / (tile + gap)));
-    const total = this.killedSnapshots.length;
-    const rows = Math.max(1, Math.ceil(total / tilesPerRow));
-    const cols = Math.min(total, tilesPerRow);
+    const entries: { snap: KilledSnapshot; beatOffset: number; played: boolean }[] = [];
+    let cursor = 0;
+    for (const snap of this.killedSnapshots) {
+      entries.push({ snap, beatOffset: cursor, played: false });
+      // Space AFTER this entry is (maxHp / 4) beats — that is, how many
+      // on-rhythm shots it would have taken to kill it.
+      cursor += Math.max(0.25, snap.maxHp / 4);
+    }
+    this.paradeEntries = entries;
+    this.paradeTotalBeats = cursor;
+
+    // Canvas spans the viewport horizontally and is tall enough to fit the
+    // largest enemy (boss large = 160 radius → 320px diameter) plus padding.
+    const cssW = Math.max(320, window.innerWidth);
+    const cssH = 360;
     const dpr = window.devicePixelRatio || 1;
-    const cssW = padX * 2 + cols * tile + (cols - 1) * gap;
-    const cssH = padY * 2 + rows * tile + (rows - 1) * gap;
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     canvas.style.width = `${cssW}px`;
     canvas.style.height = `${cssH}px`;
+    this.paradeCanvasW = cssW;
+    this.paradeCanvasH = cssH;
+    canvas.classList.remove("hidden");
+
+    this.paradeActive = true;
+    this.paradeStartTime = performance.now();
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssW, cssH);
-    for (let i = 0; i < total; i++) {
-      const r = Math.floor(i / tilesPerRow);
-      const c = i % tilesPerRow;
-      const x = padX + c * (tile + gap);
-      const y = padY + r * (tile + gap);
-      ctx.drawImage(this.killedSnapshots[i], x, y, tile, tile);
+    const step = () => {
+      if (!this.paradeActive) return;
+      this.tickParade(ctx);
+      this.paradeRafId = requestAnimationFrame(step);
+    };
+    this.paradeRafId = requestAnimationFrame(step);
+  }
+
+  // Stops the parade animation loop and resets state. Called whenever we
+  // re-render the killed row (new game over / abort) or start a fresh run.
+  stopParade() {
+    if (this.paradeRafId !== null) {
+      cancelAnimationFrame(this.paradeRafId);
+      this.paradeRafId = null;
     }
-    canvas.classList.remove("hidden");
+    this.paradeActive = false;
+    this.paradeEntries = [];
+    this.paradeTotalBeats = 0;
+  }
+
+  // One frame of the parade. Scrolls the timeline left at PX_PER_BEAT and
+  // plays each entry's kill sound as its centre crosses the canvas centre.
+  tickParade(ctx: CanvasRenderingContext2D) {
+    const PX_PER_BEAT = 140;
+    const elapsedSec = (performance.now() - this.paradeStartTime) / 1000;
+    const elapsedBeats = elapsedSec / BEAT_GRID;
+    const cssW = this.paradeCanvasW;
+    const cssH = this.paradeCanvasH;
+    const centreX = cssW / 2;
+    const centreY = cssH / 2;
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    // Pre-roll: the first sprite enters from the right edge and travels
+    // until its centre meets centreX. That distance is (cssW - centreX) =
+    // cssW/2 → cssW/(2*PX_PER_BEAT) beats. Subtract this from elapsedBeats
+    // so beatOffset=0 lines up with "sprite at centre".
+    const preRollBeats = cssW / (2 * PX_PER_BEAT);
+    const t = elapsedBeats - preRollBeats;
+
+    // Each entry's centre starts off the right edge at t = -preRoll and
+    // scrolls leftward, crossing centreX at t = beatOffset.
+    for (const e of this.paradeEntries) {
+      const x = centreX + (e.beatOffset - t) * PX_PER_BEAT;
+      const halfW = e.snap.full.width / 2;
+      if (!e.played && x <= centreX) {
+        e.played = true;
+        this.sound.play(e.snap.killSound);
+      }
+      if (x - halfW > cssW || x + halfW < 0) continue;
+      ctx.drawImage(e.snap.full, x - halfW, centreY - e.snap.full.height / 2);
+    }
+
+    // Parade ends once the final entry has scrolled fully off the left.
+    const last = this.paradeEntries[this.paradeEntries.length - 1];
+    if (last) {
+      const lastX = centreX + (last.beatOffset - t) * PX_PER_BEAT;
+      if (lastX + last.snap.full.width / 2 < 0) {
+        this.paradeActive = false;
+      }
+    }
   }
 
   killShip() {
@@ -1728,7 +1826,13 @@ export class Game {
     for (const ab of this.alienBullets) ab.render(ctx);
     for (const b of this.bullets) b.render(ctx);
     this.particles.render(ctx);
-    this.ship.renderReticules(ctx, BEAT_GRID, this.w, this.h);
+    this.ship.renderReticules(ctx, BEAT_GRID, this.w, this.h, [
+      ...this.asteroids,
+      ...this.comets,
+      ...this.aliens,
+      ...this.alienBullets,
+      ...this.canisters,
+    ]);
     this.ship.render(ctx, this.time, this.currentBeatPulse());
     this.renderComboPopups(ctx);
 

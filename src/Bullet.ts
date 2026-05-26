@@ -15,8 +15,8 @@ export class Bullet {
   vel: Vec;
   life: number;
   maxLife: number;
-  // Base radius before any on-beat / pierce sizing. Non-beat shots render
-  // and collide at this radius; on-beat shots render slightly larger.
+  // Base radius for the visible core. Collision uses hitRadius(), which is
+  // larger so shots inside the glow register as hits.
   radius = 1.8;
   trail: Vec[] = [];
   // True when fired within the on-beat window. Drives a deeper-blue, larger
@@ -40,10 +40,16 @@ export class Bullet {
     return this.onBeat ? BULLET_DAMAGE_BEAT : BULLET_DAMAGE_BASE;
   }
 
-  // Effective collision/visual radius. On-beat shots are larger than the
-  // base — both visually (heft) and as a small aim-assist for rhythm play.
+  // Visual core radius. On-beat shots render larger; hitRadius() scales with
+  // this so the collision box matches the visible glow.
   effectiveRadius(): number {
-    return this.onBeat ? this.radius * 1.7 : this.radius;
+    return this.onBeat ? this.radius * 2.38 : this.radius;
+  }
+
+  // Collision radius — larger than the visible core so glancing shots that
+  // look like they should connect (inside the glow) actually register.
+  hitRadius(): number {
+    return this.effectiveRadius() * 2.5;
   }
 
   update(dt: number, w: number, h: number) {
