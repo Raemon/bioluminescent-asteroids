@@ -1101,6 +1101,24 @@ export class Game {
         this.showTitle();
       }
       for (const a of this.asteroids) a.update(dt, this.w, this.h);
+      // Keep the bass clock running so any surviving bassteroids still hit
+      // their downbeat — but instead of just flashing, each beat detonates
+      // the asteroid that fired it. The field goes out one voice at a time,
+      // in rhythm. Non-bass rocks have no scheduled noise and drift on.
+      this.beatTime += dt;
+      let anyBassExploded = false;
+      for (const a of this.asteroids) {
+        if (!a.isBass()) continue;
+        if (this.beatTime < a.nextBeatAt) continue;
+        const sound = BASS_KIND_SOUND[a.kind as "bassA" | "bassB" | "bassC" | "bassD"];
+        const pitchRatio = BASS_SPLIT_PITCH_RATIO[a.splitLevel] ?? 1;
+        this.sound.play(sound, pitchRatio);
+        this.sound.stopBassteroidDrone(a);
+        a.hp = 0;
+        this.emitExplosion(a, false);
+        anyBassExploded = true;
+      }
+      if (anyBassExploded) this.asteroids = this.asteroids.filter((a) => !(a.isBass() && a.hp <= 0));
       for (const s of this.shards) s.update(dt);
       this.shards = this.shards.filter((s) => s.life > 0);
       this.particles.update(dt);

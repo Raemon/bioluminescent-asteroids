@@ -13,7 +13,6 @@ const TRIDENT_SPREAD = 0.21;
 const RETICULE_LINE_DASH: [number, number] = [4, 4];
 const RETICULE_DASH_HSL = "220, 100%, 100%";
 const RETICULE_HITBOX_ALPHA = 0.28;
-const RETICULE_RADAR_ALPHA = 0.2;
 const RETICULE_COOLDOWN_DIM = 0.3;
 
 const RETICULE_HITBOX_PULSE_MAX = 1.0;
@@ -31,6 +30,10 @@ const RETICULE_TRAJECTORY_PULSE_MIN_ALPHA = 0.2
 
 const RADAR_CONE_HALF_ANGLE = 0.60;
 const RADAR_CONE_LENGTH = 500;
+// Cone fill brightness at the apex; the gradient fades from this to 0 at the tip.
+const RADAR_CONE_FILL_ALPHA = 0.05;
+// Pulse swing applied on top of RADAR_CONE_FILL_ALPHA (0 = no pulse, 1 = full).
+const RADAR_CONE_FILL_PULSE_AMOUNT = 0.1;
 
 const BULLET_HIT_RADIUS_ON_BEAT = 1.8 * 2.38 * 2.5;
 const BULLET_HIT_RADIUS_OFF_BEAT = 1.8 * 2.5;
@@ -330,25 +333,28 @@ export class Ship {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Radar cone — two dashed edges emanate from the ship; far edge invisible.
-    // Each edge fades from opacity 1 at the ship to 0 at the tip.
+    // Radar cone — filled triangle with a gradient along the axis: bright at
+    // the ship, fades to fully transparent at the far edge. The side-tip
+    // corners project onto the axis at length*cos(halfAngle), so the
+    // gradient's 0-alpha stop sits there to guarantee the corners hit 0.
     ctx.save();
     ctx.shadowBlur = 0;
-    ctx.setLineDash(RETICULE_LINE_DASH);
-    const coneAlpha = RETICULE_RADAR_ALPHA * radarPulse * 5; // boost: cone is sparser than the old disc
-    const coneAlphaClamped = Math.min(1, coneAlpha);
-    const drawConeEdge = (endX: number, endY: number) => {
-      const grad = ctx.createLinearGradient(coneApex.x, coneApex.y, endX, endY);
-      grad.addColorStop(0, `hsla(${RETICULE_DASH_HSL}, ${coneAlphaClamped})`);
-      grad.addColorStop(1, `hsla(${RETICULE_DASH_HSL}, 0)`);
-      ctx.strokeStyle = grad;
-      ctx.beginPath();
-      ctx.moveTo(coneApex.x, coneApex.y);
-      ctx.lineTo(endX, endY);
-      ctx.stroke();
-    };
-    drawConeEdge(leftEdgeEnd.x, leftEdgeEnd.y);
-    drawConeEdge(rightEdgeEnd.x, rightEdgeEnd.y);
+    ctx.setLineDash([]);
+    const axisFadeDist = RADAR_CONE_LENGTH * Math.cos(RADAR_CONE_HALF_ANGLE);
+    const axisEndX = coneApex.x + Math.cos(this.heading) * axisFadeDist;
+    const axisEndY = coneApex.y + Math.sin(this.heading) * axisFadeDist;
+    const pulseMix = 1 - RADAR_CONE_FILL_PULSE_AMOUNT + RADAR_CONE_FILL_PULSE_AMOUNT * radarPulse;
+    const coneAlpha = Math.min(1, RADAR_CONE_FILL_ALPHA * pulseMix);
+    const coneGrad = ctx.createLinearGradient(coneApex.x, coneApex.y, axisEndX, axisEndY);
+    coneGrad.addColorStop(0, `hsla(${RETICULE_DASH_HSL}, ${coneAlpha})`);
+    coneGrad.addColorStop(1, `hsla(${RETICULE_DASH_HSL}, 0)`);
+    ctx.fillStyle = coneGrad;
+    ctx.beginPath();
+    ctx.moveTo(coneApex.x, coneApex.y);
+    ctx.lineTo(leftEdgeEnd.x, leftEdgeEnd.y);
+    ctx.lineTo(rightEdgeEnd.x, rightEdgeEnd.y);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
 
     // Trajectory previews for targets inside the cone.
