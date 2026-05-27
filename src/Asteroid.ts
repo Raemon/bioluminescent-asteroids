@@ -1031,6 +1031,10 @@ export class Asteroid {
         const child = new Asteroid({ ...this.pos }, fromAngle(a, speedMag), childSize, this.hue, this.kind, chunks[i]);
         child.splitLevel = childLevel;
         child.measureOffset = childOffsets[i];
+        // Broken pieces tumble. Mediums (gen-1) drift with a gentle wobble;
+        // smalls (gen-2) — the lightest fragments — spin noticeably faster.
+        const spinMag = childSize === "medium" ? rand(0.4, 0.9) : rand(1.4, 2.6);
+        child.rotSpeed = spinMag * (Math.random() < 0.5 ? -1 : 1);
         fragmentList.push(child);
       }
       return fragmentList;
