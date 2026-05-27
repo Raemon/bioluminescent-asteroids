@@ -5,6 +5,15 @@ import type { SilhouetteSample } from "./Asteroid";
 // or smalls — at which point its drone voice fades in and the piece should
 // "sing" outward rather than leave a wake behind it.
 //
+// Design role — this is the *non-rhythmic* counterpart to the bassteroid's
+// own visual: the body sprite already throbs on the beat (the rhythmic layer),
+// so the nebula must read as continuous ambient hum between beats. Anything
+// that feels like a second pulse here would compete with the body's pulse
+// and muddy the visual rhythm. Hence the five-band incommensurate breath
+// (see BREATH_FREQS / BREATH_RATES) and the deliberate absence of a per-puff
+// amplitude envelope — the breath is constant across each puff's life, only
+// the puff's overall opacity envelopes in and out.
+//
 // Each wave is a closed polygon shaped like a simplified silhouette of the
 // chunk it came from (see buildBassSilhouette in Asteroid.ts). At emission
 // the wave inherits a fraction (VELOCITY_INHERIT) of the fragment's
@@ -61,7 +70,13 @@ import type { SilhouetteSample } from "./Asteroid";
 //   allocation after construction. Path is built with beginPath/moveTo/
 //   lineTo on a pre-cached SilhouetteSample list (cos/sin already baked).
 
-const STRIDE = 6; // originX, originY, age, snapshotRotation, inheritedVelX, inheritedVelY
+// Per-wave packed record:
+//   0: originX        1: originY
+//   2: age            3: snapshotRotation
+//   4: inheritedVelX  5: inheritedVelY
+//   6: speed          7: velAngle (unit-vector angle of inherited velocity)
+//   8: birthSeed      (per-wave randomised phase for the breath/wobble terms)
+const STRIDE = 9;
 const CAPACITY = 16;
 
 // Fraction of the fragment's velocity each wave inherits at emission. < 1 so
@@ -69,6 +84,52 @@ const CAPACITY = 16;
 // the fragment pulls ahead, leaving a soft cluster of breathing nebulae in
 // its wake rather than a stationary ring.
 const VELOCITY_INHERIT = 0.82;
+
+// How far back along the fragment's velocity vector each new wave is born,
+// in units of the fragment's current radius. Slight offset makes the puffs
+// emerge from behind the body like a wake rather than directly on top of it.
+const EMIT_BACK_OFFSET = 0.55;
+
+// Anisotropic stretch: the silhouette is elongated along the velocity vector
+// (head + tail). STRETCH_AXIAL is the multiplier applied along velocity, and
+// STRETCH_LATERAL across it. The asymmetry plus a small head/tail bias gives
+// a comet/teardrop hint — the wave "trails" the fragment rather than radiating
+// as a perfect circle. Effect scales with speed (see render).
+const STRETCH_AXIAL_MAX = 1.55;
+const STRETCH_LATERAL_MIN = 0.78;
+// Reference speed (px/s) at which the stretch reaches roughly its full
+// strength. Below this the wave is nearly round; above it the teardrop
+// shape stays bounded.
+const STRETCH_REF_SPEED = 140;
+
+// Per-vertex breath — the silhouette radius is modulated by a sum of five
+// sinusoids in (angle, time). This is the "ambient noise" layer that has
+// to feel distinct from the rhythmic body-pulse the bassteroid already
+// carries; the design goals here are explicitly:
+//
+//   * Continuous, not rhythmic. The bassteroid sprite already throbs on
+//     beat — this nebula must be unrelated low-amplitude shimmer, the
+//     "between-beats hum" of the drone, not another beat marker.
+//   * No global envelope. The breath amplitude is constant over a puff's
+//     life (no per-puff swell), so the effect reads as ongoing background
+//     texture rather than a one-shot pulse.
+//   * Avoid any felt period. Frequencies are irrationally related (φ-scaled)
+//     so the sum never closes into a recognisable beat. Spatial frequencies
+//     are mid-range (3–13 around the silhouette) and temporal rates sit at
+//     3–6 Hz — fast enough to read as shimmer rather than as a slow throb.
+//   * Per-wave decorrelation. Phase is offset by birthSeed so neighbouring
+//     puffs aren't shimmering in lockstep — the cluster reads as several
+//     independent voices, not one coherent oscillator.
+//
+// Five band-limited sinusoids approximate noise (Karplus-style additive
+// synthesis) more convincingly than three; amplitudes drop with frequency
+// so the high-frequency shimmer adds detail without dominating the shape.
+const BREATH_FREQS = [3, 5, 7, 11, 13];
+const BREATH_AMPS = [0.060, 0.048, 0.034, 0.022, 0.016];
+// Hz at which each breath term sweeps its phase. Mid-band rates (~3–6 Hz)
+// sit above the beat range so the effect doesn't accidentally lock to the
+// drone tempo. Ratios are golden-ratio scaled to stay incommensurate.
+const BREATH_RATES = [3.1, 3.7, 4.6, 5.3, 6.1];
 
 // Per-kind tuning. Lower-pitched voices emit slower and grow into bigger
 // radii (deep sound = broad waves); higher-pitched voices emit faster with
@@ -175,8 +236,21 @@ export class SoundwaveRadiator {
 
   private emitWave(x: number, y: number, vx: number, vy: number) {
     const base = this.head * STRIDE;
-    this.buf[base] = x;
-    this.buf[base + 1] = y;
+    const speed = Math.hypot(vx, vy);
+    const velAngle = speed > 1e-3 ? Math.atan2(vy, vx) : 0;
+    // Offset emission backwards along velocity so the new puff is born in
+    // the wake rather than on top of the fragment. Falls back to the raw
+    // position if the fragment is essentially stationary.
+    let ox = x;
+    let oy = y;
+    if (speed > 1e-3) {
+      const ux = vx / speed;
+      const uy = vy / speed;
+      ox -= ux * EMIT_BACK_OFFSET * 16; // 16 ≈ small per-radius nudge; ship-scale handled in render
+      oy -= uy * EMIT_BACK_OFFSET * 16;
+    }
+    this.buf[base] = ox;
+    this.buf[base + 1] = oy;
     this.buf[base + 2] = 0;
     // Small per-wave rotation so successive waves don't stamp on top of
     // each other rigidly — gives a subtle "the resonance shape rotates a
@@ -184,6 +258,9 @@ export class SoundwaveRadiator {
     this.buf[base + 3] = Math.random() * Math.PI * 2;
     this.buf[base + 4] = vx * VELOCITY_INHERIT;
     this.buf[base + 5] = vy * VELOCITY_INHERIT;
+    this.buf[base + 6] = speed;
+    this.buf[base + 7] = velAngle;
+    this.buf[base + 8] = Math.random() * Math.PI * 2;
     this.head = (this.head + 1) % CAPACITY;
     if (this.count < CAPACITY) this.count += 1;
   }
@@ -241,9 +318,41 @@ export class SoundwaveRadiator {
       const ox = buf[off];
       const oy = buf[off + 1];
       const rot = buf[off + 3];
+      const speed = buf[off + 6];
+      const velAngle = buf[off + 7];
+      const seed = buf[off + 8];
       const cosR = Math.cos(rot);
       const sinR = Math.sin(rot);
       const polyR = scaleRadius * ringScale;
+
+      // --- Anisotropic stretch (teardrop along velocity vector).
+      // The stretch is bounded by speed via a soft saturation curve. At rest
+      // the wave is round; moving, it elongates along velocity and tucks
+      // laterally — like a smoke puff being dragged by airflow. The shape
+      // also widens slightly behind the body and narrows ahead so the puff
+      // has a head/tail asymmetry (a real "wake" cue, not a mirrored ellipse).
+      const speedT = speed / (speed + STRETCH_REF_SPEED);
+      const axial = 1 + (STRETCH_AXIAL_MAX - 1) * speedT;
+      const lateral = 1 - (1 - STRETCH_LATERAL_MIN) * speedT;
+      const cosV = Math.cos(velAngle);
+      const sinV = Math.sin(velAngle);
+      // tailBias grows the trailing half of the puff and shrinks the leading
+      // half. Scaled by speedT so the asymmetry only shows when moving.
+      const tailBias = 0.25 * speedT;
+
+      // Per-wave breath phases. Each term gets an independent phase offset
+      // built from the wave's seed × an irrational multiplier — keeps the
+      // five terms decorrelated and the cluster from shimmering in unison.
+      // No per-puff envelope: breath amplitude is constant over the wave's
+      // life so the effect reads as continuous ambient texture, not as a
+      // second pulse layered on top of the bassteroid's beat throb.
+      const tAbs = tSeconds;
+      const TAU2 = Math.PI * 2;
+      const bp0 = tAbs * BREATH_RATES[0] * TAU2 + seed * 1.000;
+      const bp1 = tAbs * BREATH_RATES[1] * TAU2 + seed * 1.618;
+      const bp2 = tAbs * BREATH_RATES[2] * TAU2 + seed * 2.414;
+      const bp3 = tAbs * BREATH_RATES[3] * TAU2 + seed * 3.302;
+      const bp4 = tAbs * BREATH_RATES[4] * TAU2 + seed * 4.236;
 
       // Blurry feathered edge: stack the concentric silhouette fills (see
       // FEATHER_SCALES / FEATHER_ALPHAS at module scope). Outermost (faintest,
@@ -258,8 +367,42 @@ export class SoundwaveRadiator {
           // Rotate the silhouette unit-vector by `rot`.
           const ux = sample.ax * cosR - sample.ay * sinR;
           const uy = sample.ax * sinR + sample.ay * cosR;
-          const px = ox + ux * sample.r * ringR;
-          const py = oy + uy * sample.r * ringR;
+
+          // Per-vertex breath: sum of five band-limited sinusoids in
+          // vertex-angle. Approximates the look of an FFT bin visualizer
+          // riding the silhouette while avoiding any felt periodicity.
+          const va = Math.atan2(uy, ux);
+          const breath =
+            BREATH_AMPS[0] * Math.sin(BREATH_FREQS[0] * va + bp0) +
+            BREATH_AMPS[1] * Math.sin(BREATH_FREQS[1] * va + bp1) +
+            BREATH_AMPS[2] * Math.sin(BREATH_FREQS[2] * va + bp2) +
+            BREATH_AMPS[3] * Math.sin(BREATH_FREQS[3] * va + bp3) +
+            BREATH_AMPS[4] * Math.sin(BREATH_FREQS[4] * va + bp4);
+          const r = sample.r * (1 + breath) * ringR;
+
+          // Convert the vertex into the velocity-aligned frame, apply
+          // axial/lateral stretch and the trailing tail bias, then rotate
+          // back to world coordinates.
+          let lx = ux * r;
+          let ly = uy * r;
+          if (speedT > 0.001) {
+            // Project (lx, ly) onto velocity axes.
+            const along = lx * cosV + ly * sinV;
+            const across = -lx * sinV + ly * cosV;
+            // Stretch.
+            let alongS = along * axial;
+            const acrossS = across * lateral;
+            // Tail bias: behind the centre (along < 0) is stretched more,
+            // ahead (along > 0) compressed. Same sign convention as velocity.
+            if (along < 0) alongS *= 1 + tailBias;
+            else alongS *= 1 - tailBias * 0.6;
+            // Rotate back: (alongS, acrossS) in velocity frame → world.
+            lx = alongS * cosV - acrossS * sinV;
+            ly = alongS * sinV + acrossS * cosV;
+          }
+
+          const px = ox + lx;
+          const py = oy + ly;
           if (s === 0) ctx.moveTo(px, py);
           else ctx.lineTo(px, py);
         }
