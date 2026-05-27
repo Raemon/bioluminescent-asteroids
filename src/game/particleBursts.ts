@@ -1,0 +1,193 @@
+import { Vec, fromAngle, rand, TAU } from "../vec";
+import { ParticleSystem } from "../Particle";
+import { Asteroid } from "../Asteroid";
+import { Comet } from "../Comet";
+import { Alien } from "../Alien";
+import { Canister } from "../Canister";
+import { Shard, shatterAsteroid } from "../Shard";
+
+// Why: every burst in the game shares this shape; differences live in tuning, not code structure.
+export type BurstSpec = {
+  pos: Vec;
+  count: number;
+  speedRange: [number, number];
+  lifeRange: [number, number];
+  maxLife: number;
+  sizeRange: [number, number];
+  hue: number;
+  hueSpread: [number, number];
+  drag: number;
+  angleMode: "random" | "uniform";
+  angleJitter: number;
+};
+
+// Why: one emit-loop replaces ~8 duplicated Array.from + emit blocks across kill/pop sites.
+export const emitBurst = (particles: ParticleSystem, s: BurstSpec) => {
+  for (let i = 0; i < s.count; i++) {
+    const angle = s.angleMode === "uniform"
+      ? (i / s.count) * TAU + rand(-s.angleJitter, s.angleJitter)
+      : rand(0, TAU);
+    const speed = rand(s.speedRange[0], s.speedRange[1]);
+    particles.emit({
+      pos: { ...s.pos },
+      vel: fromAngle(angle, speed),
+      life: rand(s.lifeRange[0], s.lifeRange[1]),
+      maxLife: s.maxLife,
+      size: rand(s.sizeRange[0], s.sizeRange[1]),
+      hue: s.hue + rand(s.hueSpread[0], s.hueSpread[1]),
+      shrink: 1,
+      drag: s.drag,
+    });
+  }
+};
+
+// Why: gold ring shared by every on-beat impact so the rhythm bonus reads consistently.
+const emitOnBeatSparkleRing = (particles: ParticleSystem, pos: Vec, count: number, speedRange: [number, number], lifeMax: number, sizeRange: [number, number], drag: number) => {
+  emitBurst(particles, {
+    pos, count,
+    speedRange,
+    lifeRange: [lifeMax * 0.5, lifeMax],
+    maxLife: lifeMax,
+    sizeRange,
+    hue: 48, hueSpread: [-6, 12],
+    drag,
+    angleMode: "uniform", angleJitter: 0.05,
+  });
+};
+
+// Why: shards carry "rock physically breaks"; particles + sparkle reinforce on-beat rhythm credit.
+export const emitExplosion = (particles: ParticleSystem, shards: Shard[], a: Asteroid, onBeat: boolean) => {
+  for (const s of shatterAsteroid(a)) shards.push(s);
+  const baseCount = a.size === "large" ? 60 : a.size === "medium" ? 40 : 24;
+  emitBurst(particles, {
+    pos: a.pos,
+    count: onBeat ? Math.round(baseCount * 1.6) : baseCount,
+    speedRange: [80, 320],
+    lifeRange: [0.5, 1.4], maxLife: 1.4,
+    sizeRange: [1, 2.6],
+    hue: a.hue, hueSpread: [-15, 25],
+    drag: 1.5,
+    angleMode: "random", angleJitter: 0,
+  });
+  if (onBeat) {
+    emitOnBeatSparkleRing(particles, a.pos, 18, [220, 360], 0.7, [1.6, 2.4], 1.8);
+  }
+};
+
+// Why: heavier dark debris reads "cracked, not killed" — distinguishes a chip from a kill.
+export const emitCrackParticles = (particles: ParticleSystem, a: Asteroid, onBeat: boolean) => {
+  emitBurst(particles, {
+    pos: a.pos,
+    count: onBeat ? 14 : 9,
+    speedRange: [60, 180],
+    lifeRange: [0.35, 0.7], maxLife: 0.7,
+    sizeRange: [1.6, 2.8],
+    hue: a.hue, hueSpread: [-8, 12],
+    drag: 3.0,
+    angleMode: "random", angleJitter: 0,
+  });
+  if (onBeat) {
+    emitOnBeatSparkleRing(particles, a.pos, 8, [140, 220], 0.5, [1.4, 2.0], 2.2);
+  }
+};
+
+// Why: sparks + slow dust cloud reads "celestial" — distinguishes comet kill from rock kill.
+export const emitCometExplosion = (particles: ParticleSystem, c: Comet) => {
+  emitBurst(particles, {
+    pos: c.pos, count: 90,
+    speedRange: [160, 520],
+    lifeRange: [0.6, 1.6], maxLife: 1.6,
+    sizeRange: [1.4, 2.8],
+    hue: c.hue, hueSpread: [-15, 25],
+    drag: 1.2,
+    angleMode: "random", angleJitter: 0,
+  });
+  emitBurst(particles, {
+    pos: c.pos, count: 40,
+    speedRange: [40, 180],
+    lifeRange: [1.5, 3.0], maxLife: 3.0,
+    sizeRange: [2.0, 3.4],
+    hue: c.hue, hueSpread: [-40, 40],
+    drag: 0.7,
+    angleMode: "random", angleJitter: 0,
+  });
+};
+
+// Why: count scales with size so a 4-HP big saucer's death feels meatier than a 1-HP small one's.
+export const emitAlienExplosion = (particles: ParticleSystem, a: Alien) => {
+  const count = a.size === "big" ? 70 : a.size === "medium" ? 48 : 30;
+  emitBurst(particles, {
+    pos: a.pos, count,
+    speedRange: [80, 340],
+    lifeRange: [0.5, 1.2], maxLife: 1.2,
+    sizeRange: [1, 2.6],
+    hue: a.hue, hueSpread: [-15, 25],
+    drag: 1.4,
+    angleMode: "random", angleJitter: 0,
+  });
+};
+
+// Why: white = "wasted pod"; tints the destruction differently from the celebratory pickup burst.
+export const emitCanisterPop = (particles: ParticleSystem, c: Canister) => {
+  emitBurst(particles, {
+    pos: c.pos, count: 30,
+    speedRange: [120, 320],
+    lifeRange: [0.4, 0.9], maxLife: 0.9,
+    sizeRange: [1.2, 2.4],
+    hue: 0, hueSpread: [0, 0],
+    drag: 1.8,
+    angleMode: "random", angleJitter: 0,
+  });
+};
+
+// Why: canister-hue tint makes each pickup kind read visually distinct (vs. white "wasted" burst).
+export const emitCanisterPickup = (particles: ParticleSystem, c: Canister) => {
+  emitBurst(particles, {
+    pos: c.pos, count: 36,
+    speedRange: [80, 260],
+    lifeRange: [0.5, 1.0], maxLife: 1.0,
+    sizeRange: [1.4, 2.6],
+    hue: c.hue, hueSpread: [-10, 20],
+    drag: 1.6,
+    angleMode: "random", angleJitter: 0,
+  });
+};
+
+// Why: uniformly spaced ring reads as a deflected wavefront, not a chaotic kill explosion.
+export const emitShieldPop = (particles: ParticleSystem, pos: Vec) => {
+  emitBurst(particles, {
+    pos, count: 28,
+    speedRange: [180, 260],
+    lifeRange: [0.35, 0.65], maxLife: 0.65,
+    sizeRange: [1.6, 2.4],
+    hue: 200, hueSpread: [-8, 12],
+    drag: 1.8,
+    angleMode: "uniform", angleJitter: 0,
+  });
+};
+
+// Why: cyan-leaning hue ties debris to the ship's own hull palette so it reads as personal loss.
+export const emitShipDebris = (particles: ParticleSystem, pos: Vec) => {
+  emitBurst(particles, {
+    pos, count: 70,
+    speedRange: [60, 280],
+    lifeRange: [0.7, 1.6], maxLife: 1.6,
+    sizeRange: [1.2, 2.6],
+    hue: 195, hueSpread: [-10, 30],
+    drag: 1.2,
+    angleMode: "random", angleJitter: 0,
+  });
+};
+
+// Why: outward-radiating sparks sell the shockwave as physical mass, not a pure light effect.
+export const emitShockwaveSparks = (particles: ParticleSystem, pos: Vec) => {
+  emitBurst(particles, {
+    pos, count: 64,
+    speedRange: [280, 520],
+    lifeRange: [0.5, 1.1], maxLife: 1.1,
+    sizeRange: [1.4, 2.6],
+    hue: 200, hueSpread: [-10, 20],
+    drag: 0.9,
+    angleMode: "random", angleJitter: 0,
+  });
+};

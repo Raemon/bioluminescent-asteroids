@@ -1,0 +1,58 @@
+import type { Ship } from "../../Ship";
+import { Vec, add, mul, fromAngle, wrap, TAU } from "../../vec";
+import { computeConeFrame } from "./coneGeometry";
+import { paintConeBackground, paintRangeArcs } from "./radarCone";
+import { paintTrajectoryPreviews, ReticuleTarget } from "./trajectoryPreview";
+import { reticuleOverlapsAnyTarget, computeBaseHitAlpha, paintAimDiscs } from "./aimDisc";
+
+// Why: hitbox alpha breathes slowly so the disc feels alive even when no target is in range.
+const RETICULE_HITBOX_PULSE_MAX = 1.0;
+const RETICULE_HITBOX_PULSE_MIN = 0.75;
+const RETICULE_HITBOX_PULSE_PERIOD_SEC = 2.0;
+const RETICULE_RADAR_PULSE_MAX = 1;
+const RETICULE_RADAR_PULSE_MIN = 0.4;
+const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
+
+// Why: bind ship state to per-target memo so trajectory previews can track "first seen" across frames.
+type ReticuleState = { trajectoryFirstSeen: WeakMap<object, number> };
+
+// Why: position where a shot fired this frame would impact at the next beat — the aim "lock" point.
+const computeReticulePosition = (ship: Ship, beatGrid: number, w: number, h: number): Vec => {
+  const dir = fromAngle(ship.heading, 1);
+  const muzzle = add(ship.pos, mul(dir, ship.radius + 4));
+  const bulletVel = add(mul(dir, ship.bulletSpeed), mul(ship.vel, 0.4));
+  return wrap(add(muzzle, mul(bulletVel, beatGrid)), w, h);
+};
+
+// Why: cosine envelope between min/max produces a smooth, predictable visual pulse over time.
+const cosineEnvelope = (beatTime: number, period: number, min: number, max: number): number => {
+  const v = 0.5 + 0.5 * Math.cos((beatTime / period) * TAU);
+  return min + (max - min) * v;
+};
+
+// Why: single entry point — composes background, range arcs, trajectory previews, then aim discs in order.
+export const renderShipReticules = (
+  ship: Ship, state: ReticuleState,
+  ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number,
+  targets: ReadonlyArray<ReticuleTarget>, beatTime: number,
+) => {
+  if (!ship.alive) return;
+  const reticulePos = computeReticulePosition(ship, beatGrid, w, h);
+  const apex = ship.pos;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const hitboxPulse = cosineEnvelope(beatTime, RETICULE_HITBOX_PULSE_PERIOD_SEC, RETICULE_HITBOX_PULSE_MIN, RETICULE_HITBOX_PULSE_MAX);
+  const radarPulse = cosineEnvelope(beatTime, RETICULE_RADAR_PULSE_PERIOD_SEC, RETICULE_RADAR_PULSE_MIN, RETICULE_RADAR_PULSE_MAX);
+  const baseHitAlpha = computeBaseHitAlpha(ship.fireCooldown > 0, hitboxPulse);
+  let overlapsTarget = reticuleOverlapsAnyTarget(reticulePos, targets, w, h);
+  paintConeBackground(ctx, ship, apex, beatTime, beatGrid);
+  paintRangeArcs(ctx, ship, apex, beatTime, radarPulse);
+  const frame = computeConeFrame(ship);
+  const fromTrajectory = paintTrajectoryPreviews({
+    ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos,
+    trajectoryFirstSeen: state.trajectoryFirstSeen,
+  }, targets);
+  if (fromTrajectory) overlapsTarget = true;
+  paintAimDiscs(ctx, reticulePos, baseHitAlpha, overlapsTarget);
+  ctx.restore();
+};

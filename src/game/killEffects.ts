@@ -1,0 +1,142 @@
+import type { Game } from "../Game";
+import { Asteroid } from "../Asteroid";
+import { Alien } from "../Alien";
+import { Comet } from "../Comet";
+import { Bullet } from "../Bullet";
+import { Vec } from "../vec";
+import { COMBO_MULTIPLIER_MAX } from "./rhythmConstants";
+import { loseCombo } from "./rhythmGate";
+import { syncComboHud, syncHud } from "./hud";
+import { popupCombo } from "./popups";
+import {
+  emitExplosion,
+  emitCrackParticles,
+  emitAlienExplosion,
+  emitCometExplosion,
+} from "./particleBursts";
+import { snapshotAsteroidKill, snapshotAlienKill, snapshotCometKill } from "./killSnapshot";
+import { alignBassBeat } from "./waveDirector";
+
+// Why: bassteroids run their own bassHit/bassEcho path; this maps the non-bass kinds to sounds.
+export const hitSoundFor = (
+  a: Asteroid,
+): "explosionLarge" | "explosionMedium" | "explosionSmall" | "chime" | "bell" | "warble" | "tink" => {
+  if (a.kind === "chime") return "chime";
+  if (a.kind === "bell") return "bell";
+  if (a.kind === "warble") return "warble";
+  if (a.kind === "tink") return "tink";
+  return a.size === "large" ? "explosionLarge" : a.size === "medium" ? "explosionMedium" : "explosionSmall";
+};
+
+// Why: same combo-update rule for every kill type — one helper means callers don't reimplement.
+export const applyHitToCombo = (game: Game, isOnBeatHit: boolean) => {
+  if (isOnBeatHit && game.beatCombo >= 1) {
+    game.beatCombo = Math.min(game.beatCombo + 1, COMBO_MULTIPLIER_MAX);
+    syncComboHud(game);
+  } else if (!isOnBeatHit && game.beatCombo !== 0) {
+    loseCombo(game);
+  }
+};
+
+// Why: multiplier + sparkle + popup are the on-beat reward — one helper guarantees consistency.
+const awardScoreForKill = (game: Game, hitPos: Vec, baseScore: number, isOnBeatHit: boolean) => {
+  let scoreEarned = baseScore;
+  if (isOnBeatHit) {
+    const multiplier = game.beatCombo;
+    scoreEarned = Math.round(scoreEarned * multiplier);
+    game.sound.play("comboSparkle");
+    if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
+  }
+  game.score += scoreEarned;
+};
+
+// Why: only medium/small children carry drones (large bass has its own continuous low end).
+const restartChildBassDrones = (game: Game, children: Asteroid[]) => {
+  for (const c of children) {
+    alignBassBeat(game, c);
+    if (c.size === "medium" || c.size === "small") {
+      game.sound.startBassteroidDrone(c, c.kind as "bassA" | "bassB" | "bassC" | "bassD", c.size);
+    }
+  }
+};
+
+// Why: audio-free core lets bullet vs ram paths stage their own kill-sound order independently.
+const finishAsteroidKillCore = (
+  game: Game,
+  a: Asteroid,
+  killerVel: Vec,
+  isOnBeatHit: boolean,
+): Asteroid[] => {
+  emitExplosion(game.particles, game.shards, a, isOnBeatHit);
+  if (a.isBass()) game.sound.stopBassteroidDrone(a);
+  const asteroidHit = hitSoundFor(a);
+  const snap = snapshotAsteroidKill(a, a.isBass() ? "bassEcho" : asteroidHit);
+  if (snap) game.killedSnapshots.push(snap);
+  const children = a.split(killerVel);
+  if (a.isBass()) restartChildBassDrones(game, children);
+  return children;
+};
+
+// Why: bassEcho → asteroidHit order matches the original handleCollisions bullet branch.
+export const onAsteroidKilledByBullet = (
+  game: Game,
+  a: Asteroid,
+  b: Bullet,
+  isOnBeatHit: boolean,
+): Asteroid[] => {
+  awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit);
+  if (a.isBass()) game.sound.play("bassEcho");
+  game.sound.play(hitSoundFor(a));
+  return finishAsteroidKillCore(game, a, b.vel, isOnBeatHit);
+};
+
+// Why: asteroidHit → bassEcho (reverse of bullet path) preserves the original ram-branch order.
+export const onAsteroidKilledByRam = (game: Game, a: Asteroid, shipVel: Vec): Asteroid[] => {
+  if (a.isBass()) game.sound.play("bassHit");
+  game.sound.play(hitSoundFor(a));
+  if (a.isBass()) game.sound.play("bassEcho");
+  return finishAsteroidKillCore(game, a, shipVel, false);
+};
+
+// Why: bullet crack — bassHit announces the chip; sparkle layers on if it was on-beat.
+export const onAsteroidCrackedByBullet = (game: Game, a: Asteroid, isOnBeatHit: boolean) => {
+  if (a.isBass()) game.sound.play("bassHit");
+  emitCrackParticles(game.particles, a, isOnBeatHit);
+  if (isOnBeatHit) game.sound.play("comboSparkle");
+};
+
+// Why: ram crack uses asteroidHit (not bassHit) so the impact reads as a kick, not a chip.
+export const onAsteroidCrackedByRam = (game: Game, a: Asteroid) => {
+  game.sound.play(a.isBass() ? "bassHit" : hitSoundFor(a));
+  emitCrackParticles(game.particles, a, false);
+};
+
+// Why: no split path here — alien deaths fall into the "single body, fixed sound" pattern.
+export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boolean) => {
+  awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit);
+  game.shake = Math.min(game.shake + 0.5, 1.4);
+  game.sound.play("alienExplode");
+  game.sound.stopAlienDrone(al);
+  emitAlienExplosion(game.particles, al);
+  const snap = snapshotAlienKill(al, "alienExplode");
+  if (snap) game.killedSnapshots.push(snap);
+};
+
+// Why: shared cracked-alien feedback for medium/big saucers since the killing-hit path differs.
+export const onAlienCracked = (game: Game, isOnBeatHit: boolean) => {
+  game.sound.play("alienHit");
+  game.shake = Math.min(game.shake + 0.18, 1.2);
+  if (isOnBeatHit) game.sound.play("comboSparkle");
+};
+
+// Why: comets sit outside the rhythm flow — flat 5000 reward instead of combo bookkeeping.
+export const onCometKilled = (game: Game, c: Comet) => {
+  game.score += 5000;
+  game.shake = Math.min(game.shake + 0.6, 1.6);
+  game.sound.play("cometDestroyed");
+  game.sound.stopCometShimmer(c);
+  emitCometExplosion(game.particles, c);
+  const snap = snapshotCometKill(c, "cometDestroyed");
+  if (snap) game.killedSnapshots.push(snap);
+  syncHud(game);
+};
