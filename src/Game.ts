@@ -58,7 +58,7 @@ type KilledSnapshot = {
 // Window is ±80ms — wide enough to absorb the 50ms dt cap in main.ts plus
 // a little timing slop, narrow enough that on-beat play needs real timing.
 export const BEAT_GRID = 0.5;
-const BEAT_WINDOW = 0.05;
+const BEAT_WINDOW = 0.065;
 
 // When true, every fire and every bullet impact logs its absolute beatTime,
 // the offset from the nearest beat center on the active combo grid, and
