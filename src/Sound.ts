@@ -1,11 +1,12 @@
 import * as Tone from "tone";
 import { cfgN, cfgU } from "./soundConfig";
 
-// Tone.js-based engine wiring. When `Sound.engine === "tone"`, sounds opt
-// into a separate signal path: synths → fxBus (chorus → reverb) + dry →
-// toneMaster → compressor → limiter → destination. The plain WebAudio
-// `master` node still exists in parallel for legacy voices, but Tone routes
-// through its own master so we can shape its sound independently.
+// Tone.js master bus. Every voice — both Tone-native synths (bassKick,
+// chimeSynth, etc.) and the hand-built WebAudio voices (playFire,
+// playExplosion, etc.) — feeds into this chain: dry → toneMaster, wet →
+// reverbSend → chorus → reverb → toneMaster, then toneMaster → compressor
+// → limiter → destination. Hand-built voices connect via Sound.master,
+// which routes into voiceBusDry/Wet.
 type ToneEngineNodes = {
   toneMaster: Tone.Gain;
   reverbSend: Tone.Gain;
@@ -13,18 +14,16 @@ type ToneEngineNodes = {
   chorus: Tone.Chorus;
   compressor: Tone.Compressor;
   limiter: Tone.Limiter;
-  // Input nodes for the legacy WebAudio chain. The hand-written voices all
-  // target Sound.master; we route master → legacyBusDry + legacyBusWet so
-  // every legacy sound gets the polished master chain when engine === "tone".
-  legacyBusDry: Tone.Gain;
-  legacyBusWet: Tone.Gain;
+  // Input nodes for the hand-built WebAudio voices. Sound.master connects
+  // into both: dry for presence, wet for shared reverb tail polish.
+  voiceBusDry: Tone.Gain;
+  voiceBusWet: Tone.Gain;
   cometMelodySynth: Tone.PolySynth;
   cometShimmerByKey: Map<object, ToneCometShimmer>;
   // Per-voice synths for the highest-impact sounds — the ones the player
   // hears most often or that most differentiate "polished" from "raw
-  // oscillators". Everything else still uses the legacy WebAudio code; in
-  // tone-engine mode it routes through the same master bus for shared
-  // compressor/limiter/reverb polish.
+  // oscillators". Lower-traffic sounds still use the hand-built WebAudio
+  // code, routed through the same master bus.
   bgBeatKick: Tone.MembraneSynth;
   bassKick: Tone.MembraneSynth;
   bassBoom: Tone.MembraneSynth;
@@ -140,16 +139,7 @@ export class Sound {
   bassDrones: Map<object, BassDroneNode> = new Map();
   // Per-comet shimmer pad, keyed by the Comet instance.
   cometShimmers: Map<object, CometShimmerNode> = new Map();
-  // Which engine routes the audio. Legacy hand-built WebAudio vs the Tone.js
-  // polished path (default). In tone mode, *every* sound
-  // (including hand-written synthesis that targets `this.master`) is siphoned
-  // through the Tone fx bus → compressor → limiter, so the global character
-  // changes engine-wide without rewriting each voice individually.
-  engine: "legacy" | "tone" = "tone";
   toneEngine: ToneEngineNodes | null = null;
-  // Legacy master compressor — held so we can disconnect it when switching to
-  // tone mode (where the Tone chain owns mastering instead).
-  legacyCompressor: DynamicsCompressorNode | null = null;
 
   ensureContext() {
     if (this.ctx) return;
@@ -158,26 +148,15 @@ export class Sound {
     this.ctx = new AC();
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.6;
-    const compressor = this.ctx.createDynamicsCompressor();
-    compressor.threshold.value = -12;
-    compressor.knee.value = 12;
-    compressor.ratio.value = 4;
-    compressor.attack.value = 0.005;
-    compressor.release.value = 0.15;
-    this.master.connect(compressor);
-    compressor.connect(this.ctx.destination);
-    this.legacyCompressor = compressor;
     // Direct-to-destination bus for pre-baked buffers (whose tail already
     // contains the full Tone master chain). Mirrors the master gain level so
     // baked and live voices sit at a comparable loudness.
     this.bakedOut = this.ctx.createGain();
     this.bakedOut.gain.value = 0.6;
     this.bakedOut.connect(this.ctx.destination);
-    // If we boot with the tone engine active, build it now so the master bus
-    // is hot before the first voice plays. ensureToneEngine ends by calling
-    // applyEngineRouting, which swaps master off the legacy compressor and
-    // onto the tone bus.
-    if (this.engine === "tone") this.ensureToneEngine();
+    // Build the Tone bus immediately so master is hot before the first
+    // voice plays. ensureToneEngine wires master → voiceBusDry/Wet.
+    this.ensureToneEngine();
   }
 
   // Lazy-build the Tone.js master bus and shared synths. Shares our existing
@@ -229,16 +208,16 @@ export class Sound {
     chorus.connect(reverb);
     reverb.connect(toneMaster);
 
-    // Legacy-bus inputs. Sound.master (the WebAudio GainNode every legacy
-    // voice writes into) connects to both: dry sums straight into toneMaster
-    // for presence; wet sends to the fx bus. The wet level is intentionally
-    // subtle (~25%) so legacy percussion (bass kit, bg-beat) doesn't get
-    // washed out in reverb. Comet voices already have a heavier wet send via
-    // their own dedicated Tone synth path.
-    const legacyBusDry = new Tone.Gain(0.95);
-    const legacyBusWet = new Tone.Gain(0.25);
-    legacyBusDry.connect(toneMaster);
-    legacyBusWet.connect(reverbSend);
+    // Hand-built voice bus inputs. Sound.master (the WebAudio GainNode every
+    // hand-built voice writes into) connects to both: dry sums straight into
+    // toneMaster for presence; wet sends to the fx bus. The wet level is
+    // intentionally subtle (~25%) so the percussion family (bass kit, bg-beat)
+    // doesn't get washed out in reverb. Comet voices already have a heavier
+    // wet send via their own dedicated Tone synth path.
+    const voiceBusDry = new Tone.Gain(0.95);
+    const voiceBusWet = new Tone.Gain(0.25);
+    voiceBusDry.connect(toneMaster);
+    voiceBusWet.connect(reverbSend);
 
     // Comet melody voice: FM synth tuned for an unsettling, hollow timbre.
     // Inharmonic harmonicity (2.41 ≈ a sour just-out-of-tune interval) plus
@@ -376,8 +355,8 @@ export class Sound {
       chorus,
       compressor,
       limiter,
-      legacyBusDry,
-      legacyBusWet,
+      voiceBusDry,
+      voiceBusWet,
       cometMelodySynth,
       cometShimmerByKey: new Map(),
       bgBeatKick,
@@ -391,7 +370,7 @@ export class Sound {
       powerupSynth,
       waveClearSynth,
     };
-    this.applyEngineRouting();
+    this.wireMasterToBus();
     // Warm the baked-buffer cache immediately so the first in-game trigger
     // hits the cache instead of paying for live synthesis. Bakes run async
     // in parallel; total wall time is dominated by the longest single recipe
@@ -450,24 +429,15 @@ export class Sound {
     }).catch(() => { this.bakingInFlight.delete(key); }));
   }
 
-  // Swap the master-out connections so Sound.master either goes through the
-  // legacy compressor (engine = "legacy") or through Tone's bus + master
-  // chain (engine = "tone"). Both paths share the same Sound.master input
-  // node, so individual voices don't care which engine is active.
-  applyEngineRouting() {
-    if (!this.ctx || !this.master) return;
-    // Always start from a disconnected master to avoid double-routing.
+  // Wire Sound.master into the Tone bus. Master sums every hand-built
+  // WebAudio voice; it taps into voiceBusDry for presence and voiceBusWet
+  // for the shared reverb tail. The Tone chain ends at ctx.destination via
+  // the limiter.
+  private wireMasterToBus() {
+    if (!this.ctx || !this.master || !this.toneEngine) return;
     this.master.disconnect();
-    if (this.engine === "tone" && this.toneEngine) {
-      // Tone owns mastering: tap master into both dry and wet inputs of the
-      // Tone bus. The Tone chain ends at ctx.destination via its limiter.
-      // Use the underlying input AudioNode (Tone wraps a GainNode internally).
-      this.master.connect(this.toneEngine.legacyBusDry.input as AudioNode);
-      this.master.connect(this.toneEngine.legacyBusWet.input as AudioNode);
-    } else if (this.legacyCompressor) {
-      // Legacy: master → compressor → destination, as it has always been.
-      this.master.connect(this.legacyCompressor);
-    }
+    this.master.connect(this.toneEngine.voiceBusDry.input as AudioNode);
+    this.master.connect(this.toneEngine.voiceBusWet.input as AudioNode);
   }
 
   // ── Pre-rendered Tone one-shots ─────────────────────────────────────────
@@ -649,22 +619,19 @@ export class Sound {
     }
   }
 
-  // Render one legacy-engine voice recipe into an AudioBuffer. The sound
-  // editor uses this to pre-render every catalog entry on page load: instead
-  // of needing a live AudioContext + user gesture + rAF polling, we route the
-  // existing play(name) path through an OfflineAudioContext by temporarily
-  // swapping this.ctx / this.master, then restoring.
+  // Render one voice recipe into an AudioBuffer for the sound editor's
+  // page-load pre-render. Routes play(name) through an OfflineAudioContext
+  // by temporarily swapping this.ctx / this.master, then restoring.
   //
-  // All legacy voice methods read this.ctx/this.master directly, so the swap
-  // transparently redirects every createOscillator/createBuffer/connect to
-  // the offline graph. The engine is pinned to "legacy" for the duration so
-  // Tone-engine branches inside playFireBeat/etc. don't try to swap Tone's
-  // global context mid-render.
-  //
-  // For pitch-aware sounds (cometNote, bassKick, etc.) pass the same
-  // pitchRatio you'd pass at runtime; `step` is forwarded as Math.round()
-  // by Sound.play.
-  async renderOfflineLegacy(
+  // The hand-built voice methods read this.ctx/this.master directly, so the
+  // swap transparently redirects every createOscillator/createBuffer/connect
+  // to the offline graph. The 10 Tone-native voices (fireBeat, bgBeat, bass*,
+  // chime, powerup, waveClear, cometNote) won't render meaningfully via this
+  // path — they need Tone.setContext to be pointed at the offline context,
+  // which the editor doesn't currently do; pre-render falls back to silent
+  // buffers for those. (The runtime baked-buffer pipeline still serves the
+  // game's actual playback.)
+  async renderOfflineVoice(
     name: SoundName,
     pitchRatio: number,
     durationSec: number,
@@ -677,12 +644,11 @@ export class Sound {
 
     const savedCtx = this.ctx;
     const savedMaster = this.master;
-    const savedEngine = this.engine;
     const savedEnabled = this.enabled;
     const savedThrust = this.thrustNode;
 
     // Build a fresh master node + compressor inside the offline graph that
-    // mirrors the live legacy chain (master → compressor → destination), so
+    // mirrors the live tone chain (master → compressor → destination), so
     // the rendered buffer sounds like what the player hears.
     const offlineMaster = offline.createGain();
     offlineMaster.gain.value = 0.6;
@@ -697,7 +663,6 @@ export class Sound {
 
     this.ctx = offline as unknown as AudioContext;
     this.master = offlineMaster;
-    this.engine = "legacy";
     this.enabled = true;
     // Detach any live thrust node so play("thrust") starts cleanly on the
     // offline ctx. We restore the live one in `finally`.
@@ -705,34 +670,17 @@ export class Sound {
 
     try {
       this.play(name, pitchRatio);
-      // Thrust is a looping voice — startThrust schedules an attack ramp but
-      // never stops on its own. Don't try to call stopThrust against the
-      // offline ctx (its currentTime would advance only during rendering);
-      // just let the ramp ride out the buffer length.
       const rendered = await offline.startRendering();
       return rendered;
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn(`renderOfflineLegacy(${name}) failed`, e);
+      console.warn(`renderOfflineVoice(${name}) failed`, e);
       return null;
     } finally {
       this.ctx = savedCtx;
       this.master = savedMaster;
-      this.engine = savedEngine;
       this.enabled = savedEnabled;
       this.thrustNode = savedThrust;
     }
-  }
-
-  // Cycle through engines: legacy <-> tone. Tears down active comet voices
-  // on whichever side we just left so we don't double-trigger, then rewires
-  // the master output.
-  cycleEngine(): "legacy" | "tone" {
-    this.stopAllCometShimmers();
-    this.engine = this.engine === "legacy" ? "tone" : "legacy";
-    if (this.engine === "tone") this.ensureToneEngine();
-    this.applyEngineRouting();
-    return this.engine;
   }
 
   resume() {
@@ -1057,55 +1005,14 @@ export class Sound {
     const freq = melody[((step % melody.length) + melody.length) % melody.length];
     if (freq === null) return;
 
-    if (this.engine === "tone") {
-      const eng = this.ensureToneEngine();
-      if (!eng) return;
-      // Light velocity variation per step so the looping melody breathes
-      // instead of mechanically repeating. Step 0/4/8/12 (the downbeats) hit
-      // a touch harder.
-      const isDownbeat = step % 4 === 0;
-      const velocity = isDownbeat ? 0.85 : 0.6;
-      eng.cometMelodySynth.triggerAttackRelease(freq, "2n", undefined, velocity);
-      return;
-    }
-
-    const t = this.ctx.currentTime;
-
-    // Three sine partials with mild inharmonic ratios — glassy/bell-like
-    // without the metallic clang of true bell ratios. Each partial gets
-    // its own envelope so the highs decay faster than the fundamental,
-    // giving the note a soft "ping → hum → silence" shape.
-    const partials = [1, 2.005, 3.012];
-    const partialPeaks = [0.18, 0.08, 0.035];
-    const partialDecays = [3.2, 2.0, 1.2];
-    for (let i = 0; i < partials.length; i++) {
-      const osc = this.ctx.createOscillator();
-      osc.type = "sine";
-      osc.frequency.value = freq * partials[i];
-      const gain = this.ctx.createGain();
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(partialPeaks[i], t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + partialDecays[i]);
-      osc.connect(gain);
-      gain.connect(this.master);
-      osc.start(t);
-      osc.stop(t + partialDecays[i] + 0.05);
-    }
-
-    // A second voice an octave up at a much lower level, panned-feeling via
-    // slight detune. Adds shimmer to the top of each note so the melody
-    // reads as "ethereal" rather than just "soft bell".
-    const high = this.ctx.createOscillator();
-    high.type = "sine";
-    high.frequency.value = freq * 2.001;
-    const highGain = this.ctx.createGain();
-    highGain.gain.setValueAtTime(0.0001, t);
-    highGain.gain.exponentialRampToValueAtTime(0.04, t + 0.03);
-    highGain.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
-    high.connect(highGain);
-    highGain.connect(this.master);
-    high.start(t);
-    high.stop(t + 2.5);
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    // Light velocity variation per step so the looping melody breathes
+    // instead of mechanically repeating. Step 0/4/8/12 (the downbeats) hit
+    // a touch harder.
+    const isDownbeat = step % 4 === 0;
+    const velocity = isDownbeat ? 0.85 : 0.6;
+    eng.cometMelodySynth.triggerAttackRelease(freq, "2n", undefined, velocity);
   }
 
   // Ominous voice held under the comet's entire lifetime. Begins with a
@@ -1921,95 +1828,18 @@ export class Sound {
     // (0.35x at wave 1) while still reaching full level by wave 30.
     const levelMul = (0.35 + 0.65 * intensity) * offbeatMul;
 
-    if (this.engine === "tone") {
-      // bgBeat amplitude depends on bgBeatIntensity, which changes per wave.
-      // Quantize intensity to 0.1 buckets so we cache ~10 buffers instead of
-      // baking a new one for every float drift, but still track wave-to-wave
-      // intensity ramping.
-      const intensityBucket = Math.round(intensity * 10) / 10;
-      const bgBeatPitchKey = pitchRatio * 100 + intensityBucket;
-      if (this.playBaked("bgBeat", bgBeatPitchKey)) return;
-      const eng = this.ensureToneEngine();
-      if (!eng) return;
-      const velocity = (0.25 + intensity * 0.75) * levelMul;
-      const note = pitchRatio === 1 ? "C2" : "D2";
-      eng.bgBeatKick.triggerAttackRelease(note, "8n", undefined, velocity);
-      return;
-    }
-
-    const t = this.ctx.currentTime;
-    // Peak amplitude scales concavely with intensity. Floor (0.06) is below
-    // every other gameplay sound (comboTick 0.18, chime partials 0.07) but
-    // still clearly audible on laptop/phone speakers. Peak (~0.55) at full
-    // intensity is heavier than explosions, which sells "ominous rumble" at
-    // wave 30.
-    const peak = (0.06 + intensity * intensity * 0.5) * levelMul;
-
-    // Body: sine at 65 Hz (C2) for downbeats, lifted by pitchRatio on
-    // offbeats. C2 is high enough that even small speakers reproduce it,
-    // unlike the sub-40 Hz we'd want for "deepest possible" — the sub
-    // oscillator below handles the chest-thump end of the spectrum on
-    // capable systems. Short downward pitch sweep gives each hit a thump.
-    const baseFreq = 65 * pitchRatio;
-    const osc = this.ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(baseFreq * 1.4, t);
-    osc.frequency.exponentialRampToValueAtTime(baseFreq, t + 0.08);
-    const gain = this.ctx.createGain();
-    // 5 ms attack matches the bass voices (bassKick 4 ms, bassBoom 5 ms,
-    // bassPluck 6 ms, bassSnap 3 ms) so the perceived "thump" lands on the
-    // same instant as the bassteroid voices triggered on the same beat.
-    // Earlier value was 40 ms — long enough that the pulsar's hit was clearly
-    // trailing the bass section.
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(peak, t + 0.005);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
-    osc.connect(gain);
-    gain.connect(this.master);
-    osc.start(t);
-    osc.stop(t + 0.6);
-
-    // Sub-octave reinforcement (~32 Hz). Mostly inaudible as a pitch on
-    // small speakers but adds the chest-rumble body on headphones/subwoofer.
-    // Scaled aggressively with intensity so it barely contributes at wave 1
-    // and dominates the low spectrum by wave 30. Attack tightened from 50 ms
-    // to 8 ms so the sub doesn't smear in late behind the body transient.
-    const sub = this.ctx.createOscillator();
-    sub.type = "sine";
-    sub.frequency.value = baseFreq * 0.5;
-    const subGain = this.ctx.createGain();
-    const subPeak = peak * (0.3 + 0.7 * intensity);
-    subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(subPeak, t + 0.008);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
-    sub.connect(subGain);
-    subGain.connect(this.master);
-    sub.start(t);
-    sub.stop(t + 0.75);
-
-    // Lowpassed noise rumble — only audible at higher intensities, so the
-    // late-wave version has a gritty texture vs. the early-wave pure tone.
-    if (intensity > 0.25) {
-      const noiseBuf = this.makeNoiseBuffer(0.5);
-      if (noiseBuf) {
-        const noise = this.ctx.createBufferSource();
-        noise.buffer = noiseBuf;
-        const nFilter = this.ctx.createBiquadFilter();
-        nFilter.type = "lowpass";
-        nFilter.frequency.value = 180;
-        nFilter.Q.value = 1.5;
-        const nGain = this.ctx.createGain();
-        const noisePeak = (intensity - 0.25) * 0.22;
-        nGain.gain.setValueAtTime(0.0001, t);
-        nGain.gain.exponentialRampToValueAtTime(noisePeak, t + 0.05);
-        nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
-        noise.connect(nFilter);
-        nFilter.connect(nGain);
-        nGain.connect(this.master);
-        noise.start(t);
-        noise.stop(t + 0.55);
-      }
-    }
+    // bgBeat amplitude depends on bgBeatIntensity, which changes per wave.
+    // Quantize intensity to 0.1 buckets so we cache ~10 buffers instead of
+    // baking a new one for every float drift, but still track wave-to-wave
+    // intensity ramping.
+    const intensityBucket = Math.round(intensity * 10) / 10;
+    const bgBeatPitchKey = pitchRatio * 100 + intensityBucket;
+    if (this.playBaked("bgBeat", bgBeatPitchKey)) return;
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    const velocity = (0.25 + intensity * 0.75) * levelMul;
+    const note = pitchRatio === 1 ? "C2" : "D2";
+    eng.bgBeatKick.triggerAttackRelease(note, "8n", undefined, velocity);
   }
 
   // Plucked-string "pew" for non-rhythm shots — quieter and shorter than
@@ -2080,84 +1910,11 @@ export class Sound {
   // rather than a tight zing. Louder + longer tail than playFire so the
   // player can feel the weight of a timed shot.
   private playFireBeat() {
-    if (!this.ctx || !this.master) return;
-
-    if (this.engine === "tone") {
-      if (this.playBaked("fireBeat", 1)) return;
-      const eng = this.ensureToneEngine();
-      if (!eng) return;
-      eng.fireBeatBody.triggerAttackRelease("C3", "16n", undefined, 0.9);
-      eng.fireBeatPluck.triggerAttack("G4");
-      return;
-    }
-
-    const t = this.ctx.currentTime;
-    const bodyHz = cfgN("fireBeat", "bodyHz", 130.8);
-    const bodyPeak = cfgN("fireBeat", "bodyPeak", 0.38);
-    const bodyDecay = cfgN("fireBeat", "bodyDecay", 0.24);
-    const subHz = cfgN("fireBeat", "subHz", 65.4);
-    const subPeak = cfgN("fireBeat", "subPeak", 0.28);
-    const subDecay = cfgN("fireBeat", "subDecay", 0.28);
-    const partialHz = cfgN("fireBeat", "partialHz", 196);
-    const partialPeak = cfgN("fireBeat", "partialPeak", 0.12);
-    const partialDecay = cfgN("fireBeat", "partialDecay", 0.1);
-    const tickHz = cfgN("fireBeat", "tickHz", 600);
-    const tickQ = cfgN("fireBeat", "tickQ", 1.0);
-    const tickPeak = cfgN("fireBeat", "tickPeak", 0.09);
-    const tickDecay = cfgN("fireBeat", "tickDecay", 0.03);
-
-    const body = this.ctx.createOscillator();
-    const bodyGain = this.ctx.createGain();
-    body.type = "sine";
-    body.frequency.value = bodyHz;
-    bodyGain.gain.setValueAtTime(0.0001, t);
-    bodyGain.gain.exponentialRampToValueAtTime(bodyPeak, t + 0.005);
-    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + bodyDecay);
-    body.connect(bodyGain);
-    bodyGain.connect(this.master);
-    body.start(t);
-    body.stop(t + bodyDecay + 0.03);
-
-    const sub = this.ctx.createOscillator();
-    const subGain = this.ctx.createGain();
-    sub.type = "sine";
-    sub.frequency.value = subHz;
-    subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(subPeak, t + 0.008);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + subDecay);
-    sub.connect(subGain);
-    subGain.connect(this.master);
-    sub.start(t);
-    sub.stop(t + subDecay + 0.03);
-
-    const partial = this.ctx.createOscillator();
-    const partialGain = this.ctx.createGain();
-    partial.type = "sine";
-    partial.frequency.value = partialHz;
-    partialGain.gain.setValueAtTime(0.0001, t);
-    partialGain.gain.exponentialRampToValueAtTime(partialPeak, t + 0.004);
-    partialGain.gain.exponentialRampToValueAtTime(0.0001, t + partialDecay);
-    partial.connect(partialGain);
-    partialGain.connect(this.master);
-    partial.start(t);
-    partial.stop(t + partialDecay + 0.02);
-
-    const tickBuf = this.makeNoiseBuffer(Math.max(tickDecay, 0.005));
-    if (!tickBuf) return;
-    const tick = this.ctx.createBufferSource();
-    tick.buffer = tickBuf;
-    const tickFilter = this.ctx.createBiquadFilter();
-    tickFilter.type = "bandpass";
-    tickFilter.frequency.value = tickHz;
-    tickFilter.Q.value = tickQ;
-    const tickGain = this.ctx.createGain();
-    tickGain.gain.setValueAtTime(tickPeak, t);
-    tickGain.gain.exponentialRampToValueAtTime(0.0001, t + tickDecay);
-    tick.connect(tickFilter);
-    tickFilter.connect(tickGain);
-    tickGain.connect(this.master);
-    tick.start(t);
-    tick.stop(t + tickDecay + 0.005);
+    if (this.playBaked("fireBeat", 1)) return;
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    eng.fireBeatBody.triggerAttackRelease("C3", "16n", undefined, 0.9);
+    eng.fireBeatPluck.triggerAttack("G4");
   }
 
   private playExplosion(volume: number, lowpassStart: number, duration: number) {
@@ -2380,36 +2137,13 @@ export class Sound {
   }
 
   private playWaveClear() {
-    if (!this.ctx || !this.master) return;
-
-    if (this.engine === "tone") {
-      if (this.playBaked("waveClear", 1)) return;
-      const eng = this.ensureToneEngine();
-      if (!eng) return;
-      const notes = ["E4", "G#4", "B4", "Eb5"];
-      const now = Tone.now();
-      for (let i = 0; i < notes.length; i++) {
-        eng.waveClearSynth.triggerAttackRelease(notes[i], "4n", now + i * 0.06, 0.7);
-      }
-      return;
-    }
-
-    const t = this.ctx.currentTime;
-    const chordFrequencies = [330, 415, 494, 622];
-    for (let i = 0; i < chordFrequencies.length; i++) {
-      const freq = chordFrequencies[i];
-      const start = t + i * 0.06;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.04);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.6);
-      osc.connect(gain);
-      gain.connect(this.master);
-      osc.start(start);
-      osc.stop(start + 0.7);
+    if (this.playBaked("waveClear", 1)) return;
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    const notes = ["E4", "G#4", "B4", "Eb5"];
+    const now = Tone.now();
+    for (let i = 0; i < notes.length; i++) {
+      eng.waveClearSynth.triggerAttackRelease(notes[i], "4n", now + i * 0.06, 0.7);
     }
   }
 
@@ -2417,51 +2151,11 @@ export class Sound {
   // `pitchRatio` scales the tonal sweep so split-children of a bassteroid
   // can sound a fourth/octave below the parent (see Game.bassPitchRatio).
   private playBassKick(pitchRatio = 1) {
-    if (!this.ctx || !this.master) return;
-
-    if (this.engine === "tone") {
-      if (this.playBaked("bassKick", pitchRatio)) return;
-      const eng = this.ensureToneEngine();
-      if (!eng) return;
-      const note = 65.4 * pitchRatio;
-      eng.bassKick.triggerAttackRelease(note, "16n", undefined, 0.95);
-      return;
-    }
-
-    const t = this.ctx.currentTime;
-    const startHz = cfgN("bassKick", "startHz", 140);
-    const endHz = cfgN("bassKick", "endHz", 55);
-    const sweepTime = cfgN("bassKick", "sweepTime", 0.09);
-    const peak = cfgN("bassKick", "peak", 0.55);
-    const decay = cfgN("bassKick", "decay", 0.32);
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(startHz * pitchRatio, t);
-    osc.frequency.exponentialRampToValueAtTime(endHz * pitchRatio, t + sweepTime);
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
-    osc.connect(gain);
-    gain.connect(this.master);
-    osc.start(t);
-    osc.stop(t + decay + 0.02);
-
-    const clickBuf = this.makeNoiseBuffer(0.04);
-    if (!clickBuf) return;
-    const click = this.ctx.createBufferSource();
-    click.buffer = clickBuf;
-    const clickFilter = this.ctx.createBiquadFilter();
-    clickFilter.type = "highpass";
-    clickFilter.frequency.value = 1800;
-    const clickGain = this.ctx.createGain();
-    clickGain.gain.setValueAtTime(0.18, t);
-    clickGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
-    click.connect(clickFilter);
-    clickFilter.connect(clickGain);
-    clickGain.connect(this.master);
-    click.start(t);
-    click.stop(t + 0.05);
+    if (this.playBaked("bassKick", pitchRatio)) return;
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    const note = 65.4 * pitchRatio;
+    eng.bassKick.triggerAttackRelease(note, "16n", undefined, 0.95);
   }
 
   // Sub-bass "boom" on F2 (the IV of C major). Sine body with a brief
@@ -2470,67 +2164,11 @@ export class Sound {
   // and stays inside the C-F-G chord pocket so layering with kick/pluck
   // reads as a I/IV/V bassline rather than a dissonant pile.
   private playBassBoom(pitchRatio = 1) {
-    if (!this.ctx || !this.master) return;
-
-    if (this.engine === "tone") {
-      if (this.playBaked("bassBoom", pitchRatio)) return;
-      const eng = this.ensureToneEngine();
-      if (!eng) return;
-      const note = 87.3 * pitchRatio;
-      eng.bassBoom.triggerAttackRelease(note, "8n", undefined, 0.9);
-      return;
-    }
-
-    const t = this.ctx.currentTime;
-    const startHz = cfgN("bassBoom", "startHz", 180);
-    const endHz = cfgN("bassBoom", "endHz", 87.3);
-    const sweepTime = cfgN("bassBoom", "sweepTime", 0.06);
-    const peak = cfgN("bassBoom", "peak", 0.5);
-    const decay = cfgN("bassBoom", "decay", 0.42);
-    const subHz = cfgN("bassBoom", "subHz", 43.65);
-    const subPeak = cfgN("bassBoom", "subPeak", 0.28);
-    const subDecay = cfgN("bassBoom", "subDecay", 0.5);
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(startHz * pitchRatio, t);
-    osc.frequency.exponentialRampToValueAtTime(endHz * pitchRatio, t + sweepTime);
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(peak, t + 0.005);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
-    osc.connect(gain);
-    gain.connect(this.master);
-    osc.start(t);
-    osc.stop(t + decay + 0.03);
-
-    const sub = this.ctx.createOscillator();
-    const subGain = this.ctx.createGain();
-    sub.type = "sine";
-    sub.frequency.value = subHz * pitchRatio;
-    subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(subPeak, t + 0.01);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + subDecay);
-    sub.connect(subGain);
-    subGain.connect(this.master);
-    sub.start(t);
-    sub.stop(t + subDecay + 0.05);
-
-    const clackBuf = this.makeNoiseBuffer(0.035);
-    if (!clackBuf) return;
-    const clack = this.ctx.createBufferSource();
-    clack.buffer = clackBuf;
-    const clackFilter = this.ctx.createBiquadFilter();
-    clackFilter.type = "bandpass";
-    clackFilter.frequency.value = 1100;
-    clackFilter.Q.value = 1.4;
-    const clackGain = this.ctx.createGain();
-    clackGain.gain.setValueAtTime(0.14, t);
-    clackGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
-    clack.connect(clackFilter);
-    clackFilter.connect(clackGain);
-    clackGain.connect(this.master);
-    clack.start(t);
-    clack.stop(t + 0.04);
+    if (this.playBaked("bassBoom", pitchRatio)) return;
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    const note = 87.3 * pitchRatio;
+    eng.bassBoom.triggerAttackRelease(note, "8n", undefined, 0.9);
   }
 
   // Percussive "snap" — a snare-leaning hybrid that gives beat 4 a sharp
@@ -2539,105 +2177,20 @@ export class Sound {
   // body. Sits an octave above the kick/pluck/boom region so the four-voice
   // pattern reads as kick-pluck-boom-snap rather than a wall of low end.
   private playBassSnap(pitchRatio = 1) {
-    if (!this.ctx || !this.master) return;
-
-    if (this.engine === "tone") {
-      if (this.playBaked("bassSnap", pitchRatio)) return;
-      const eng = this.ensureToneEngine();
-      if (!eng) return;
-      eng.bassSnap.triggerAttackRelease("C3", "16n", undefined, 0.7 + pitchRatio * 0.0);
-      return;
-    }
-
-    const t = this.ctx.currentTime;
-    const noiseStartHz = cfgN("bassSnap", "noiseStartHz", 1700);
-    const noiseEndHz = cfgN("bassSnap", "noiseEndHz", 700);
-    const noiseQ = cfgN("bassSnap", "noiseQ", 1.1);
-    const noisePeak = cfgN("bassSnap", "noisePeak", 0.28);
-    const noiseDecay = cfgN("bassSnap", "noiseDecay", 0.15);
-    const bodyStartHz = cfgN("bassSnap", "bodyStartHz", 330);
-    const bodyEndHz = cfgN("bassSnap", "bodyEndHz", 130.8);
-    const bodyPeak = cfgN("bassSnap", "bodyPeak", 0.22);
-    const bodyDecay = cfgN("bassSnap", "bodyDecay", 0.12);
-    const noiseBuf = this.makeNoiseBuffer(Math.max(0.05, noiseDecay - 0.02));
-    if (!noiseBuf) return;
-    const noise = this.ctx.createBufferSource();
-    noise.buffer = noiseBuf;
-    const nFilter = this.ctx.createBiquadFilter();
-    nFilter.type = "bandpass";
-    nFilter.frequency.setValueAtTime(noiseStartHz, t);
-    nFilter.frequency.exponentialRampToValueAtTime(noiseEndHz, t + noiseDecay - 0.02);
-    nFilter.Q.value = noiseQ;
-    const nGain = this.ctx.createGain();
-    nGain.gain.setValueAtTime(noisePeak, t);
-    nGain.gain.exponentialRampToValueAtTime(0.0001, t + noiseDecay);
-    noise.connect(nFilter);
-    nFilter.connect(nGain);
-    nGain.connect(this.master);
-    noise.start(t);
-    noise.stop(t + noiseDecay + 0.01);
-
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = "triangle";
-    osc.frequency.setValueAtTime(bodyStartHz * pitchRatio, t);
-    osc.frequency.exponentialRampToValueAtTime(bodyEndHz * pitchRatio, t + Math.max(0.02, bodyDecay - 0.03));
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(bodyPeak, t + 0.003);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + bodyDecay);
-    osc.connect(gain);
-    gain.connect(this.master);
-    osc.start(t);
-    osc.stop(t + bodyDecay + 0.02);
+    if (this.playBaked("bassSnap", pitchRatio)) return;
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    eng.bassSnap.triggerAttackRelease("C3", "16n", undefined, 0.7 + pitchRatio * 0.0);
   }
 
   // Plucked sub-bass at G2 with a closing lowpass filter — distinct timbre
   // from the kick so the two layer rather than mask each other.
   private playBassPluck(pitchRatio = 1) {
-    if (!this.ctx || !this.master) return;
-
-    if (this.engine === "tone") {
-      if (this.playBaked("bassPluck", pitchRatio)) return;
-      const eng = this.ensureToneEngine();
-      if (!eng) return;
-      const note = 98 * pitchRatio;
-      eng.bassPluck.triggerAttackRelease(note, "8n", undefined, 0.85);
-      return;
-    }
-
-    const t = this.ctx.currentTime;
-    const fundamentalHz = cfgN("bassPluck", "fundamentalHz", 98);
-    const filterStartHz = cfgN("bassPluck", "filterStartHz", 1400);
-    const filterEndHz = cfgN("bassPluck", "filterEndHz", 220);
-    const filterQ = cfgN("bassPluck", "filterQ", 6);
-    const peak = cfgN("bassPluck", "peak", 0.28);
-    const decay = cfgN("bassPluck", "decay", 0.45);
-    const osc1 = this.ctx.createOscillator();
-    const osc2 = this.ctx.createOscillator();
-    osc1.type = "sawtooth";
-    osc2.type = "triangle";
-    osc1.frequency.value = fundamentalHz * pitchRatio;
-    osc2.frequency.value = (fundamentalHz + 0.3) * pitchRatio;
-
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.Q.value = filterQ;
-    filter.frequency.setValueAtTime(filterStartHz, t);
-    filter.frequency.exponentialRampToValueAtTime(filterEndHz, t + decay * 0.89);
-
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(peak, t + 0.006);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
-
-    osc1.connect(filter);
-    osc2.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.master);
-    osc1.start(t);
-    osc2.start(t);
-    osc1.stop(t + decay + 0.03);
-    osc2.stop(t + decay + 0.03);
+    if (this.playBaked("bassPluck", pitchRatio)) return;
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    const note = 98 * pitchRatio;
+    eng.bassPluck.triggerAttackRelease(note, "8n", undefined, 0.85);
   }
 
   // Crunch played when a bassteroid is shot. Deep, gravelly, sub-200 Hz —
@@ -2737,39 +2290,10 @@ export class Sound {
 
   // High shimmery bell — three sine partials at near-bell ratios.
   private playChime() {
-    if (!this.ctx || !this.master) return;
-
-    if (this.engine === "tone") {
-      if (this.playBaked("chime", 1)) return;
-      const eng = this.ensureToneEngine();
-      if (!eng) return;
-      eng.chimeSynth.triggerAttackRelease(["C6", "G6"], "8n", undefined, 0.65);
-      return;
-    }
-
-    const t = this.ctx.currentTime;
-    const fundamentalFreq = cfgN("chime", "fundamentalHz", 1046.5);
-    const peakBase = cfgN("chime", "peak", 0.16);
-    const decayBase = cfgN("chime", "decay", 0.9);
-    const partialRatios = [
-      1,
-      cfgN("chime", "partial1Ratio", 2.005),
-      cfgN("chime", "partial2Ratio", 3.01),
-    ];
-    for (let i = 0; i < partialRatios.length; i++) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = fundamentalFreq * partialRatios[i];
-      const peak = peakBase / (i + 1);
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(peak, t + 0.008);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(0.1, decayBase - i * 0.15));
-      osc.connect(gain);
-      gain.connect(this.master);
-      osc.start(t);
-      osc.stop(t + decayBase + 0.1);
-    }
+    if (this.playBaked("chime", 1)) return;
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    eng.chimeSynth.triggerAttackRelease(["C6", "G6"], "8n", undefined, 0.65);
   }
 
   // Lower bell with inharmonic partials — feels like a temple bell rather
@@ -2882,48 +2406,14 @@ export class Sound {
   // Ascending sine arpeggio with a sparkle overlay — the "you got something
   // good" jingle that plays when the ship flies over a canister.
   private playPowerup() {
-    if (!this.ctx || !this.master) return;
-
-    if (this.engine === "tone") {
-      if (this.playBaked("powerup", 1)) return;
-      const eng = this.ensureToneEngine();
-      if (!eng) return;
-      const notes = ["C5", "E5", "G5", "C6"];
-      const now = Tone.now();
-      for (let i = 0; i < notes.length; i++) {
-        eng.powerupSynth.triggerAttackRelease(notes[i], "16n", now + i * 0.06, 0.7);
-      }
-      return;
+    if (this.playBaked("powerup", 1)) return;
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    const notes = ["C5", "E5", "G5", "C6"];
+    const now = Tone.now();
+    for (let i = 0; i < notes.length; i++) {
+      eng.powerupSynth.triggerAttackRelease(notes[i], "16n", now + i * 0.06, 0.7);
     }
-
-    const t = this.ctx.currentTime;
-    const arpeggioFrequencies = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
-    for (let i = 0; i < arpeggioFrequencies.length; i++) {
-      const start = t + i * 0.06;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = arpeggioFrequencies[i];
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(0.22, start + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.5);
-      osc.connect(gain);
-      gain.connect(this.master);
-      osc.start(start);
-      osc.stop(start + 0.55);
-    }
-    const shimmer = this.ctx.createOscillator();
-    const shimmerGain = this.ctx.createGain();
-    shimmer.type = "sine";
-    shimmer.frequency.setValueAtTime(2093, t);
-    shimmer.frequency.exponentialRampToValueAtTime(3520, t + 0.35);
-    shimmerGain.gain.setValueAtTime(0.0001, t);
-    shimmerGain.gain.exponentialRampToValueAtTime(0.1, t + 0.06);
-    shimmerGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
-    shimmer.connect(shimmerGain);
-    shimmerGain.connect(this.master);
-    shimmer.start(t);
-    shimmer.stop(t + 0.5);
   }
 
   // Soft glassy "ting" with a quick noise wash — the shield absorbing a hit.

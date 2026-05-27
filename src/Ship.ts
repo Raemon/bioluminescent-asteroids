@@ -43,6 +43,13 @@ export class Ship {
   drag = 0.6;
   maxSpeed = 460;
   radius = 14;
+  // Outer outline sits ~haloOffset past the hull; this is what collisions use.
+  haloOffset = 8;
+  // Conservative bounding radius — circumscribes the outer (halo) triangle's
+  // forward tip. Use for broad-phase checks; for accurate collisions against
+  // an asteroid call `hitDistanceToward(worldAngle)` which returns the actual
+  // silhouette distance and matches what the player sees.
+  get hitRadius() { return this.radius * 1.4 + this.haloOffset; }
   alive = true;
   invuln = 2.0;
   thrustOn = false;
@@ -66,37 +73,66 @@ export class Ship {
     this.pos = pos;
   }
 
-  // Combo halo: a single ship-shaped outline offset ~8px from the hull, pulsing with the beat.
+  // Combo halo: a single ship-shaped outline offset ~haloOffset from the hull, pulsing with the beat.
+  // When intensity is 0, renders a dull static outline so the halo position is always visible.
   private renderComboHalo(ctx: CanvasRenderingContext2D, beatPulse: number) {
     const i = this.comboHaloIntensity;
     const tier1 = Math.min(1, i);
     const tier2 = Math.max(0, Math.min(1, i - 1));
 
-    // Base 8px offset, gently breathing with the beat (+/- ~2px).
-    const offset = 8 + 2 * beatPulse;
+    // Halo polygon is the ship's actual collision silhouette (see haloVertices).
+    const halo = this.haloVertices();
 
-    // Ship hull vertices (must match render()).
+    ctx.beginPath();
+    ctx.moveTo(halo[0][0], halo[0][1]);
+    ctx.lineTo(halo[1][0], halo[1][1]);
+    ctx.lineTo(halo[2][0], halo[2][1]);
+    ctx.closePath();
+
+    // Dull static outline (visible when there's no rhythm), fades out as the active halo takes over.
+    const dullAlpha = 0.25 * (1 - tier1);
+    if (dullAlpha > 0.001) {
+      ctx.strokeStyle = `hsla(210, 30%, 70%, ${dullAlpha})`;
+      ctx.lineWidth = 1.2;
+      ctx.shadowBlur = 0;
+      ctx.stroke();
+    }
+
+    // Active combo halo: color shifts cyan -> gold as we cross into tier 2.
+    if (tier1 > 0.001) {
+      const hue = 195 + (45 - 195) * tier2; // 195 cyan, 45 gold
+      const alpha = (0.45 + 0.35 * beatPulse) * tier1;
+      ctx.strokeStyle = `hsla(${hue}, 100%, 78%, ${alpha})`;
+      ctx.lineWidth = 1.6;
+      ctx.shadowColor = `hsla(${hue}, 100%, 70%, 1)`;
+      ctx.shadowBlur = 10 + 6 * beatPulse;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // World-space vertices of the outer (halo) triangle — the visible outline
+  // that defines the ship's hitbox. Hull vertices are at radii [1.4r, 1.0r, 1.0r],
+  // then each is pushed outward along its angle bisector so the polygon edges
+  // sit `haloOffset` perpendicular to the hull edges.
+  haloVertices(): Array<[number, number]> {
     const hull: Array<[number, number]> = [
       [Math.cos(this.heading) * this.radius * 1.4, Math.sin(this.heading) * this.radius * 1.4],
       [Math.cos(this.heading + Math.PI * 0.78) * this.radius * 1.0, Math.sin(this.heading + Math.PI * 0.78) * this.radius * 1.0],
       [Math.cos(this.heading - Math.PI * 0.78) * this.radius * 1.0, Math.sin(this.heading - Math.PI * 0.78) * this.radius * 1.0],
     ];
-
-    // Offset each vertex outward along its angle bisector by `offset`.
-    // For a CCW polygon, the outward bisector points along normalized (n_prev + n_next),
-    // where edge normals point outward (rotate edge vector +90deg for CCW outward).
+    const cross =
+      (hull[1][0] - hull[0][0]) * (hull[2][1] - hull[0][1]) -
+      (hull[1][1] - hull[0][1]) * (hull[2][0] - hull[0][0]);
+    const s = cross < 0 ? 1 : -1;
+    const offset = this.haloOffset;
     const halo: Array<[number, number]> = [];
     for (let k = 0; k < 3; k++) {
       const prev = hull[(k + 2) % 3];
       const curr = hull[k];
       const next = hull[(k + 1) % 3];
-      // Edge from prev->curr and curr->next.
       const e1x = curr[0] - prev[0], e1y = curr[1] - prev[1];
       const e2x = next[0] - curr[0], e2y = next[1] - curr[1];
-      // Outward normal of each edge for a CCW polygon is (ey, -ex); flip for CW.
-      // Use signed area to determine winding.
-      const cross = (hull[1][0] - hull[0][0]) * (hull[2][1] - hull[0][1]) - (hull[1][1] - hull[0][1]) * (hull[2][0] - hull[0][0]);
-      const s = cross < 0 ? 1 : -1; // outward sign
       let n1x = s * -e1y, n1y = s * e1x;
       let n2x = s * -e2y, n2y = s * e2x;
       const l1 = Math.hypot(n1x, n1y) || 1;
@@ -106,27 +142,34 @@ export class Ship {
       let bx = n1x + n2x, by = n1y + n2y;
       const bl = Math.hypot(bx, by) || 1;
       bx /= bl; by /= bl;
-      // Miter length so the parallel-offset distance is `offset`.
       const dot = bx * n1x + by * n1y;
       const miter = offset / Math.max(0.2, dot);
       halo.push([curr[0] + bx * miter, curr[1] + by * miter]);
     }
+    return halo;
+  }
 
-    // Color shifts cyan -> gold as we cross into tier 2.
-    const hue = 195 + (45 - 195) * tier2; // 195 cyan, 45 gold
-    const alpha = (0.45 + 0.35 * beatPulse) * tier1;
-
-    ctx.strokeStyle = `hsla(${hue}, 100%, 78%, ${alpha})`;
-    ctx.lineWidth = 1.6;
-    ctx.shadowColor = `hsla(${hue}, 100%, 70%, 1)`;
-    ctx.shadowBlur = 10 + 6 * beatPulse;
-    ctx.beginPath();
-    ctx.moveTo(halo[0][0], halo[0][1]);
-    ctx.lineTo(halo[1][0], halo[1][1]);
-    ctx.lineTo(halo[2][0], halo[2][1]);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+  // Distance from ship center to the outer triangle silhouette along world
+  // ray angle `theta`. Returns the ray's intersection with the closest halo
+  // edge — exactly what the player sees as the ship's outline in that
+  // direction.
+  hitDistanceToward(theta: number): number {
+    const dx = Math.cos(theta);
+    const dy = Math.sin(theta);
+    const halo = this.haloVertices();
+    let best = Infinity;
+    for (let k = 0; k < 3; k++) {
+      const a = halo[k];
+      const b = halo[(k + 1) % 3];
+      // Solve t*(dx,dy) = a + u*(b-a) with t>=0 and u in [0,1].
+      const ex = b[0] - a[0], ey = b[1] - a[1];
+      const denom = dx * ey - dy * ex;
+      if (Math.abs(denom) < 1e-9) continue;
+      const t = (a[0] * ey - a[1] * ex) / denom;
+      const u = (a[0] * dy - a[1] * dx) / denom;
+      if (t >= 0 && u >= 0 && u <= 1 && t < best) best = t;
+    }
+    return Number.isFinite(best) ? best : this.hitRadius;
   }
 
   // Map beatCombo to halo tier (<2: 0, 2-3: 1, >=4: 2).
@@ -393,10 +436,8 @@ export class Ship {
 
     ctx.globalCompositeOperation = "lighter";
 
-    // Combo halo renders behind the ship outline.
-    if (this.comboHaloIntensity > 0.01) {
-      this.renderComboHalo(ctx, beatPulse);
-    }
+    // Combo halo renders behind the ship outline (dull static outline when there's no rhythm).
+    this.renderComboHalo(ctx, beatPulse);
 
     const breathPulse = 0.7 + 0.3 * Math.sin(t * 0.005);
 
@@ -411,7 +452,7 @@ export class Ship {
     ctx.stroke();
 
     ctx.shadowBlur = 0;
-    ctx.fillStyle = `hsla(195, 100%, 60%, ${(0.06 + 0.28 * beatPulse) * invulnFlicker})`;
+    ctx.fillStyle = `hsla(195, 100%, 60%, ${0.12 * invulnFlicker})`;
     ctx.fill();
 
     if (this.thrustOn) {

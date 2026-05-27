@@ -26,6 +26,19 @@ type ComboPopup = {
 
 const COMBO_POPUP_LIFE = 0.9;
 
+// Debug popup tied to DEBUG_BEAT_TIMING. Spawned at each fire (ship pos) and
+// each hit (impact pos) showing "ON"/"OFF" plus the offset in ms.
+type BeatDebugPopup = {
+  pos: Vec;
+  vel: Vec;
+  life: number;
+  maxLife: number;
+  text: string;
+  onBeat: boolean;
+};
+
+const BEAT_DEBUG_POPUP_LIFE = 1.2;
+
 type GameState = "title" | "playing" | "paused" | "dying" | "gameover";
 
 // Per-kill record captured at the moment an enemy dies. Used by the
@@ -45,7 +58,13 @@ type KilledSnapshot = {
 // Window is ±80ms — wide enough to absorb the 50ms dt cap in main.ts plus
 // a little timing slop, narrow enough that on-beat play needs real timing.
 export const BEAT_GRID = 0.5;
-const BEAT_WINDOW = 0.08;
+const BEAT_WINDOW = 0.05;
+
+// When true, every fire and every bullet impact logs its absolute beatTime,
+// the offset from the nearest beat center on the active combo grid, and
+// whether it was classified as on-beat. Used to diagnose drift between the
+// rhythm gate and what the player hears/sees.
+const DEBUG_BEAT_TIMING = true;
 // On-beat kill multiplier equals the current beatCombo value. The combo
 // counts hits-in-a-row since the player primed the streak by firing on-beat;
 // combo=1 means "primed but no hits yet" (multiplier 1×, no bonus shown),
@@ -164,6 +183,7 @@ export class Game {
   asteroids: Asteroid[] = [];
   bullets: Bullet[] = [];
   comboPopups: ComboPopup[] = [];
+  beatDebugPopups: BeatDebugPopup[] = [];
   score = 0;
   wave = 1;
   lives = 3;
@@ -383,6 +403,7 @@ export class Game {
     this.firedOffBeatSinceLastBeat = false;
     this.bullets = [];
     this.comboPopups = [];
+    this.beatDebugPopups = [];
     this.shards = [];
     this.canisters = [];
     this.killedSnapshots = [];
@@ -653,7 +674,13 @@ export class Game {
         if (b.life <= 0) continue;
         if (!a.collidesWith(b.pos, b.hitRadius())) continue;
         if (!b.pierce) b.life = 0;
-        const isOnBeatHit = this.isInBeatWindow(this.beatTime) || b.onBeat;
+        const isOnBeatHit = this.isInBeatWindow(this.beatTime) && b.onBeat;
+        this.logBeatEvent(
+          "HIT alien",
+          this.beatTime,
+          `firedAt=${b.firedAtBeatTime.toFixed(4)}s fireOffset=${(this.beatOffsetFor(b.firedAtBeatTime) * 1000).toFixed(1)}ms bulletOnBeat=${b.onBeat}`,
+        );
+        this.spawnBeatDebugPopup(b.pos, this.beatTime, "HIT");
         const { killed: alienKilled } = a.applyDamage();
         if (isOnBeatHit && this.beatCombo >= 1) {
           this.beatCombo = Math.min(this.beatCombo + 1, COMBO_MULTIPLIER_MAX);
@@ -696,7 +723,11 @@ export class Game {
     const remaining: AlienBullet[] = [];
     let hit = false;
     for (const ab of this.alienBullets) {
-      if (!hit && Math.hypot(ab.pos.x - this.ship.pos.x, ab.pos.y - this.ship.pos.y) < this.ship.radius * 0.7 + ab.radius) {
+      const dx = ab.pos.x - this.ship.pos.x;
+      const dy = ab.pos.y - this.ship.pos.y;
+      const distance = Math.hypot(dx, dy);
+      const shipReach = this.ship.hitDistanceToward(Math.atan2(dy, dx));
+      if (!hit && distance < shipReach + ab.radius) {
         hit = true;
         if (this.ship.shieldActive) {
           this.ship.shieldActive = false;
@@ -725,6 +756,12 @@ export class Game {
         if (b.life <= 0) continue;
         if (!c.collidesWith(b.pos, b.hitRadius())) continue;
         if (!b.pierce) b.life = 0;
+        this.logBeatEvent(
+          "HIT comet",
+          this.beatTime,
+          `firedAt=${b.firedAtBeatTime.toFixed(4)}s fireOffset=${(this.beatOffsetFor(b.firedAtBeatTime) * 1000).toFixed(1)}ms bulletOnBeat=${b.onBeat}`,
+        );
+        this.spawnBeatDebugPopup(b.pos, this.beatTime, "HIT");
         this.score += 5000;
         this.shake = Math.min(this.shake + 0.6, 1.6);
         this.sound.play("cometDestroyed");
@@ -900,6 +937,51 @@ export class Game {
     ctx.restore();
   }
 
+  // Spawn a debug "ON"/"OFF" label at the given world position. `time` is the
+  // beatTime of the event used to compute the offset shown beneath the label.
+  spawnBeatDebugPopup(pos: Vec, time: number, prefix: string) {
+    if (!DEBUG_BEAT_TIMING) return;
+    const onBeat = this.isInBeatWindow(time);
+    const offsetMs = (this.beatOffsetFor(time) * 1000).toFixed(0);
+    this.beatDebugPopups.push({
+      pos: { x: pos.x, y: pos.y - 10 },
+      vel: { x: rand(-8, 8), y: -40 },
+      life: BEAT_DEBUG_POPUP_LIFE,
+      maxLife: BEAT_DEBUG_POPUP_LIFE,
+      text: `${prefix} ${onBeat ? "ON" : "OFF"} ${offsetMs}ms`,
+      onBeat,
+    });
+  }
+
+  updateBeatDebugPopups(dt: number) {
+    for (const p of this.beatDebugPopups) {
+      p.life -= dt;
+      p.pos.x += p.vel.x * dt;
+      p.pos.y += p.vel.y * dt;
+      p.vel.x *= 0.94;
+      p.vel.y *= 0.94;
+    }
+    this.beatDebugPopups = this.beatDebugPopups.filter((p) => p.life > 0);
+  }
+
+  renderBeatDebugPopups(ctx: CanvasRenderingContext2D) {
+    if (this.beatDebugPopups.length === 0) return;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "600 14px 'Space Grotesk', system-ui, sans-serif";
+    for (const p of this.beatDebugPopups) {
+      const t = p.life / p.maxLife;
+      const alpha = Math.min(1, t * 1.4);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.onBeat ? "#7cffb0" : "#ff6a6a";
+      ctx.shadowColor = p.onBeat ? "rgba(100, 255, 160, 0.7)" : "rgba(255, 100, 100, 0.7)";
+      ctx.shadowBlur = 8;
+      ctx.fillText(p.text, p.pos.x, p.pos.y);
+    }
+    ctx.restore();
+  }
+
   // The grid the rhythm gate runs on. Quarter notes (BEAT_GRID) normally;
   // 8th notes (BEAT_GRID/2) while the player has rapid fire, so a rapid
   // held-fire shot lands a beat every trigger pull. nextBeatToEvaluate is
@@ -946,6 +1028,26 @@ export class Game {
     const beatIndex = Math.round(time / grid);
     const beatCenter = beatIndex * grid;
     return Math.abs(time - beatCenter) <= BEAT_WINDOW;
+  }
+
+  // Signed offset (seconds) from `time` to the nearest beat center on the
+  // current combo grid. Positive = `time` lies AFTER the beat. Used by debug
+  // logging so we can see how far a fire/hit was from the rhythm gate even
+  // when it falls outside BEAT_WINDOW.
+  beatOffsetFor(time: number): number {
+    const grid = this.comboGrid();
+    const beatIndex = Math.round(time / grid);
+    return time - beatIndex * grid;
+  }
+
+  private logBeatEvent(kind: string, time: number, extra?: string) {
+    if (!DEBUG_BEAT_TIMING) return;
+    const offset = this.beatOffsetFor(time);
+    const offsetMs = (offset * 1000).toFixed(1);
+    const within = this.isInBeatWindow(time) ? "ON" : "OFF";
+    const beatTimeStr = time.toFixed(4);
+    console.log(kind.toLowerCase(), within);
+    console.log(beatTimeStr, offsetMs, extra ?? "");
   }
 
   // Walk through every beat whose closing edge has passed beatTime. The
@@ -1055,6 +1157,9 @@ export class Game {
         // They all share the same beat flag because they're one shot.
         const newBullets = this.bullets.slice(bulletsBeforeShipUpdate);
         const firedOnBeat = this.isInBeatWindow(this.beatTime);
+        for (const newBullet of newBullets) newBullet.firedAtBeatTime = this.beatTime;
+        this.logBeatEvent("FIRE", this.beatTime, `bullets=${newBullets.length}`);
+        this.spawnBeatDebugPopup(this.ship.pos, this.beatTime, "FIRE");
         if (firedOnBeat) {
           for (const newBullet of newBullets) newBullet.onBeat = true;
           this.sound.play("comboTick");
@@ -1129,6 +1234,7 @@ export class Game {
       this.canisters = this.canisters.filter((c) => c.alive);
       this.particles.update(dt);
       this.updateComboPopups(dt);
+      this.updateBeatDebugPopups(dt);
       this.handleCollisions();
       this.handleAlienHits();
       this.handleAlienBulletHits();
@@ -1185,6 +1291,7 @@ export class Game {
       // 1.122 = whole-step lift (~E1 → F#1) — audibly distinct from the
       // downbeat without breaking the ominous mood.
       const pitchRatio = isOffbeat ? 1.122 : 1;
+      console.log("BG_BEAT idx=" + this.lastBgBeatIndex + " beatTime=" + this.beatTime.toFixed(4) + " musicDt=" + musicDt.toFixed(4) + " wall=" + performance.now().toFixed(1));
       this.sound.play("bgBeat", pitchRatio);
     }
     for (const a of this.asteroids) {
@@ -1305,6 +1412,18 @@ export class Game {
     }
   }
 
+  // Polygon-accurate ship-vs-asteroid hit: tests the asteroid surface
+  // against the ship's outer triangle silhouette (not a bounding circle),
+  // so the visible outline is exactly the hitbox.
+  shipAsteroidHit(a: Asteroid): boolean {
+    const dx = a.pos.x - this.ship.pos.x;
+    const dy = a.pos.y - this.ship.pos.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance > a.radius * 1.3 + this.ship.hitRadius) return false;
+    const shipReach = this.ship.hitDistanceToward(Math.atan2(dy, dx));
+    return a.collidesWith(this.ship.pos, shipReach);
+  }
+
   handleCollisions() {
     const surviving: Asteroid[] = [];
     for (const a of this.asteroids) {
@@ -1316,13 +1435,17 @@ export class Game {
         // through a row of asteroids. Their `life` timer still expires
         // normally, so they don't last forever.
         if (!b.pierce) b.life = 0;
-        // A hit counts as on-beat if EITHER the bullet was fired on the
-        // beat OR the impact itself lands in a beat window. The fire-time
-        // case keeps long-range shots fair (a timed shot that drifts to a
-        // far asteroid still earns its bonus), and the impact-time case
-        // covers point-blank kills where the player times the destruction
-        // rather than the trigger pull.
-        const isOnBeatHit = this.isInBeatWindow(this.beatTime) || b.onBeat;
+        // A hit counts as on-beat only if BOTH the fire and the impact land
+        // in a beat window. An off-beat fire that drifts into a window — or
+        // an on-beat fire that drifts out of one — both break the chain. The
+        // rhythm gate is a true rhythm gate, not a "best effort" classifier.
+        const isOnBeatHit = this.isInBeatWindow(this.beatTime) && b.onBeat;
+        this.logBeatEvent(
+          "HIT asteroid",
+          this.beatTime,
+          `firedAt=${b.firedAtBeatTime.toFixed(4)}s fireOffset=${(this.beatOffsetFor(b.firedAtBeatTime) * 1000).toFixed(1)}ms bulletOnBeat=${b.onBeat}`,
+        );
+        this.spawnBeatDebugPopup(b.pos, this.beatTime, "HIT");
         // Unified damage path: every asteroid carries HP now. Non-killing
         // hits play crack feedback (cracks visible on the body via
         // Asteroid.renderCracks). Killing hits award score and dispatch the
@@ -1380,7 +1503,7 @@ export class Game {
     if (this.ship.alive && this.ship.invuln <= 0) {
       for (let i = 0; i < this.asteroids.length; i++) {
         const a = this.asteroids[i];
-        if (a.collidesWith(this.ship.pos, this.ship.radius * 0.6)) {
+        if (this.shipAsteroidHit(a)) {
           // The ship dishes 4 damage to whatever it rammed. If that kills
           // the asteroid, run the same kill bookkeeping a bullet would (no
           // score / combo — a ramming kill isn't a rhythm hit).
@@ -1957,6 +2080,7 @@ export class Game {
     ], this.beatTime);
     this.ship.render(ctx, this.time, this.currentBeatPulse());
     this.renderComboPopups(ctx);
+    this.renderBeatDebugPopups(ctx);
 
     ctx.restore();
   }

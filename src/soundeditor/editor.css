@@ -49,24 +49,6 @@
   text-transform: uppercase;
 }
 
-.se-engine {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: rgba(216, 243, 255, 0.55);
-}
-.se-engine select {
-  background: rgba(10, 18, 48, 0.9);
-  color: #d8f3ff;
-  border: 1px solid rgba(106, 215, 255, 0.3);
-  padding: 5px 10px;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  cursor: pointer;
-  border-radius: 2px;
-}
-
 .se-header-actions button,
 .se-header-actions .se-back {
   background: rgba(106, 215, 255, 0.08);

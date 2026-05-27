@@ -55,21 +55,6 @@ const SEMANTIC_KNOBS: Record<string, KnobDef[]> = {
     { key: "tickPeak", label: "tick lvl", min: 0, max: 0.2, step: 0.005, fmt: ampFmt },
     { key: "tickDecay", label: "tick decay", min: 0.005, max: 0.1, step: 0.001, fmt: msFmt },
   ],
-  fireBeat: [
-    { key: "bodyHz", label: "body", min: 40, max: 400, step: 0.5, fmt: hzFmt },
-    { key: "bodyPeak", label: "body lvl", min: 0, max: 0.8, step: 0.005, fmt: ampFmt },
-    { key: "bodyDecay", label: "body decay", min: 0.05, max: 0.6, step: 0.005, fmt: msFmt },
-    { key: "subHz", label: "sub", min: 20, max: 200, step: 0.5, fmt: hzFmt },
-    { key: "subPeak", label: "sub lvl", min: 0, max: 0.6, step: 0.005, fmt: ampFmt },
-    { key: "subDecay", label: "sub decay", min: 0.05, max: 0.6, step: 0.005, fmt: msFmt },
-    { key: "partialHz", label: "partial", min: 60, max: 800, step: 1, fmt: hzFmt },
-    { key: "partialPeak", label: "partial lvl", min: 0, max: 0.4, step: 0.005, fmt: ampFmt },
-    { key: "partialDecay", label: "partial decay", min: 0.02, max: 0.3, step: 0.005, fmt: msFmt },
-    { key: "tickHz", label: "tick", min: 100, max: 4000, step: 5, fmt: hzFmt },
-    { key: "tickQ", label: "tick Q", min: 0.1, max: 8, step: 0.05, fmt: ampFmt },
-    { key: "tickPeak", label: "tick lvl", min: 0, max: 0.3, step: 0.005, fmt: ampFmt },
-    { key: "tickDecay", label: "tick decay", min: 0.005, max: 0.15, step: 0.001, fmt: msFmt },
-  ],
   explosionLarge: [
     { key: "volume", label: "volume", min: 0, max: 1.5, step: 0.01, fmt: ampFmt },
     { key: "lowpassStart", label: "lpf start", min: 40, max: 800, step: 1, fmt: hzFmt },
@@ -98,49 +83,6 @@ const SEMANTIC_KNOBS: Record<string, KnobDef[]> = {
     { key: "screamDur", label: "scream dur", min: 0.2, max: 2.0, step: 0.01, fmt: msFmt },
     { key: "tailVol", label: "tail lvl", min: 0, max: 0.5, step: 0.005, fmt: ampFmt },
     { key: "tailDur", label: "tail dur", min: 0.2, max: 3.0, step: 0.01, fmt: msFmt },
-  ],
-  bassKick: [
-    { key: "startHz", label: "start", min: 40, max: 400, step: 1, fmt: hzFmt },
-    { key: "endHz", label: "end", min: 20, max: 200, step: 1, fmt: hzFmt },
-    { key: "sweepTime", label: "sweep", min: 0.01, max: 0.4, step: 0.005, fmt: msFmt },
-    { key: "peak", label: "peak", min: 0, max: 1.0, step: 0.005, fmt: ampFmt },
-    { key: "decay", label: "decay", min: 0.05, max: 0.8, step: 0.005, fmt: msFmt },
-  ],
-  bassPluck: [
-    { key: "fundamentalHz", label: "fundamental", min: 30, max: 400, step: 0.5, fmt: hzFmt },
-    { key: "filterStartHz", label: "lpf start", min: 200, max: 5000, step: 10, fmt: hzFmt },
-    { key: "filterEndHz", label: "lpf end", min: 80, max: 2000, step: 5, fmt: hzFmt },
-    { key: "filterQ", label: "lpf Q", min: 0.1, max: 15, step: 0.1, fmt: ampFmt },
-    { key: "peak", label: "peak", min: 0, max: 0.6, step: 0.005, fmt: ampFmt },
-    { key: "decay", label: "decay", min: 0.05, max: 1.0, step: 0.005, fmt: msFmt },
-  ],
-  bassBoom: [
-    { key: "startHz", label: "start", min: 40, max: 500, step: 1, fmt: hzFmt },
-    { key: "endHz", label: "end", min: 30, max: 200, step: 0.5, fmt: hzFmt },
-    { key: "sweepTime", label: "sweep", min: 0.01, max: 0.3, step: 0.005, fmt: msFmt },
-    { key: "peak", label: "peak", min: 0, max: 1.0, step: 0.005, fmt: ampFmt },
-    { key: "decay", label: "decay", min: 0.1, max: 1.0, step: 0.005, fmt: msFmt },
-    { key: "subHz", label: "sub", min: 20, max: 120, step: 0.5, fmt: hzFmt },
-    { key: "subPeak", label: "sub lvl", min: 0, max: 0.6, step: 0.005, fmt: ampFmt },
-    { key: "subDecay", label: "sub decay", min: 0.1, max: 1.0, step: 0.005, fmt: msFmt },
-  ],
-  bassSnap: [
-    { key: "noiseStartHz", label: "noise start", min: 200, max: 5000, step: 10, fmt: hzFmt },
-    { key: "noiseEndHz", label: "noise end", min: 100, max: 3000, step: 10, fmt: hzFmt },
-    { key: "noiseQ", label: "noise Q", min: 0.1, max: 8, step: 0.05, fmt: ampFmt },
-    { key: "noisePeak", label: "noise lvl", min: 0, max: 0.6, step: 0.005, fmt: ampFmt },
-    { key: "noiseDecay", label: "noise decay", min: 0.03, max: 0.4, step: 0.005, fmt: msFmt },
-    { key: "bodyStartHz", label: "body start", min: 80, max: 800, step: 1, fmt: hzFmt },
-    { key: "bodyEndHz", label: "body end", min: 50, max: 400, step: 1, fmt: hzFmt },
-    { key: "bodyPeak", label: "body lvl", min: 0, max: 0.5, step: 0.005, fmt: ampFmt },
-    { key: "bodyDecay", label: "body decay", min: 0.03, max: 0.3, step: 0.005, fmt: msFmt },
-  ],
-  chime: [
-    { key: "fundamentalHz", label: "fundamental", min: 400, max: 3000, step: 1, fmt: hzFmt },
-    { key: "partial1Ratio", label: "partial 1", min: 1.5, max: 4, step: 0.005, fmt: ratioFmt },
-    { key: "partial2Ratio", label: "partial 2", min: 2, max: 6, step: 0.005, fmt: ratioFmt },
-    { key: "peak", label: "peak", min: 0, max: 0.5, step: 0.005, fmt: ampFmt },
-    { key: "decay", label: "decay", min: 0.2, max: 2.5, step: 0.01, fmt: msFmt },
   ],
   bell: [
     { key: "fundamentalHz", label: "fundamental", min: 80, max: 800, step: 0.5, fmt: hzFmt },
@@ -182,13 +124,6 @@ let pendingSave: ReturnType<typeof setTimeout> | null = null;
 async function init() {
   await loadSoundConfig();
 
-  // The editor always uses the legacy engine so the cfgN() values
-  // immediately drive playback. The Tone engine bakes one-shots into
-  // buffers ahead of time, which would freeze the visualizer to whatever
-  // values were captured at bake time. The header dropdown still lets you
-  // listen with the polished tone bus once values are settled.
-  sound.engine = "legacy";
-
   buildGlobals();
   buildList();
   hookHeader();
@@ -196,9 +131,9 @@ async function init() {
   setSaveStatus("loaded", "saved");
 
   // Pre-render every row's visualizer via OfflineAudioContext. No user
-  // gesture required, no audible playback — each sound's legacy synth recipe
-  // is rendered into an offline buffer and the visualizer ingests it the
-  // same way it would a live capture. Serialized so the main thread stays
+  // gesture required, no audible playback — each sound's synth recipe is
+  // rendered into an offline buffer and the visualizer ingests it the same
+  // way it would a live capture. Serialized so the main thread stays
   // responsive: each render typically takes < 30ms but they add up.
   prerenderAllRows();
 }
@@ -220,7 +155,7 @@ async function prerenderAllRows() {
       const durSec = spec.name === "thrust" ? 0.6 : Math.min(spec.expectedDurationSec + 0.15, 2.5);
       // Sample rate has to be ≥ 8000 in Chrome's OfflineAudioContext. 44.1k
       // is enough resolution for visualization and keeps render fast.
-      const buf = await sound.renderOfflineLegacy(spec.name, 1, durSec, 44100);
+      const buf = await sound.renderOfflineVoice(spec.name, 1, durSec, 44100);
       if (buf) {
         handle.vis.ingestBuffer(buf);
         handle.vis.render();
@@ -498,17 +433,6 @@ function resetRow(spec: SoundSpec) {
 }
 
 function hookHeader() {
-  const engineSel = document.getElementById("se-engine-select") as HTMLSelectElement | null;
-  if (engineSel) {
-    engineSel.value = sound.engine;
-    engineSel.addEventListener("change", () => {
-      const next = engineSel.value as "legacy" | "tone";
-      if (next === sound.engine) return;
-      sound.cycleEngine();
-      // cycleEngine flips one step; if we needed to flip twice, do it again.
-      if (sound.engine !== next) sound.cycleEngine();
-    });
-  }
   const reCap = document.getElementById("se-recapture-all");
   if (reCap) {
     reCap.addEventListener("click", async () => {
