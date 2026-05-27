@@ -1,5 +1,6 @@
 import { Vec, v, add, mul, fromAngle, wrap, rand, TAU } from "./vec";
 import { Trail } from "./Trail";
+import { SoundwaveRadiator } from "./SoundwaveRadiator";
 
 const HUE_PALETTE = [185, 200, 220, 250, 280, 310, 330];
 
@@ -353,6 +354,79 @@ const partitionBassShip = (ship: BassShip, count: number): BassShip[] => {
   });
 };
 
+// Build a simplified closed silhouette from a BassShip — the outer hull of
+// all module vertices, resampled at fixed angular intervals around the
+// centroid. Used by SoundwaveRadiator: a wave that wears the actual chunk's
+// silhouette reads as "the broken piece is singing" rather than a generic
+// ring. Returned in radius-units (caller scales by this.radius).
+//
+// Algorithm:
+//   1. Gather every module vertex.
+//   2. For each of N angular bins around (0,0), keep the farthest vertex
+//      whose angle falls in that bin. This is a polar-max sweep — cheaper
+//      than a true convex hull, and gives a slightly puffier outline that
+//      reads as "the body" rather than "the exact edge of the body".
+//   3. Bins with no contributors fall back to interpolation between their
+//      filled neighbours so the curve is C0-continuous.
+// Result: a 28-sample closed polygon, each sample = (angle, radius_norm).
+// The renderer reconstructs xy by (cos a * r, sin a * r) * scaleRadius.
+export type SilhouetteSample = { ax: number; ay: number; r: number };
+export const buildBassSilhouette = (ship: BassShip, samples = 28): SilhouetteSample[] => {
+  const bins: number[] = new Array(samples).fill(0);
+  for (const m of ship.modules) {
+    for (const p of m.vertices) {
+      const r = Math.hypot(p.x, p.y);
+      if (r <= 0) continue;
+      let a = Math.atan2(p.y, p.x);
+      if (a < 0) a += TAU;
+      const idx = Math.min(samples - 1, Math.floor((a / TAU) * samples));
+      if (r > bins[idx]) bins[idx] = r;
+    }
+  }
+  // Fill any empty bins by linear interpolation from the nearest filled
+  // neighbours on either side. If everything is empty (defensive), fall
+  // back to a unit circle so the radiator still draws something.
+  let anyFilled = false;
+  for (const b of bins) if (b > 0) { anyFilled = true; break; }
+  if (!anyFilled) {
+    for (let i = 0; i < samples; i++) bins[i] = 1;
+  } else {
+    for (let i = 0; i < samples; i++) {
+      if (bins[i] > 0) continue;
+      let left = -1, right = -1;
+      for (let k = 1; k <= samples; k++) {
+        const li = (i - k + samples) % samples;
+        if (bins[li] > 0) { left = li; break; }
+      }
+      for (let k = 1; k <= samples; k++) {
+        const ri = (i + k) % samples;
+        if (bins[ri] > 0) { right = ri; break; }
+      }
+      if (left === right) { bins[i] = bins[left]; continue; }
+      // Shortest signed distance from left → i and i → right (going around).
+      const dL = (i - left + samples) % samples;
+      const dR = (right - i + samples) % samples;
+      const t = dL / (dL + dR);
+      bins[i] = bins[left] * (1 - t) + bins[right] * t;
+    }
+  }
+  // Light low-pass: average each bin with its neighbours so the outline
+  // breathes smoothly instead of stepping per-bin (which would read as
+  // a polygon, not a soundwave).
+  const smoothed: number[] = new Array(samples);
+  for (let i = 0; i < samples; i++) {
+    const prev = bins[(i - 1 + samples) % samples];
+    const next = bins[(i + 1) % samples];
+    smoothed[i] = (prev + bins[i] * 2 + next) * 0.25;
+  }
+  const out: SilhouetteSample[] = new Array(samples);
+  for (let i = 0; i < samples; i++) {
+    const a = (i / samples) * TAU;
+    out[i] = { ax: Math.cos(a), ay: Math.sin(a), r: smoothed[i] };
+  }
+  return out;
+};
+
 // Pre-rolled local-space placements for crack damage. We generate one entry
 // per HP — cracks reveal in order as hits land so the same bassteroid gives
 // a consistent, escalating fracture pattern per playthrough. Each crack is
@@ -448,6 +522,11 @@ export class Asteroid {
   // stamp per ring-buffer sample under additive blend — no shadowBlur, no
   // per-frame allocation. See Trail.ts.
   trail: Trail | null = null;
+  // Radiating-soundwave visualiser. Replaces `trail` once a bassteroid has
+  // been broken into mediums/smalls — at which point its drone fades in and
+  // the piece should "sing" outward rather than leave a wake. Anchored
+  // origin per wave; see SoundwaveRadiator.ts.
+  radiator: SoundwaveRadiator | null = null;
 
   constructor(pos: Vec, vel: Vec, size: AsteroidSize, hue?: number, kind: AsteroidKind = "normal", inheritBass?: BassShip) {
     this.pos = pos;
@@ -508,21 +587,37 @@ export class Asteroid {
     }
     this.membranePhase = rand(0, TAU);
     this.sprite = this.buildSprite();
-    // Bassteroid drone trail. Pulse rate is loosely keyed to the kind's
-    // pitch — A (root, lowest) breathes slowest, D (highest) fastest — so
-    // the visual rhythm reads as "deeper voice = slower throb". Trail hue
-    // matches the bassteroid's own hue (set above from KIND_HUE).
+    // Bassteroid wake. Gen-0 (large) wears no drone yet — it gets the slow
+    // glow Trail as a "pristine charged thing drifting in space" wake.
+    // Mediums/smalls (only spawned via split) have an active drone voice,
+    // so they instead wear a SoundwaveRadiator that radiates the drone
+    // outward from their position. Trail hue / radiator hue both match the
+    // bassteroid's own hue (set above from KIND_HUE).
     if (isBass) {
-      const bassRateByKind: Record<string, number> = {
-        bassA: 0.65,
-        bassB: 0.85,
-        bassC: 0.75,
-        bassD: 1.05,
-      };
-      const rate = bassRateByKind[kind] ?? 0.8;
-      // Trail radius scales with asteroid radius; alpha kept modest so a
-      // field of four overlapping drones doesn't wash the screen out.
-      this.trail = new Trail(this.hue, this.radius * 0.65, 0.28, "bass", rate);
+      if (size === "large") {
+        const bassRateByKind: Record<string, number> = {
+          bassA: 0.65,
+          bassB: 0.85,
+          bassC: 0.75,
+          bassD: 1.05,
+        };
+        const rate = bassRateByKind[kind] ?? 0.8;
+        // Trail radius scales with asteroid radius; alpha kept modest so a
+        // field of four overlapping drones doesn't wash the screen out.
+        this.trail = new Trail(this.hue, this.radius * 0.65, 0.28, "bass", rate);
+      } else {
+        // Fragmented: drone is fading in. Build a simplified silhouette
+        // from this child's inherited ship chunk so the radiating waves
+        // wear the actual broken-piece outline rather than a generic ring.
+        const silhouette = buildBassSilhouette(this.bassShip!);
+        const isHighOctave = size === "small";
+        this.radiator = new SoundwaveRadiator(
+          kind as "bassA" | "bassB" | "bassC" | "bassD",
+          this.hue,
+          silhouette,
+          isHighOctave,
+        );
+      }
     }
   }
 
