@@ -398,9 +398,7 @@ export class Ship {
       this.renderComboHalo(ctx, beatPulse);
     }
 
-    // Beat pulse rides atop breath pulse; clamped to 1.
     const breathPulse = 0.7 + 0.3 * Math.sin(t * 0.005);
-    const pulse = Math.min(1, breathPulse + 0.7 * beatPulse) * invulnFlicker;
 
     ctx.strokeStyle = `hsla(195, 100%, 75%, ${0.95 * breathPulse * invulnFlicker})`;
     ctx.lineWidth = 1.5;
