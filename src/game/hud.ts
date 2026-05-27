@@ -4,6 +4,7 @@ import { SLOW_MO_DURATION } from "./slowMo";
 // Why: cache the DOM handles once so per-frame syncs don't repeat document.getElementById calls.
 export type HudElements = {
   scoreEl: HTMLElement;
+  scoreFlashEl: HTMLElement;
   comboEl: HTMLElement;
   comboValueEl: HTMLElement;
   waveEl: HTMLElement;
@@ -30,6 +31,7 @@ export const bindHudElements = (): HudElements => {
   slowProgressEl = powerupSlots.slow?.querySelector<HTMLElement>(".powerup-progress") ?? null;
   return {
     scoreEl: document.getElementById("score")!,
+    scoreFlashEl: document.getElementById("score-flash")!,
     comboEl: document.getElementById("combo")!,
     comboValueEl: document.getElementById("combo-value")!,
     waveEl: document.getElementById("wave")!,
@@ -50,6 +52,43 @@ const setSlotActive = (kind: string, active: boolean) => {
   const isActive = el.classList.contains("active");
   if (active && !isActive) el.classList.add("active");
   else if (!active && isActive) el.classList.remove("active");
+};
+
+// Linear scale/glow from points earned. Anchors: a 50-point baseline kill
+// reads at 1.0× scale; a 5000-point comet kill reads at 2.5×. Clamps keep
+// tiny chips visible and very-big combo'd kills from blowing out the HUD.
+const SCORE_FLASH_BASELINE_POINTS = 50;
+const SCORE_FLASH_PEAK_POINTS = 5000;
+const SCORE_FLASH_BASELINE_SCALE = 1.0;
+const SCORE_FLASH_PEAK_SCALE = 2.5;
+const SCORE_FLASH_MIN_SCALE = 0.85;
+const SCORE_FLASH_MAX_SCALE = 3.0;
+
+const scoreFlashScale = (points: number): number => {
+  const slope =
+    (SCORE_FLASH_PEAK_SCALE - SCORE_FLASH_BASELINE_SCALE) /
+    (SCORE_FLASH_PEAK_POINTS - SCORE_FLASH_BASELINE_POINTS);
+  const raw = SCORE_FLASH_BASELINE_SCALE + (points - SCORE_FLASH_BASELINE_POINTS) * slope;
+  return Math.max(SCORE_FLASH_MIN_SCALE, Math.min(SCORE_FLASH_MAX_SCALE, raw));
+};
+
+// Pop the "+N" readout next to the score. We toggle the .flashing class off
+// and re-apply on the next frame so a rapid-fire kill chain restarts the
+// animation instead of being swallowed by an already-playing one.
+export const flashScoreGain = (game: Game, points: number) => {
+  if (points <= 0) return;
+  const el = game.scoreFlashEl;
+  const scale = scoreFlashScale(points);
+  // Glow tracks the same linear curve, then re-mapped into a smaller range
+  // so even small flashes still glow a little.
+  const glow = 0.55 + ((scale - SCORE_FLASH_MIN_SCALE) / (SCORE_FLASH_MAX_SCALE - SCORE_FLASH_MIN_SCALE)) * 0.45;
+  el.textContent = `+${points}`;
+  el.style.setProperty("--scale", scale.toFixed(3));
+  el.style.setProperty("--glow", glow.toFixed(3));
+  el.classList.remove("flashing");
+  // Force a reflow so removing+adding the class restarts the keyframes.
+  void el.offsetWidth;
+  el.classList.add("flashing");
 };
 
 // Why: collapses score/wave/lives/combo DOM writes into one call so handlers stay one-liners.

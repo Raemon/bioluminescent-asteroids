@@ -77,6 +77,7 @@ export class Game implements HudElements {
   waveEvents: WaveEventSchedule = newWaveEventSchedule();
 
   scoreEl: HTMLElement;
+  scoreFlashEl: HTMLElement;
   comboEl: HTMLElement;
   comboValueEl: HTMLElement;
   waveEl: HTMLElement;
@@ -114,6 +115,7 @@ export class Game implements HudElements {
     window.addEventListener("resize", () => this.resize());
     const hud = bindHudElements();
     this.scoreEl = hud.scoreEl;
+    this.scoreFlashEl = hud.scoreFlashEl;
     this.comboEl = hud.comboEl;
     this.comboValueEl = hud.comboValueEl;
     this.waveEl = hud.waveEl;

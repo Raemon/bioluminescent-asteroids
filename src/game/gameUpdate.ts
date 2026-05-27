@@ -154,9 +154,12 @@ const classifyNewBullets = (game: Game, firstNewIndex: number) => {
 const handleOnBeatFire = (game: Game, newBullets: Bullet[]) => {
   // Why: boosted bullets fly while the yellow halo (combo ≥ 4, tier 2) is up.
   const boosted = game.ship.comboHaloTier >= 2;
+  // Why: combo ≥ 8 promotes to the white "super-boosted" tier — bigger hitbox.
+  const superBoosted = game.beatCombo >= 8;
   for (const newBullet of newBullets) {
     newBullet.onBeat = true;
     newBullet.boosted = boosted;
+    newBullet.superBoosted = superBoosted;
   }
   game.sound.play("comboTick");
   if (game.beatCombo === 0) {

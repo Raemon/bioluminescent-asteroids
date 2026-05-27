@@ -8,18 +8,19 @@ const HUE_BUCKET_STEP = 15;
 const HUE_BUCKETS = Math.ceil(360 / HUE_BUCKET_STEP);
 
 const glowSpriteByBucket: HTMLCanvasElement[] = new Array(HUE_BUCKETS);
+let whiteGlowSprite: HTMLCanvasElement | null = null;
 
-const buildGlowSprite = (hue: number): HTMLCanvasElement => {
+const buildGlowSprite = (hue: number, saturation: number): HTMLCanvasElement => {
   const canvas = document.createElement("canvas");
   canvas.width = SPRITE_SIZE;
   canvas.height = SPRITE_SIZE;
   const ctx = canvas.getContext("2d")!;
   const c = SPRITE_SIZE / 2;
   const grad = ctx.createRadialGradient(c, c, 0, c, c, c);
-  grad.addColorStop(0, `hsla(${hue}, 95%, 80%, 1)`);
-  grad.addColorStop(0.25, `hsla(${hue}, 95%, 65%, 0.55)`);
-  grad.addColorStop(0.6, `hsla(${hue}, 95%, 55%, 0.15)`);
-  grad.addColorStop(1, `hsla(${hue}, 95%, 55%, 0)`);
+  grad.addColorStop(0, `hsla(${hue}, ${saturation}%, 80%, 1)`);
+  grad.addColorStop(0.25, `hsla(${hue}, ${saturation}%, 65%, 0.55)`);
+  grad.addColorStop(0.6, `hsla(${hue}, ${saturation}%, 55%, 0.15)`);
+  grad.addColorStop(1, `hsla(${hue}, ${saturation}%, 55%, 0)`);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, SPRITE_SIZE, SPRITE_SIZE);
   return canvas;
@@ -30,10 +31,17 @@ export const getGlowSprite = (hue: number): HTMLCanvasElement => {
   const bucket = Math.floor(normalized / HUE_BUCKET_STEP) % HUE_BUCKETS;
   let sprite = glowSpriteByBucket[bucket];
   if (!sprite) {
-    sprite = buildGlowSprite(bucket * HUE_BUCKET_STEP);
+    sprite = buildGlowSprite(bucket * HUE_BUCKET_STEP, 95);
     glowSpriteByBucket[bucket] = sprite;
   }
   return sprite;
+};
+
+// Why: combo ≥ 8 wants a true-white glow — building a desaturated sprite once
+// is cheaper than baking saturation into every cached hue bucket.
+const getWhiteGlowSprite = (): HTMLCanvasElement => {
+  if (!whiteGlowSprite) whiteGlowSprite = buildGlowSprite(0, 0);
+  return whiteGlowSprite;
 };
 
 // Draws a glow blob of radius `r` at (x, y) using the cached sprite. The
@@ -47,8 +55,9 @@ export const drawGlow = (
   r: number,
   hue: number,
   alpha: number,
+  white: boolean = false,
 ) => {
-  const sprite = getGlowSprite(hue);
+  const sprite = white ? getWhiteGlowSprite() : getGlowSprite(hue);
   const size = r * 2;
   ctx.globalAlpha = alpha;
   ctx.drawImage(sprite, x - r, y - r, size, size);

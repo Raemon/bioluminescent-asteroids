@@ -4,9 +4,8 @@ import { Alien } from "../Alien";
 import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
 import { Vec } from "../vec";
-import { COMBO_MULTIPLIER_MAX } from "./rhythmConstants";
 import { loseCombo } from "./rhythmGate";
-import { syncComboHud, syncHud } from "./hud";
+import { syncComboHud, syncHud, flashScoreGain } from "./hud";
 import { popupCombo, popupScore } from "./popups";
 import {
   emitExplosion,
@@ -32,7 +31,7 @@ export const hitSoundFor = (
 //   hitPos anchors the "COMBO LOST" popup at the target the off-beat shot landed on.
 export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) => {
   if (isOnBeatHit && game.beatCombo >= 1) {
-    game.beatCombo = Math.min(game.beatCombo + 1, COMBO_MULTIPLIER_MAX);
+    game.beatCombo += 1;
     syncComboHud(game);
   } else if (!isOnBeatHit && game.beatCombo !== 0) {
     loseCombo(game, hitPos);
@@ -50,6 +49,7 @@ const awardScoreForKill = (game: Game, hitPos: Vec, baseScore: number, isOnBeatH
     if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
   }
   game.score += scoreEarned;
+  flashScoreGain(game, scoreEarned);
   return scoreEarned;
 };
 
@@ -147,6 +147,7 @@ export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: bool
   const baseScore = 5000;
   const scoreEarned = isOnBeatHit ? Math.round(baseScore * game.beatCombo) : baseScore;
   game.score += scoreEarned;
+  flashScoreGain(game, scoreEarned);
   game.popups.push(popupScore(b.pos, scoreEarned));
   if (isOnBeatHit) {
     game.sound.play("comboSparkle", 1, b.pos);

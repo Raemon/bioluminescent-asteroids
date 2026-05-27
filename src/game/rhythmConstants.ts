@@ -6,5 +6,3 @@ export const BEAT_WINDOW = 0.08;
 // Why: dev-only logging gate to diagnose drift between the rhythm gate and what the player hears.
 export const DEBUG_BEAT_TIMING = false;
 
-// Why: cap stops long streaks from trivialising high-wave scoring; combo=1 is the "primed" tier.
-export const COMBO_MULTIPLIER_MAX = 5;
