@@ -29,6 +29,9 @@ const RETICULE_TRAJECTORY_FADE_START = 0.3;
 const RETICULE_TRAJECTORY_PULSE_PERIOD_BEATS = 4;
 const RETICULE_TRAJECTORY_PULSE_MIN_ALPHA = 0.2
 
+const RADAR_CONE_HALF_ANGLE = 0.60;
+const RADAR_CONE_LENGTH = 500;
+
 const BULLET_HIT_RADIUS_ON_BEAT = 1.8 * 2.38 * 2.5;
 const BULLET_HIT_RADIUS_OFF_BEAT = 1.8 * 2.5;
 
@@ -284,7 +287,12 @@ export class Ship {
     const bulletVel = add(mul(dir, this.bulletSpeed), mul(this.vel, 0.4));
     const reticulePos = wrap(add(muzzle, mul(bulletVel, beatGrid)), w, h);
     const onCooldown = this.fireCooldown > 0;
-    const RADAR_RADIUS = 150;
+    // Cone apex sits at the ship; edges fan forward from the hull.
+    const coneApex = this.pos;
+    const leftAngle = this.heading - RADAR_CONE_HALF_ANGLE;
+    const rightAngle = this.heading + RADAR_CONE_HALF_ANGLE;
+    const leftEdgeEnd = add(coneApex, fromAngle(leftAngle, RADAR_CONE_LENGTH));
+    const rightEdgeEnd = add(coneApex, fromAngle(rightAngle, RADAR_CONE_LENGTH));
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
 
@@ -314,38 +322,67 @@ export class Ship {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Dotted radar circle — barely visible.
+    // Radar cone — two dashed edges emanate from the ship; far edge invisible.
+    // Each edge fades from opacity 1 at the ship to 0 at the tip.
     ctx.save();
     ctx.shadowBlur = 0;
     ctx.setLineDash(RETICULE_LINE_DASH);
-    ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${RETICULE_RADAR_ALPHA * radarPulse})`;
-    ctx.beginPath();
-    ctx.arc(reticulePos.x, reticulePos.y, RADAR_RADIUS, 0, TAU);
-    ctx.stroke();
+    const coneAlpha = RETICULE_RADAR_ALPHA * radarPulse * 5; // boost: cone is sparser than the old disc
+    const coneAlphaClamped = Math.min(1, coneAlpha);
+    const drawConeEdge = (endX: number, endY: number) => {
+      const grad = ctx.createLinearGradient(coneApex.x, coneApex.y, endX, endY);
+      grad.addColorStop(0, `hsla(${RETICULE_DASH_HSL}, ${coneAlphaClamped})`);
+      grad.addColorStop(1, `hsla(${RETICULE_DASH_HSL}, 0)`);
+      ctx.strokeStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(coneApex.x, coneApex.y);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+    };
+    drawConeEdge(leftEdgeEnd.x, leftEdgeEnd.y);
+    drawConeEdge(rightEdgeEnd.x, rightEdgeEnd.y);
     ctx.restore();
 
-    // Trajectory previews for targets inside the radar.
+    // Trajectory previews for targets inside the cone.
     if (targets.length > 0) {
       ctx.save();
       ctx.setLineDash(RETICULE_LINE_DASH);
       ctx.lineWidth = 1.5;
       // No shadowBlur: gradient-stroke drop-shadows are slow.
       ctx.shadowBlur = 0;
-      const radarR2 = RADAR_RADIUS * RADAR_RADIUS;
       const pulsePeriod = RETICULE_TRAJECTORY_PULSE_PERIOD_BEATS * beatGrid;
+      // Cone axis (unit) and outward normals of the two side edges (pointing out of the cone).
+      const axisX = Math.cos(this.heading);
+      const axisY = Math.sin(this.heading);
+      // Outward normals of the side edges. Left edge direction is (cos(h-half),
+      // sin(h-half)); rotating by -90° gives the outward (cone-left) normal.
+      // Right edge direction is (cos(h+half), sin(h+half)); rotating by +90°
+      // gives the outward (cone-right) normal.
+      const leftNx = Math.sin(this.heading - RADAR_CONE_HALF_ANGLE);
+      const leftNy = -Math.cos(this.heading - RADAR_CONE_HALF_ANGLE);
+      const rightNx = -Math.sin(this.heading + RADAR_CONE_HALF_ANGLE);
+      const rightNy = Math.cos(this.heading + RADAR_CONE_HALF_ANGLE);
+      // Inside the cone, the dot product of (point - apex) with each outward normal is ≤ 0.
       for (const t of targets) {
-        // Pick nearest toroidal image for screen-wrap.
-        let dx = t.pos.x - reticulePos.x;
-        let dy = t.pos.y - reticulePos.y;
+        // Pick nearest toroidal image for screen-wrap, relative to the cone apex (ship).
+        let dx = t.pos.x - coneApex.x;
+        let dy = t.pos.y - coneApex.y;
         if (dx > w / 2) dx -= w;
         else if (dx < -w / 2) dx += w;
         if (dy > h / 2) dy -= h;
         else if (dy < -h / 2) dy += h;
-        // In range if silhouette overlaps the disc.
         const tr = t.radius ?? 0;
-        const inclusionR = RADAR_RADIUS + tr;
-        if (dx * dx + dy * dy > inclusionR * inclusionR) {
-          // Out of range — clear so re-entry restarts ramp.
+        // In range if silhouette overlaps the cone: forward distance within length+r and
+        // perpendicular distance to either edge within r (i.e., the target's circle bulges
+        // into the cone). Use signed distances against side-edge outward normals.
+        const forward = dx * axisX + dy * axisY;
+        if (forward < -tr || forward > RADAR_CONE_LENGTH + tr) {
+          this.trajectoryFirstSeen.delete(t as unknown as object);
+          continue;
+        }
+        const leftSigned = dx * leftNx + dy * leftNy;
+        const rightSigned = dx * rightNx + dy * rightNy;
+        if (leftSigned > tr || rightSigned > tr) {
           this.trajectoryFirstSeen.delete(t as unknown as object);
           continue;
         }
@@ -372,8 +409,8 @@ export class Ship {
           beatTime < firstPeakBeat ? 0 : RETICULE_TRAJECTORY_PULSE_MIN_ALPHA;
         const pulse = floor + (1 - floor) * pulse01;
         ctx.globalAlpha = RETICULE_TRAJECTORY_ALPHA * pulse;
-        const cx = reticulePos.x + dx;
-        const cy = reticulePos.y + dy;
+        const cx = coneApex.x + dx;
+        const cy = coneApex.y + dy;
         const speed = Math.hypot(t.vel.x, t.vel.y);
         if (speed < 1) continue;
         const ux = t.vel.x / speed;
@@ -383,22 +420,40 @@ export class Ship {
         const edgePad = 6;
         const rawStartX = cx + ux * (r + edgePad);
         const rawStartY = cy + uy * (r + edgePad);
-        // Ray-disc intersection: s^2 + 2b s + c = 0.
-        const sx = rawStartX - reticulePos.x;
-        const sy = rawStartY - reticulePos.y;
-        const b = sx * ux + sy * uy;
-        const c = sx * sx + sy * sy - radarR2;
-        const disc = b * b - c;
-        if (disc <= 0) continue;
-        const sqrtDisc = Math.sqrt(disc);
-        const sExit = -b + sqrtDisc;
-        if (sExit <= 0) continue;
-        // Clip start to whichever is further along the ray.
-        const sEntry = Math.max(0, -b - sqrtDisc);
-        const startX = rawStartX + ux * sEntry;
-        const startY = rawStartY + uy * sEntry;
-        const endX = rawStartX + ux * sExit;
-        const endY = rawStartY + uy * sExit;
+        // Clip ray (rawStart + s * u) to the cone half-plane intersection
+        // (forward ≥ 0, forward ≤ length, leftSigned ≤ 0, rightSigned ≤ 0).
+        // For each half-plane n·(P-apex) ≤ d: solving for s gives a 1-sided constraint.
+        const rsx = rawStartX - coneApex.x;
+        const rsy = rawStartY - coneApex.y;
+        let sMin = 0;
+        let sMax = Infinity;
+        const clip = (nx: number, ny: number, d: number) => {
+          // n·(rawStart - apex) + s * (n·u) ≤ d
+          const num = d - (nx * rsx + ny * rsy);
+          const den = nx * ux + ny * uy;
+          if (Math.abs(den) < 1e-9) {
+            // Ray parallel to plane; if start violates, no intersection.
+            if (num < 0) sMax = -1;
+            return;
+          }
+          const sBound = num / den;
+          if (den > 0) {
+            // Ray moves into violation past sBound: upper bound.
+            if (sBound < sMax) sMax = sBound;
+          } else {
+            // Ray was violating, becomes valid after sBound: lower bound.
+            if (sBound > sMin) sMin = sBound;
+          }
+        };
+        clip(-axisX, -axisY, 0);                       // forward ≥ 0
+        clip(axisX, axisY, RADAR_CONE_LENGTH);         // forward ≤ length
+        clip(leftNx, leftNy, 0);                       // leftSigned ≤ 0
+        clip(rightNx, rightNy, 0);                     // rightSigned ≤ 0
+        if (sMax <= sMin) continue;
+        const startX = rawStartX + ux * sMin;
+        const startY = rawStartY + uy * sMin;
+        const endX = rawStartX + ux * sMax;
+        const endY = rawStartY + uy * sMax;
         // Gradient: opaque, then fade out at far end.
         const grad = ctx.createLinearGradient(startX, startY, endX, endY);
         grad.addColorStop(0, `hsla(${RETICULE_DASH_HSL}, 1)`);

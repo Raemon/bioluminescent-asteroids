@@ -680,7 +680,7 @@ export class Asteroid {
     const dx = point.x - this.pos.x;
     const dy = point.y - this.pos.y;
     const distance = Math.hypot(dx, dy);
-    if (distance > this.radius * 1.3) return false;
+    if (distance > this.radius * 1.3 + pointRadius) return false;
     // Bassteroids are modular silhouettes, not organic blobs — use a tight
     // circle for the hitbox. 0.88 is a feel-tuned shrink so glancing shots
     // miss the gaps between modules instead of registering on empty space.

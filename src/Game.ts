@@ -1291,7 +1291,6 @@ export class Game {
       // 1.122 = whole-step lift (~E1 → F#1) — audibly distinct from the
       // downbeat without breaking the ominous mood.
       const pitchRatio = isOffbeat ? 1.122 : 1;
-      console.log("BG_BEAT idx=" + this.lastBgBeatIndex + " beatTime=" + this.beatTime.toFixed(4) + " musicDt=" + musicDt.toFixed(4) + " wall=" + performance.now().toFixed(1));
       this.sound.play("bgBeat", pitchRatio);
     }
     for (const a of this.asteroids) {
