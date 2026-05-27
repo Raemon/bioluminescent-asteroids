@@ -113,7 +113,8 @@ export type SoundName =
   | "cometNote"
   | "cometDestroyed"
   | "canisterAppear"
-  | "canisterDestroyed";
+  | "canisterDestroyed"
+  | "comboLost";
 
 export class Sound {
   ctx: AudioContext | null = null;
@@ -1390,6 +1391,7 @@ export class Sound {
       case "cometDestroyed": this.playCometDestroyed(); break;
       case "canisterAppear": this.playCanisterAppear(); break;
       case "canisterDestroyed": this.playCanisterDestroyed(); break;
+      case "comboLost": this.playComboLost(); break;
     }
 
     if (voiceGain) this.master = realMaster;
@@ -2590,6 +2592,44 @@ export class Sound {
       lfo.start(t);
       osc.stop(t + 1.15);
       lfo.stop(t + 1.15);
+    }
+  }
+
+  // Combo-lost "wrrr" — a short downward pitch-bend on two detuned triangles
+  // through a closing lowpass. Reads as a deflating/slowing motor, the
+  // tonal opposite of the cyan→gold combo halo lighting up. Kept short
+  // (~0.4s) so it doesn't step on the shot or hit that triggered the loss.
+  private playComboLost() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    // Two slightly detuned triangle voices — the small detune is what
+    // gives the tail its buzzy "wrrr" character instead of a clean sigh.
+    const voices: Array<{ start: number; end: number; detune: number; level: number }> = [
+      { start: 392.0, end: 130.8, detune: 0, level: 0.16 },   // G4 → C3
+      { start: 392.0, end: 130.8, detune: 12, level: 0.12 },  // detuned twin
+    ];
+    for (const v of voices) {
+      const osc = this.ctx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(v.start, t);
+      osc.frequency.exponentialRampToValueAtTime(v.end, t + 0.34);
+      osc.detune.value = v.detune;
+      // Lowpass closes alongside the pitch drop — kills the brightness so
+      // the tail genuinely fades into the floor instead of buzzing on.
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.Q.value = 1.2;
+      filter.frequency.setValueAtTime(1800, t);
+      filter.frequency.exponentialRampToValueAtTime(380, t + 0.34);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(v.level, t + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      osc.stop(t + 0.45);
     }
   }
 

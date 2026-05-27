@@ -7,7 +7,7 @@ import { Starfield } from "./Starfield";
 import { Pulsar } from "./Pulsar";
 import { Input } from "./Input";
 import { Sound, SoundName } from "./Sound";
-import { Canister, spawnCanister } from "./Canister";
+import { Canister, spawnCanister, PowerupKind, POWERUP_HUE } from "./Canister";
 import { Comet, spawnComet } from "./Comet";
 import { Alien, AlienSize, ALIEN_FIRE_PERIOD_BEATS, spawnAlienAtEdge } from "./Alien";
 import { AlienBullet } from "./AlienBullet";
@@ -25,6 +25,28 @@ type ComboPopup = {
 };
 
 const COMBO_POPUP_LIFE = 0.9;
+
+// Floating label naming the powerup that was just picked up. Spawns at the
+// canister's former position so the player can read what they grabbed even
+// after the pickup burst clears.
+type PickupPopup = {
+  pos: Vec;
+  vel: Vec;
+  life: number;
+  maxLife: number;
+  text: string;
+  hue: number;
+};
+
+const PICKUP_POPUP_LIFE = 1.6;
+
+const POWERUP_LABEL: Record<PowerupKind, string> = {
+  trident: "TRIDENT",
+  rapid: "RAPID FIRE",
+  pierce: "PIERCE",
+  shield: "SHIELD",
+  slow: "SLOW-MO",
+};
 
 // Debug popup tied to DEBUG_BEAT_TIMING. Spawned at each fire (ship pos) and
 // each hit (impact pos) showing "ON"/"OFF" plus the offset in ms.
@@ -81,8 +103,8 @@ const COMBO_MULTIPLIER_MAX = 5;
 // time" advantage rather than a global pause.
 const CANISTER_CHANCE_PER_WAVE = 1 / 3;
 const CANISTER_SPAWN_WINDOW: [number, number] = [8, 24];
-const SLOW_MO_DURATION = 8;
-const SLOW_MO_FACTOR = 0.45;
+const SLOW_MO_DURATION = 24;
+const SLOW_MO_FACTOR = 0.2;
 
 // Alien saucer event: every few waves a saucer drops in mid-wave and starts
 // firing musical bullets at the player. Eligibility starts at wave 3 and
@@ -183,6 +205,7 @@ export class Game {
   asteroids: Asteroid[] = [];
   bullets: Bullet[] = [];
   comboPopups: ComboPopup[] = [];
+  pickupPopups: PickupPopup[] = [];
   beatDebugPopups: BeatDebugPopup[] = [];
   score = 0;
   wave = 1;
@@ -407,6 +430,7 @@ export class Game {
     this.firedOffBeatSinceLastBeat = false;
     this.bullets = [];
     this.comboPopups = [];
+    this.pickupPopups = [];
     this.beatDebugPopups = [];
     this.shards = [];
     this.canisters = [];
@@ -690,8 +714,7 @@ export class Game {
           this.beatCombo = Math.min(this.beatCombo + 1, COMBO_MULTIPLIER_MAX);
           this.syncComboHud();
         } else if (!isOnBeatHit && this.beatCombo !== 0) {
-          this.beatCombo = 0;
-          this.syncComboHud();
+          this.loseCombo();
         }
         if (!alienKilled) {
           this.sound.play("alienHit");
@@ -890,6 +913,22 @@ export class Game {
     }
   }
 
+  // Call instead of `this.beatCombo = 0` at sites where the player lost the
+  // streak through their own action (off-beat hit, missed beat). Only the
+  // "meaningful" loss — going from a visible combo (≥2) to 0 — triggers the
+  // sad wrrr + red halo flash; dropping a fresh 1 is too noisy to feedback.
+  // Death has its own dramatic cues, so killShip clears combo directly.
+  loseCombo() {
+    const wasMeaningful = this.beatCombo >= 2;
+    if (this.beatCombo === 0) return;
+    this.beatCombo = 0;
+    if (wasMeaningful) {
+      this.sound.play("comboLost");
+      this.ship.comboLossFlash = 1;
+    }
+    this.syncComboHud();
+  }
+
   // Spawn a floating "x{N}" label at an on-beat hit. Drifts upward and fades
   // out over ~0.9s. Replaces the old corner-pulse flash: feedback now lives
   // at the place the player actually struck.
@@ -931,6 +970,53 @@ export class Game {
       ctx.globalAlpha = alpha;
       ctx.fillStyle = "#ffd86a";
       ctx.shadowColor = "rgba(255, 200, 80, 0.85)";
+      ctx.shadowBlur = 14;
+      ctx.save();
+      ctx.translate(p.pos.x, p.pos.y);
+      ctx.scale(scale, scale);
+      ctx.fillText(p.text, 0, 0);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  spawnPickupPopup(pos: Vec, kind: PowerupKind) {
+    this.pickupPopups.push({
+      pos: { x: pos.x, y: pos.y - 24 },
+      vel: { x: 0, y: -18 },
+      life: PICKUP_POPUP_LIFE,
+      maxLife: PICKUP_POPUP_LIFE,
+      text: POWERUP_LABEL[kind],
+      hue: POWERUP_HUE[kind],
+    });
+  }
+
+  updatePickupPopups(dt: number) {
+    for (const p of this.pickupPopups) {
+      p.life -= dt;
+      p.pos.x += p.vel.x * dt;
+      p.pos.y += p.vel.y * dt;
+      p.vel.y *= 0.96;
+    }
+    this.pickupPopups = this.pickupPopups.filter((p) => p.life > 0);
+  }
+
+  renderPickupPopups(ctx: CanvasRenderingContext2D) {
+    if (this.pickupPopups.length === 0) return;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "700 18px 'Space Grotesk', system-ui, sans-serif";
+    for (const p of this.pickupPopups) {
+      const t = p.life / p.maxLife;
+      const age = 1 - t;
+      const scale = age < 0.15 ? 1 + (0.15 - age) * 2.0 : 1.0;
+      // Hold full opacity through most of the life, fade only in the last
+      // ~30% so the label stays readable long enough to register.
+      const alpha = t < 0.3 ? t / 0.3 : 1;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = `hsl(${p.hue}, 90%, 70%)`;
+      ctx.shadowColor = `hsla(${p.hue}, 95%, 65%, 0.9)`;
       ctx.shadowBlur = 14;
       ctx.save();
       ctx.translate(p.pos.x, p.pos.y);
@@ -1061,18 +1147,13 @@ export class Game {
   // combo only grows via on-beat hits (handled at impact time).
   evaluateClosedBeats() {
     const grid = this.comboGrid();
-    let changed = false;
     while (this.nextBeatToEvaluate * grid + BEAT_WINDOW <= this.beatTime) {
-      if (this.firedOffBeatSinceLastBeat) {
-        if (this.beatCombo !== 0) {
-          this.beatCombo = 0;
-          changed = true;
-        }
+      if (this.firedOffBeatSinceLastBeat && this.beatCombo !== 0) {
+        this.loseCombo();
       }
       this.firedOffBeatSinceLastBeat = false;
       this.nextBeatToEvaluate += 1;
     }
-    if (changed) this.syncComboHud();
   }
 
   update(dt: number) {
@@ -1257,6 +1338,7 @@ export class Game {
       this.canisters = this.canisters.filter((c) => c.alive);
       this.particles.update(dt);
       this.updateComboPopups(dt);
+      this.updatePickupPopups(dt);
       this.updateBeatDebugPopups(dt);
       this.handleCollisions();
       this.handleAlienHits();
@@ -1481,8 +1563,7 @@ export class Game {
           this.beatCombo = Math.min(this.beatCombo + 1, COMBO_MULTIPLIER_MAX);
           this.syncComboHud();
         } else if (!isOnBeatHit && this.beatCombo !== 0) {
-          this.beatCombo = 0;
-          this.syncComboHud();
+          this.loseCombo();
         }
         if (!didKill) {
           this.emitCrackParticles(a, isOnBeatHit);
@@ -1644,6 +1725,7 @@ export class Game {
 
   collectCanister(c: Canister) {
     this.sound.play("powerup");
+    this.spawnPickupPopup(c.pos, c.kind);
     if (c.kind === "slow") {
       this.slowMoTimer = SLOW_MO_DURATION;
     } else {
@@ -2104,6 +2186,7 @@ export class Game {
     ], this.beatTime);
     this.ship.render(ctx, this.time, this.currentBeatPulse());
     this.renderComboPopups(ctx);
+    this.renderPickupPopups(ctx);
     this.renderBeatDebugPopups(ctx);
 
     ctx.restore();

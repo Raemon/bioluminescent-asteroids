@@ -64,7 +64,7 @@ export class Ship {
   rotSpeed = 4.6;
   // Rotation ramp: 0 at tap, climbs to 1 on hold.
   rotRamp = 0;
-  thrustPower = 320;
+  thrustPower = 420;
   // Newtonian space drift: thrust and retro-thrust set velocity; nothing
   // slows the ship by itself.
   drag = 0;
@@ -100,6 +100,9 @@ export class Ship {
   // Target tier (0/1/2); intensity eases toward it.
   comboHaloTier = 0;
   comboHaloIntensity = 0;
+  // 0..1 — set to 1 by Game when a real combo (≥2) is lost; decays in update.
+  // Drives a red flash on the halo so the loss is felt visually as well as audibly.
+  comboLossFlash = 0;
   // beatTime each target first entered the radar disc.
   private trajectoryFirstSeen = new WeakMap<object, number>();
   constructor(pos: Vec) {
@@ -123,7 +126,7 @@ export class Ship {
     ctx.closePath();
 
     // Dull static outline (visible when there's no rhythm), fades out as the active halo takes over.
-    const dullAlpha = 0.25 * (1 - tier1);
+    const dullAlpha = 0.4 * (1 - tier1);
     if (dullAlpha > 0.001) {
       ctx.strokeStyle = `hsla(210, 30%, 70%, ${dullAlpha})`;
       ctx.lineWidth = 1.2;
@@ -139,6 +142,21 @@ export class Ship {
       ctx.lineWidth = 1.6;
       ctx.shadowColor = `hsla(${hue}, 100%, 70%, 1)`;
       ctx.shadowBlur = 10 + 6 * beatPulse;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    // Combo-loss flash: a red wash painted on top of whatever halo state was
+    // last visible. Fires the instant the combo dies (tier hasn't fully eased
+    // down yet), so the eye catches a red flicker exactly where the cyan/gold
+    // halo just was, then fades to nothing.
+    const lossFlash = this.comboLossFlash;
+    if (lossFlash > 0.001) {
+      const alpha = 0.85 * lossFlash;
+      ctx.strokeStyle = `hsla(0, 95%, 62%, ${alpha})`;
+      ctx.lineWidth = 1.8;
+      ctx.shadowColor = `hsla(0, 100%, 55%, 1)`;
+      ctx.shadowBlur = 12 * lossFlash;
       ctx.stroke();
       ctx.shadowBlur = 0;
     }
@@ -229,6 +247,10 @@ export class Ship {
     const rising = haloTarget > this.comboHaloIntensity;
     const rate = rising ? 14 : 2.5;
     this.comboHaloIntensity += (haloTarget - this.comboHaloIntensity) * Math.min(1, rate * dt);
+    // Combo-loss flash: decay linearly so the red is visible for ~0.7s then gone.
+    if (this.comboLossFlash > 0) {
+      this.comboLossFlash = Math.max(0, this.comboLossFlash - dt / 0.7);
+    }
 
     // Turn rate ramps from 0.18 to 1 over ~0.18s of hold.
     const turnLeft = input.down("arrowleft") || input.down("a");
