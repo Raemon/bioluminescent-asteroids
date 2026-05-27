@@ -48,11 +48,16 @@ export class Ship {
   radius = 14;
   // Outer outline sits ~haloOffset past the hull; this is what collisions use.
   haloOffset = 8;
+  // Collision-only inflation: pushes the hit silhouette out past the visible
+  // halo without affecting rendering. `hitPad` is uniform; `hitFrontBonus`
+  // adds extra reach near the forward heading, falling off to 0 at the rear.
+  hitPad = 4;
+  hitFrontBonus = 6;
   // Conservative bounding radius — circumscribes the outer (halo) triangle's
   // forward tip. Use for broad-phase checks; for accurate collisions against
   // an asteroid call `hitDistanceToward(worldAngle)` which returns the actual
   // silhouette distance and matches what the player sees.
-  get hitRadius() { return this.radius * 1.4 + this.haloOffset; }
+  get hitRadius() { return this.radius * 1.4 + this.haloOffset + this.hitPad + this.hitFrontBonus; }
   alive = true;
   invuln = 2.0;
   thrustOn = false;
@@ -172,7 +177,10 @@ export class Ship {
       const u = (a[0] * dy - a[1] * dx) / denom;
       if (t >= 0 && u >= 0 && u <= 1 && t < best) best = t;
     }
-    return Number.isFinite(best) ? best : this.hitRadius;
+    if (!Number.isFinite(best)) return this.hitRadius;
+    // Collision-only padding: uniform pad + extra reach toward the heading.
+    const forward = Math.max(0, Math.cos(theta - this.heading));
+    return best + this.hitPad + this.hitFrontBonus * forward;
   }
 
   // Map beatCombo to halo tier (<2: 0, 2-3: 1, >=4: 2).
