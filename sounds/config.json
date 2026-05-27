@@ -5,16 +5,16 @@
     "fire": {
       "universal": {
         "volume": 1,
-        "pitch": 1
+        "pitch": 0.92
       },
       "semantic": {
-        "bodyHz": 500,
+        "bodyHz": 190,
         "bodyPeak": 0.16,
-        "bodyDecay": 0.11,
-        "partialHz": 784,
+        "bodyDecay": 0.365,
+        "partialHz": 60,
         "partialPeak": 0.07,
-        "partialDecay": 0.05,
-        "tickHz": 1600,
+        "partialDecay": 0.17,
+        "tickHz": 820,
         "tickQ": 1.2,
         "tickPeak": 0.04,
         "tickDecay": 0.02
@@ -22,11 +22,11 @@
     },
     "fireBeat": {
       "universal": {
-        "volume": 1,
-        "pitch": 1
+        "volume": 0.93,
+        "pitch": 1.24
       },
       "semantic": {
-        "bodyHz": 130.8,
+        "bodyHz": 85.5,
         "bodyPeak": 0.38,
         "bodyDecay": 0.24,
         "subHz": 65.4,
@@ -34,8 +34,8 @@
         "subDecay": 0.28,
         "partialHz": 196,
         "partialPeak": 0.12,
-        "partialDecay": 0.1,
-        "tickHz": 600,
+        "partialDecay": 0.11,
+        "tickHz": 745,
         "tickQ": 1,
         "tickPeak": 0.09,
         "tickDecay": 0.03
@@ -44,7 +44,7 @@
     "explosionLarge": {
       "universal": {
         "volume": 1,
-        "pitch": 1
+        "pitch": 0.85
       },
       "semantic": {
         "volume": 0.7,
@@ -84,6 +84,20 @@
       "universal": {
         "volume": 1,
         "pitch": 1
+      },
+      "semantic": {
+        "subStartHz": 85,
+        "subEndHz": 26,
+        "subPeak": 0.65,
+        "subDecay": 1.2,
+        "crackVol": 0.55,
+        "crackDur": 1.4,
+        "screamStartHz": 330,
+        "screamEndHz": 30,
+        "screamPeak": 0.22,
+        "screamDur": 1.1,
+        "tailVol": 0.18,
+        "tailDur": 1.6
       }
     },
     "waveClear": {
@@ -108,7 +122,7 @@
     "bassPluck": {
       "universal": {
         "volume": 1,
-        "pitch": 1
+        "pitch": 0.59
       },
       "semantic": {
         "fundamentalHz": 98,

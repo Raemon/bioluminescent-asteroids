@@ -85,6 +85,20 @@ const SEMANTIC_KNOBS: Record<string, KnobDef[]> = {
     { key: "lowpassStart", label: "lpf start", min: 40, max: 800, step: 1, fmt: hzFmt },
     { key: "duration", label: "duration", min: 0.05, max: 1.0, step: 0.01, fmt: msFmt },
   ],
+  death: [
+    { key: "subStartHz", label: "sub start", min: 40, max: 200, step: 1, fmt: hzFmt },
+    { key: "subEndHz", label: "sub end", min: 18, max: 80, step: 1, fmt: hzFmt },
+    { key: "subPeak", label: "sub lvl", min: 0, max: 1.0, step: 0.005, fmt: ampFmt },
+    { key: "subDecay", label: "sub decay", min: 0.2, max: 2.0, step: 0.01, fmt: msFmt },
+    { key: "crackVol", label: "crack lvl", min: 0, max: 1.0, step: 0.005, fmt: ampFmt },
+    { key: "crackDur", label: "crack dur", min: 0.2, max: 2.0, step: 0.01, fmt: msFmt },
+    { key: "screamStartHz", label: "scream start", min: 100, max: 800, step: 1, fmt: hzFmt },
+    { key: "screamEndHz", label: "scream end", min: 20, max: 150, step: 1, fmt: hzFmt },
+    { key: "screamPeak", label: "scream lvl", min: 0, max: 0.6, step: 0.005, fmt: ampFmt },
+    { key: "screamDur", label: "scream dur", min: 0.2, max: 2.0, step: 0.01, fmt: msFmt },
+    { key: "tailVol", label: "tail lvl", min: 0, max: 0.5, step: 0.005, fmt: ampFmt },
+    { key: "tailDur", label: "tail dur", min: 0.2, max: 3.0, step: 0.01, fmt: msFmt },
+  ],
   bassKick: [
     { key: "startHz", label: "start", min: 40, max: 400, step: 1, fmt: hzFmt },
     { key: "endHz", label: "end", min: 20, max: 200, step: 1, fmt: hzFmt },
@@ -180,6 +194,55 @@ async function init() {
   hookHeader();
 
   setSaveStatus("loaded", "saved");
+
+  // Pre-render every row's visualizer via OfflineAudioContext. No user
+  // gesture required, no audible playback — each sound's legacy synth recipe
+  // is rendered into an offline buffer and the visualizer ingests it the
+  // same way it would a live capture. Serialized so the main thread stays
+  // responsive: each render typically takes < 30ms but they add up.
+  prerenderAllRows();
+}
+
+async function prerenderAllRows() {
+  setSaveStatus("rendering 0/" + SOUND_CATALOG.length, "");
+  let done = 0;
+  for (const spec of SOUND_CATALOG) {
+    const handle = rows.get(spec.name);
+    if (!handle || !handle.vis) { done++; continue; }
+    handle.el.classList.add("rendering");
+    // Suppress the "no capture yet" placeholder while the rendering overlay
+    // is up, otherwise both ::after labels would stack.
+    handle.visContainer.classList.remove("empty");
+    try {
+      // Same duration budget as the live capture path (capture takes
+      // expectedDurationSec + 0.15, capped at 2.5s). Thrust gets a fixed
+      // 0.6s window like the live path.
+      const durSec = spec.name === "thrust" ? 0.6 : Math.min(spec.expectedDurationSec + 0.15, 2.5);
+      // Sample rate has to be ≥ 8000 in Chrome's OfflineAudioContext. 44.1k
+      // is enough resolution for visualization and keeps render fast.
+      const buf = await sound.renderOfflineLegacy(spec.name, 1, durSec, 44100);
+      if (buf) {
+        handle.vis.ingestBuffer(buf);
+        handle.vis.render();
+        handle.hasCaptured = true;
+      } else {
+        // Restore the placeholder if the render didn't produce a buffer
+        // (e.g. browser without OfflineAudioContext).
+        handle.visContainer.classList.add("empty");
+      }
+    } catch (e) {
+      console.warn("prerender failed for", spec.name, e);
+      handle.visContainer.classList.add("empty");
+    } finally {
+      handle.el.classList.remove("rendering");
+    }
+    done++;
+    setSaveStatus(`rendering ${done}/${SOUND_CATALOG.length}`, "");
+    // Yield to the browser between renders so the UI stays responsive
+    // (slider drags, scrolling) while the queue drains.
+    await new Promise<void>((r) => setTimeout(r, 0));
+  }
+  setSaveStatus("ready", "saved");
 }
 
 function setSaveStatus(text: string, cls: "saved" | "error" | "" = "") {

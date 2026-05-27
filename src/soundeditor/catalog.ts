@@ -94,11 +94,11 @@ export const SOUND_CATALOG: SoundSpec[] = [
     name: "death",
     label: "death",
     group: "explosion",
-    expectedDurationSec: 0.95,
+    expectedDurationSec: 1.7,
     acceptsPitchRatio: false,
-    blurb: "Big explosion + 440→40 Hz sawtooth wail.",
-    centerHz: 80,
-    noisiness: 0.75,
+    blurb: "Sub-thump + noise crack + detuned-saw scream + rumble tail.",
+    centerHz: 60,
+    noisiness: 0.8,
   },
 
   // — ship —

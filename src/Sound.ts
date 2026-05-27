@@ -649,6 +649,81 @@ export class Sound {
     }
   }
 
+  // Render one legacy-engine voice recipe into an AudioBuffer. The sound
+  // editor uses this to pre-render every catalog entry on page load: instead
+  // of needing a live AudioContext + user gesture + rAF polling, we route the
+  // existing play(name) path through an OfflineAudioContext by temporarily
+  // swapping this.ctx / this.master, then restoring.
+  //
+  // All legacy voice methods read this.ctx/this.master directly, so the swap
+  // transparently redirects every createOscillator/createBuffer/connect to
+  // the offline graph. The engine is pinned to "legacy" for the duration so
+  // Tone-engine branches inside playFireBeat/etc. don't try to swap Tone's
+  // global context mid-render.
+  //
+  // For pitch-aware sounds (cometNote, bassKick, etc.) pass the same
+  // pitchRatio you'd pass at runtime; `step` is forwarded as Math.round()
+  // by Sound.play.
+  async renderOfflineLegacy(
+    name: SoundName,
+    pitchRatio: number,
+    durationSec: number,
+    sampleRate: number,
+  ): Promise<AudioBuffer | null> {
+    const OAC = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
+    if (!OAC) return null;
+    const length = Math.max(1, Math.ceil(durationSec * sampleRate));
+    const offline = new OAC(1, length, sampleRate);
+
+    const savedCtx = this.ctx;
+    const savedMaster = this.master;
+    const savedEngine = this.engine;
+    const savedEnabled = this.enabled;
+    const savedThrust = this.thrustNode;
+
+    // Build a fresh master node + compressor inside the offline graph that
+    // mirrors the live legacy chain (master → compressor → destination), so
+    // the rendered buffer sounds like what the player hears.
+    const offlineMaster = offline.createGain();
+    offlineMaster.gain.value = 0.6;
+    const offlineComp = offline.createDynamicsCompressor();
+    offlineComp.threshold.value = -12;
+    offlineComp.knee.value = 12;
+    offlineComp.ratio.value = 4;
+    offlineComp.attack.value = 0.005;
+    offlineComp.release.value = 0.15;
+    offlineMaster.connect(offlineComp);
+    offlineComp.connect(offline.destination);
+
+    this.ctx = offline as unknown as AudioContext;
+    this.master = offlineMaster;
+    this.engine = "legacy";
+    this.enabled = true;
+    // Detach any live thrust node so play("thrust") starts cleanly on the
+    // offline ctx. We restore the live one in `finally`.
+    this.thrustNode = null;
+
+    try {
+      this.play(name, pitchRatio);
+      // Thrust is a looping voice — startThrust schedules an attack ramp but
+      // never stops on its own. Don't try to call stopThrust against the
+      // offline ctx (its currentTime would advance only during rendering);
+      // just let the ramp ride out the buffer length.
+      const rendered = await offline.startRendering();
+      return rendered;
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(`renderOfflineLegacy(${name}) failed`, e);
+      return null;
+    } finally {
+      this.ctx = savedCtx;
+      this.master = savedMaster;
+      this.engine = savedEngine;
+      this.enabled = savedEnabled;
+      this.thrustNode = savedThrust;
+    }
+  }
+
   // Cycle through engines: legacy <-> tone. Tears down active comet voices
   // on whichever side we just left so we don't double-trigger, then rewires
   // the master output.
@@ -2185,22 +2260,123 @@ export class Sound {
     this.thrustNode = null;
   }
 
+  // Player-ship death: deep, dramatic, satisfying. Layered as:
+  //   (1) sub-bass impact thump — chest-punch sine sweep ~85Hz → 26Hz
+  //   (2) broadband noise crack with LP sweep ~3kHz → 110Hz (debris)
+  //   (3) detuned saw pair sweeping 330Hz → 30Hz through a resonant LP
+  //       (the "dying engine" scream — replaces the old single sawtooth)
+  //   (4) sub-octave sine doubling under the saws for weight
+  //   (5) bandpass noise rumble tail fading to silence ~1.6s in
+  // Total body ~1.5s; fits inside the 1.8s `dyingTimer` in Game.respawn.
   private playDeath() {
     if (!this.ctx || !this.master) return;
-    this.playExplosion(0.8, 180, 0.9);
     const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(440, t);
-    osc.frequency.exponentialRampToValueAtTime(40, t + 0.7);
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
-    osc.connect(gain);
-    gain.connect(this.master);
-    osc.start(t);
-    osc.stop(t + 0.95);
+
+    const subStartHz = cfgN("death", "subStartHz", 85);
+    const subEndHz = cfgN("death", "subEndHz", 26);
+    const subPeak = cfgN("death", "subPeak", 0.65);
+    const subDecay = cfgN("death", "subDecay", 1.2);
+    const crackVol = cfgN("death", "crackVol", 0.55);
+    const crackDur = cfgN("death", "crackDur", 1.4);
+    const screamStartHz = cfgN("death", "screamStartHz", 330);
+    const screamEndHz = cfgN("death", "screamEndHz", 30);
+    const screamPeak = cfgN("death", "screamPeak", 0.22);
+    const screamDur = cfgN("death", "screamDur", 1.1);
+    const tailVol = cfgN("death", "tailVol", 0.18);
+    const tailDur = cfgN("death", "tailDur", 1.6);
+
+    // (1) Sub-bass impact thump
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(subStartHz, t);
+    sub.frequency.exponentialRampToValueAtTime(subEndHz, t + subDecay * 0.75);
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(subPeak, t + 0.01);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + subDecay);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + subDecay + 0.05);
+
+    // (2) Broadband noise crack with LP sweep
+    const crackBuf = this.makeNoiseBuffer(crackDur);
+    if (crackBuf) {
+      const crack = this.ctx.createBufferSource();
+      crack.buffer = crackBuf;
+      const crackFilter = this.ctx.createBiquadFilter();
+      crackFilter.type = "lowpass";
+      crackFilter.Q.value = 1.1;
+      crackFilter.frequency.setValueAtTime(3000, t);
+      crackFilter.frequency.exponentialRampToValueAtTime(110, t + crackDur);
+      const crackGain = this.ctx.createGain();
+      crackGain.gain.setValueAtTime(0.0001, t);
+      crackGain.gain.exponentialRampToValueAtTime(crackVol, t + 0.015);
+      crackGain.gain.exponentialRampToValueAtTime(0.0001, t + crackDur);
+      crack.connect(crackFilter);
+      crackFilter.connect(crackGain);
+      crackGain.connect(this.master);
+      crack.start(t);
+      crack.stop(t + crackDur + 0.05);
+    }
+
+    // (3) Detuned saw pair — the dying engine scream
+    const screamFilter = this.ctx.createBiquadFilter();
+    screamFilter.type = "lowpass";
+    screamFilter.Q.value = 4.5;
+    screamFilter.frequency.setValueAtTime(1800, t);
+    screamFilter.frequency.exponentialRampToValueAtTime(180, t + screamDur);
+    const screamGain = this.ctx.createGain();
+    screamGain.gain.setValueAtTime(0.0001, t);
+    screamGain.gain.exponentialRampToValueAtTime(screamPeak, t + 0.03);
+    screamGain.gain.exponentialRampToValueAtTime(0.0001, t + screamDur);
+    screamFilter.connect(screamGain);
+    screamGain.connect(this.master);
+    for (const detune of [-7, 6]) {
+      const saw = this.ctx.createOscillator();
+      saw.type = "sawtooth";
+      saw.detune.value = detune;
+      saw.frequency.setValueAtTime(screamStartHz, t);
+      saw.frequency.exponentialRampToValueAtTime(screamEndHz, t + screamDur * 0.85);
+      saw.connect(screamFilter);
+      saw.start(t);
+      saw.stop(t + screamDur + 0.05);
+    }
+
+    // (4) Sub-octave sine doubling for weight
+    const octave = this.ctx.createOscillator();
+    const octaveGain = this.ctx.createGain();
+    octave.type = "sine";
+    octave.frequency.setValueAtTime(screamStartHz * 0.5, t);
+    octave.frequency.exponentialRampToValueAtTime(screamEndHz * 0.5, t + screamDur * 0.85);
+    octaveGain.gain.setValueAtTime(0.0001, t);
+    octaveGain.gain.exponentialRampToValueAtTime(screamPeak * 0.55, t + 0.03);
+    octaveGain.gain.exponentialRampToValueAtTime(0.0001, t + screamDur);
+    octave.connect(octaveGain);
+    octaveGain.connect(this.master);
+    octave.start(t);
+    octave.stop(t + screamDur + 0.05);
+
+    // (5) Bandpass noise rumble tail — wreckage echo
+    const tailBuf = this.makeNoiseBuffer(tailDur);
+    if (tailBuf) {
+      const tail = this.ctx.createBufferSource();
+      tail.buffer = tailBuf;
+      const tailFilter = this.ctx.createBiquadFilter();
+      tailFilter.type = "bandpass";
+      tailFilter.Q.value = 1.4;
+      tailFilter.frequency.setValueAtTime(400, t);
+      tailFilter.frequency.exponentialRampToValueAtTime(70, t + tailDur);
+      const tailGain = this.ctx.createGain();
+      tailGain.gain.setValueAtTime(0.0001, t);
+      tailGain.gain.exponentialRampToValueAtTime(tailVol, t + 0.1);
+      tailGain.gain.exponentialRampToValueAtTime(0.0001, t + tailDur);
+      tail.connect(tailFilter);
+      tailFilter.connect(tailGain);
+      tailGain.connect(this.master);
+      tail.start(t);
+      tail.stop(t + tailDur + 0.05);
+    }
   }
 
   private playWaveClear() {

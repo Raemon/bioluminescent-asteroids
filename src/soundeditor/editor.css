@@ -171,6 +171,22 @@
   background: rgba(40, 30, 10, 0.4);
 }
 
+.se-row.rendering {
+  border-color: rgba(106, 215, 255, 0.35);
+}
+.se-row.rendering .se-row-vis::after {
+  content: "rendering…";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(106, 215, 255, 0.65);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
 .se-row-meta { display: flex; flex-direction: column; gap: 8px; }
 
 .se-row-name {

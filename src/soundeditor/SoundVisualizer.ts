@@ -177,6 +177,21 @@ export class SoundVisualizer {
     this.analyze();
   }
 
+  /**
+   * Ingest an already-rendered AudioBuffer (e.g. the result of
+   * OfflineAudioContext.startRendering()) and feed it through the same
+   * analyze() pipeline as the live capture path. The rendered artwork is
+   * therefore identical to a live capture; this is just the "no live ctx
+   * needed" entry point used by the editor's startup pre-render.
+   */
+  ingestBuffer(buf: AudioBuffer): void {
+    const out = new Float32Array(buf.length);
+    buf.copyFromChannel(out, 0);
+    this.samples = out;
+    this.sampleRate = buf.sampleRate;
+    this.analyze();
+  }
+
   /** Pre-compute envelope, per-column FFTs, centroids, and stats. */
   private analyze(): void {
     if (!this.samples) return;
