@@ -5,14 +5,25 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "build": "prisma generate && tsc -b && tsc -p api && vite build",
+    "preview": "vite preview",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "postinstall": "prisma generate"
   },
   "devDependencies": {
+    "@vercel/node": "^5.8.5",
+    "dotenv": "^17.4.2",
+    "prisma": "^7.8.0",
+    "tsx": "^4.22.3",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "@prisma/adapter-neon": "^7.8.0",
+    "@prisma/client": "^7.8.0",
     "tone": "^15.1.22"
   }
 }

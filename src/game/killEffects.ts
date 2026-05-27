@@ -15,6 +15,19 @@ import {
 } from "./particleBursts";
 import { snapshotAsteroidKill, snapshotAlienKill, snapshotCometKill } from "./killSnapshot";
 import { alignBassBeat } from "./waveDirector";
+import type { KillBucket } from "./killBuckets";
+
+// Why: feeds the leaderboard's per-run breakdown; bucket names stay human-readable for display.
+const bumpKill = (game: Game, bucket: KillBucket) => {
+  game.killTally[bucket] = (game.killTally[bucket] ?? 0) + 1;
+};
+
+const asteroidBucket = (a: Asteroid): KillBucket => {
+  if (a.kind === "boss") return "boss";
+  if (a.isBass()) return "bassteroid";
+  if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble" || a.kind === "tink") return a.kind;
+  return `asteroid_${a.size}`;
+};
 
 // Why: bassteroids run their own bassHit/bassEcho path; this maps the non-bass kinds to sounds.
 export const hitSoundFor = (
@@ -77,6 +90,7 @@ const finishAsteroidKillCore = (
   const asteroidHit = hitSoundFor(a);
   const snap = snapshotAsteroidKill(a, a.isBass() ? "bassEcho" : asteroidHit, scoreEarned);
   if (snap) game.killedSnapshots.push(snap);
+  bumpKill(game, asteroidBucket(a));
   const children = a.split(killerVel);
   if (a.isBass()) restartChildBassDrones(game, children);
   return children;
@@ -132,6 +146,7 @@ export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boo
   emitAlienExplosion(game.particles, al);
   const snap = snapshotAlienKill(al, "alienExplode", scoreEarned);
   if (snap) game.killedSnapshots.push(snap);
+  bumpKill(game, `alien_${al.size}`);
 };
 
 // Why: shared cracked-alien feedback for medium/big saucers since the killing-hit path differs.
@@ -159,5 +174,6 @@ export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: bool
   emitCometExplosion(game.particles, c);
   const snap = snapshotCometKill(c, "cometDestroyed", scoreEarned);
   if (snap) game.killedSnapshots.push(snap);
+  bumpKill(game, "comet");
   syncHud(game);
 };

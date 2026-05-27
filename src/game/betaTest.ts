@@ -233,6 +233,7 @@ const startBetaWave = (game: Game) => {
   game.shards = [];
   game.canisters = [];
   game.killedSnapshots = [];
+  game.killTally = {};
   game.aliens = [];
   game.alienBullets = [];
   game.asteroids = [];
@@ -241,6 +242,7 @@ const startBetaWave = (game: Game) => {
   game.sound.stopAllAlienDrones();
   game.sound.stopAllBassteroidDrones();
   game.sound.stopAllCometShimmers();
+  game.sound.stopHaloAmbient();
   game.comets = [];
   game.waveEvents = newWaveEventSchedule();
 

@@ -15,15 +15,36 @@ export const BASS_KIND_SOUND: Record<"bassA" | "bassB" | "bassC" | "bassD", "bas
 export const BASS_SPLIT_PITCH_RATIO = [1, 1, 0.8409] as const;
 
 // Why: shares beatTime with bassteroids so the pulsar approach beat stays locked under slow-mo.
+// White-bullet tier (combo ≥ 8) doubles the pulse: the existing quarter-note slots still fire
+// the heavy beat, with lighter "and" eighth-note hits half-way between them. The in-between
+// eighths use playBgBeatLight, which routes the same kick voice at ~40% velocity (and a
+// semitone up) so the riff reads as "downbeat / and / offbeat / and" rather than four equal
+// kicks.
+// We walk an eighth-note grid (BEAT_GRID/2). Even eighths = the existing quarter beats;
+// odd eighths = the new in-between "and" hits, only fired while the white tier is active.
 const tickBgBeats = (game: Game) => {
-  const bgIdx = Math.floor(game.beatTime / BEAT_GRID);
-  if (bgIdx < game.lastBgBeatIndex) game.lastBgBeatIndex = bgIdx - 1;
-  while (game.lastBgBeatIndex < bgIdx) {
+  const EIGHTH_GRID = BEAT_GRID / 2;
+  const eighthIdx = Math.floor(game.beatTime / EIGHTH_GRID);
+  // lastBgBeatIndex tracks eighth-note slots now. Reset is handled by the same
+  // backward-jump guard the old loop used.
+  if (eighthIdx < game.lastBgBeatIndex) game.lastBgBeatIndex = eighthIdx - 1;
+  while (game.lastBgBeatIndex < eighthIdx) {
     game.lastBgBeatIndex += 1;
-    const isOffbeat = (game.lastBgBeatIndex & 1) === 1;
-    // Why: 1.122 = whole-step lift (E1→F#1) — distinct from the downbeat, mood intact.
-    const pitchRatio = isOffbeat ? 1.122 : 1;
-    game.sound.play("bgBeat", pitchRatio);
+    const isQuarter = (game.lastBgBeatIndex & 1) === 0;
+    if (isQuarter) {
+      const quarterIdx = game.lastBgBeatIndex >> 1;
+      const isOffbeat = (quarterIdx & 1) === 1;
+      // Why: 1.122 = whole-step lift (E1→F#1) — distinct from the downbeat, mood intact.
+      const pitchRatio = isOffbeat ? 1.122 : 1;
+      game.sound.play("bgBeat", pitchRatio);
+    } else if (game.beatCombo >= 8) {
+      // Doubletime "and": land on the eighth between quarter beats. The next
+      // quarter slot's parity determines pitch — alternating C#/D# so the
+      // syncopation oscillates rather than stutters on a single pitch.
+      const nextQuarterIdx = (game.lastBgBeatIndex + 1) >> 1;
+      const nextIsOffbeat = (nextQuarterIdx & 1) === 1;
+      game.sound.playBgBeatLight(nextIsOffbeat ? 1.122 : 1);
+    }
   }
 };
 

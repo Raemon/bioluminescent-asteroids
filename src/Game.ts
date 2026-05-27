@@ -14,6 +14,7 @@ import { AlienBullet } from "./AlienBullet";
 import { v } from "./vec";
 import { Popup } from "./game/popups";
 import { KilledSnapshot } from "./game/killSnapshot";
+import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
@@ -88,9 +89,19 @@ export class Game implements HudElements {
   muteEl: HTMLButtonElement;
   abortEl: HTMLButtonElement;
   killedRowEl: HTMLCanvasElement;
+  scoreEntryFormEl: HTMLFormElement;
+  scoreEntryInputEl: HTMLInputElement;
+  scoreEntrySubmitEl: HTMLButtonElement;
+  scoreEntryStatusEl: HTMLElement;
+  leaderboardEl: HTMLElement;
+  leaderboardListEl: HTMLOListElement;
+  // Why: prevents a double-submit if the player mashes Enter while the POST is in flight.
+  scoreSubmitState: "idle" | "submitting" | "submitted" = "idle";
 
   // Why: post-run trophy lineup; replayed in the end-of-mission parade with original kill sounds.
   killedSnapshots: KilledSnapshot[] = [];
+  // Why: per-run kill tally by category — submitted alongside the score on game over.
+  killTally: Partial<Record<KillBucket, number>> = {};
   paradeActive = false;
   // Why: parade timing reads game.beatTime (which keeps ticking through gameover) so
   //   sprite-crosses-centre events land on the same beat grid as the bg bass beat.
@@ -126,6 +137,12 @@ export class Game implements HudElements {
     this.muteEl = hud.muteEl;
     this.abortEl = hud.abortEl;
     this.killedRowEl = hud.killedRowEl;
+    this.scoreEntryFormEl = hud.scoreEntryFormEl;
+    this.scoreEntryInputEl = hud.scoreEntryInputEl;
+    this.scoreEntrySubmitEl = hud.scoreEntrySubmitEl;
+    this.scoreEntryStatusEl = hud.scoreEntryStatusEl;
+    this.leaderboardEl = hud.leaderboardEl;
+    this.leaderboardListEl = hud.leaderboardListEl;
     this.muteEl.addEventListener("click", () => toggleMute(this));
     this.abortEl.addEventListener("click", () => abortMission(this));
     window.addEventListener("keydown", (e) => {

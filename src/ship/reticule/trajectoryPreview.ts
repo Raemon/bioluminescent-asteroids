@@ -28,8 +28,30 @@ const TRAJECTORY_DIRECT_FLASH_DEPTH = 0.55;
 const TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR = 18;
 const TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA = 0.85;
 
+// Why: when a target first enters the cone, briefly boost alpha so the appearance reads as a flash.
+const TRAJECTORY_ENTRY_FLASH_DURATION_SEC = 0.35;
+const TRAJECTORY_ENTRY_FLASH_PEAK_BOOST = 2.5;
+// Why: after a target leaves the cone, keep the last-seen trajectory visible for this long, fading out.
+const TRAJECTORY_FADE_OUT_DURATION_SEC = 2;
+
 // Why: target shape covers everything the reticule might lock onto (asteroids, comets, aliens, canisters).
 export type ReticuleTarget = { pos: Vec; vel: Vec; radius?: number };
+
+// Why: snapshot the last in-cone state so fade-out can keep rendering even if the target dies/leaves.
+type TrajectorySnapshot = { posX: number; posY: number; velX: number; velY: number; radius: number };
+
+// Why: per-target tracking for entry flash phase and post-exit fade lingering.
+export type TrajectoryTrack = {
+  firstSeen: number;
+  lastInConeAt: number;
+  snapshot: TrajectorySnapshot;
+};
+
+// Why: strong Map (not WeakMap) is required because we need to keep rendering a target's fade-out
+//   snapshot even after the target itself is gone (e.g. asteroid destroyed mid-cone). Entries are
+//   cleaned up by renderFadingTrajectories once the 2s fade completes, and the whole map is
+//   discarded when the Ship instance is replaced on respawn/restart, so the leak is bounded.
+export type TrajectoryTrackMap = Map<object, TrajectoryTrack>;
 
 export type TrajectoryContext = {
   ctx: CanvasRenderingContext2D;
@@ -40,7 +62,7 @@ export type TrajectoryContext = {
   h: number;
   frame: ConeFrame;
   reticulePos: Vec;
-  trajectoryFirstSeen: WeakMap<object, number>;
+  trajectoryTracks: TrajectoryTrackMap;
 };
 
 // Why: dots pulse from 0→1 the first beat, then sinusoidally — gives a "lock-on" feel as targets enter.
@@ -57,35 +79,47 @@ const computeTargetPulse = (firstSeenBeat: number, beatTime: number, beatGrid: n
   return floor + (1 - floor) * pulse01;
 };
 
-// Why: track per-target first-seen-beat so the pulse phase is consistent across frames.
-const beatAtFirstSight = (t: ReticuleTarget, seen: WeakMap<object, number>, beatTime: number): number => {
-  let firstSeen = seen.get(t as unknown as object);
-  if (firstSeen === undefined) {
-    firstSeen = beatTime;
-    seen.set(t as unknown as object, beatTime);
-  }
-  return firstSeen;
+// Why: alpha multiplier that spikes to PEAK_BOOST when target just entered the cone, decays to 1 over
+// ENTRY_FLASH_DURATION_SEC — gives an unmistakable "new contact" flash on first appearance.
+const computeEntryFlashBoost = (firstSeen: number, beatTime: number): number => {
+  const age = beatTime - firstSeen;
+  if (age < 0 || age >= TRAJECTORY_ENTRY_FLASH_DURATION_SEC) return 1;
+  const t01 = 1 - age / TRAJECTORY_ENTRY_FLASH_DURATION_SEC;
+  return 1 + (TRAJECTORY_ENTRY_FLASH_PEAK_BOOST - 1) * t01 * t01;
+};
+
+// Why: trajectory lingers for FADE_OUT_DURATION_SEC after leaving cone — returns 1→0 fade or 1 if in-cone.
+const computeFadeAlpha = (lastInConeAt: number, beatTime: number): number => {
+  const since = beatTime - lastInConeAt;
+  if (since <= 0) return 1;
+  if (since >= TRAJECTORY_FADE_OUT_DURATION_SEC) return 0;
+  const t01 = 1 - since / TRAJECTORY_FADE_OUT_DURATION_SEC;
+  return t01 * t01;
 };
 
 // Why: dashed dot at the first beat reads as "tracking lock"; subsequent solid dots show its future path.
 // proximity01 ramps the alpha from baseline → peak as the reticule approaches; directFlash adds an
-// overt flicker once the reticule directly overlaps so the player sees "this shot will land".
+// overt flicker once the reticule directly overlaps so the player sees "this shot will land";
+// entryFlashBoost multiplies the per-dot alpha for the brief window after a target enters the cone.
 const paintFirstBeatDot = (
   ctx: CanvasRenderingContext2D, px: number, py: number,
-  proximity01: number, directFlash: number,
+  proximity01: number, directFlash: number, entryFlashBoost: number,
 ) => {
   const proximityAlpha = TRAJECTORY_FIRST_BEAT_DOT_ALPHA
     + (TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA - TRAJECTORY_FIRST_BEAT_DOT_ALPHA) * proximity01;
-  const alpha = Math.min(1, proximityAlpha * (1 + directFlash));
+  const alpha = Math.min(1, proximityAlpha * (1 + directFlash) * entryFlashBoost);
   const flash01 = directFlash > 0 ? directFlash / TRAJECTORY_DIRECT_FLASH_DEPTH : 0;
+  // Why: entry-flash adds a soft glow halo too — borrowing the same shadow-blur trick as direct-flash.
+  const entryGlow01 = Math.max(0, Math.min(1, (entryFlashBoost - 1) / (TRAJECTORY_ENTRY_FLASH_PEAK_BOOST - 1)));
+  const glow01 = Math.max(flash01, entryGlow01);
   const prevShadowBlur = ctx.shadowBlur;
   const prevShadowColor = ctx.shadowColor;
-  if (flash01 > 0) {
-    ctx.shadowBlur = TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR * flash01;
-    ctx.shadowColor = `hsla(${RETICULE_DASH_HSL}, ${TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA * flash01})`;
+  if (glow01 > 0) {
+    ctx.shadowBlur = TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR * glow01;
+    ctx.shadowColor = `hsla(${RETICULE_DASH_HSL}, ${TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA * glow01})`;
   }
   ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${alpha})`;
-  ctx.lineWidth = TRAJECTORY_FIRST_BEAT_DOT_LINE_WIDTH + directFlash;
+  ctx.lineWidth = TRAJECTORY_FIRST_BEAT_DOT_LINE_WIDTH + directFlash + (entryFlashBoost - 1);
   ctx.setLineDash(TRAJECTORY_FIRST_BEAT_DOT_DASH);
   ctx.lineDashOffset = 0;
   ctx.beginPath();
@@ -96,8 +130,11 @@ const paintFirstBeatDot = (
   ctx.shadowColor = prevShadowColor;
 };
 
-const paintBeatDot = (ctx: CanvasRenderingContext2D, px: number, py: number) => {
-  ctx.fillStyle = `hsla(${RETICULE_DASH_HSL}, ${TRAJECTORY_BEAT_DOT_ALPHA})`;
+const paintBeatDot = (
+  ctx: CanvasRenderingContext2D, px: number, py: number, entryFlashBoost: number,
+) => {
+  const alpha = Math.min(1, TRAJECTORY_BEAT_DOT_ALPHA * entryFlashBoost);
+  ctx.fillStyle = `hsla(${RETICULE_DASH_HSL}, ${alpha})`;
   ctx.beginPath();
   ctx.arc(px, py, TRAJECTORY_BEAT_DOT_RADIUS, 0, TAU);
   ctx.fill();
@@ -132,7 +169,7 @@ const drawBeatDotsAlongRay = (
   rawStartX: number, rawStartY: number, ux: number, uy: number,
   retX: number, retY: number,
   sMin: number, sMax: number, dotStep: number, dotOffset: number,
-  flashPulse: number,
+  flashPulse: number, entryFlashBoost: number,
 ): DotWalkResult => {
   let overlapsReticule = false;
   let drawnDots = 0;
@@ -146,10 +183,10 @@ const drawBeatDotsAlongRay = (
       const proximity01 = firstDotProximity01(px, py, retX, retY);
       const overlap = firstDotOverlapsReticule(px, py, retX, retY);
       const directFlash = overlap ? flashPulse : 0;
-      paintFirstBeatDot(ctx, px, py, proximity01, directFlash);
+      paintFirstBeatDot(ctx, px, py, proximity01, directFlash, entryFlashBoost);
       if (overlap) overlapsReticule = true;
     } else {
-      paintBeatDot(ctx, px, py);
+      paintBeatDot(ctx, px, py, entryFlashBoost);
     }
     drawnDots++;
   }
@@ -169,31 +206,43 @@ const computeDirectFlashPulse = (beatTime: number): number => {
   return TRAJECTORY_DIRECT_FLASH_DEPTH * tri;
 };
 
-// Why: per-target trajectory + first-beat lock dot; reports whether the disc overlaps this target's path.
-const previewOneTarget = (ctx: TrajectoryContext, t: ReticuleTarget, flashPulse: number): boolean => {
-  let [dx, dy] = toroidalDelta(t.pos.x - ctx.apex.x, t.pos.y - ctx.apex.y, ctx.w, ctx.h);
-  const tr = t.radius ?? 0;
-  if (!targetIsInsideCone(dx, dy, tr, ctx.frame)) {
-    ctx.trajectoryFirstSeen.delete(t as unknown as object);
-    return false;
-  }
-  const firstSeen = beatAtFirstSight(t, ctx.trajectoryFirstSeen, ctx.beatTime);
-  const pulsePeriod = TRAJECTORY_PULSE_PERIOD_BEATS * ctx.beatGrid;
-  const pulse = computeTargetPulse(firstSeen, ctx.beatTime, ctx.beatGrid, pulsePeriod);
-  ctx.ctx.globalAlpha = TRAJECTORY_ALPHA * pulse;
-
+// Why: core trajectory renderer — operates on a position/velocity snapshot, with optional cone clipping.
+// alphaMultiplier folds in entry-flash boost and exit-fade decay; clipToCone is false during fade so the
+// lingering ghost remains visible even after the target has left the radar wedge.
+const paintTrajectoryFromSnapshot = (
+  ctx: TrajectoryContext, snap: TrajectorySnapshot, firstSeen: number,
+  alphaMultiplier: number, flashPulse: number, clipToCone: boolean,
+): boolean => {
+  const speed = Math.hypot(snap.velX, snap.velY);
+  if (speed < 1) return false;
+  const [dx, dy] = toroidalDelta(snap.posX - ctx.apex.x, snap.posY - ctx.apex.y, ctx.w, ctx.h);
   const cx = ctx.apex.x + dx;
   const cy = ctx.apex.y + dy;
-  const speed = Math.hypot(t.vel.x, t.vel.y);
-  if (speed < 1) return false;
-  const ux = t.vel.x / speed;
-  const uy = t.vel.y / speed;
-  const r = t.radius ?? 0;
+  const ux = snap.velX / speed;
+  const uy = snap.velY / speed;
+  const r = snap.radius;
   const edgePad = 6;
   const rawStartX = cx + ux * (r + edgePad);
   const rawStartY = cy + uy * (r + edgePad);
-  const clip = clipRayToCone(rawStartX - ctx.apex.x, rawStartY - ctx.apex.y, ux, uy, ctx.frame);
-  if (clip.sMax <= clip.sMin) return false;
+  let sMin: number;
+  let sMax: number;
+  if (clipToCone) {
+    const clip = clipRayToCone(rawStartX - ctx.apex.x, rawStartY - ctx.apex.y, ux, uy, ctx.frame);
+    if (clip.sMax <= clip.sMin) return false;
+    sMin = clip.sMin;
+    sMax = clip.sMax;
+  } else {
+    sMin = -(r + edgePad);
+    sMax = ctx.frame.length;
+  }
+
+  const pulsePeriod = TRAJECTORY_PULSE_PERIOD_BEATS * ctx.beatGrid;
+  const pulse = computeTargetPulse(firstSeen, ctx.beatTime, ctx.beatGrid, pulsePeriod);
+  const entryFlashBoost = computeEntryFlashBoost(firstSeen, ctx.beatTime);
+  // Why: during the entry-flash window, override the pulse ramp so brightness peaks immediately rather
+  // than easing in — the flash is the visual cue that the contact JUST appeared.
+  const effectivePulse = entryFlashBoost > 1 ? Math.max(pulse, 1) : pulse;
+  ctx.ctx.globalAlpha = TRAJECTORY_ALPHA * effectivePulse * alphaMultiplier;
 
   const [retX, retY] = remapReticuleToTarget(ctx.apex, ctx.reticulePos, ctx.w, ctx.h);
   const dotStep = speed * ctx.beatGrid;
@@ -202,26 +251,77 @@ const previewOneTarget = (ctx: TrajectoryContext, t: ReticuleTarget, flashPulse:
   ctx.ctx.setLineDash([]);
   const result = drawBeatDotsAlongRay(
     ctx.ctx, rawStartX, rawStartY, ux, uy, retX, retY,
-    clip.sMin, clip.sMax, dotStep, dotOffset, flashPulse,
+    sMin, sMax, dotStep, dotOffset, flashPulse, entryFlashBoost,
   );
   ctx.ctx.restore();
   return result.overlapsReticule;
+};
+
+// Why: refresh the track for an in-cone target — entry flash starts when no track existed, or when the
+// target had fully faded out and re-enters; otherwise re-arming preserves the existing pulse phase.
+const refreshTrack = (
+  tracks: TrajectoryTrackMap, t: ReticuleTarget, beatTime: number,
+): TrajectoryTrack => {
+  const key = t as unknown as object;
+  const existing = tracks.get(key);
+  const radius = t.radius ?? 0;
+  const snapshot: TrajectorySnapshot = {
+    posX: t.pos.x, posY: t.pos.y, velX: t.vel.x, velY: t.vel.y, radius,
+  };
+  if (!existing) {
+    const fresh: TrajectoryTrack = { firstSeen: beatTime, lastInConeAt: beatTime, snapshot };
+    tracks.set(key, fresh);
+    return fresh;
+  }
+  existing.snapshot = snapshot;
+  existing.lastInConeAt = beatTime;
+  return existing;
+};
+
+// Why: per-target live render — checks cone membership, updates track, and draws with flash boost.
+const previewLiveTarget = (
+  ctx: TrajectoryContext, t: ReticuleTarget, flashPulse: number, rendered: Set<object>,
+): boolean => {
+  const [dx, dy] = toroidalDelta(t.pos.x - ctx.apex.x, t.pos.y - ctx.apex.y, ctx.w, ctx.h);
+  const tr = t.radius ?? 0;
+  if (!targetIsInsideCone(dx, dy, tr, ctx.frame)) return false;
+  const track = refreshTrack(ctx.trajectoryTracks, t, ctx.beatTime);
+  rendered.add(t as unknown as object);
+  return paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, 1, flashPulse, true);
+};
+
+// Why: drain expired fade entries and render fading-out trajectories for targets that left the cone or
+// were destroyed while in it — keeps a 2s "ghost" of the last-seen path that decays to invisible.
+const renderFadingTrajectories = (
+  ctx: TrajectoryContext, rendered: Set<object>, flashPulse: number,
+) => {
+  for (const [key, track] of ctx.trajectoryTracks) {
+    if (rendered.has(key)) continue;
+    const fade = computeFadeAlpha(track.lastInConeAt, ctx.beatTime);
+    if (fade <= 0) {
+      ctx.trajectoryTracks.delete(key);
+      continue;
+    }
+    paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, fade, flashPulse, false);
+  }
 };
 
 // Why: walks every visible target and accumulates whether any of their lock dots touched the aim disc.
 export const paintTrajectoryPreviews = (
   ctx: TrajectoryContext, targets: ReadonlyArray<ReticuleTarget>,
 ): boolean => {
-  if (targets.length === 0 || ctx.frame.length <= 0) return false;
+  if (ctx.frame.length <= 0) return false;
   ctx.ctx.save();
   ctx.ctx.setLineDash([]);
   ctx.ctx.lineWidth = 1.5;
   ctx.ctx.shadowBlur = 0;
   const flashPulse = computeDirectFlashPulse(ctx.beatTime);
+  const rendered = new Set<object>();
   let overlapsReticule = false;
   for (const t of targets) {
-    if (previewOneTarget(ctx, t, flashPulse)) overlapsReticule = true;
+    if (previewLiveTarget(ctx, t, flashPulse, rendered)) overlapsReticule = true;
   }
+  renderFadingTrajectories(ctx, rendered, flashPulse);
   ctx.ctx.restore();
   return overlapsReticule;
 };

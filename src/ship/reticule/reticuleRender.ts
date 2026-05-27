@@ -2,7 +2,7 @@ import type { Ship } from "../../Ship";
 import { Vec, add, mul, fromAngle, wrap, TAU } from "../../vec";
 import { computeConeFrame } from "./coneGeometry";
 import { paintConeBackground, paintRangeArcs } from "./radarCone";
-import { paintTrajectoryPreviews, ReticuleTarget } from "./trajectoryPreview";
+import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap } from "./trajectoryPreview";
 import {
   reticuleOverlapsAnyTarget, reticuleDirectlyOnTarget,
   computeBaseHitAlpha, paintAimDiscs, computeDirectFlashPulse,
@@ -21,8 +21,8 @@ const TRIDENT_SPREAD = 0.21;
 // Why: rapid fires every half-beat, so the off-beat bullet only travels half as far before the next beat.
 const RAPID_HALF_BEAT_FRACTION = 0.5;
 
-// Why: bind ship state to per-target memo so trajectory previews can track "first seen" across frames.
-type ReticuleState = { trajectoryFirstSeen: WeakMap<object, number> };
+// Why: bind ship state to per-target memo so trajectory previews can track entry-flash and fade across frames.
+type ReticuleState = { trajectoryTracks: TrajectoryTrackMap };
 
 // Why: position where a shot fired with the given heading offset lands after `beatFraction` of a beat.
 const computeReticulePosition = (
@@ -76,7 +76,7 @@ export const renderShipReticules = (
   const frame = computeConeFrame(ship);
   const fromTrajectory = paintTrajectoryPreviews({
     ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule,
-    trajectoryFirstSeen: state.trajectoryFirstSeen,
+    trajectoryTracks: state.trajectoryTracks,
   }, targets);
   const flashPulse = computeDirectFlashPulse(beatTime);
   for (const pos of reticulePositions) {

@@ -15,6 +15,12 @@ export type HudElements = {
   muteEl: HTMLButtonElement;
   abortEl: HTMLButtonElement;
   killedRowEl: HTMLCanvasElement;
+  scoreEntryFormEl: HTMLFormElement;
+  scoreEntryInputEl: HTMLInputElement;
+  scoreEntrySubmitEl: HTMLButtonElement;
+  scoreEntryStatusEl: HTMLElement;
+  leaderboardEl: HTMLElement;
+  leaderboardListEl: HTMLOListElement;
 };
 
 // Cached references for the powerup slot row; resolved once at boot.
@@ -42,6 +48,12 @@ export const bindHudElements = (): HudElements => {
     muteEl: document.getElementById("mute") as HTMLButtonElement,
     abortEl: document.getElementById("abort-mission") as HTMLButtonElement,
     killedRowEl: document.getElementById("killed-row") as HTMLCanvasElement,
+    scoreEntryFormEl: document.getElementById("score-entry") as HTMLFormElement,
+    scoreEntryInputEl: document.getElementById("score-entry-name") as HTMLInputElement,
+    scoreEntrySubmitEl: document.getElementById("score-entry-submit") as HTMLButtonElement,
+    scoreEntryStatusEl: document.getElementById("score-entry-status")!,
+    leaderboardEl: document.getElementById("leaderboard")!,
+    leaderboardListEl: document.getElementById("leaderboard-list") as HTMLOListElement,
   };
 };
 

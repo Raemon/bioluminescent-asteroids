@@ -67,12 +67,22 @@
       <h1 id="overlay-title">Pulsar</h1>
       <p id="overlay-sub">
         <span class="key">←</span> <span class="key">→</span> rotate &nbsp;·&nbsp;
-        <span class="key">↑</span> thrust &nbsp;·&nbsp;
+        <span class="key">↑</span> <span class="key">↓</span> thrust &nbsp;·&nbsp;
         <span class="key">space</span> fire &nbsp;·&nbsp;
         <span class="key">esc</span> pause
       </p>
       <p id="overlay-start">press <span class="key">enter</span> to begin</p>
       <canvas id="killed-row" class="hidden" width="0" height="0"></canvas>
+      <form id="score-entry" class="hidden" autocomplete="off" novalidate>
+        <label for="score-entry-name">Enter callsign</label>
+        <input id="score-entry-name" name="name" type="text" maxlength="16" spellcheck="false" autocapitalize="characters" />
+        <button type="submit" id="score-entry-submit">Save Score</button>
+        <p id="score-entry-status" class="score-entry-status"></p>
+      </form>
+      <div id="leaderboard" class="hidden">
+        <div class="leaderboard-title">Top Pilots</div>
+        <ol id="leaderboard-list"></ol>
+      </div>
       <button id="abort-mission" type="button" class="hidden">Abort Mission</button>
     </div>
     <script type="module" src="/src/main.ts"></script>

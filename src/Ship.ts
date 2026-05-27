@@ -11,7 +11,7 @@ import { fireBullets, applyPowerup } from "./ship/shipWeapons";
 import { setComboFromValue } from "./ship/shipComboHalo";
 import { renderShipBody } from "./ship/shipRender";
 import { renderShipReticules } from "./ship/reticule/reticuleRender";
-import { ReticuleTarget } from "./ship/reticule/trajectoryPreview";
+import { ReticuleTarget, TrajectoryTrackMap } from "./ship/reticule/trajectoryPreview";
 
 // Why: BEAT_GRID is re-exported from Game.ts for backwards compatibility; Ship code reads it directly here.
 export { BEAT_GRID };
@@ -56,8 +56,8 @@ export class Ship {
   comboHaloIntensity = 0;
   // Why: set to 1 by Game on a meaningful combo loss; decays in update to drive the red halo flash.
   comboLossFlash = 0;
-  // Why: remember the beat each target first entered the radar so the trajectory pulse phase is stable.
-  private trajectoryFirstSeen = new WeakMap<object, number>();
+  // Why: per-target trajectory state — drives entry-flash phase, fade-out lingering, and pulse phase.
+  private trajectoryTracks: TrajectoryTrackMap = new Map();
 
   constructor(pos: Vec) { this.pos = pos; }
 
@@ -92,7 +92,7 @@ export class Ship {
     ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number,
     targets: ReadonlyArray<ReticuleTarget> = [], beatTime: number = 0,
   ) {
-    renderShipReticules(this, { trajectoryFirstSeen: this.trajectoryFirstSeen }, ctx, beatGrid, w, h, targets, beatTime);
+    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks }, ctx, beatGrid, w, h, targets, beatTime);
   }
 
   // Why: hull + thrust + retro + shield + combo halo all composite together in one save/restore block.

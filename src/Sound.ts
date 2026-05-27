@@ -80,6 +80,23 @@ type CometShimmerNode = {
   spatial?: SpatialNodes;
 };
 
+// Ambient pad that holds for the duration of a yellow-halo combo (≥4) and
+// thickens further at white-bullet tier (≥8). Voices C2/C3/G3 are common to
+// both the bassteroid C-major bed and the comet's C-rooted phrygian cluster,
+// so they layer pleasantly with both. The "third voice" frequency glides
+// between E4 (major third, bright with bass field) and Eb4 (minor third,
+// neutral with the comet's b2/tritone dissonance) — controlled by
+// setHaloAmbientCometMode.
+type HaloAmbientNode = {
+  oscs: OscillatorNode[];
+  lfos: OscillatorNode[];
+  mainGain: GainNode;
+  thirdOsc: OscillatorNode;
+  // tier1 (yellow halo only): C+G open fifth foundation + E/Eb third voice.
+  // tier2 (white bullets): extra octave-up voice swells in for a brighter top.
+  tier2Gain: GainNode;
+};
+
 // Optional pan + distance-falloff splice. When a sound (one-shot or drone)
 // is positional, its voices feed into spatial.in; spatial.out connects to the
 // usual master/bakedOut sink. The Game updates pan/gain values per frame for
@@ -167,6 +184,15 @@ export class Sound {
   bassDrones: Map<object, BassDroneNode> = new Map();
   // Per-comet shimmer pad, keyed by the Comet instance.
   cometShimmers: Map<object, CometShimmerNode> = new Map();
+  // Single combo-halo ambient pad. Null when combo < 4 (no yellow halo yet).
+  // Tier rides with the halo: 1 = yellow only, 2 = white bullets (combo ≥ 8).
+  haloAmbient: HaloAmbientNode | null = null;
+  haloAmbientTier = 0;
+  // True while any comet is on screen — slides the pad's "third voice" from
+  // major-third E4 (bright over the C-major bass bed) down to minor-third
+  // Eb4, which is consonant with the comet's phrygian dissonance instead of
+  // fighting it.
+  haloAmbientCometMode = false;
   toneEngine: ToneEngineNodes | null = null;
 
   // Listener position (ship). Pan + distance falloff are computed relative
@@ -495,11 +521,13 @@ export class Sound {
     }
     // bgBeat: 2 base pitches (1 = downbeat C2, 1.122 = offbeat D2) × 11
     // intensity buckets. Encoded key is `actualPitch * 100 + intensityBucket`
-    // — matches the call-site in playBgBeat.
+    // — matches the call-site in playBgBeat. The +1000-offset variant is the
+    // doubletime "light eighth" used at white-bullet tier (combo ≥ 8).
     for (const basePitch of [1, 1.122]) {
       for (let bucket = 0; bucket <= 10; bucket++) {
         const intensityBucket = bucket / 10;
         this.queueBake("bgBeat", basePitch * 100 + intensityBucket);
+        this.queueBake("bgBeat", basePitch * 100 + intensityBucket + 1000);
       }
     }
   }
@@ -658,15 +686,24 @@ export class Sound {
         break;
       }
       case "bgBeat": {
-        // The composite key is `actualPitch * 100 + intensityBucket`. Decode:
-        const intensity = pitchRatio - Math.floor(pitchRatio);
-        const actualPitch = Math.floor(pitchRatio) / 100;
+        // The composite key is `actualPitch * 100 + intensityBucket`, with a
+        // +1000 offset added when this is a doubletime "light eighth" variant
+        // (see playBgBeatLight). Decode:
+        const isLight = pitchRatio >= 500;
+        const baseKey = isLight ? pitchRatio - 1000 : pitchRatio;
+        const intensity = baseKey - Math.floor(baseKey);
+        const actualPitch = Math.floor(baseKey) / 100;
         const kick = wire(new Tone.MembraneSynth({ pitchDecay: 0.06, octaves: 6, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.45, sustain: 0, release: 0.5 }, volume: -6 }), 1, 0.1);
         const isOffbeat = actualPitch !== 1;
         const offbeatMul = isOffbeat ? 0.35 + intensity * 0.45 : 1;
-        const levelMul = (0.35 + 0.65 * intensity) * offbeatMul;
+        const lightMul = isLight ? 0.42 : 1;
+        const levelMul = (0.35 + 0.65 * intensity) * offbeatMul * lightMul;
         const velocity = (0.25 + intensity * 0.75) * levelMul;
-        const note = actualPitch === 1 ? "C2" : "D2";
+        // Light eighths are pitched a semitone up so they sit between the
+        // main quarter-note pitches: C2 → C#2, D2 → D#2.
+        const note = isLight
+          ? (actualPitch === 1 ? "C#2" : "D#2")
+          : (actualPitch === 1 ? "C2" : "D2");
         kick.triggerAttackRelease(note, "8n", 0, velocity);
         break;
       }
@@ -801,6 +838,7 @@ export class Sound {
     if (!on) this.stopAllAlienDrones();
     if (!on) this.stopAllBassteroidDrones();
     if (!on) this.stopAllCometShimmers();
+    if (!on) this.stopHaloAmbient();
   }
 
   // Start a continuous theremin-ish drone for an alien. The `key` is the
@@ -1434,6 +1472,216 @@ export class Sound {
     if (this.toneEngine) {
       for (const key of Array.from(this.toneEngine.cometShimmerByKey.keys())) this.stopCometShimmer(key);
     }
+  }
+
+  // Yellow-halo ambient pad. A soft, beatless C-rooted shimmer that hangs
+  // under the bass field whenever the player is holding a halo. The voicing
+  // is deliberately a stable open-fifth (C+G) with a single colour-third
+  // floating over it — the open fifth is at home in *both* the bassteroids'
+  // C-major bed AND the comet's C-rooted phrygian/diminished cluster, and
+  // the colour third slides between E (bright over major bass) and Eb
+  // (neutral over the comet) via setHaloAmbientCometMode. Because the pad
+  // has no rhythmic content, it sounds equally good at quarter-note and
+  // doubletime (white-bullet tier) bg-beat tempos.
+  startHaloAmbient(tier: 1 | 2 = 1) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    if (this.haloAmbient) {
+      this.setHaloAmbientTier(tier);
+      return;
+    }
+    const t = this.ctx.currentTime;
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.setValueAtTime(0.0001, t);
+    // ~2s fade-in — the pad arrives as a halo emerging, not as a click.
+    // Peak level chosen to sit just under the bass drones: with the per-voice
+    // gains below, the loudest moment of the root voice is ~0.04 amplitude,
+    // comparable to one bassteroid drone (0.022–0.035 peak).
+    mainGain.gain.exponentialRampToValueAtTime(0.09, t + 2.0);
+
+    // Lowpass keeps the pad soft and "behind" the bass drones (which have
+    // their own brighter top end). Cutoff sits above the highest voice so
+    // we shape rather than mute it.
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = 0.9;
+    filter.frequency.value = 1600;
+    filter.connect(mainGain);
+
+    // Slow tremolo — the pad breathes at ~0.06 Hz (16s period). Slower than
+    // any bass drone's pulseLfo (0.07–0.18 Hz) so the layers don't beat in
+    // lockstep and the pad reads as the slowest moving voice in the mix.
+    const tremLfo = this.ctx.createOscillator();
+    tremLfo.type = "sine";
+    tremLfo.frequency.value = 0.06;
+    const tremDepth = this.ctx.createGain();
+    tremDepth.gain.value = 0.28;
+    const tremGain = this.ctx.createGain();
+    tremGain.gain.value = 0.72;
+    tremLfo.connect(tremDepth);
+    tremDepth.connect(tremGain.gain);
+    tremGain.connect(filter);
+    tremLfo.start(t);
+
+    const oscs: OscillatorNode[] = [];
+    const lfos: OscillatorNode[] = [tremLfo];
+
+    // C3 fundamental (130.81). Same pitch as bassA medium so they reinforce
+    // when bassA is present and form a clean root when it's not.
+    const root = this.ctx.createOscillator();
+    root.type = "sine";
+    root.frequency.value = 130.81;
+    const rootGain = this.ctx.createGain();
+    rootGain.gain.value = 0.55;
+    root.connect(rootGain);
+    rootGain.connect(tremGain);
+    root.start(t);
+    oscs.push(root);
+
+    // G3 fifth (196.00). Same pitch as bassB medium. The C+G open fifth is
+    // the harmonic invariant — it's in every mode that begins on C and
+    // doesn't fight the comet's b2 (Db) or tritone (F#) the way an E or A
+    // would. A second slightly-detuned oscillator gives a gentle phasing
+    // shimmer without using a chorus that would cost CPU.
+    const fifth = this.ctx.createOscillator();
+    const fifthDetuned = this.ctx.createOscillator();
+    fifth.type = "sine";
+    fifthDetuned.type = "sine";
+    fifth.frequency.value = 196.00;
+    fifthDetuned.frequency.value = 196.00 * 1.006;
+    const fifthGain = this.ctx.createGain();
+    fifthGain.gain.value = 0.40;
+    fifth.connect(fifthGain);
+    fifthDetuned.connect(fifthGain);
+    fifthGain.connect(tremGain);
+    fifth.start(t);
+    fifthDetuned.start(t);
+    oscs.push(fifth, fifthDetuned);
+
+    // Third voice — defaults to E4 (329.63), glides down to Eb4 (311.13)
+    // when a comet is present. E4 turns the open fifth into a C-major triad
+    // (CEG up an octave), which is rich and bright over the bass major bed.
+    // Eb4 turns it into a C-minor triad which is *consonant with the comet's
+    // dissonant cluster* — Eb is the b3 in C-phrygian. Either way the bottom
+    // C+G stays put, so the pad never breaks character; only the colour
+    // shifts.
+    const thirdOsc = this.ctx.createOscillator();
+    thirdOsc.type = "sine";
+    thirdOsc.frequency.value = this.haloAmbientCometMode ? 311.13 : 329.63;
+    const thirdGain = this.ctx.createGain();
+    thirdGain.gain.value = 0.28;
+    thirdOsc.connect(thirdGain);
+    thirdGain.connect(tremGain);
+    thirdOsc.start(t);
+    oscs.push(thirdOsc);
+
+    // Tier-2 (white bullet) gain — an octave-up colour layer that swells in
+    // when combo crosses 8. Wired here so the upgrade is a single gain ramp
+    // rather than starting a new oscillator stack mid-game.
+    const tier2Gain = this.ctx.createGain();
+    tier2Gain.gain.value = 0.0001;
+
+    // Octave-up top: C4 + G4. Brighter sparkle for the white-bullet tier.
+    const topC = this.ctx.createOscillator();
+    const topG = this.ctx.createOscillator();
+    topC.type = "sine";
+    topG.type = "sine";
+    topC.frequency.value = 261.63;
+    topG.frequency.value = 392.00;
+    const topGain = this.ctx.createGain();
+    topGain.gain.value = 0.18;
+    topC.connect(topGain);
+    topG.connect(topGain);
+    topGain.connect(tier2Gain);
+    tier2Gain.connect(tremGain);
+    topC.start(t);
+    topG.start(t);
+    oscs.push(topC, topG);
+
+    mainGain.connect(this.master);
+
+    this.haloAmbient = { oscs, lfos, mainGain, thirdOsc, tier2Gain };
+    this.haloAmbientTier = 1;
+    if (tier === 2) this.setHaloAmbientTier(2);
+  }
+
+  setHaloAmbientTier(tier: 1 | 2) {
+    if (!this.ctx || !this.haloAmbient) return;
+    if (this.haloAmbientTier === tier) return;
+    const t = this.ctx.currentTime;
+    const target = tier === 2 ? 1.0 : 0.0001;
+    this.haloAmbient.tier2Gain.gain.cancelScheduledValues(t);
+    this.haloAmbient.tier2Gain.gain.setValueAtTime(this.haloAmbient.tier2Gain.gain.value, t);
+    // Fade up over ~0.5s for a smooth tier promotion, demote a bit slower
+    // so a single mistimed shot doesn't strip the sparkle abruptly.
+    this.haloAmbient.tier2Gain.gain.exponentialRampToValueAtTime(target, t + (tier === 2 ? 0.5 : 0.9));
+    this.haloAmbientTier = tier;
+  }
+
+  // Comet-on-screen toggle. Slides the third voice between E4 (no comet) and
+  // Eb4 (comet present) over ~0.8s — slow enough to read as a mood shift,
+  // fast enough that the player connects it to the comet's appearance.
+  setHaloAmbientCometMode(active: boolean) {
+    if (this.haloAmbientCometMode === active) return;
+    this.haloAmbientCometMode = active;
+    if (!this.ctx || !this.haloAmbient) return;
+    const t = this.ctx.currentTime;
+    const targetHz = active ? 311.13 : 329.63;
+    this.haloAmbient.thirdOsc.frequency.cancelScheduledValues(t);
+    this.haloAmbient.thirdOsc.frequency.setValueAtTime(this.haloAmbient.thirdOsc.frequency.value, t);
+    this.haloAmbient.thirdOsc.frequency.exponentialRampToValueAtTime(targetHz, t + 0.8);
+  }
+
+  stopHaloAmbient() {
+    if (!this.ctx || !this.haloAmbient) return;
+    const t = this.ctx.currentTime;
+    const node = this.haloAmbient;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    // ~1.2s fade-out — long enough that the loss of halo feels musical, not
+    // a hard mute. Bass drones stay, so the bed under the pad keeps playing.
+    node.mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+    const stopAt = t + 1.3;
+    for (const o of node.oscs) o.stop(stopAt);
+    for (const l of node.lfos) l.stop(stopAt);
+    this.haloAmbient = null;
+    this.haloAmbientTier = 0;
+  }
+
+  // Lighter sibling of playBgBeat — used for the in-between eighths when the
+  // background pulse doubles at white-bullet tier. Same voice as the main
+  // beat (so it locks in tonally) at ~40% velocity so the new eighths read as
+  // grace-note in-betweens, not as a thicker downbeat. Pitch is shifted up a
+  // semitone (C#2 / D#2) so the bake cache stores it under a distinct key
+  // from the main beat without re-baking on every dispatch.
+  playBgBeatLight(pitchRatio = 1) {
+    if (!this.enabled) return;
+    if (!this.ctx || !this.master) return;
+    if (this.bgBeatIntensity <= 0) return;
+    const intensity = Math.max(0, Math.min(1, this.bgBeatIntensity));
+    const isOffbeat = pitchRatio !== 1;
+    // Light eighths are quieter than the main beat by a fixed multiplier,
+    // on top of the standard offbeat attenuation.
+    const lightMul = 0.42;
+    const offbeatMul = isOffbeat ? 0.35 + intensity * 0.45 : 1;
+    const levelMul = (0.35 + 0.65 * intensity) * offbeatMul * lightMul;
+    const intensityBucket = Math.round(intensity * 10) / 10;
+    // Light variant tagged in the bake key by a +1000 sentinel offset. Stays
+    // unambiguous against the main beat's `pitchRatio * 100 + bucket`
+    // encoding (max ~113) so the decode in bakeSound can identify "light" by
+    // simply checking key > 500.
+    const bgBeatPitchKey = pitchRatio * 100 + intensityBucket + 1000;
+    if (this.playBaked("bgBeat", bgBeatPitchKey)) return;
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    const velocity = (0.25 + intensity * 0.75) * levelMul;
+    // Shift up a semitone vs. the main beat so the in-between eighth carries
+    // its own pitch character (C#2 vs C2, D#2 vs D2) — distinct enough to
+    // hear as a grace note, close enough that the riff stays musical.
+    const note = pitchRatio === 1 ? "C#2" : "D#2";
+    eng.bgBeatKick.triggerAttackRelease(note, "8n", undefined, velocity);
   }
 
   private makeNoiseBuffer(duration: number): AudioBuffer | null {

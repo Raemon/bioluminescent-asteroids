@@ -29,10 +29,12 @@ import { renderKilledRow } from "./killedParade";
 import { updatePopups } from "./popups";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
+import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry } from "./scoreEntry";
 
 // Why: single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
   if (game.input.pressed("escape") || game.input.pressed("esc")) togglePause(game);
+  else if (game.state === "paused" && (game.input.pressed("enter") || game.input.pressed("return"))) togglePause(game);
   if (game.state === "paused") { game.input.endFrame(); return; }
   game.time += dt * 1000;
   // Why: title/gameover/paused freeze beatTime; playing+dying defer pulsar to after tickBassBeats.
@@ -60,7 +62,12 @@ const updateTitle = (game: Game, dt: number) => {
 // Why: bgBeat sub-bass + comet notes keep ticking so the parade has a steady pulse to align to,
 //   and the pulsar's beat-driven flash piggybacks on the same beatTime via Pulsar.update().
 const updateGameOver = (game: Game, dt: number) => {
-  if (game.input.pressed("enter") || game.input.pressed("return")) showTitle(game);
+  // Why: Escape dismisses score entry so the player can skip submission and press Enter to restart.
+  //   Handled here in addition to the input-level listener for the case where the player clicked
+  //   outside the input before pressing Escape.
+  if (game.input.pressed("escape") || game.input.pressed("esc")) hideScoreEntry(game);
+  const enterPressed = game.input.pressed("enter") || game.input.pressed("return");
+  if (enterPressed && !isScoreEntryBlockingEnter(game)) showTitle(game);
   for (const a of game.asteroids) a.update(dt, game.w, game.h);
   game.beatTime += dt;
   tickAuxBeats(game);
@@ -102,17 +109,35 @@ const transitionToGameOver = (game: Game) => {
   game.sound.stopAllAlienDrones();
   game.sound.stopAllBassteroidDrones();
   game.sound.stopAllCometShimmers();
+  game.sound.stopHaloAmbient();
   game.comets = [];
   game.overlayTitleEl.textContent = "Game Over";
   game.overlayStartEl.innerHTML = `score <strong>${String(game.score).padStart(6, "0")}</strong> &nbsp;·&nbsp; press <span class="key">enter</span> to restart`;
   game.overlayEl.classList.remove("hidden");
   renderKilledRow(game);
+  showScoreEntry(game);
+};
+
+// Why: yellow-halo (combo ≥ 4) opens the ambient pad; white-bullet tier (≥ 8) thickens it
+//   with an octave-up sparkle layer. Comet presence slides the colour-third from E→Eb so
+//   the pad stays consonant with the comet's phrygian shimmer instead of fighting it.
+const syncHaloAmbient = (game: Game) => {
+  const hasYellowHalo = game.beatCombo >= 4;
+  const hasWhiteBullets = game.beatCombo >= 8;
+  if (hasYellowHalo) {
+    if (!game.sound.haloAmbient) game.sound.startHaloAmbient(hasWhiteBullets ? 2 : 1);
+    else game.sound.setHaloAmbientTier(hasWhiteBullets ? 2 : 1);
+  } else if (game.sound.haloAmbient) {
+    game.sound.stopHaloAmbient();
+  }
+  game.sound.setHaloAmbientCometMode(game.comets.length > 0);
 };
 
 // Why: ordered phases (ship → bass → world → collisions) so cause-and-effect reads top-down.
 const updatePlaying = (game: Game, dt: number) => {
   const bulletsBeforeShipUpdate = game.bullets.length;
   game.ship.setCombo(game.beatCombo);
+  syncHaloAmbient(game);
   game.ship.update(dt, game.input, game.particles, game.bullets, game.w, game.h, game.time, game.sound);
   const musicDt = tickSlowMoTimer(game, dt);
   tickBassBeats(game, musicDt);

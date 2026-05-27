@@ -11,6 +11,7 @@ import { newWaveEventSchedule } from "./waveEvents";
 import { stopParade } from "./killedParade";
 import { renderKilledRow } from "./killedParade";
 import { emitShipDebris } from "./particleBursts";
+import { hideScoreEntry, showLeaderboard, showScoreEntry } from "./scoreEntry";
 
 // Why: Fisher-Yates over Array.sort — sort's randomness is biased and varies across engines.
 const shuffled = <T,>(arr: ReadonlyArray<T>): T[] => {
@@ -35,6 +36,7 @@ const stopAllPersistentAudio = (game: Game) => {
   game.sound.stopAllAlienDrones();
   game.sound.stopAllBassteroidDrones();
   game.sound.stopAllCometShimmers();
+  game.sound.stopHaloAmbient();
   game.comets = [];
 };
 
@@ -70,6 +72,8 @@ export const showTitle = (game: Game) => {
   game.ship.shieldActive = false;
   game.ship.radarActive = false;
   syncPowerupHud(game);
+  hideScoreEntry(game);
+  showLeaderboard(game);
 };
 
 // Why: per-run randomised bass intro order means the wave-2/3 picks vary between runs.
@@ -91,6 +95,8 @@ export const startGame = (game: Game) => {
   updateBgBeatIntensity(game);
   spawnWave(game);
   game.overlayEl.classList.add("hidden");
+  hideScoreEntry(game);
+  game.leaderboardEl.classList.add("hidden");
   syncHud(game);
 };
 
@@ -112,6 +118,7 @@ const resetRunCollections = (game: Game) => {
   game.shards = [];
   game.canisters = [];
   game.killedSnapshots = [];
+  game.killTally = {};
   stopParade(game);
   game.killedRowEl.classList.add("hidden");
   stopAllPersistentAudio(game);
@@ -133,7 +140,7 @@ const enterPause = (game: Game) => {
   game.sound.stopThrust();
   game.sound.stopReverseThrust();
   game.overlayTitleEl.textContent = "Paused";
-  game.overlayStartEl.innerHTML = 'press <span class="key">esc</span> to resume';
+  game.overlayStartEl.innerHTML = 'press <span class="key">esc</span> or <span class="key">enter</span> to resume';
   game.overlayEl.classList.remove("hidden");
   game.abortEl.classList.remove("hidden");
 };
@@ -158,6 +165,7 @@ export const abortMission = (game: Game) => {
   game.overlayStartEl.innerHTML = `score <strong>${String(game.score).padStart(6, "0")}</strong> &nbsp;·&nbsp; press <span class="key">enter</span> to restart`;
   game.overlayEl.classList.remove("hidden");
   renderKilledRow(game);
+  showScoreEntry(game);
 };
 
 // Why: combo grid may have flipped (8ths→quarters if previous life had rapid); rebase the eval index.
@@ -178,6 +186,7 @@ export const killShip = (game: Game) => {
   clearComboSilently(game);
   game.sound.stopThrust();
   game.sound.stopReverseThrust();
+  game.sound.stopHaloAmbient();
   game.sound.play("death");
   emitShipDebris(game.particles, game.ship.pos);
   game.ship.alive = false;

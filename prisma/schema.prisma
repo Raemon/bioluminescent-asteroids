@@ -1,0 +1,20 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Highscore {
+  id          Int      @id @default(autoincrement())
+  name        String
+  score       Int
+  wave        Int      @default(1)
+  killCount   Int      @default(0) @map("kill_count")
+  killSummary Json     @default("{}") @map("kill_summary")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([score(sort: Desc), createdAt(sort: Desc)], map: "highscores_score_desc")
+  @@map("highscores")
+}
