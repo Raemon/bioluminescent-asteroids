@@ -34,7 +34,7 @@ const tickBassAsteroids = (game: Game) => {
     while (game.beatTime >= a.nextBeatAt) {
       const sound = BASS_KIND_SOUND[a.kind as "bassA" | "bassB" | "bassC" | "bassD"];
       const pitchRatio = BASS_SPLIT_PITCH_RATIO[a.splitLevel] ?? 1;
-      game.sound.play(sound, pitchRatio);
+      game.sound.play(sound, pitchRatio, a.pos);
       a.beatFlash = 1.0;
       // Why: re-snap to BEAT_GRID so accumulated float error can't drift the voice off the beat.
       a.nextBeatAt = Math.round((a.nextBeatAt + BASS_MEASURE_LENGTH) / BEAT_GRID) * BEAT_GRID;
@@ -46,7 +46,7 @@ const tickBassAsteroids = (game: Game) => {
 const tickCometMelodies = (game: Game) => {
   for (const c of game.comets) {
     while (game.beatTime >= c.nextNoteBeatTime) {
-      game.sound.play("cometNote", c.noteIndex);
+      game.sound.play("cometNote", c.noteIndex, c.pos);
       c.noteIndex += 1;
       c.nextNoteBeatTime = Math.round((c.nextNoteBeatTime + BEAT_GRID) / BEAT_GRID) * BEAT_GRID;
     }

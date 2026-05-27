@@ -78,7 +78,7 @@ const detonateScheduledBassRocks = (game: Game) => {
     if (game.beatTime < a.nextBeatAt) continue;
     const sound = BASS_KIND_SOUND[a.kind as "bassA" | "bassB" | "bassC" | "bassD"];
     const pitchRatio = BASS_SPLIT_PITCH_RATIO[a.splitLevel] ?? 1;
-    game.sound.play(sound, pitchRatio);
+    game.sound.play(sound, pitchRatio, a.pos);
     game.sound.stopBassteroidDrone(a);
     a.hp = 0;
     emitExplosion(game.particles, game.shards, a, false);
@@ -201,6 +201,22 @@ const tickWorldEntities = (game: Game, dt: number, musicDt: number) => {
   game.shards = game.shards.filter((s) => s.life > 0);
   for (const c of game.canisters) c.update(dt, game.w, game.h);
   game.canisters = game.canisters.filter((c) => c.alive);
+  updatePositionalAudio(game);
+};
+
+// Refresh the spatial listener and the per-frame pan/gain on every active
+// drone. Listener is the ship (when alive); drones still pan after death so
+// the post-mortem field-clear keeps positional cues. We pass the screen
+// dimensions so pan saturates at the actual visible edges.
+const updatePositionalAudio = (game: Game) => {
+  game.sound.setListener(game.ship.pos.x, game.ship.pos.y, game.w, game.h);
+  for (const a of game.asteroids) {
+    if (a.isBass() && (a.size === "medium" || a.size === "small")) {
+      game.sound.updateBassteroidDrone(a, a.pos);
+    }
+  }
+  for (const al of game.aliens) game.sound.updateAlienDrone(al, al.pos);
+  for (const c of game.comets) game.sound.updateCometShimmer(c, c.pos);
 };
 
 // Why: pruning is a separate pass so we don't mutate game.comets mid-iteration of the update loop.
@@ -225,7 +241,7 @@ const fireOneAlienShot = (game: Game, a: Alien) => {
   if (game.ship.alive) {
     game.alienBullets.push(a.fireAt(game.ship.pos));
     const fireSound = a.size === "big" ? "alienFireBig" : a.size === "medium" ? "alienFireMedium" : "alienFireSmall";
-    game.sound.play(fireSound);
+    game.sound.play(fireSound, 1, a.pos);
   } else {
     a.fireFlash = 1;
   }

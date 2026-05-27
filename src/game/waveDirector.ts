@@ -105,7 +105,7 @@ export const spawnAlien = (game: Game, size: AlienSize) => {
   const period = ALIEN_FIRE_PERIOD_BEATS[size] * BEAT_GRID;
   a.nextFireAt = Math.ceil((game.beatTime + 0.5) / period) * period;
   game.aliens.push(a);
-  game.sound.startAlienDrone(a, size);
+  game.sound.startAlienDrone(a, size, a.pos);
 };
 
 // Why: shimmer fades up ~one beat before the first note so the comet sounds like it arrives, then plays.
@@ -114,7 +114,7 @@ export const spawnComet = (game: Game) => {
   c.lifetime = rand(COMET_LIFETIME[0], COMET_LIFETIME[1]);
   c.nextNoteBeatTime = Math.ceil((game.beatTime + 0.6) / BEAT_GRID) * BEAT_GRID;
   game.comets.push(c);
-  game.sound.startCometShimmer(c);
+  game.sound.startCometShimmer(c, c.pos);
 };
 
 // Why: one entry replaces the previous if/else maze covering boss/foreshadow/normal wave dispatch.
@@ -153,8 +153,9 @@ const setForeshadowState = (game: Game) => {
 // Why: each event rolls independently so we can't get e.g. canister + shockwave coupled by accident.
 const rollWaveEvents = (game: Game) => {
   maybeSchedule(game.waveEvents, CANISTER_CHANCE_PER_WAVE, CANISTER_SPAWN_WINDOW, () => {
-    game.canisters.push(spawnCanister(game.w, game.h, game.ship.pos));
-    game.sound.play("canisterAppear");
+    const c = spawnCanister(game.w, game.h, game.ship.pos);
+    game.canisters.push(c);
+    game.sound.play("canisterAppear", 1, c.pos);
   });
   if (game.wave >= SHOCKWAVE_FIRST_WAVE) {
     maybeSchedule(game.waveEvents, SHOCKWAVE_CHANCE_PER_WAVE, SHOCKWAVE_SPAWN_WINDOW, () => startShockwave(game));

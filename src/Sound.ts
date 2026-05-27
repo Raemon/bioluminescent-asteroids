@@ -55,6 +55,7 @@ type AlienDroneNode = {
   filter: BiquadFilterNode;
   pulseGain: GainNode;
   mainGain: GainNode;
+  spatial?: SpatialNodes;
 };
 
 // Per-bassteroid ambient drone. Opened when a large bassteroid breaks open
@@ -66,6 +67,7 @@ type BassDroneNode = {
   lfos: OscillatorNode[];
   noise?: AudioBufferSourceNode;
   mainGain: GainNode;
+  spatial?: SpatialNodes;
 };
 
 // Per-comet shimmer pad. Underlies the comet melody for the entire lifetime
@@ -75,7 +77,19 @@ type CometShimmerNode = {
   oscs: OscillatorNode[];
   lfos: OscillatorNode[];
   mainGain: GainNode;
+  spatial?: SpatialNodes;
 };
+
+// Optional pan + distance-falloff splice. When a sound (one-shot or drone)
+// is positional, its voices feed into spatial.in; spatial.out connects to the
+// usual master/bakedOut sink. The Game updates pan/gain values per frame for
+// drones via setSpatial.
+type SpatialNodes = {
+  panner: StereoPannerNode;
+  distGain: GainNode;
+};
+
+export type Pos = { x: number; y: number };
 
 export type SoundName =
   | "fire"
@@ -154,6 +168,66 @@ export class Sound {
   // Per-comet shimmer pad, keyed by the Comet instance.
   cometShimmers: Map<object, CometShimmerNode> = new Map();
   toneEngine: ToneEngineNodes | null = null;
+
+  // Listener position (ship). Pan + distance falloff are computed relative
+  // to this. Half-width/half-height scale the screen so pan saturates at the
+  // edges; updated by the game on resize. Listener defaults to screen center
+  // so positional sounds before the first setListener() still pan sensibly.
+  listenerX = 0;
+  listenerY = 0;
+  halfW = 1;
+  halfH = 1;
+  // Subtle spatial profile: pan saturates at ~60% of full L/R, and volume
+  // drops to ~50% by the screen edge.
+  private static readonly PAN_MAX = 0.6;
+  private static readonly DIST_MIN_GAIN = 0.5;
+
+  // Tell the audio bus where the listener (ship) is and how big the screen is.
+  // Called once per frame from the game loop.
+  setListener(x: number, y: number, w: number, h: number) {
+    this.listenerX = x;
+    this.listenerY = y;
+    this.halfW = Math.max(1, w * 0.5);
+    this.halfH = Math.max(1, h * 0.5);
+  }
+
+  // Compute pan + falloff gain from a world position relative to the listener.
+  // Pan is the x-offset normalized to [-PAN_MAX, +PAN_MAX]; gain falls off
+  // smoothly with euclidean distance, clamped to DIST_MIN_GAIN at the edge.
+  private spatialFor(pos: Pos): { pan: number; gain: number } {
+    const dx = (pos.x - this.listenerX) / this.halfW;
+    const dy = (pos.y - this.listenerY) / this.halfH;
+    const pan = Math.max(-1, Math.min(1, dx)) * Sound.PAN_MAX;
+    const d = Math.min(1, Math.hypot(dx, dy));
+    const gain = 1 - (1 - Sound.DIST_MIN_GAIN) * d;
+    return { pan, gain };
+  }
+
+  // Build a pan+gain splice node connected to `sink`. Voices in the caller
+  // connect into `panner` (or `distGain` — equivalent, both are upstream).
+  private makeSpatial(pos: Pos, sink: AudioNode): SpatialNodes | null {
+    if (!this.ctx) return null;
+    const { pan, gain } = this.spatialFor(pos);
+    const panner = this.ctx.createStereoPanner();
+    panner.pan.value = pan;
+    const distGain = this.ctx.createGain();
+    distGain.gain.value = gain;
+    panner.connect(distGain);
+    distGain.connect(sink);
+    return { panner, distGain };
+  }
+
+  // Update an existing spatial splice (used per-frame for drones as the
+  // underlying entity moves around the screen).
+  private updateSpatial(s: SpatialNodes, pos: Pos) {
+    if (!this.ctx) return;
+    const { pan, gain } = this.spatialFor(pos);
+    const t = this.ctx.currentTime;
+    // setTargetAtTime smooths the change over a short time constant so we
+    // don't hear zipper noise when an entity moves quickly.
+    s.panner.pan.setTargetAtTime(pan, t, 0.05);
+    s.distGain.gain.setTargetAtTime(gain, t, 0.05);
+  }
 
   ensureContext() {
     if (this.ctx) return;
@@ -481,6 +555,10 @@ export class Sound {
   // tone mode) and go straight to destination via this gain — otherwise the
   // bus chain would be applied twice.
   bakedOut: GainNode | null = null;
+  // Set by play() while a single dispatch is in progress, so playBaked can
+  // pick up the position without per-helper plumbing. Null when the call has
+  // no spatial position.
+  private spatialPosForCall: Pos | null = null;
 
   private bakedKey(name: SoundName, pitchRatio: number): string {
     // Quantize to 4 decimals so floating-point noise doesn't fragment the cache.
@@ -497,7 +575,18 @@ export class Sound {
     if (buf) {
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
-      src.connect(this.bakedOut);
+      // Positional splice: if play() recorded a pos for this dispatch, route
+      // the buffer through the same pan + distance-gain pair we'd use for
+      // live voices. Baked buffers don't go through this.master, so we wire
+      // them straight into bakedOut.
+      const pos = this.spatialPosForCall;
+      if (pos) {
+        const spatial = this.makeSpatial(pos, this.bakedOut);
+        if (spatial) src.connect(spatial.panner);
+        else src.connect(this.bakedOut);
+      } else {
+        src.connect(this.bakedOut);
+      }
       src.start();
       return true;
     }
@@ -719,12 +808,14 @@ export class Sound {
   // it's time to stop it. Carrier frequency depends on size — bigger
   // saucers sit deeper in the mix so multiple aliens read as a chord
   // rather than a single wall of sound.
-  startAlienDrone(key: object, size: "big" | "medium" | "small") {
+  startAlienDrone(key: object, size: "big" | "medium" | "small", pos?: Pos) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     if (this.alienDrones.has(key)) return;
     const t = this.ctx.currentTime;
+    const spatial = pos ? this.makeSpatial(pos, this.master) : null;
+    const sink: AudioNode = spatial ? spatial.panner : this.master;
 
     // Carrier frequencies — A minor pentatonic-ish so multiple drones layer
     // without dissonance: big=A2 (110), medium=E3 (165), small=A3 (220).
@@ -782,7 +873,7 @@ export class Sound {
     oscB.connect(filter);
     filter.connect(pulseGain);
     pulseGain.connect(mainGain);
-    mainGain.connect(this.master);
+    mainGain.connect(sink);
 
     oscA.start(t);
     oscB.start(t);
@@ -791,7 +882,14 @@ export class Sound {
 
     this.alienDrones.set(key, {
       oscA, oscB, pulseLfo, vibratoLfo, vibratoDepth, filter, pulseGain, mainGain,
+      spatial: spatial ?? undefined,
     });
+  }
+
+  updateAlienDrone(key: object, pos: Pos) {
+    const node = this.alienDrones.get(key);
+    if (!node || !node.spatial) return;
+    this.updateSpatial(node.spatial, pos);
   }
 
   stopAlienDrone(key: object) {
@@ -833,12 +931,14 @@ export class Sound {
   //   bassB = detuned sine pair with vibrato (breathy choir)
   //   bassC = sine + sine-fifth (open chorale)
   //   bassD = sine + bandpassed noise (wind-through-metal)
-  startBassteroidDrone(key: object, kind: "bassA" | "bassB" | "bassC" | "bassD", size: "medium" | "small") {
+  startBassteroidDrone(key: object, kind: "bassA" | "bassB" | "bassC" | "bassD", size: "medium" | "small", pos?: Pos) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     if (this.bassDrones.has(key)) return;
     const t = this.ctx.currentTime;
+    const spatial = pos ? this.makeSpatial(pos, this.master) : null;
+    const sink: AudioNode = spatial ? spatial.panner : this.master;
 
     const mediumFreq: Record<"bassA" | "bassB" | "bassC" | "bassD", number> = {
       bassA: 130.81, bassB: 196.00, bassC: 164.81, bassD: 220.00,
@@ -887,7 +987,7 @@ export class Sound {
 
     filter.connect(pulseGain);
     pulseGain.connect(mainGain);
-    mainGain.connect(this.master);
+    mainGain.connect(sink);
 
     const oscs: OscillatorNode[] = [];
     const lfos: OscillatorNode[] = [pulseLfo];
@@ -971,7 +1071,13 @@ export class Sound {
 
     pulseLfo.start(t);
 
-    this.bassDrones.set(key, { oscs, lfos, noise, mainGain });
+    this.bassDrones.set(key, { oscs, lfos, noise, mainGain, spatial: spatial ?? undefined });
+  }
+
+  updateBassteroidDrone(key: object, pos: Pos) {
+    const node = this.bassDrones.get(key);
+    if (!node || !node.spatial) return;
+    this.updateSpatial(node.spatial, pos);
   }
 
   stopBassteroidDrone(key: object) {
@@ -1039,7 +1145,7 @@ export class Sound {
   // into a low, dissonant drone (minor 2nd + tritone over the root) that
   // hums for the comet's life. The drone is intentionally unresolved so
   // the comet feels threatening rather than tranquil.
-  startCometShimmer(key: object) {
+  startCometShimmer(key: object, pos?: Pos) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
@@ -1050,6 +1156,8 @@ export class Sound {
     // through the same compressor/limiter chain, so polish is shared.
     if (this.cometShimmers.has(key)) return;
     const t = this.ctx.currentTime;
+    const spatial = pos ? this.makeSpatial(pos, this.master) : null;
+    const sink: AudioNode = spatial ? spatial.panner : this.master;
 
     // ── Master comet voice gain ──────────────────────────────────────────
     const mainGain = this.ctx.createGain();
@@ -1062,7 +1170,7 @@ export class Sound {
     // Then ease back to a sustained but quieter drone level so the melody
     // notes have headroom to cut through.
     mainGain.gain.exponentialRampToValueAtTime(0.085, t + audioFadeIn + 2.0);
-    mainGain.connect(this.master);
+    mainGain.connect(sink);
 
     const oscs: OscillatorNode[] = [];
     const lfos: OscillatorNode[] = [];
@@ -1169,7 +1277,13 @@ export class Sound {
       lfos.push(trem);
     }
 
-    this.cometShimmers.set(key, { oscs, lfos, mainGain });
+    this.cometShimmers.set(key, { oscs, lfos, mainGain, spatial: spatial ?? undefined });
+  }
+
+  updateCometShimmer(key: object, pos: Pos) {
+    const node = this.cometShimmers.get(key);
+    if (!node || !node.spatial) return;
+    this.updateSpatial(node.spatial, pos);
   }
 
   stopCometShimmer(key: object) {
@@ -1331,7 +1445,7 @@ export class Sound {
     return buf;
   }
 
-  play(name: SoundName, pitchRatio = 1) {
+  play(name: SoundName, pitchRatio = 1, pos?: Pos) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
@@ -1343,16 +1457,40 @@ export class Sound {
     // voices into "master" — actually our voice gain), then restore. The
     // voice gain stays connected to the real master so its nodes outlive
     // the swap.
+    //
+    // Positional audio piggybacks on the same swap: when pos is provided we
+    // insert a StereoPanner + distance-gain pair upstream of the (possibly
+    // volume-adjusted) voice gain. The cached bakedOut path is spliced
+    // separately inside playBaked.
     const u = cfgU(name);
     const effectivePitch = pitchRatio * u.pitch;
     const realMaster = this.master;
-    let voiceGain: GainNode | null = null;
+    // Build the chain bottom-up: sink = (volume gain → realMaster) if volume
+    // differs, else realMaster. Then if positional, splice panner+distGain
+    // upstream of sink. Finally we always swap this.master to a per-call
+    // pass-through gain whose output feeds the chain — that way every
+    // per-sound helper still calls `connect(this.master)` (a GainNode) and
+    // we don't need to widen master's type.
+    let sink: AudioNode = realMaster;
     if (u.volume !== 1) {
-      voiceGain = this.ctx.createGain();
-      voiceGain.gain.value = u.volume;
-      voiceGain.connect(realMaster);
-      this.master = voiceGain;
+      const volGain = this.ctx.createGain();
+      volGain.gain.value = u.volume;
+      volGain.connect(sink);
+      sink = volGain;
     }
+    if (pos) {
+      const spatial = this.makeSpatial(pos, sink);
+      if (spatial) sink = spatial.panner;
+    }
+    let voiceMaster: GainNode | null = null;
+    if (sink !== realMaster) {
+      voiceMaster = this.ctx.createGain();
+      voiceMaster.connect(sink);
+      this.master = voiceMaster;
+    }
+    // Stash so playBaked can pick the same splice up without re-threading
+    // pos through every per-sound helper.
+    this.spatialPosForCall = pos ?? null;
 
     switch (name) {
       case "fire": this.playFire(); break;
@@ -1394,7 +1532,8 @@ export class Sound {
       case "comboLost": this.playComboLost(); break;
     }
 
-    if (voiceGain) this.master = realMaster;
+    this.master = realMaster;
+    this.spatialPosForCall = null;
   }
 
   // Three alien-fire voices, harmonically related so they layer cleanly with

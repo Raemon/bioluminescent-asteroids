@@ -35,7 +35,7 @@ const shatterBassRock = (game: Game, a: Asteroid, surviving: Asteroid[]) => {
   for (const c of a.split()) {
     alignBassBeat(game, c);
     if (c.size === "medium" || c.size === "small") {
-      game.sound.startBassteroidDrone(c, c.kind as "bassA" | "bassB" | "bassC" | "bassD", c.size);
+      game.sound.startBassteroidDrone(c, c.kind as "bassA" | "bassB" | "bassC" | "bassD", c.size, c.pos);
     }
     kickChildFromShockwave(game, c);
     surviving.push(c);

@@ -46,7 +46,7 @@ const awardScoreForKill = (game: Game, hitPos: Vec, baseScore: number, isOnBeatH
   if (isOnBeatHit) {
     const multiplier = game.beatCombo;
     scoreEarned = Math.round(scoreEarned * multiplier);
-    game.sound.play("comboSparkle");
+    game.sound.play("comboSparkle", 1, hitPos);
     if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
   }
   game.score += scoreEarned;
@@ -58,7 +58,7 @@ const restartChildBassDrones = (game: Game, children: Asteroid[]) => {
   for (const c of children) {
     alignBassBeat(game, c);
     if (c.size === "medium" || c.size === "small") {
-      game.sound.startBassteroidDrone(c, c.kind as "bassA" | "bassB" | "bassC" | "bassD", c.size);
+      game.sound.startBassteroidDrone(c, c.kind as "bassA" | "bassB" | "bassC" | "bassD", c.size, c.pos);
     }
   }
 };
@@ -90,17 +90,17 @@ export const onAsteroidKilledByBullet = (
   isOnBeatHit: boolean,
 ): Asteroid[] => {
   const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit);
-  if (a.isBass()) game.sound.play("bassEcho");
-  game.sound.play(hitSoundFor(a));
+  if (a.isBass()) game.sound.play("bassEcho", 1, a.pos);
+  game.sound.play(hitSoundFor(a), 1, a.pos);
   return finishAsteroidKillCore(game, a, b.vel, isOnBeatHit, scoreEarned);
 };
 
 // Why: asteroidHit → bassEcho (reverse of bullet path) preserves the original ram-branch order.
 // Why: ram kills award no points — pass 0 so the parade flash reflects the actual payout.
 export const onAsteroidKilledByRam = (game: Game, a: Asteroid, shipVel: Vec): Asteroid[] => {
-  if (a.isBass()) game.sound.play("bassHit");
-  game.sound.play(hitSoundFor(a));
-  if (a.isBass()) game.sound.play("bassEcho");
+  if (a.isBass()) game.sound.play("bassHit", 1, a.pos);
+  game.sound.play(hitSoundFor(a), 1, a.pos);
+  if (a.isBass()) game.sound.play("bassEcho", 1, a.pos);
   return finishAsteroidKillCore(game, a, shipVel, false, 0);
 };
 
@@ -111,15 +111,15 @@ const bassChipScore = (a: Asteroid): number => Math.max(1, Math.round(a.scoreVal
 // Why: bullet crack — bassHit announces the chip; sparkle layers on if it was on-beat.
 // Bassteroid chips also pay out (small) points + combo popup so multi-hit kills feel rewarding.
 export const onAsteroidCrackedByBullet = (game: Game, a: Asteroid, b: Bullet, isOnBeatHit: boolean) => {
-  if (a.isBass()) game.sound.play("bassHit");
+  if (a.isBass()) game.sound.play("bassHit", 1, a.pos);
   emitCrackParticles(game.particles, a, isOnBeatHit);
-  if (isOnBeatHit) game.sound.play("comboSparkle");
+  if (isOnBeatHit) game.sound.play("comboSparkle", 1, b.pos);
   if (a.isBass()) awardScoreForKill(game, b.pos, bassChipScore(a), isOnBeatHit);
 };
 
 // Why: ram crack uses asteroidHit (not bassHit) so the impact reads as a kick, not a chip.
 export const onAsteroidCrackedByRam = (game: Game, a: Asteroid) => {
-  game.sound.play(a.isBass() ? "bassHit" : hitSoundFor(a));
+  game.sound.play(a.isBass() ? "bassHit" : hitSoundFor(a), 1, a.pos);
   emitCrackParticles(game.particles, a, false);
 };
 
@@ -127,7 +127,7 @@ export const onAsteroidCrackedByRam = (game: Game, a: Asteroid) => {
 export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boolean) => {
   const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit);
   game.shake = Math.min(game.shake + 0.5, 1.4);
-  game.sound.play("alienExplode");
+  game.sound.play("alienExplode", 1, al.pos);
   game.sound.stopAlienDrone(al);
   emitAlienExplosion(game.particles, al);
   const snap = snapshotAlienKill(al, "alienExplode", scoreEarned);
@@ -135,10 +135,10 @@ export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boo
 };
 
 // Why: shared cracked-alien feedback for medium/big saucers since the killing-hit path differs.
-export const onAlienCracked = (game: Game, isOnBeatHit: boolean) => {
-  game.sound.play("alienHit");
+export const onAlienCracked = (game: Game, isOnBeatHit: boolean, pos: Vec) => {
+  game.sound.play("alienHit", 1, pos);
   game.shake = Math.min(game.shake + 0.18, 1.2);
-  if (isOnBeatHit) game.sound.play("comboSparkle");
+  if (isOnBeatHit) game.sound.play("comboSparkle", 1, pos);
 };
 
 // Why: comets pay a flat 5000 base; combo multiplier and a "+N" readout match the rest of the
@@ -149,11 +149,11 @@ export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: bool
   game.score += scoreEarned;
   game.popups.push(popupScore(b.pos, scoreEarned));
   if (isOnBeatHit) {
-    game.sound.play("comboSparkle");
+    game.sound.play("comboSparkle", 1, b.pos);
     if (game.beatCombo >= 2) game.popups.push(popupCombo(b.pos, game.beatCombo));
   }
   game.shake = Math.min(game.shake + 0.6, 1.6);
-  game.sound.play("cometDestroyed");
+  game.sound.play("cometDestroyed", 1, c.pos);
   game.sound.stopCometShimmer(c);
   emitCometExplosion(game.particles, c);
   const snap = snapshotCometKill(c, "cometDestroyed", scoreEarned);

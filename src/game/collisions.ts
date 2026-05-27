@@ -150,7 +150,7 @@ const tryKillAlienWithBullets = (game: Game, a: Alien): boolean => {
     applyHitToCombo(game, onBeat, b.pos);
     if (!killed) {
       a.applyKnockback(b.vel.x, b.vel.y, 1);
-      onAlienCracked(game, onBeat);
+      onAlienCracked(game, onBeat, a.pos);
       return false;
     }
     onAlienKilled(game, a, b, onBeat);
@@ -258,8 +258,8 @@ const collectCanister = (game: Game, c: Canister) => {
 
 // Why: shooting wastes the powerup — neutral sound + white burst contrasts the pickup flavour.
 const explodeCanister = (game: Game, c: Canister) => {
-  game.sound.play("explosionSmall");
-  game.sound.play("canisterDestroyed");
+  game.sound.play("explosionSmall", 1, c.pos);
+  game.sound.play("canisterDestroyed", 1, c.pos);
   game.shake = Math.min(game.shake + 0.25, 1.2);
   emitCanisterPop(game.particles, c);
 };

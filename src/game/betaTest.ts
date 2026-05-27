@@ -35,7 +35,7 @@ const spawnAsteroid = (game: Game, kind: AsteroidKind = "normal") => {
   );
   if (a.isBass()) alignBassBeat(game, a);
   if (a.isBass() && (a.size === "medium" || a.size === "small")) {
-    game.sound.startBassteroidDrone(a, kind as "bassA" | "bassB" | "bassC" | "bassD", a.size);
+    game.sound.startBassteroidDrone(a, kind as "bassA" | "bassB" | "bassC" | "bassD", a.size, a.pos);
   }
   game.asteroids.push(a);
 };
@@ -79,8 +79,9 @@ const ELEMENTS: BetaElement[] = [
     label: "Powerup Pod",
     group: "Pickup",
     apply: (g) => {
-      g.canisters.push(spawnCanister(g.w, g.h, g.ship.pos));
-      g.sound.play("canisterAppear");
+      const c = spawnCanister(g.w, g.h, g.ship.pos);
+      g.canisters.push(c);
+      g.sound.play("canisterAppear", 1, c.pos);
     },
   },
   { id: "trident", label: "Trident", group: "Powerup", apply: (g) => applyPowerup(g, "trident") },

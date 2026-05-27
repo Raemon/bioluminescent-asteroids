@@ -14,6 +14,24 @@ import type { SilhouetteSample } from "./Asteroid";
 // amplitude envelope — the breath is constant across each puff's life, only
 // the puff's overall opacity envelopes in and out.
 //
+// Visual vocabulary — each puff is rendered as three layered "audio-
+// visualizer" elements that together read as a Milkdrop / WebAudio
+// AnalyserNode aesthetic wrapped around a drifting ship-fragment:
+//
+//   1. Nebula body — the feathered silhouette fill (FEATHER_SCALES /
+//      FEATHER_ALPHAS). Soft blurred core, no hard edge.
+//   2. Polar frequency-spectrum bars — a ring of short radial bars whose
+//      heights are sampled from a sum-of-sinusoids field (BAR_HEIGHT_*).
+//      The unambiguously "audio-coded" element — reads as a polar EQ.
+//   3. Oscilloscope waveform ring — a single thin continuous line drawn
+//      just outside the body, radius modulated by a separate waveform
+//      (OSCILLO_*). The Milkdrop "wave" element.
+//
+// All three layers inherit the puff's velocity-axis stretch (teardrop) and
+// share the same per-wave seed so they stay visually coherent. The breath
+// and bar/wave fields use coprime frequencies so they don't visually lock
+// onto each other.
+//
 // Each wave is a closed polygon shaped like a simplified silhouette of the
 // chunk it came from (see buildBassSilhouette in Asteroid.ts). At emission
 // the wave inherits a fraction (VELOCITY_INHERIT) of the fragment's
@@ -176,6 +194,50 @@ const FADE_IN_FRACTION = 0.14;
 // Module-scope so we don't reallocate per wave per frame.
 const FEATHER_SCALES = [1.32, 1.18, 1.06, 0.94];
 const FEATHER_ALPHAS = [0.18, 0.28, 0.42, 0.5];
+
+// --- Audio-visualizer overlays on top of each puff -------------------------
+// The fill above is the "nebula body". The two layers below are the
+// unambiguously-audio cues: a polar frequency-spectrum bar field and a
+// continuous oscilloscope-style waveform ring. Together they read as a
+// music visualizer (Milkdrop / WebAudio AnalyserNode aesthetic) wrapping
+// each drifting puff.
+
+// Polar spectrum bars. Number of bars around the silhouette and the
+// inner/outer radial extent each bar can occupy (in puff-radius units).
+// More bars read as a finer-resolution EQ; too many and they smear into a
+// halo and stop reading as discrete bins. 32 is the sweet spot.
+const SPECTRUM_BARS = 32;
+const SPECTRUM_INNER = 1.05; // just outside the puff's body
+const SPECTRUM_OUTER_MAX = 1.55; // tallest a bar can reach
+const SPECTRUM_BAR_WIDTH = 1.6; // line width in px
+const SPECTRUM_ALPHA = 0.55; // multiplied by the puff envelope alpha
+// Per-bar height frequencies/rates. Picked to span low-mid-high bands so
+// adjacent bars don't move in lockstep — reads as a real spectrum where
+// each bin has its own life. Coprime with BREATH_FREQS to keep the body
+// breath and bar field visually independent.
+const BAR_HEIGHT_FREQS = [2, 4, 6, 9, 12];
+const BAR_HEIGHT_RATES = [4.7, 5.9, 7.3, 8.6, 9.7];
+const BAR_HEIGHT_AMPS = [0.45, 0.30, 0.20, 0.14, 0.10];
+// Floor on the bar's normalised height (0..1) so even quiet bars draw a
+// short visible stub. Without this the bars flicker in and out and read
+// as broken rather than as a quiet bin.
+const SPECTRUM_FLOOR = 0.18;
+
+// Oscilloscope-style continuous waveform ring. One open polyline drawn
+// slightly outside the puff, radius modulated by a sum of sines (the
+// "waveform"). Higher resolution than the silhouette so the line reads as
+// a smooth oscilloscope trace rather than a wobbly polygon.
+const OSCILLO_SAMPLES = 96;
+const OSCILLO_RADIUS = 1.12; // base radius (puff-units) before wave displacement
+const OSCILLO_AMP = 0.075; // peak radial displacement (puff-units)
+const OSCILLO_LINE_WIDTH = 1.1;
+const OSCILLO_ALPHA = 0.7; // multiplied by the puff envelope alpha
+// Waveform terms — fewer and faster than BREATH. The waveform should look
+// like it's "moving" around the ring, which calls for one dominant rotating
+// term + a couple of cross-modulating ones at higher temporal rates.
+const OSCILLO_FREQS = [4, 7, 11];
+const OSCILLO_RATES = [7.0, 9.8, 12.3];
+const OSCILLO_AMPS = [0.55, 0.30, 0.15];
 
 export class SoundwaveRadiator {
   private readonly buf: Float32Array;
@@ -412,6 +474,123 @@ export class SoundwaveRadiator {
         const ringLight = Math.min(95, lightness + (k - 1) * 4);
         ctx.fillStyle = `hsla(${hue}, 100%, ${ringLight}%, ${ringAlpha})`;
         ctx.fill();
+      }
+
+      // --- Polar frequency-spectrum bars ----------------------------------
+      // A ring of short radial line segments around the puff. Each bar's
+      // length is set by sampling the bar-height field at that bar's angle.
+      // Unambiguously reads as "polar EQ" — the audio-visualizer vocabulary
+      // we want layered on top of the nebula body.
+      //
+      // The bars also inherit the puff's velocity-axis stretch (via the
+      // along/across projection used by the body) so they elongate in the
+      // same direction the body is being dragged — keeps the wake-feel
+      // consistent across all three layers.
+      const barEnv = Math.min(1, t * 6); // quick attack so bars "latch on"
+      const barAlpha = alpha * SPECTRUM_ALPHA * barEnv;
+      if (barAlpha > 0.01) {
+        const barLight = Math.min(95, lightness + 18);
+        ctx.lineWidth = SPECTRUM_BAR_WIDTH;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = `hsla(${hue}, 100%, ${barLight}%, ${barAlpha})`;
+        ctx.beginPath();
+        const innerR = polyR * SPECTRUM_INNER;
+        const outerSpan = polyR * (SPECTRUM_OUTER_MAX - SPECTRUM_INNER);
+        for (let b = 0; b < SPECTRUM_BARS; b++) {
+          const baseA = (b / SPECTRUM_BARS) * TAU2;
+          // Apply the puff's snapshot rotation so the bar field rotates
+          // with the body's "resonance shape".
+          const a = baseA + rot;
+          const dx = Math.cos(a);
+          const dy = Math.sin(a);
+
+          // Per-bar height: sum the breath/bar terms at this bar's angle.
+          // The five sinusoids give each bar its own life; the absolute
+          // value + floor maps the [-1,1] signal into a one-sided "energy".
+          const raw =
+            BAR_HEIGHT_AMPS[0] * Math.sin(BAR_HEIGHT_FREQS[0] * baseA + tAbs * BAR_HEIGHT_RATES[0] + seed * 1.0) +
+            BAR_HEIGHT_AMPS[1] * Math.sin(BAR_HEIGHT_FREQS[1] * baseA + tAbs * BAR_HEIGHT_RATES[1] + seed * 1.618) +
+            BAR_HEIGHT_AMPS[2] * Math.sin(BAR_HEIGHT_FREQS[2] * baseA + tAbs * BAR_HEIGHT_RATES[2] + seed * 2.414) +
+            BAR_HEIGHT_AMPS[3] * Math.sin(BAR_HEIGHT_FREQS[3] * baseA + tAbs * BAR_HEIGHT_RATES[3] + seed * 3.302) +
+            BAR_HEIGHT_AMPS[4] * Math.sin(BAR_HEIGHT_FREQS[4] * baseA + tAbs * BAR_HEIGHT_RATES[4] + seed * 4.236);
+          const energy = SPECTRUM_FLOOR + (1 - SPECTRUM_FLOOR) * Math.min(1, Math.abs(raw));
+
+          // Inner endpoint sits on the puff edge in the direction of the
+          // bar; outer endpoint is `energy * outerSpan` farther out.
+          let ix = dx * innerR;
+          let iy = dy * innerR;
+          let oxBar = dx * (innerR + energy * outerSpan);
+          let oyBar = dy * (innerR + energy * outerSpan);
+
+          // Apply the same axial/lateral stretch the body uses so the bar
+          // field elongates along velocity. Skip when nearly stationary.
+          if (speedT > 0.001) {
+            const ia = ix * cosV + iy * sinV;
+            const ic = -ix * sinV + iy * cosV;
+            const oa = oxBar * cosV + oyBar * sinV;
+            const oc = -oxBar * sinV + oyBar * cosV;
+            const iaS = ia * axial;
+            const oaS = oa * axial;
+            const icS = ic * lateral;
+            const ocS = oc * lateral;
+            ix = iaS * cosV - icS * sinV;
+            iy = iaS * sinV + icS * cosV;
+            oxBar = oaS * cosV - ocS * sinV;
+            oyBar = oaS * sinV + ocS * cosV;
+          }
+
+          ctx.moveTo(ox + ix, oy + iy);
+          ctx.lineTo(ox + oxBar, oy + oyBar);
+        }
+        ctx.stroke();
+      }
+
+      // --- Oscilloscope waveform ring -------------------------------------
+      // A single thin closed polyline whose radius wobbles continuously
+      // around the puff — the Milkdrop "waveform" element. Reads as an
+      // oscilloscope trace bent into a circle. Higher angular resolution
+      // than the silhouette so the line stays smooth.
+      const oscEnv = Math.min(1, t * 4);
+      const oscAlpha = alpha * OSCILLO_ALPHA * oscEnv;
+      if (oscAlpha > 0.01) {
+        const oscLight = Math.min(96, lightness + 22);
+        ctx.lineWidth = OSCILLO_LINE_WIDTH;
+        ctx.strokeStyle = `hsla(${hue}, 100%, ${oscLight}%, ${oscAlpha})`;
+        ctx.beginPath();
+        const baseRingR = polyR * OSCILLO_RADIUS;
+        const ampPx = polyR * OSCILLO_AMP;
+        for (let s = 0; s <= OSCILLO_SAMPLES; s++) {
+          const a = (s / OSCILLO_SAMPLES) * TAU2 + rot;
+          // Wave value at this angle. Sum-of-sines in (angle, time) with
+          // per-wave seed phase so adjacent puffs don't draw the same
+          // squiggle. Net amplitude is bounded by the sum of |OSCILLO_AMPS|.
+          const w =
+            OSCILLO_AMPS[0] * Math.sin(OSCILLO_FREQS[0] * a + tAbs * OSCILLO_RATES[0] + seed * 1.0) +
+            OSCILLO_AMPS[1] * Math.sin(OSCILLO_FREQS[1] * a + tAbs * OSCILLO_RATES[1] + seed * 1.618) +
+            OSCILLO_AMPS[2] * Math.sin(OSCILLO_FREQS[2] * a + tAbs * OSCILLO_RATES[2] + seed * 2.414);
+          const r = baseRingR + w * ampPx;
+
+          // Velocity-axis stretch applied to the ring sample so the
+          // waveform ring elongates with the rest of the puff.
+          const dx = Math.cos(a);
+          const dy = Math.sin(a);
+          let lx = dx * r;
+          let ly = dy * r;
+          if (speedT > 0.001) {
+            const along = lx * cosV + ly * sinV;
+            const across = -lx * sinV + ly * cosV;
+            const alongS = along * axial;
+            const acrossS = across * lateral;
+            lx = alongS * cosV - acrossS * sinV;
+            ly = alongS * sinV + acrossS * cosV;
+          }
+
+          const px = ox + lx;
+          const py = oy + ly;
+          if (s === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
       }
     }
   }
