@@ -111,7 +111,9 @@ export type SoundName =
   | "alienHit"
   | "alienExplode"
   | "cometNote"
-  | "cometDestroyed";
+  | "cometDestroyed"
+  | "canisterAppear"
+  | "canisterDestroyed";
 
 export class Sound {
   ctx: AudioContext | null = null;
@@ -1386,6 +1388,8 @@ export class Sound {
       case "alienExplode": this.playAlienExplode(); break;
       case "cometNote": this.playCometNote(Math.round(effectivePitch)); break;
       case "cometDestroyed": this.playCometDestroyed(); break;
+      case "canisterAppear": this.playCanisterAppear(); break;
+      case "canisterDestroyed": this.playCanisterDestroyed(); break;
     }
 
     if (voiceGain) this.master = realMaster;
@@ -2496,6 +2500,96 @@ export class Sound {
     const now = Tone.now();
     for (let i = 0; i < notes.length; i++) {
       eng.powerupSynth.triggerAttackRelease(notes[i], "16n", now + i * 0.06, 0.7);
+    }
+  }
+
+  // Canister-appear: gentle ascending wind-chime sparkle. Three soft sine
+  // partials of a Cmaj9 voicing arrive in rising sequence, slower and quieter
+  // than playPowerup so the player reads "something nice just appeared" rather
+  // than "pickup confirmed". Bandpass-filtered white-noise wash underneath
+  // gives the air-suspended pod a breath of presence.
+  private playCanisterAppear() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    // Cmaj9 partials: C6, E6, G6, D7 — open, airy, unambiguously friendly.
+    const partialFrequencies = [1046.5, 1318.5, 1568.0, 2349.3];
+    for (let i = 0; i < partialFrequencies.length; i++) {
+      const start = t + i * 0.085;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(partialFrequencies[i], start);
+      const peak = 0.085 / (1 + i * 0.25);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(peak, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.9);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(start);
+      osc.stop(start + 0.95);
+    }
+    // Soft airy halo — bandpassed noise behind the partials.
+    const noiseBuf = this.makeNoiseBuffer(0.6);
+    if (noiseBuf) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(2400, t);
+      filter.frequency.exponentialRampToValueAtTime(5000, t + 0.5);
+      filter.Q.value = 1.4;
+      const nGain = this.ctx.createGain();
+      nGain.gain.setValueAtTime(0.0001, t);
+      nGain.gain.exponentialRampToValueAtTime(0.04, t + 0.08);
+      nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+      noise.connect(filter);
+      filter.connect(nGain);
+      nGain.connect(this.master);
+      noise.start(t);
+      noise.stop(t + 0.6);
+    }
+  }
+
+  // Canister-destroyed: a soft sighing minor descent. Two sine voices fall a
+  // minor third (E5 → C5 / G5 → Eb5) over ~0.7s with a slow vibrato; sits
+  // *underneath* the explosionSmall the Game also plays, reading as the
+  // pod's "regret" rather than another blast. Heavily attenuated so it
+  // colors the explosion instead of competing with it.
+  private playCanisterDestroyed() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    // Voice pairs: [startHz, endHz]. The fall from a major triad partial
+    // into a minor one is what gives this its "aw, no" quality.
+    const voices: Array<[number, number]> = [
+      [659.25, 523.25], // E5 → C5
+      [783.99, 622.25], // G5 → Eb5
+      [329.63, 261.63], // E4 → C4 (sub-octave, fuller body)
+    ];
+    for (let i = 0; i < voices.length; i++) {
+      const [fStart, fEnd] = voices[i];
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(fStart, t + 0.04);
+      osc.frequency.exponentialRampToValueAtTime(fEnd, t + 0.7);
+      // Slow vibrato — gives the descent a vocal, almost weeping quality.
+      const lfo = this.ctx.createOscillator();
+      lfo.type = "sine";
+      lfo.frequency.value = 5.5;
+      const lfoDepth = this.ctx.createGain();
+      lfoDepth.gain.value = fStart * 0.012;
+      lfo.connect(lfoDepth);
+      lfoDepth.connect(osc.frequency);
+      const peak = 0.11 / (1 + i * 0.4);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(peak, t + 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      lfo.start(t);
+      osc.stop(t + 1.15);
+      lfo.stop(t + 1.15);
     }
   }
 
