@@ -6,23 +6,25 @@ import type { SilhouetteSample } from "./Asteroid";
 // "sing" outward rather than leave a wake behind it.
 //
 // Each wave is a closed polygon shaped like a simplified silhouette of the
-// chunk it came from (see buildBassSilhouette in Asteroid.ts). The wave is
-// anchored to the position where it was emitted — as time passes it expands
-// radially around that origin while the bassteroid itself drifts away, so a
-// stationary ring of past-emitted waves forms a true "radiating from source"
-// figure rather than a wake that follows the body.
+// chunk it came from (see buildBassSilhouette in Asteroid.ts). At emission
+// the wave inherits a fraction (VELOCITY_INHERIT) of the fragment's
+// velocity, so it drifts along behind the fragment instead of being left
+// fully behind — the cluster reads as a nebula that's almost (but not
+// quite) keeping up with the broken ship-piece.
 //
 // Design knobs and why they're set where they are:
 //
 //   Emission cadence (EMIT_INTERVAL_BY_KIND, seconds):
-//     One wave roughly every 0.55–0.85 s, keyed to pitch. Faster kinds emit
+//     One wave roughly every 0.27–0.42 s, keyed to pitch. Faster kinds emit
 //     more often — the visual rate matches the audio impression of "the
-//     higher voices feel busier" without coupling to the audio graph.
+//     higher voices feel busier" without coupling to the audio graph. The
+//     cadence is paired with a short WAVE_LIFETIME so the field reads as a
+//     dense cluster of brief soft puffs.
 //
 //   Wave lifetime (WAVE_LIFETIME, seconds):
-//     2.2 s. Long enough that 3–4 waves coexist on screen at any moment,
-//     giving the layered concentric look. Short enough that even at the
-//     slowest emission rate there's no gap.
+//     1.1 s with a squared fade-out tail — short enough that each puff
+//     feels transient, long enough that several always coexist so the
+//     cluster never empties out.
 //
 //   Expansion curve:
 //     1.0 → MAX_RADIUS_MULT × silhouette, ease-out (1 - (1-t)^2). The
@@ -30,11 +32,16 @@ import type { SilhouetteSample } from "./Asteroid";
 //     as energy radiating into space, like the Pulsar shockwave does.
 //
 //   Opacity envelope:
-//     Triangular: rises 0 → 1 over the first 18 % of the wave's life, then
-//     fades 1 → 0 over the remaining 82 %. The rise is short so the wave
-//     appears as a crisp leading edge; the long tail leaves a soft ghost
-//     well behind the expanding front. Multiplied by the LFO amplitude so
-//     "softer" parts of the drone produce fainter waves.
+//     Asymmetric: rises 0 → 1 over the first 14 % of life, then fades on a
+//     squared falloff (k²) so the tail drops away fast. Multiplied by the
+//     LFO amplitude so "softer" parts of the drone produce fainter waves.
+//
+//   Edge softness:
+//     No single crisp stroke. Each wave is rendered as a stack of 4
+//     concentric silhouette fills scaled around the body, with quickly
+//     decaying alphas (FEATHER_ALPHAS). Under additive blend this produces
+//     a feathered halo — there's still a perceptible edge, but it's blurry
+//     by construction, like a nebula rim.
 //
 //   Colour (pitch → hue, volume → lightness):
 //     Hue comes from the asteroid's KIND_HUE (already pitch-coded:
@@ -54,19 +61,28 @@ import type { SilhouetteSample } from "./Asteroid";
 //   allocation after construction. Path is built with beginPath/moveTo/
 //   lineTo on a pre-cached SilhouetteSample list (cos/sin already baked).
 
-const STRIDE = 4; // originX, originY, age, snapshotRotation
-const CAPACITY = 8;
+const STRIDE = 6; // originX, originY, age, snapshotRotation, inheritedVelX, inheritedVelY
+const CAPACITY = 16;
+
+// Fraction of the fragment's velocity each wave inherits at emission. < 1 so
+// waves drift slightly behind the fragment ("almost keeping up with it") and
+// the fragment pulls ahead, leaving a soft cluster of breathing nebulae in
+// its wake rather than a stationary ring.
+const VELOCITY_INHERIT = 0.82;
 
 // Per-kind tuning. Lower-pitched voices emit slower and grow into bigger
 // radii (deep sound = broad waves); higher-pitched voices emit faster with
 // tighter radii (high sound = quick, contained pulses).
 type BassKind = "bassA" | "bassB" | "bassC" | "bassD";
 
+// Tighter cadence so the cluster reads as a continuous breathing fog rather
+// than discrete pulses. Roughly halved from the previous setting, paired
+// with a shorter lifetime below to keep the on-screen density similar.
 const EMIT_INTERVAL_BY_KIND: Record<BassKind, number> = {
-  bassA: 0.85, // deepest voice — slowest, broadest
-  bassB: 0.65,
-  bassC: 0.75,
-  bassD: 0.55, // highest voice — quickest, tightest
+  bassA: 0.42, // deepest voice — slowest, broadest
+  bassB: 0.32,
+  bassC: 0.37,
+  bassD: 0.27, // highest voice — quickest, tightest
 };
 
 const MAX_RADIUS_MULT_BY_KIND: Record<BassKind, number> = {
@@ -86,8 +102,19 @@ const LFO_RATE_BY_KIND: Record<BassKind, number> = {
   bassD: 0.17,
 };
 
-const WAVE_LIFETIME = 2.2;
-const FADE_IN_FRACTION = 0.18;
+// Shorter lifetime than before — paired with the faster emit cadence above,
+// the field reads as a denser cluster of brief soft puffs rather than long
+// concentric rings.
+const WAVE_LIFETIME = 1.1;
+const FADE_IN_FRACTION = 0.14;
+
+// Feathered-edge stack: each wave is rendered as N concentric silhouette
+// fills with these radius multipliers and alpha multipliers. Outermost
+// (faintest, biggest) listed first; under additive blend this stack reads
+// as a soft halo with no hard line — the "blurry nebula edge" look.
+// Module-scope so we don't reallocate per wave per frame.
+const FEATHER_SCALES = [1.32, 1.18, 1.06, 0.94];
+const FEATHER_ALPHAS = [0.18, 0.28, 0.42, 0.5];
 
 export class SoundwaveRadiator {
   private readonly buf: Float32Array;
@@ -126,24 +153,27 @@ export class SoundwaveRadiator {
 
   // Advance time, emit new waves at the kind's cadence, and age live waves.
   // `(x, y)` is the bassteroid's current position — used as the origin of
-  // any wave emitted this tick. Existing waves stay anchored to their own
-  // recorded origin (not pulled along with the bassteroid).
-  update(dt: number, x: number, y: number) {
-    // Age existing waves first; the renderer culls anything past lifetime.
+  // any wave emitted this tick. Existing waves drift along their inherited
+  // velocity (a fraction of the fragment's velocity at emission time) so the
+  // nebula cluster trails the fragment instead of being left fully behind.
+  update(dt: number, x: number, y: number, vx: number, vy: number) {
     const buf = this.buf;
     for (let i = 0; i < this.count; i++) {
-      buf[i * STRIDE + 2] += dt;
+      const off = i * STRIDE;
+      buf[off + 2] += dt;
+      buf[off] += buf[off + 4] * dt;
+      buf[off + 1] += buf[off + 5] * dt;
     }
     // Emission timer.
     this.timeSinceEmit += dt;
     const interval = EMIT_INTERVAL_BY_KIND[this.kind] + this.emitJitter;
     if (this.timeSinceEmit >= interval) {
       this.timeSinceEmit -= interval;
-      this.emitWave(x, y);
+      this.emitWave(x, y, vx, vy);
     }
   }
 
-  private emitWave(x: number, y: number) {
+  private emitWave(x: number, y: number, vx: number, vy: number) {
     const base = this.head * STRIDE;
     this.buf[base] = x;
     this.buf[base + 1] = y;
@@ -152,6 +182,8 @@ export class SoundwaveRadiator {
     // each other rigidly — gives a subtle "the resonance shape rotates a
     // little each cycle" feel.
     this.buf[base + 3] = Math.random() * Math.PI * 2;
+    this.buf[base + 4] = vx * VELOCITY_INHERIT;
+    this.buf[base + 5] = vy * VELOCITY_INHERIT;
     this.head = (this.head + 1) % CAPACITY;
     if (this.count < CAPACITY) this.count += 1;
   }
@@ -187,14 +219,16 @@ export class SoundwaveRadiator {
       const ringScale = 1 + (maxR - 1) * grow;
 
       // Triangular opacity envelope, then modulated by the drone amplitude.
-      // Floor of 0.35 on the modulation so even at LFO trough the wave is
-      // still visible — a totally dark wave would just disappear and feel
-      // like a glitch.
+      // Faster fade-out (squared falloff after the peak) — paired with the
+      // higher emit cadence, the cluster reads as quick soft puffs rather
+      // than persistent rings. Floor of 0.35 on the LFO so the wave never
+      // disappears entirely.
       let env: number;
       if (t < FADE_IN_FRACTION) {
         env = t / FADE_IN_FRACTION;
       } else {
-        env = 1 - (t - FADE_IN_FRACTION) / (1 - FADE_IN_FRACTION);
+        const k = 1 - (t - FADE_IN_FRACTION) / (1 - FADE_IN_FRACTION);
+        env = k * k;
       }
       const ampMod = 0.35 + 0.65 * droneAmp;
       const alpha = env * ampMod * 0.55;
@@ -211,29 +245,31 @@ export class SoundwaveRadiator {
       const sinR = Math.sin(rot);
       const polyR = scaleRadius * ringScale;
 
-      // Outer soft fill — sells the bloom under additive blend.
-      ctx.beginPath();
-      for (let s = 0; s < silN; s++) {
-        const sample = sil[s];
-        // Rotate the silhouette unit-vector by `rot`.
-        const ux = sample.ax * cosR - sample.ay * sinR;
-        const uy = sample.ax * sinR + sample.ay * cosR;
-        const px = ox + ux * sample.r * polyR;
-        const py = oy + uy * sample.r * polyR;
-        if (s === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
+      // Blurry feathered edge: stack the concentric silhouette fills (see
+      // FEATHER_SCALES / FEATHER_ALPHAS at module scope). Outermost (faintest,
+      // biggest) first so brighter inner shells paint over it.
+      for (let k = 0; k < FEATHER_SCALES.length; k++) {
+        const ringR = polyR * FEATHER_SCALES[k];
+        const ringAlpha = alpha * FEATHER_ALPHAS[k];
+        if (ringAlpha < 0.005) continue;
+        ctx.beginPath();
+        for (let s = 0; s < silN; s++) {
+          const sample = sil[s];
+          // Rotate the silhouette unit-vector by `rot`.
+          const ux = sample.ax * cosR - sample.ay * sinR;
+          const uy = sample.ax * sinR + sample.ay * cosR;
+          const px = ox + ux * sample.r * ringR;
+          const py = oy + uy * sample.r * ringR;
+          if (s === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        // Outer shells slightly cooler/darker, inner brighter — keeps a
+        // perceptible (but soft) edge while staying blurry overall.
+        const ringLight = Math.min(95, lightness + (k - 1) * 4);
+        ctx.fillStyle = `hsla(${hue}, 100%, ${ringLight}%, ${ringAlpha})`;
+        ctx.fill();
       }
-      ctx.closePath();
-      ctx.fillStyle = `hsla(${hue}, 100%, ${lightness}%, ${alpha * 0.45})`;
-      ctx.fill();
-
-      // Crisp leading-edge stroke — gives the wave a defined "front" so
-      // multiple stacked waves read as discrete rings rather than a fog.
-      // Thickness tapers as the wave expands (energy spreading thinner).
-      const edgeAlpha = Math.min(1, alpha * 1.6);
-      ctx.lineWidth = Math.max(0.8, 2.2 * (1 - grow * 0.6));
-      ctx.strokeStyle = `hsla(${hue}, 100%, ${Math.min(95, lightness + 12)}%, ${edgeAlpha})`;
-      ctx.stroke();
     }
   }
 }

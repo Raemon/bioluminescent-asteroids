@@ -47,6 +47,7 @@ const clearComboSilently = (game: Game) => {
 
 // Why: carries the prior run's trophy lineup so a returning player still sees what they took down.
 export const showTitle = (game: Game) => {
+  game.betaMode = false;
   game.state = "title";
   game.overlayTitleEl.textContent = "Pulsar";
   game.overlayStartEl.innerHTML = 'press <span class="key">enter</span> to begin';
@@ -74,6 +75,7 @@ export const showTitle = (game: Game) => {
 // Why: per-run randomised bass intro order means the wave-2/3 picks vary between runs.
 export const startGame = (game: Game) => {
   game.sound.resume();
+  game.betaMode = false;
   game.state = "playing";
   game.score = 0;
   game.wave = 1;

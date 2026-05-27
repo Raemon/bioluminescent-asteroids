@@ -60,6 +60,9 @@ export class Game implements HudElements {
   firedOffBeatSinceLastBeat = false;
   // Why: first-ever meaningful combo loss in a run gets a labeled popup so the player learns the mechanic.
   hasLostComboEver = false;
+  // Why: beta-test mode disables the random wave director — the run only contains the elements
+  //   the player selected in the beta panel; when they're all gone the wave doesn't auto-spawn.
+  betaMode = false;
 
   canisters: Canister[] = [];
   comets: Comet[] = [];

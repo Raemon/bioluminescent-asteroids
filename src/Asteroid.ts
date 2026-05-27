@@ -928,7 +928,7 @@ export class Asteroid {
     // simply means future waves emit from the new side while older waves
     // age out where they were — no special-case handling needed.
     if (this.trail) this.trail.update(dt, this.pos.x, this.pos.y);
-    if (this.radiator) this.radiator.update(dt, this.pos.x, this.pos.y);
+    if (this.radiator) this.radiator.update(dt, this.pos.x, this.pos.y, this.vel.x, this.vel.y);
     if (this.flashAmount > 0) this.flashAmount = Math.max(0, this.flashAmount - dt * 4);
     // Beat flare decays a touch slower than the hit flash so the visible
     // pulse rides the audio kick all the way through the beat window.

@@ -1,0 +1,287 @@
+import type { Game } from "../Game";
+import { Ship } from "../Ship";
+import { ParticleSystem } from "../Particle";
+import { v } from "../vec";
+import { AsteroidKind, spawnBossAt, BASS_KINDS, spawnAsteroidAtEdge } from "../Asteroid";
+import { PowerupKind, spawnCanister } from "../Canister";
+import { syncHud, syncPowerupHud } from "./hud";
+import { stopParade } from "./killedParade";
+import { newWaveEventSchedule } from "./waveEvents";
+import {
+  alignBassBeat,
+  spawnAlien,
+  spawnComet,
+  updateBgBeatIntensity,
+} from "./waveDirector";
+import { spawnAwayFromShip } from "./spawnAwayFromShip";
+import { startShockwave } from "./shockwave";
+import { SLOW_MO_DURATION } from "./slowMo";
+
+// Why: beta panel exposes every spawnable + powerup so a tester can dial in any combination
+//   for a one-off wave, bypassing the normal random wave director.
+type BetaElement = {
+  id: string;
+  label: string;
+  group: "Asteroid" | "Special Rock" | "Hazard" | "Enemy" | "Pickup" | "Powerup";
+  // Why: each element knows how to apply itself; the start handler just iterates selected ones.
+  apply: (game: Game) => void;
+};
+
+const spawnAsteroid = (game: Game, kind: AsteroidKind = "normal") => {
+  const a = spawnAwayFromShip(
+    () => spawnAsteroidAtEdge(game.w, game.h, undefined, kind),
+    game.ship.pos,
+    220,
+  );
+  if (a.isBass()) alignBassBeat(game, a);
+  if (a.isBass() && (a.size === "medium" || a.size === "small")) {
+    game.sound.startBassteroidDrone(a, kind as "bassA" | "bassB" | "bassC" | "bassD", a.size);
+  }
+  game.asteroids.push(a);
+};
+
+const applyPowerup = (game: Game, kind: PowerupKind) => {
+  if (kind === "trident") game.ship.tridentActive = true;
+  else if (kind === "rapid") game.ship.rapidActive = true;
+  else if (kind === "pierce") game.ship.pierceActive = true;
+  else if (kind === "shield") game.ship.shieldActive = true;
+  else if (kind === "radar") game.ship.radarActive = true;
+  else if (kind === "slow") game.slowMoTimer = SLOW_MO_DURATION;
+};
+
+const ELEMENTS: BetaElement[] = [
+  { id: "normal", label: "Asteroid", group: "Asteroid", apply: (g) => spawnAsteroid(g, "normal") },
+  { id: "bassA", label: "Bass A", group: "Special Rock", apply: (g) => spawnAsteroid(g, "bassA") },
+  { id: "bassB", label: "Bass B", group: "Special Rock", apply: (g) => spawnAsteroid(g, "bassB") },
+  { id: "bassC", label: "Bass C", group: "Special Rock", apply: (g) => spawnAsteroid(g, "bassC") },
+  { id: "bassD", label: "Bass D", group: "Special Rock", apply: (g) => spawnAsteroid(g, "bassD") },
+  { id: "chime", label: "Chime", group: "Special Rock", apply: (g) => spawnAsteroid(g, "chime") },
+  { id: "bell", label: "Bell", group: "Special Rock", apply: (g) => spawnAsteroid(g, "bell") },
+  { id: "warble", label: "Warble", group: "Special Rock", apply: (g) => spawnAsteroid(g, "warble") },
+  { id: "tink", label: "Tink", group: "Special Rock", apply: (g) => spawnAsteroid(g, "tink") },
+  {
+    id: "boss",
+    label: "Boss",
+    group: "Enemy",
+    apply: (g) => {
+      const pos = g.pulsar.bossPlanetPos();
+      g.pulsar.setBossPlanetState("active");
+      g.asteroids.push(spawnBossAt(pos, g.w, g.h));
+    },
+  },
+  { id: "comet", label: "Comet", group: "Hazard", apply: (g) => spawnComet(g) },
+  { id: "shockwave", label: "Shockwave", group: "Hazard", apply: (g) => startShockwave(g) },
+  { id: "alienSmall", label: "Alien (S)", group: "Enemy", apply: (g) => spawnAlien(g, "small") },
+  { id: "alienMedium", label: "Alien (M)", group: "Enemy", apply: (g) => spawnAlien(g, "medium") },
+  { id: "alienBig", label: "Alien (L)", group: "Enemy", apply: (g) => spawnAlien(g, "big") },
+  {
+    id: "canister",
+    label: "Powerup Pod",
+    group: "Pickup",
+    apply: (g) => {
+      g.canisters.push(spawnCanister(g.w, g.h, g.ship.pos));
+      g.sound.play("canisterAppear");
+    },
+  },
+  { id: "trident", label: "Trident", group: "Powerup", apply: (g) => applyPowerup(g, "trident") },
+  { id: "rapid", label: "Rapid Fire", group: "Powerup", apply: (g) => applyPowerup(g, "rapid") },
+  { id: "pierce", label: "Pierce", group: "Powerup", apply: (g) => applyPowerup(g, "pierce") },
+  { id: "shield", label: "Shield", group: "Powerup", apply: (g) => applyPowerup(g, "shield") },
+  { id: "slow", label: "Slow-Mo", group: "Powerup", apply: (g) => applyPowerup(g, "slow") },
+  { id: "radar", label: "Radar", group: "Powerup", apply: (g) => applyPowerup(g, "radar") },
+];
+
+const GROUP_ORDER: BetaElement["group"][] = [
+  "Asteroid",
+  "Special Rock",
+  "Hazard",
+  "Enemy",
+  "Pickup",
+  "Powerup",
+];
+
+let panelEl: HTMLDivElement | null = null;
+const selected = new Set<string>();
+
+const buildPanel = (game: Game) => {
+  const panel = document.createElement("div");
+  panel.id = "beta-panel";
+  panel.className = "hidden";
+
+  const title = document.createElement("h2");
+  title.textContent = "Beta Test";
+  panel.appendChild(title);
+
+  const sub = document.createElement("p");
+  sub.className = "beta-sub";
+  sub.innerHTML = 'click tiles to select &nbsp;·&nbsp; <span class="key">esc</span> close &nbsp;·&nbsp; <span class="key">⌘B</span> toggle';
+  panel.appendChild(sub);
+
+  for (const group of GROUP_ORDER) {
+    const groupEls = ELEMENTS.filter((e) => e.group === group);
+    if (groupEls.length === 0) continue;
+    const groupWrap = document.createElement("div");
+    groupWrap.className = "beta-group";
+    const groupTitle = document.createElement("div");
+    groupTitle.className = "beta-group-title";
+    groupTitle.textContent = group;
+    groupWrap.appendChild(groupTitle);
+    const grid = document.createElement("div");
+    grid.className = "beta-grid";
+    for (const el of groupEls) {
+      const tile = document.createElement("button");
+      tile.type = "button";
+      tile.className = "beta-tile";
+      tile.dataset.id = el.id;
+      tile.innerHTML = `<div class="beta-icon">${iconFor(el.id)}</div><div class="beta-label">${el.label}</div>`;
+      tile.addEventListener("click", () => toggleTile(el.id, tile));
+      grid.appendChild(tile);
+    }
+    groupWrap.appendChild(grid);
+    panel.appendChild(groupWrap);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "beta-actions";
+  const startBtn = document.createElement("button");
+  startBtn.type = "button";
+  startBtn.id = "beta-start";
+  startBtn.textContent = "Start";
+  startBtn.addEventListener("click", () => startBetaWave(game));
+  actions.appendChild(startBtn);
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.id = "beta-close";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", () => closePanel());
+  actions.appendChild(closeBtn);
+  panel.appendChild(actions);
+
+  document.body.appendChild(panel);
+  return panel;
+};
+
+// Why: lightweight SVG glyphs keep the panel readable without pulling per-element render code.
+const iconFor = (id: string): string => {
+  const c = "currentColor";
+  if (id === "normal") {
+    return `<svg viewBox="0 0 24 24"><polygon points="12,3 20,8 19,17 12,21 5,17 4,8" fill="none" stroke="${c}" stroke-width="1.5"/></svg>`;
+  }
+  if (id === "bassA" || id === "bassB" || id === "bassC" || id === "bassD") {
+    return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="${c}" stroke-width="1.5"/><text x="12" y="15" text-anchor="middle" font-size="8" fill="${c}" font-family="sans-serif" font-weight="bold">${id.slice(-1)}</text></svg>`;
+  }
+  if (id === "chime") return `<svg viewBox="0 0 24 24"><path d="M8 4 L8 14 a3 3 0 1 0 2 0 L10 5 z" fill="none" stroke="${c}" stroke-width="1.5"/></svg>`;
+  if (id === "bell") return `<svg viewBox="0 0 24 24"><path d="M6 16 Q6 7 12 7 Q18 7 18 16 Z M10 18 a2 2 0 0 0 4 0" fill="none" stroke="${c}" stroke-width="1.5"/></svg>`;
+  if (id === "warble") return `<svg viewBox="0 0 24 24"><path d="M3 12 Q6 4 9 12 T15 12 T21 12" fill="none" stroke="${c}" stroke-width="1.5"/></svg>`;
+  if (id === "tink") return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5" fill="${c}"/><path d="M12 5 L12 8 M12 16 L12 19 M5 12 L8 12 M16 12 L19 12" stroke="${c}" stroke-width="1.5"/></svg>`;
+  if (id === "boss") return `<svg viewBox="0 0 24 24"><polygon points="12,2 22,9 18,21 6,21 2,9" fill="none" stroke="${c}" stroke-width="1.7"/><circle cx="12" cy="13" r="3" fill="${c}"/></svg>`;
+  if (id === "comet") return `<svg viewBox="0 0 24 24"><circle cx="17" cy="7" r="3" fill="${c}"/><path d="M14 10 L4 20" stroke="${c}" stroke-width="2" stroke-linecap="round"/></svg>`;
+  if (id === "shockwave") return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="${c}" stroke-width="1.5"/><circle cx="12" cy="12" r="7" fill="none" stroke="${c}" stroke-width="1.5" opacity="0.6"/><circle cx="12" cy="12" r="11" fill="none" stroke="${c}" stroke-width="1.5" opacity="0.3"/></svg>`;
+  if (id === "alienSmall") return `<svg viewBox="0 0 24 24"><ellipse cx="12" cy="13" rx="5" ry="2" fill="none" stroke="${c}" stroke-width="1.5"/><path d="M9 11 Q12 8 15 11" fill="none" stroke="${c}" stroke-width="1.5"/></svg>`;
+  if (id === "alienMedium") return `<svg viewBox="0 0 24 24"><ellipse cx="12" cy="14" rx="7" ry="2.5" fill="none" stroke="${c}" stroke-width="1.5"/><path d="M8 12 Q12 7 16 12" fill="none" stroke="${c}" stroke-width="1.5"/></svg>`;
+  if (id === "alienBig") return `<svg viewBox="0 0 24 24"><ellipse cx="12" cy="15" rx="9" ry="3" fill="none" stroke="${c}" stroke-width="1.7"/><path d="M6 13 Q12 5 18 13" fill="none" stroke="${c}" stroke-width="1.7"/></svg>`;
+  if (id === "canister") return `<svg viewBox="0 0 24 24"><polygon points="12,3 21,12 12,21 3,12" fill="none" stroke="${c}" stroke-width="1.5"/><text x="12" y="15" text-anchor="middle" font-size="9" fill="${c}" font-family="sans-serif" font-weight="bold">?</text></svg>`;
+  if (id === "trident") return `<svg viewBox="0 0 24 24"><path d="M5 4 L5 11 L7 13 M12 4 L12 14 M19 4 L19 11 L17 13 M7 13 L17 13 M12 14 L12 21 M9 19 L15 19" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (id === "rapid") return `<svg viewBox="0 0 24 24"><path d="M4 12 L10 12 M6 7 L12 12 L6 17 M12 7 L18 12 L12 17 M18 7 L20 9" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (id === "pierce") return `<svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="2.5" fill="none" stroke="${c}" stroke-width="1.7"/><circle cx="16" cy="12" r="2.5" fill="none" stroke="${c}" stroke-width="1.7"/><path d="M2 12 L22 12 M19 9 L22 12 L19 15" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (id === "shield") return `<svg viewBox="0 0 24 24"><path d="M12 3 L20 6 L20 12 Q20 17 12 21 Q4 17 4 12 L4 6 Z" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (id === "slow") return `<svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7" fill="none" stroke="${c}" stroke-width="1.7"/><path d="M12 13 L12 8 M12 13 L16 15 M9 3 L15 3 M12 3 L12 6" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`;
+  if (id === "radar") return `<svg viewBox="0 0 24 24"><path d="M12 21 L3 6 L21 6 Z" fill="none" stroke="${c}" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="21" r="1.4" fill="${c}"/></svg>`;
+  return "";
+};
+
+const toggleTile = (id: string, tile: HTMLElement) => {
+  if (selected.has(id)) {
+    selected.delete(id);
+    tile.classList.remove("selected");
+  } else {
+    selected.add(id);
+    tile.classList.add("selected");
+  }
+};
+
+const openPanel = (game: Game) => {
+  if (!panelEl) panelEl = buildPanel(game);
+  panelEl.classList.remove("hidden");
+};
+
+const closePanel = () => {
+  if (panelEl) panelEl.classList.add("hidden");
+};
+
+const isOpen = (): boolean => !!panelEl && !panelEl.classList.contains("hidden");
+
+// Why: handoff to a fresh ship + clean collections mirrors startGame, but skips spawnWave and
+//   instead applies only the user-selected elements so the run shows exactly what was chosen.
+const startBetaWave = (game: Game) => {
+  game.sound.resume();
+  // Reset run state
+  game.score = 0;
+  game.wave = 1;
+  game.lives = 3;
+  game.beatTime = 0;
+  game.lastBgBeatIndex = -1;
+  game.nextBeatToEvaluate = 0;
+  game.beatCombo = 0;
+  game.firedOffBeatSinceLastBeat = false;
+  game.slowMoTimer = 0;
+  game.hasLostComboEver = false;
+
+  game.bullets = [];
+  game.popups = [];
+  game.shards = [];
+  game.canisters = [];
+  game.killedSnapshots = [];
+  game.aliens = [];
+  game.alienBullets = [];
+  game.asteroids = [];
+  stopParade(game);
+  game.killedRowEl.classList.add("hidden");
+  game.sound.stopAllAlienDrones();
+  game.sound.stopAllBassteroidDrones();
+  game.sound.stopAllCometShimmers();
+  game.comets = [];
+  game.waveEvents = newWaveEventSchedule();
+
+  // Why: shuffled bass order isn't read by beta (we spawn explicit kinds), but keep it set so
+  //   downstream code that may peek at it has valid data.
+  game.bassOrder = BASS_KINDS.slice();
+  game.particles = new ParticleSystem();
+  game.ship = new Ship(v(game.w / 2, game.h / 2));
+  game.ship.invuln = 2.0;
+  game.pulsar.setBossPlanetState("idle");
+  game.pulsar.setWaveLevel(game.wave);
+  updateBgBeatIntensity(game);
+
+  game.betaMode = true;
+  game.state = "playing";
+  game.overlayEl.classList.add("hidden");
+
+  // Why: apply each selected element after state is reset so spawn helpers see the fresh ship.
+  for (const id of selected) {
+    const el = ELEMENTS.find((e) => e.id === id);
+    if (el) el.apply(game);
+  }
+
+  syncHud(game);
+  syncPowerupHud(game);
+  closePanel();
+};
+
+// Why: Cmd-B (Mac) or Ctrl-B (others) toggles the panel. preventDefault so the browser doesn't
+//   eat it (Cmd-B bolds text in some inputs).
+export const installBetaTest = (game: Game) => {
+  window.addEventListener("keydown", (e) => {
+    const isToggle = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b";
+    if (isToggle) {
+      e.preventDefault();
+      if (isOpen()) closePanel();
+      else openPanel(game);
+      return;
+    }
+    if (isOpen() && e.key === "Escape") {
+      e.preventDefault();
+      closePanel();
+    }
+  });
+};

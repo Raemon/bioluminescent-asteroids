@@ -128,7 +128,7 @@ const updatePlaying = (game: Game, dt: number) => {
   runCollisionPasses(game);
   evaluateClosedBeats(game);
   syncPowerupHud(game);
-  if (game.asteroids.length === 0) advanceWave(game);
+  if (game.asteroids.length === 0 && !game.betaMode) advanceWave(game);
 };
 
 // Why: slow-mo timer ticks in wall-clock so its lifespan isn't extended by its own effect.

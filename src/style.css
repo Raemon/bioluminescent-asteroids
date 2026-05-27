@@ -287,3 +287,149 @@ html, body {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
+
+#beta-panel {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 40px 24px;
+  gap: 14px;
+  z-index: 20;
+  background: radial-gradient(ellipse at 50% 50%, rgba(0, 8, 24, 0.85) 0%, rgba(0, 0, 5, 0.95) 70%);
+  backdrop-filter: blur(4px);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+#beta-panel.hidden { display: none; }
+
+#beta-panel h2 {
+  font-weight: 300;
+  font-size: clamp(24px, 4vw, 40px);
+  letter-spacing: 0.3em;
+  color: #c8efff;
+  text-transform: uppercase;
+  text-shadow: 0 0 18px rgba(76, 182, 255, 0.6), 0 0 40px rgba(76, 182, 255, 0.3);
+}
+
+.beta-sub {
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  color: #6ad7ff;
+  text-transform: uppercase;
+  opacity: 0.75;
+  margin-bottom: 6px;
+}
+
+.beta-group {
+  width: min(960px, 100%);
+  margin-top: 6px;
+}
+
+.beta-group-title {
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  color: #6ad7ff;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-bottom: 8px;
+  padding-left: 4px;
+}
+
+.beta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.beta-tile {
+  background: rgba(8, 16, 36, 0.55);
+  border: 1px solid rgba(106, 215, 255, 0.25);
+  border-radius: 8px;
+  padding: 12px 8px 8px;
+  color: #d8f3ff;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.35;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transition: opacity 0.15s ease, border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+}
+
+.beta-tile:hover { opacity: 0.65; }
+
+.beta-tile.selected {
+  opacity: 1;
+  border-color: #6ad7ff;
+  box-shadow: 0 0 14px rgba(106, 215, 255, 0.45), inset 0 0 10px rgba(106, 215, 255, 0.12);
+}
+
+.beta-icon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8de2ff;
+}
+
+.beta-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke-linecap: round;
+}
+
+.beta-label {
+  font-weight: 500;
+  text-align: center;
+  line-height: 1.1;
+}
+
+.beta-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 18px;
+  padding-bottom: 20px;
+}
+
+.beta-actions button {
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  padding: 12px 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+#beta-start {
+  color: #d8f3ff;
+  background: rgba(76, 182, 255, 0.18);
+  border: 1px solid rgba(106, 215, 255, 0.6);
+  text-shadow: 0 0 10px rgba(106, 215, 255, 0.6);
+}
+
+#beta-start:hover {
+  background: rgba(76, 182, 255, 0.32);
+  color: #fff;
+}
+
+#beta-close {
+  color: #c8d8e8;
+  background: rgba(80, 96, 120, 0.18);
+  border: 1px solid rgba(140, 160, 200, 0.4);
+}
+
+#beta-close:hover {
+  background: rgba(80, 96, 120, 0.32);
+  color: #fff;
+}
