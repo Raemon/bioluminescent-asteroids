@@ -7,7 +7,7 @@ import { Vec } from "../vec";
 import { COMBO_MULTIPLIER_MAX } from "./rhythmConstants";
 import { loseCombo } from "./rhythmGate";
 import { syncComboHud, syncHud } from "./hud";
-import { popupCombo } from "./popups";
+import { popupCombo, popupScore } from "./popups";
 import {
   emitExplosion,
   emitCrackParticles,
@@ -98,11 +98,17 @@ export const onAsteroidKilledByRam = (game: Game, a: Asteroid, shipVel: Vec): As
   return finishAsteroidKillCore(game, a, shipVel, false);
 };
 
+// Why: bassteroids take multiple hits to kill; chip points keep the player rewarded for
+// every rhythm-good hit along the way, not just the kill shot.
+const bassChipScore = (a: Asteroid): number => Math.max(1, Math.round(a.scoreValue() / 4));
+
 // Why: bullet crack — bassHit announces the chip; sparkle layers on if it was on-beat.
-export const onAsteroidCrackedByBullet = (game: Game, a: Asteroid, isOnBeatHit: boolean) => {
+// Bassteroid chips also pay out (small) points + combo popup so multi-hit kills feel rewarding.
+export const onAsteroidCrackedByBullet = (game: Game, a: Asteroid, b: Bullet, isOnBeatHit: boolean) => {
   if (a.isBass()) game.sound.play("bassHit");
   emitCrackParticles(game.particles, a, isOnBeatHit);
   if (isOnBeatHit) game.sound.play("comboSparkle");
+  if (a.isBass()) awardScoreForKill(game, b.pos, bassChipScore(a), isOnBeatHit);
 };
 
 // Why: ram crack uses asteroidHit (not bassHit) so the impact reads as a kick, not a chip.
@@ -129,9 +135,17 @@ export const onAlienCracked = (game: Game, isOnBeatHit: boolean) => {
   if (isOnBeatHit) game.sound.play("comboSparkle");
 };
 
-// Why: comets sit outside the rhythm flow — flat 5000 reward instead of combo bookkeeping.
-export const onCometKilled = (game: Game, c: Comet) => {
-  game.score += 5000;
+// Why: comets pay a flat 5000 base; combo multiplier and a "+N" readout match the rest of the
+// scoring system so the player sees the payout and any rhythm bonus at the kill site.
+export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: boolean) => {
+  const baseScore = 5000;
+  const scoreEarned = isOnBeatHit ? Math.round(baseScore * game.beatCombo) : baseScore;
+  game.score += scoreEarned;
+  game.popups.push(popupScore(b.pos, scoreEarned));
+  if (isOnBeatHit) {
+    game.sound.play("comboSparkle");
+    if (game.beatCombo >= 2) game.popups.push(popupCombo(b.pos, game.beatCombo));
+  }
   game.shake = Math.min(game.shake + 0.6, 1.6);
   game.sound.play("cometDestroyed");
   game.sound.stopCometShimmer(c);

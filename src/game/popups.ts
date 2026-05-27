@@ -23,6 +23,7 @@ export type Popup = {
 const COMBO_POPUP_LIFE = 0.9;
 const PICKUP_POPUP_LIFE = 1.6;
 const BEAT_DEBUG_POPUP_LIFE = 1.2;
+const SCORE_POPUP_LIFE = 1.0;
 
 const POWERUP_LABEL: Record<PowerupKind, string> = {
   trident: "TRIDENT",
@@ -45,6 +46,22 @@ export const popupCombo = (pos: Vec, multiplier: number): Popup => ({
   shadowBlur: 14,
   decayX: 0.94, decayY: 0.94,
   popPeak: 0.375, popDuration: 0.15,
+  holdUntil: 0, fadeGain: 1.4,
+});
+
+// Why: "+N" readout at the kill site so the player sees exactly what their hit was worth.
+export const popupScore = (pos: Vec, points: number): Popup => ({
+  pos: { x: pos.x, y: pos.y - 22 },
+  vel: { x: rand(-10, 10), y: -60 },
+  life: SCORE_POPUP_LIFE,
+  maxLife: SCORE_POPUP_LIFE,
+  text: `+${points}`,
+  font: "600 18px 'Space Grotesk', system-ui, sans-serif",
+  fill: "#e6f4ff",
+  shadowColor: "rgba(200, 230, 255, 0.85)",
+  shadowBlur: 12,
+  decayX: 0.94, decayY: 0.94,
+  popPeak: 0.3, popDuration: 0.15,
   holdUntil: 0, fadeGain: 1.4,
 });
 
