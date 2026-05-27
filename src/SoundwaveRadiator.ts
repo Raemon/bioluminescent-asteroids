@@ -231,7 +231,7 @@ export class SoundwaveRadiator {
         env = k * k;
       }
       const ampMod = 0.35 + 0.65 * droneAmp;
-      const alpha = env * ampMod * 0.55;
+      const alpha = env * ampMod * 0.15;
       if (alpha < 0.01) continue;
 
       // Volume → lightness. Bright at LFO peak, dimmer at trough. The wave
