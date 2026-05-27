@@ -921,10 +921,14 @@ export class Asteroid {
     this.rotation += this.rotSpeed * dt;
     this.membranePhase += dt * 0.8;
     this.pos = wrap(add(this.pos, mul(this.vel, dt)), w, h);
-    // Stamp/age the drone trail (bassteroids only). Done after the wrap so
-    // a screen-wrap teleport is caught by Trail's own jump detector and the
-    // trail restarts cleanly on the new side.
+    // Stamp/age the drone trail (gen-0 large) or radiator (fragments). Done
+    // after the wrap so a screen-wrap teleport is caught by Trail's own
+    // jump detector and the trail restarts cleanly on the new side. The
+    // radiator anchors each wave to its own emission origin, so a wrap
+    // simply means future waves emit from the new side while older waves
+    // age out where they were — no special-case handling needed.
     if (this.trail) this.trail.update(dt, this.pos.x, this.pos.y);
+    if (this.radiator) this.radiator.update(dt, this.pos.x, this.pos.y);
     if (this.flashAmount > 0) this.flashAmount = Math.max(0, this.flashAmount - dt * 4);
     // Beat flare decays a touch slower than the hit flash so the visible
     // pulse rides the audio kick all the way through the beat window.

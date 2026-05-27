@@ -8,17 +8,22 @@ const PARADE_PX_PER_BEAT = 140;
 // Why: canvas height grows to fit the tallest snap (+padding) so a boss-large with its
 //   additive glow halo isn't clipped at the top/bottom of the row.
 const PARADE_MIN_H = 220;
-const PARADE_VPAD = 24;
+// Why: bottom pad must fit the 22px "+N" score flash (drawn 6px under the sprite, top baseline)
+//   plus its 14px shadow blur — 48px keeps the tallest sprite's flash unclipped.
+const PARADE_VPAD = 48;
 const PARADE_MIN_W = 320;
 // Why: bgBeat fires on every whole BEAT_GRID tick (alternating downbeat/offbeat pitch), so
 //   snapping offsets to integer beats guarantees the kill-sound trigger lands on a bg beat.
 const PARADE_BEAT_SUBDIV = 1.0;
 
 // Why: `played` latches true so each kill sound replays once when its sprite crosses centre.
+//   `playedAtBeat` snapshots the parade-beat clock at that moment so the "+N" score flash
+//   can fade out a fixed number of beats later, independent of bgm tempo drift.
 export type ParadeEntry = {
   snap: KilledSnapshot;
   beatOffset: number;
   played: boolean;
+  playedAtBeat: number;
 };
 
 // Why: maxHp/4 spacing = on-rhythm shots needed — paces the parade by kill difficulty.
@@ -39,7 +44,7 @@ const layOutParade = (game: Game) => {
   const entries: ParadeEntry[] = [];
   let cursor = 0;
   for (const snap of game.killedSnapshots) {
-    entries.push({ snap, beatOffset: cursor, played: false });
+    entries.push({ snap, beatOffset: cursor, played: false, playedAtBeat: 0 });
     const raw = Math.max(PARADE_BEAT_SUBDIV, snap.maxHp / 4);
     const snapped = Math.ceil(raw / PARADE_BEAT_SUBDIV) * PARADE_BEAT_SUBDIV;
     cursor += snapped;
@@ -115,6 +120,10 @@ const currentParadeBeat = (game: Game, cssW: number): number => {
   return elapsedBeats - preRollBeats;
 };
 
+// Why: "+N" flashes for ~1.5 beats after the sprite crosses centre — long enough to read at
+//   any sane bpm, short enough that consecutive close kills don't pile up overlapping numbers.
+const SCORE_FLASH_BEATS = 1.5;
+
 // Why: cull offscreen sprites before drawImage; trigger kill sound when sprite crosses centre.
 const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number, cssW: number, cssH: number) => {
   const centreX = cssW / 2;
@@ -124,11 +133,39 @@ const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number,
     const halfW = e.snap.full.width / 2;
     if (!e.played && x <= centreX) {
       e.played = true;
+      e.playedAtBeat = t;
       game.sound.play(e.snap.killSound);
     }
     if (x - halfW > cssW || x + halfW < 0) continue;
     ctx.drawImage(e.snap.full, x - halfW, centreY - e.snap.full.height / 2);
+    if (e.played && e.snap.scoreEarned > 0) {
+      const age = t - e.playedAtBeat;
+      if (age < SCORE_FLASH_BEATS) {
+        drawScoreFlash(ctx, x, centreY + e.snap.full.height / 2, e.snap.scoreEarned, age);
+      }
+    }
   }
+};
+
+// Why: matches popupScore's in-game look (pale blue, soft glow, brief pop-in) so the parade
+//   feedback reads as a replay of the same "+N" the player saw at the kill site.
+const drawScoreFlash = (ctx: CanvasRenderingContext2D, x: number, y: number, points: number, ageBeats: number) => {
+  const t = ageBeats / SCORE_FLASH_BEATS;
+  const popIn = Math.min(1, ageBeats / 0.25);
+  const scale = 1 + (1 - popIn) * 0.6;
+  const alpha = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, alpha);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.font = "600 22px 'Space Grotesk', system-ui, sans-serif";
+  ctx.fillStyle = "#e6f4ff";
+  ctx.shadowColor = "rgba(200, 230, 255, 0.85)";
+  ctx.shadowBlur = 14;
+  ctx.translate(x, y + 6);
+  ctx.scale(scale, scale);
+  ctx.fillText(`+${points}`, 0, 0);
+  ctx.restore();
 };
 
 // Why: stop the rAF once the last sprite is offscreen — no point burning frames on blank.

@@ -18,7 +18,9 @@ const collectTrailCandidates = (game: Game, cx: number, cy: number): number => {
   let n = 0;
   const cap = idx.length;
   for (let i = 0; i < game.asteroids.length && n < cap; i++) {
-    if (!game.asteroids[i].trail) continue;
+    // Why: gen-0 bassteroids wear a Trail, post-split fragments wear a
+    // SoundwaveRadiator — either qualifies as a candidate to draw.
+    if (!game.asteroids[i].trail && !game.asteroids[i].radiator) continue;
     const dx = game.asteroids[i].pos.x - cx;
     const dy = game.asteroids[i].pos.y - cy;
     idx[n] = i; sect[n] = SECTION_ASTEROID; sqDist[n] = dx * dx + dy * dy;
@@ -62,8 +64,9 @@ const paintSelectedTrails = (game: Game, ctx: CanvasRenderingContext2D, n: numbe
     const k = idx[i];
     const s = sect[i];
     if (s === SECTION_ASTEROID) {
-      const t = game.asteroids[k].trail;
-      if (t) t.render(ctx, tSec);
+      const a = game.asteroids[k];
+      if (a.trail) a.trail.render(ctx, tSec);
+      else if (a.radiator) a.radiator.render(ctx, tSec, a.radius);
     } else if (s === SECTION_ALIEN) {
       game.aliens[k].trail.render(ctx, tSec);
     } else {

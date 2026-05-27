@@ -39,7 +39,8 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean) => {
 };
 
 // Why: multiplier + sparkle + popup are the on-beat reward — one helper guarantees consistency.
-const awardScoreForKill = (game: Game, hitPos: Vec, baseScore: number, isOnBeatHit: boolean) => {
+//   Returns the points actually added so the parade can flash the same "+N" per kill.
+const awardScoreForKill = (game: Game, hitPos: Vec, baseScore: number, isOnBeatHit: boolean): number => {
   let scoreEarned = baseScore;
   if (isOnBeatHit) {
     const multiplier = game.beatCombo;
@@ -48,6 +49,7 @@ const awardScoreForKill = (game: Game, hitPos: Vec, baseScore: number, isOnBeatH
     if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
   }
   game.score += scoreEarned;
+  return scoreEarned;
 };
 
 // Why: only medium/small children carry drones (large bass has its own continuous low end).
@@ -61,16 +63,18 @@ const restartChildBassDrones = (game: Game, children: Asteroid[]) => {
 };
 
 // Why: audio-free core lets bullet vs ram paths stage their own kill-sound order independently.
+//   scoreEarned is captured into the snapshot so the parade can flash "+N" beneath each sprite.
 const finishAsteroidKillCore = (
   game: Game,
   a: Asteroid,
   killerVel: Vec,
   isOnBeatHit: boolean,
+  scoreEarned: number,
 ): Asteroid[] => {
   emitExplosion(game.particles, game.shards, a, isOnBeatHit);
   if (a.isBass()) game.sound.stopBassteroidDrone(a);
   const asteroidHit = hitSoundFor(a);
-  const snap = snapshotAsteroidKill(a, a.isBass() ? "bassEcho" : asteroidHit);
+  const snap = snapshotAsteroidKill(a, a.isBass() ? "bassEcho" : asteroidHit, scoreEarned);
   if (snap) game.killedSnapshots.push(snap);
   const children = a.split(killerVel);
   if (a.isBass()) restartChildBassDrones(game, children);
@@ -84,18 +88,19 @@ export const onAsteroidKilledByBullet = (
   b: Bullet,
   isOnBeatHit: boolean,
 ): Asteroid[] => {
-  awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit);
+  const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit);
   if (a.isBass()) game.sound.play("bassEcho");
   game.sound.play(hitSoundFor(a));
-  return finishAsteroidKillCore(game, a, b.vel, isOnBeatHit);
+  return finishAsteroidKillCore(game, a, b.vel, isOnBeatHit, scoreEarned);
 };
 
 // Why: asteroidHit → bassEcho (reverse of bullet path) preserves the original ram-branch order.
+// Why: ram kills award no points — pass 0 so the parade flash reflects the actual payout.
 export const onAsteroidKilledByRam = (game: Game, a: Asteroid, shipVel: Vec): Asteroid[] => {
   if (a.isBass()) game.sound.play("bassHit");
   game.sound.play(hitSoundFor(a));
   if (a.isBass()) game.sound.play("bassEcho");
-  return finishAsteroidKillCore(game, a, shipVel, false);
+  return finishAsteroidKillCore(game, a, shipVel, false, 0);
 };
 
 // Why: bassteroids take multiple hits to kill; chip points keep the player rewarded for
@@ -119,12 +124,12 @@ export const onAsteroidCrackedByRam = (game: Game, a: Asteroid) => {
 
 // Why: no split path here — alien deaths fall into the "single body, fixed sound" pattern.
 export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boolean) => {
-  awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit);
+  const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit);
   game.shake = Math.min(game.shake + 0.5, 1.4);
   game.sound.play("alienExplode");
   game.sound.stopAlienDrone(al);
   emitAlienExplosion(game.particles, al);
-  const snap = snapshotAlienKill(al, "alienExplode");
+  const snap = snapshotAlienKill(al, "alienExplode", scoreEarned);
   if (snap) game.killedSnapshots.push(snap);
 };
 
@@ -150,7 +155,7 @@ export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: bool
   game.sound.play("cometDestroyed");
   game.sound.stopCometShimmer(c);
   emitCometExplosion(game.particles, c);
-  const snap = snapshotCometKill(c, "cometDestroyed");
+  const snap = snapshotCometKill(c, "cometDestroyed", scoreEarned);
   if (snap) game.killedSnapshots.push(snap);
   syncHud(game);
 };

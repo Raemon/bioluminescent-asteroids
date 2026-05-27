@@ -1,6 +1,7 @@
 import { Vec, add, mul, wrap, TAU } from "./vec";
 import { drawGlow } from "./glow";
 import { AlienSize } from "./Alien";
+import { BEAT_GRID } from "./game/rhythmConstants";
 
 // Bullets shot BY aliens. The player can be hit by them (handled in Game).
 // Distinct hue from player bullets (cyan/gold) — these run hot pink/violet/
@@ -20,10 +21,7 @@ export class AlienBullet {
     this.vel = vel;
     this.size = size;
     this.hue = hue;
-    // Long enough for a typical cross-screen traverse at the slowest bullet
-    // speed (~220 px/s for big alien bullets). Off-screen bullets wrap with
-    // the rest of the world.
-    this.maxLife = 4.5;
+    this.maxLife = BEAT_GRID * 2;
     this.life = this.maxLife;
   }
 
