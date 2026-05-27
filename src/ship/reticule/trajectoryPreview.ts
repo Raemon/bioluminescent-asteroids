@@ -1,5 +1,5 @@
 import { Vec, TAU } from "../../vec";
-import { ConeFrame, RADAR_LENGTH, clipRayToCone, targetIsInsideCone, toroidalDelta } from "./coneGeometry";
+import { ConeFrame, clipRayToCone, targetIsInsideCone, toroidalDelta } from "./coneGeometry";
 import { RETICULE_DASH_HSL } from "./radarCone";
 
 // Why: shared bullet-overlap radius constant so trajectory dots and aim discs use the same hit reach.
@@ -15,6 +15,18 @@ const TRAJECTORY_FIRST_BEAT_DOT_RADIUS = 8;
 const TRAJECTORY_FIRST_BEAT_DOT_ALPHA = 0.25;
 const TRAJECTORY_FIRST_BEAT_DOT_LINE_WIDTH = 1;
 const TRAJECTORY_FIRST_BEAT_DOT_DASH: number[] = [2, 2];
+// Why: peak alpha matches the disc's RETICULE_OVERLAP_BRIGHTNESS=3 boost (0.25 * 3 ≈ 0.75) so
+// the first-dot "lights up" to the same intensity as the disc when proximity is reached.
+const TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA = 0.75;
+// Why: how far outside the on-beat hit radius the proximity glow starts ramping up — this is
+// the "near" band where the first-dot already reads as bright before a direct overlap.
+const TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD = 24;
+// Why: 6Hz flicker when directly on a target reads as an unmistakeable "shot will land" cue.
+const TRAJECTORY_DIRECT_FLASH_HZ = 6;
+const TRAJECTORY_DIRECT_FLASH_DEPTH = 0.55;
+// Why: shadow blur halo so the flash reads as a soft glow rather than just a brightness bump.
+const TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR = 18;
+const TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA = 0.85;
 
 // Why: target shape covers everything the reticule might lock onto (asteroids, comets, aliens, canisters).
 export type ReticuleTarget = { pos: Vec; vel: Vec; radius?: number };
@@ -56,15 +68,32 @@ const beatAtFirstSight = (t: ReticuleTarget, seen: WeakMap<object, number>, beat
 };
 
 // Why: dashed dot at the first beat reads as "tracking lock"; subsequent solid dots show its future path.
-const paintFirstBeatDot = (ctx: CanvasRenderingContext2D, px: number, py: number) => {
-  ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${TRAJECTORY_FIRST_BEAT_DOT_ALPHA})`;
-  ctx.lineWidth = TRAJECTORY_FIRST_BEAT_DOT_LINE_WIDTH;
+// proximity01 ramps the alpha from baseline → peak as the reticule approaches; directFlash adds an
+// overt flicker once the reticule directly overlaps so the player sees "this shot will land".
+const paintFirstBeatDot = (
+  ctx: CanvasRenderingContext2D, px: number, py: number,
+  proximity01: number, directFlash: number,
+) => {
+  const proximityAlpha = TRAJECTORY_FIRST_BEAT_DOT_ALPHA
+    + (TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA - TRAJECTORY_FIRST_BEAT_DOT_ALPHA) * proximity01;
+  const alpha = Math.min(1, proximityAlpha * (1 + directFlash));
+  const flash01 = directFlash > 0 ? directFlash / TRAJECTORY_DIRECT_FLASH_DEPTH : 0;
+  const prevShadowBlur = ctx.shadowBlur;
+  const prevShadowColor = ctx.shadowColor;
+  if (flash01 > 0) {
+    ctx.shadowBlur = TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR * flash01;
+    ctx.shadowColor = `hsla(${RETICULE_DASH_HSL}, ${TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA * flash01})`;
+  }
+  ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${alpha})`;
+  ctx.lineWidth = TRAJECTORY_FIRST_BEAT_DOT_LINE_WIDTH + directFlash;
   ctx.setLineDash(TRAJECTORY_FIRST_BEAT_DOT_DASH);
   ctx.lineDashOffset = 0;
   ctx.beginPath();
   ctx.arc(px, py, TRAJECTORY_FIRST_BEAT_DOT_RADIUS, 0, TAU);
   ctx.stroke();
   ctx.setLineDash([]);
+  ctx.shadowBlur = prevShadowBlur;
+  ctx.shadowColor = prevShadowColor;
 };
 
 const paintBeatDot = (ctx: CanvasRenderingContext2D, px: number, py: number) => {
@@ -82,6 +111,19 @@ const firstDotOverlapsReticule = (px: number, py: number, retX: number, retY: nu
   return ddx * ddx + ddy * ddy <= (R + TRAJECTORY_FIRST_BEAT_DOT_RADIUS) * (R + TRAJECTORY_FIRST_BEAT_DOT_RADIUS);
 };
 
+// Why: 0 = far away (no glow), 1 = touching the disc (full lit). Smooth ramp through the proximity pad.
+const firstDotProximity01 = (px: number, py: number, retX: number, retY: number): number => {
+  const ddx = px - retX;
+  const ddy = py - retY;
+  const dist = Math.hypot(ddx, ddy);
+  const overlapDist = BULLET_HIT_RADIUS_ON_BEAT + TRAJECTORY_FIRST_BEAT_DOT_RADIUS;
+  if (dist <= overlapDist) return 1;
+  const outerDist = overlapDist + TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD;
+  if (dist >= outerDist) return 0;
+  const t = 1 - (dist - overlapDist) / TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD;
+  return t * t * (3 - 2 * t);
+};
+
 type DotWalkResult = { overlapsReticule: boolean };
 
 // Why: dots mark target position at successive beats — direct preview of where the player needs to aim.
@@ -90,6 +132,7 @@ const drawBeatDotsAlongRay = (
   rawStartX: number, rawStartY: number, ux: number, uy: number,
   retX: number, retY: number,
   sMin: number, sMax: number, dotStep: number, dotOffset: number,
+  flashPulse: number,
 ): DotWalkResult => {
   let overlapsReticule = false;
   let drawnDots = 0;
@@ -100,8 +143,11 @@ const drawBeatDotsAlongRay = (
     const px = rawStartX + ux * sK;
     const py = rawStartY + uy * sK;
     if (drawnDots === 0) {
-      paintFirstBeatDot(ctx, px, py);
-      if (firstDotOverlapsReticule(px, py, retX, retY)) overlapsReticule = true;
+      const proximity01 = firstDotProximity01(px, py, retX, retY);
+      const overlap = firstDotOverlapsReticule(px, py, retX, retY);
+      const directFlash = overlap ? flashPulse : 0;
+      paintFirstBeatDot(ctx, px, py, proximity01, directFlash);
+      if (overlap) overlapsReticule = true;
     } else {
       paintBeatDot(ctx, px, py);
     }
@@ -116,8 +162,15 @@ const remapReticuleToTarget = (apex: Vec, reticulePos: Vec, w: number, h: number
   return [apex.x + retDx, apex.y + retDy];
 };
 
+// Why: square-wave-ish flicker in [0, DEPTH] driven by beatTime — clearly reads as a flash, not a pulse.
+const computeDirectFlashPulse = (beatTime: number): number => {
+  const phase = (beatTime * TRAJECTORY_DIRECT_FLASH_HZ) % 1;
+  const tri = phase < 0.5 ? phase * 2 : (1 - phase) * 2;
+  return TRAJECTORY_DIRECT_FLASH_DEPTH * tri;
+};
+
 // Why: per-target trajectory + first-beat lock dot; reports whether the disc overlaps this target's path.
-const previewOneTarget = (ctx: TrajectoryContext, t: ReticuleTarget): boolean => {
+const previewOneTarget = (ctx: TrajectoryContext, t: ReticuleTarget, flashPulse: number): boolean => {
   let [dx, dy] = toroidalDelta(t.pos.x - ctx.apex.x, t.pos.y - ctx.apex.y, ctx.w, ctx.h);
   const tr = t.radius ?? 0;
   if (!targetIsInsideCone(dx, dy, tr, ctx.frame)) {
@@ -149,7 +202,7 @@ const previewOneTarget = (ctx: TrajectoryContext, t: ReticuleTarget): boolean =>
   ctx.ctx.setLineDash([]);
   const result = drawBeatDotsAlongRay(
     ctx.ctx, rawStartX, rawStartY, ux, uy, retX, retY,
-    clip.sMin, clip.sMax, dotStep, dotOffset,
+    clip.sMin, clip.sMax, dotStep, dotOffset, flashPulse,
   );
   ctx.ctx.restore();
   return result.overlapsReticule;
@@ -159,14 +212,15 @@ const previewOneTarget = (ctx: TrajectoryContext, t: ReticuleTarget): boolean =>
 export const paintTrajectoryPreviews = (
   ctx: TrajectoryContext, targets: ReadonlyArray<ReticuleTarget>,
 ): boolean => {
-  if (targets.length === 0 || RADAR_LENGTH <= 0) return false;
+  if (targets.length === 0 || ctx.frame.length <= 0) return false;
   ctx.ctx.save();
   ctx.ctx.setLineDash([]);
   ctx.ctx.lineWidth = 1.5;
   ctx.ctx.shadowBlur = 0;
+  const flashPulse = computeDirectFlashPulse(ctx.beatTime);
   let overlapsReticule = false;
   for (const t of targets) {
-    if (previewOneTarget(ctx, t)) overlapsReticule = true;
+    if (previewOneTarget(ctx, t, flashPulse)) overlapsReticule = true;
   }
   ctx.ctx.restore();
   return overlapsReticule;

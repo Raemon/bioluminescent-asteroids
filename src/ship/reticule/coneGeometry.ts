@@ -1,10 +1,18 @@
 import type { Ship } from "../../Ship";
 
-// Why: the radar cone is a wedge that fans forward from the ship; everything else needs its angle.
-export const RADAR_HALF_ANGLE = 0.60;
-export const RADAR_LENGTH = 800;
+// Why: base wedge geometry; the radar powerup doubles both at runtime via radarHalfAngle/radarLength.
+const RADAR_HALF_ANGLE_BASE = 0.60;
+const RADAR_LENGTH_BASE = 800;
+const RADAR_BOOST = 2;
+
+// Why: every wedge consumer reads from the ship so the radar powerup widens & extends the cone everywhere at once.
+export const radarHalfAngle = (ship: Ship): number =>
+  ship.radarActive ? RADAR_HALF_ANGLE_BASE * RADAR_BOOST : RADAR_HALF_ANGLE_BASE;
+export const radarLength = (ship: Ship): number =>
+  ship.radarActive ? RADAR_LENGTH_BASE * RADAR_BOOST : RADAR_LENGTH_BASE;
 
 // Why: cone-side outward normals enable signed-distance tests for "inside the cone".
+// halfAngle/length travel with the frame so downstream clipping uses the same wedge the renderer drew.
 export type ConeFrame = {
   axisX: number;
   axisY: number;
@@ -12,17 +20,24 @@ export type ConeFrame = {
   leftNy: number;
   rightNx: number;
   rightNy: number;
+  halfAngle: number;
+  length: number;
 };
 
 // Why: precompute the cone's axis + side-edge outward normals once per frame instead of per target.
-export const computeConeFrame = (ship: Ship): ConeFrame => ({
-  axisX: Math.cos(ship.heading),
-  axisY: Math.sin(ship.heading),
-  leftNx: Math.sin(ship.heading - RADAR_HALF_ANGLE),
-  leftNy: -Math.cos(ship.heading - RADAR_HALF_ANGLE),
-  rightNx: -Math.sin(ship.heading + RADAR_HALF_ANGLE),
-  rightNy: Math.cos(ship.heading + RADAR_HALF_ANGLE),
-});
+export const computeConeFrame = (ship: Ship): ConeFrame => {
+  const half = radarHalfAngle(ship);
+  return {
+    axisX: Math.cos(ship.heading),
+    axisY: Math.sin(ship.heading),
+    leftNx: Math.sin(ship.heading - half),
+    leftNy: -Math.cos(ship.heading - half),
+    rightNx: -Math.sin(ship.heading + half),
+    rightNy: Math.cos(ship.heading + half),
+    halfAngle: half,
+    length: radarLength(ship),
+  };
+};
 
 // Why: screen-wrap means the closest "image" of a target may be on the other side; pick the nearest.
 export const toroidalDelta = (dx: number, dy: number, w: number, h: number): [number, number] => {
@@ -38,7 +53,7 @@ export const targetIsInsideCone = (
   dx: number, dy: number, tr: number, frame: ConeFrame,
 ): boolean => {
   const forward = dx * frame.axisX + dy * frame.axisY;
-  if (forward < -tr || forward > RADAR_LENGTH + tr) return false;
+  if (forward < -tr || forward > frame.length + tr) return false;
   const leftSigned = dx * frame.leftNx + dy * frame.leftNy;
   const rightSigned = dx * frame.rightNx + dy * frame.rightNy;
   return !(leftSigned > tr || rightSigned > tr);
@@ -53,7 +68,7 @@ export const clipRayToCone = (
 ): RayClip => {
   const r: RayClip = { sMin: 0, sMax: Infinity };
   clipAgainst(r, -frame.axisX, -frame.axisY, 0, rsx, rsy, ux, uy);
-  clipAgainst(r, frame.axisX, frame.axisY, RADAR_LENGTH, rsx, rsy, ux, uy);
+  clipAgainst(r, frame.axisX, frame.axisY, frame.length, rsx, rsy, ux, uy);
   clipAgainst(r, frame.leftNx, frame.leftNy, 0, rsx, rsy, ux, uy);
   clipAgainst(r, frame.rightNx, frame.rightNy, 0, rsx, rsy, ux, uy);
   return r;

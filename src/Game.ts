@@ -58,6 +58,8 @@ export class Game implements HudElements {
   beatCombo = 0;
   // Why: latched on off-beat fire so the punishment can land at the next beat closure (not retroactive).
   firedOffBeatSinceLastBeat = false;
+  // Why: first-ever meaningful combo loss in a run gets a labeled popup so the player learns the mechanic.
+  hasLostComboEver = false;
 
   canisters: Canister[] = [];
   comets: Comet[] = [];

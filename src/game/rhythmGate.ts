@@ -2,7 +2,7 @@ import type { Game } from "../Game";
 import { Vec } from "../vec";
 import { BEAT_GRID, BEAT_WINDOW, DEBUG_BEAT_TIMING } from "./rhythmConstants";
 import { syncComboHud } from "./hud";
-import { popupBeatDebug } from "./popups";
+import { popupBeatDebug, popupComboLost } from "./popups";
 
 // Why: rapid powerup flips the grid to 8ths so rapid-fire trigger pulls each land on a beat.
 export const comboGrid = (game: Game): number => game.ship.rapidActive ? BEAT_GRID / 2 : BEAT_GRID;
@@ -64,22 +64,29 @@ export const spawnBeatDebugPopup = (game: Game, pos: Vec, time: number, prefix: 
 };
 
 // Why: only meaningful losses (combo ≥2 → 0) fire wrrr + red halo; primed-only loss is too noisy.
-export const loseCombo = (game: Game) => {
+//   sourcePos anchors the "COMBO LOST" popup at whatever caused the break (ship fire / target hit).
+export const loseCombo = (game: Game, sourcePos?: Vec) => {
   if (game.beatCombo === 0) return;
   const wasMeaningful = game.beatCombo >= 2;
+  const haloActive = game.ship.comboHaloTier >= 2;
   game.beatCombo = 0;
   if (wasMeaningful) {
     game.sound.play("comboLost");
     game.ship.comboLossFlash = 1;
+    if (sourcePos && (!game.hasLostComboEver || haloActive)) {
+      game.popups.push(popupComboLost(sourcePos));
+    }
+    game.hasLostComboEver = true;
   }
   syncComboHud(game);
 };
 
 // Why: silence holds combo; only an off-beat fire latched during the closing beat drops it to 0.
+//   ship pos is the source for off-beat fires — that's the shot the player got wrong.
 export const evaluateClosedBeats = (game: Game) => {
   const grid = comboGrid(game);
   while (game.nextBeatToEvaluate * grid + BEAT_WINDOW <= game.beatTime) {
-    if (game.firedOffBeatSinceLastBeat && game.beatCombo !== 0) loseCombo(game);
+    if (game.firedOffBeatSinceLastBeat && game.beatCombo !== 0) loseCombo(game, game.ship.pos);
     game.firedOffBeatSinceLastBeat = false;
     game.nextBeatToEvaluate += 1;
   }

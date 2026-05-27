@@ -73,7 +73,7 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     const dmg = b.damage();
     const { killed } = a.applyDamage(dmg);
     game.shake = Math.min(game.shake + (killed ? 0.4 : 0.2), 1.2);
-    applyHitToCombo(game, onBeat);
+    applyHitToCombo(game, onBeat, b.pos);
     if (!killed) {
       a.applyKnockback(b.vel.x, b.vel.y, dmg);
       onAsteroidCrackedByBullet(game, a, b, onBeat);
@@ -147,7 +147,7 @@ const tryKillAlienWithBullets = (game: Game, a: Alien): boolean => {
     const onBeat = isHitOnBeat(game, b);
     logBulletHit(game, "HIT alien", b);
     const { killed } = a.applyDamage();
-    applyHitToCombo(game, onBeat);
+    applyHitToCombo(game, onBeat, b.pos);
     if (!killed) {
       a.applyKnockback(b.vel.x, b.vel.y, 1);
       onAlienCracked(game, onBeat);
@@ -208,7 +208,7 @@ const tryKillCometWithBullets = (game: Game, c: Comet): boolean => {
   consumeBullet(b);
   const onBeat = isHitOnBeat(game, b);
   logBulletHit(game, "HIT comet", b);
-  applyHitToCombo(game, onBeat);
+  applyHitToCombo(game, onBeat, b.pos);
   onCometKilled(game, c, b, onBeat);
   return true;
 };

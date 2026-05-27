@@ -33,4 +33,5 @@ export const applyPowerup = (ship: Ship, kind: PowerupKind) => {
   else if (kind === "rapid") ship.rapidActive = true;
   else if (kind === "pierce") ship.pierceActive = true;
   else if (kind === "shield") ship.shieldActive = true;
+  else if (kind === "radar") ship.radarActive = true;
 };

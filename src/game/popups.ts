@@ -31,6 +31,7 @@ const POWERUP_LABEL: Record<PowerupKind, string> = {
   pierce: "PIERCE",
   shield: "SHIELD",
   slow: "SLOW-MO",
+  radar: "RADAR",
 };
 
 // Why: anchors the multiplier feedback at the spot the player actually struck, not a corner pulse.
@@ -46,6 +47,22 @@ export const popupCombo = (pos: Vec, multiplier: number): Popup => ({
   shadowBlur: 14,
   decayX: 0.94, decayY: 0.94,
   popPeak: 0.375, popDuration: 0.15,
+  holdUntil: 0, fadeGain: 1.4,
+});
+
+// Why: surfaces the streak break at the spot that caused it (ship fire / target hit).
+export const popupComboLost = (pos: Vec): Popup => ({
+  pos: { x: pos.x, y: pos.y - 6 },
+  vel: { x: rand(-10, 10), y: -55 },
+  life: 1.1,
+  maxLife: 1.1,
+  text: "COMBO LOST",
+  font: "700 16px 'Space Grotesk', system-ui, sans-serif",
+  fill: "#ff6a6a",
+  shadowColor: "rgba(255, 90, 90, 0.85)",
+  shadowBlur: 14,
+  decayX: 0.94, decayY: 0.94,
+  popPeak: 0.4, popDuration: 0.15,
   holdUntil: 0, fadeGain: 1.4,
 });
 

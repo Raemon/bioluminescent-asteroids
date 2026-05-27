@@ -67,6 +67,7 @@ export const showTitle = (game: Game) => {
   game.ship.rapidActive = false;
   game.ship.pierceActive = false;
   game.ship.shieldActive = false;
+  game.ship.radarActive = false;
   syncPowerupHud(game);
 };
 
@@ -99,6 +100,7 @@ const resetRunTimers = (game: Game) => {
   game.beatCombo = 0;
   game.firedOffBeatSinceLastBeat = false;
   game.slowMoTimer = 0;
+  game.hasLostComboEver = false;
 };
 
 // Why: parade + drones from the previous title screen must be torn down before the new run runs.

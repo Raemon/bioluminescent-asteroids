@@ -3,7 +3,10 @@ import { Vec, add, mul, fromAngle, wrap, TAU } from "../../vec";
 import { computeConeFrame } from "./coneGeometry";
 import { paintConeBackground, paintRangeArcs } from "./radarCone";
 import { paintTrajectoryPreviews, ReticuleTarget } from "./trajectoryPreview";
-import { reticuleOverlapsAnyTarget, computeBaseHitAlpha, paintAimDiscs } from "./aimDisc";
+import {
+  reticuleOverlapsAnyTarget, reticuleDirectlyOnTarget,
+  computeBaseHitAlpha, paintAimDiscs, computeDirectFlashPulse,
+} from "./aimDisc";
 
 // Why: hitbox alpha breathes slowly so the disc feels alive even when no target is in range.
 const RETICULE_HITBOX_PULSE_MAX = 1.0;
@@ -75,11 +78,13 @@ export const renderShipReticules = (
     ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule,
     trajectoryFirstSeen: state.trajectoryFirstSeen,
   }, targets);
+  const flashPulse = computeDirectFlashPulse(beatTime);
   for (const pos of reticulePositions) {
     const overlaps = fromTrajectory && pos === primaryReticule
       ? true
       : reticuleOverlapsAnyTarget(pos, targets, w, h);
-    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps);
+    const directlyOn = reticuleDirectlyOnTarget(pos, targets, w, h);
+    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, directlyOn ? flashPulse : 0);
   }
   ctx.restore();
 };

@@ -3,7 +3,7 @@ import { Vec, v, add, mul, fromAngle, rand, pick, TAU } from "./vec";
 // Five powerup kinds, each with its own glyph so the player can read the
 // canister at a glance from across the screen. Keeping the list short
 // (rather than 10+ kinds) means each one stays familiar after a few waves.
-export type PowerupKind = "trident" | "rapid" | "pierce" | "shield" | "slow";
+export type PowerupKind = "trident" | "rapid" | "pierce" | "shield" | "slow" | "radar";
 
 // Hue is kept for downstream effects (pickup burst tinting) but the canister
 // itself renders pure white so the player reads it as "incoming pod" first
@@ -14,6 +14,7 @@ export const POWERUP_HUE: Record<PowerupKind, number> = {
   pierce: 60,
   shield: 200,
   slow: 130,
+  radar: 30,
 };
 
 const POWERUP_GLYPH: Record<PowerupKind, string> = {
@@ -22,9 +23,10 @@ const POWERUP_GLYPH: Record<PowerupKind, string> = {
   pierce: "P",
   shield: "S",
   slow: "Z",
+  radar: "X",
 };
 
-export const POWERUP_KINDS: PowerupKind[] = ["trident", "rapid", "pierce", "shield", "slow"];
+export const POWERUP_KINDS: PowerupKind[] = ["trident", "rapid", "pierce", "shield", "slow", "radar"];
 
 export class Canister {
   pos: Vec;

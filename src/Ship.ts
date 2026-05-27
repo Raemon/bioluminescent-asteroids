@@ -44,11 +44,12 @@ export class Ship {
   fireRate = BEAT_GRID;
   bulletSpeed = 620;
   bulletLife = 0.85;
-  // Why: trident/rapid/pierce persist for the run; shield is one-shot.
+  // Why: trident/rapid/pierce/radar persist for the run; shield is one-shot.
   tridentActive = false;
   rapidActive = false;
   pierceActive = false;
   shieldActive = false;
+  radarActive = false;
 
   // Why: discrete halo tier 0/1/2; intensity eases toward this target for a smooth visual response.
   comboHaloTier = 0;
