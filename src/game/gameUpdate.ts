@@ -35,8 +35,8 @@ export const updateGame = (game: Game, dt: number) => {
   if (game.input.pressed("escape") || game.input.pressed("esc")) togglePause(game);
   if (game.state === "paused") { game.input.endFrame(); return; }
   game.time += dt * 1000;
-  // Why: non-playing states freeze beatTime; playing defers pulsar.update until after tickBassBeats.
-  if (game.state !== "playing") game.pulsar.update(dt, game.beatTime, BEAT_GRID);
+  // Why: title/gameover/paused freeze beatTime; playing+dying defer pulsar to after tickBassBeats.
+  if (game.state !== "playing" && game.state !== "dying") game.pulsar.update(dt, game.beatTime, BEAT_GRID);
   routeStateUpdate(game, dt);
   if (game.shake > 0) game.shake = Math.max(0, game.shake - dt * 3);
   game.input.endFrame();
@@ -84,15 +84,11 @@ const detonateScheduledBassRocks = (game: Game) => {
   if (anyExploded) game.asteroids = game.asteroids.filter((a: Asteroid) => !(a.isBass() && a.hp <= 0));
 };
 
-// Why: dying freeze gives the player a moment to absorb the death before respawn or gameover.
+// Why: world keeps running while the ship is gone — music, beats, aliens, comets all play on.
+// The ship's alive=false flag already gates firing, rendering, and collisions.
 const updateDying = (game: Game, dt: number) => {
   game.dyingTimer -= dt;
-  for (const a of game.asteroids) a.update(dt, game.w, game.h);
-  for (const b of game.bullets) b.update(dt, game.w, game.h);
-  game.bullets = game.bullets.filter((b) => b.life > 0);
-  for (const s of game.shards) s.update(dt);
-  game.shards = game.shards.filter((s) => s.life > 0);
-  game.particles.update(dt);
+  updatePlaying(game, dt);
   if (game.dyingTimer > 0) return;
   if (game.lives <= 0) transitionToGameOver(game);
   else respawn(game);

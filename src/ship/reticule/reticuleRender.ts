@@ -13,15 +13,38 @@ const RETICULE_RADAR_PULSE_MAX = 1;
 const RETICULE_RADAR_PULSE_MIN = 0.4;
 const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
 
+// Why: matches TRIDENT_SPREAD in shipWeapons.ts — three bullets fan at ±this angle.
+const TRIDENT_SPREAD = 0.21;
+// Why: rapid fires every half-beat, so the off-beat bullet only travels half as far before the next beat.
+const RAPID_HALF_BEAT_FRACTION = 0.5;
+
 // Why: bind ship state to per-target memo so trajectory previews can track "first seen" across frames.
 type ReticuleState = { trajectoryFirstSeen: WeakMap<object, number> };
 
-// Why: position where a shot fired this frame would impact at the next beat — the aim "lock" point.
-const computeReticulePosition = (ship: Ship, beatGrid: number, w: number, h: number): Vec => {
-  const dir = fromAngle(ship.heading, 1);
+// Why: position where a shot fired with the given heading offset lands after `beatFraction` of a beat.
+const computeReticulePosition = (
+  ship: Ship, beatGrid: number, w: number, h: number,
+  headingOffset: number, beatFraction: number,
+): Vec => {
+  const dir = fromAngle(ship.heading + headingOffset, 1);
   const muzzle = add(ship.pos, mul(dir, ship.radius + 4));
   const bulletVel = add(mul(dir, ship.bulletSpeed), mul(ship.vel, 0.4));
-  return wrap(add(muzzle, mul(bulletVel, beatGrid)), w, h);
+  return wrap(add(muzzle, mul(bulletVel, beatGrid * beatFraction)), w, h);
+};
+
+// Why: trident fans the aim into three angles; rapid adds a half-beat preview at half distance.
+const computeReticulePositions = (
+  ship: Ship, beatGrid: number, w: number, h: number,
+): Vec[] => {
+  const angleOffsets = ship.tridentActive ? [-TRIDENT_SPREAD, 0, TRIDENT_SPREAD] : [0];
+  const beatFractions = ship.rapidActive ? [RAPID_HALF_BEAT_FRACTION, 1] : [1];
+  const positions: Vec[] = [];
+  for (const frac of beatFractions) {
+    for (const off of angleOffsets) {
+      positions.push(computeReticulePosition(ship, beatGrid, w, h, off, frac));
+    }
+  }
+  return positions;
 };
 
 // Why: cosine envelope between min/max produces a smooth, predictable visual pulse over time.
@@ -37,22 +60,26 @@ export const renderShipReticules = (
   targets: ReadonlyArray<ReticuleTarget>, beatTime: number,
 ) => {
   if (!ship.alive) return;
-  const reticulePos = computeReticulePosition(ship, beatGrid, w, h);
+  const reticulePositions = computeReticulePositions(ship, beatGrid, w, h);
+  const primaryReticule = reticulePositions[reticulePositions.length - 1];
   const apex = ship.pos;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   const hitboxPulse = cosineEnvelope(beatTime, RETICULE_HITBOX_PULSE_PERIOD_SEC, RETICULE_HITBOX_PULSE_MIN, RETICULE_HITBOX_PULSE_MAX);
   const radarPulse = cosineEnvelope(beatTime, RETICULE_RADAR_PULSE_PERIOD_SEC, RETICULE_RADAR_PULSE_MIN, RETICULE_RADAR_PULSE_MAX);
   const baseHitAlpha = computeBaseHitAlpha(ship.fireCooldown > 0, hitboxPulse);
-  let overlapsTarget = reticuleOverlapsAnyTarget(reticulePos, targets, w, h);
   paintConeBackground(ctx, ship, apex, beatTime, beatGrid);
   paintRangeArcs(ctx, ship, apex, beatTime, radarPulse);
   const frame = computeConeFrame(ship);
   const fromTrajectory = paintTrajectoryPreviews({
-    ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos,
+    ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule,
     trajectoryFirstSeen: state.trajectoryFirstSeen,
   }, targets);
-  if (fromTrajectory) overlapsTarget = true;
-  paintAimDiscs(ctx, reticulePos, baseHitAlpha, overlapsTarget);
+  for (const pos of reticulePositions) {
+    const overlaps = fromTrajectory && pos === primaryReticule
+      ? true
+      : reticuleOverlapsAnyTarget(pos, targets, w, h);
+    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps);
+  }
   ctx.restore();
 };
