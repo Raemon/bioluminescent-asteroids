@@ -283,9 +283,6 @@ export class Game {
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();
       if (k === "m" && this.state !== "title") this.toggleMute();
-      // B = swap audio engine (legacy hand-built vs Tone.js bus). Available
-      // during gameplay only, not the title screen.
-      if (k === "b" && this.state !== "title") this.toggleEngine();
     });
     this.showTitle();
   }
@@ -294,18 +291,6 @@ export class Game {
     this.sound.setEnabled(!this.sound.enabled);
     this.muteEl.classList.toggle("muted", !this.sound.enabled);
     this.muteEl.textContent = this.sound.enabled ? "♪" : "✕";
-  }
-
-  toggleEngine() {
-    const which = this.sound.cycleEngine();
-    const toast = document.getElementById("engine-toast");
-    if (!toast) return;
-    toast.textContent = which === "tone" ? "Audio: Tone.js" : "Audio: Legacy";
-    toast.classList.remove("hidden");
-    window.clearTimeout((this as unknown as { _engineToastTimer?: number })._engineToastTimer);
-    (this as unknown as { _engineToastTimer?: number })._engineToastTimer = window.setTimeout(() => {
-      toast.classList.add("hidden");
-    }, 1400);
   }
 
   togglePause() {
@@ -727,6 +712,107 @@ export class Game {
     this.alienBullets = remaining;
   }
 
+  // Player bullets hitting comets. Comets are 1-HP — any bullet kills,
+  // bestowing a flat 5000 points (not combo-multiplied: the comet is a
+  // celestial bonus target, not part of the rhythm flow). On kill we fire
+  // the long fade-out destroy sound on top of the comet's own drone — the
+  // drone's normal 2s stopCometShimmer fade lets the explosion take over.
+  handleCometHits() {
+    const surviving: Comet[] = [];
+    for (const c of this.comets) {
+      let killed = false;
+      for (const b of this.bullets) {
+        if (b.life <= 0) continue;
+        if (!c.collidesWith(b.pos, b.hitRadius())) continue;
+        if (!b.pierce) b.life = 0;
+        this.score += 5000;
+        this.shake = Math.min(this.shake + 0.6, 1.6);
+        this.sound.play("cometDestroyed");
+        this.sound.stopCometShimmer(c);
+        this.emitCometExplosion(c);
+        this.snapshotCometKill(c, "cometDestroyed");
+        killed = true;
+        break;
+      }
+      if (!killed) surviving.push(c);
+    }
+    this.comets = surviving;
+    if (surviving.length !== this.comets.length) this.syncHud();
+  }
+
+  // Dramatic burst at the comet's head — bright sparks in the comet's own
+  // hue plus a wider, slower outer cloud so the explosion reads as
+  // *celestial* rather than the dirty-fuel pop of an asteroid.
+  emitCometExplosion(c: Comet) {
+    const sparkIndices = Array.from({ length: 90 }, (_, i) => i);
+    for (const _ of sparkIndices) {
+      const angle = rand(0, TAU);
+      const speed = rand(160, 520);
+      this.particles.emit({
+        pos: { ...c.pos },
+        vel: fromAngle(angle, speed),
+        life: rand(0.6, 1.6),
+        maxLife: 1.6,
+        size: rand(1.4, 2.8),
+        hue: c.hue + rand(-15, 25),
+        shrink: 1,
+        drag: 1.2,
+      });
+    }
+    // Slow outer cloud — wider hue spread (white-leaning) so it reads as
+    // dust kicked up by the impact.
+    const cloudIndices = Array.from({ length: 40 }, (_, i) => i);
+    for (const _ of cloudIndices) {
+      const angle = rand(0, TAU);
+      const speed = rand(40, 180);
+      this.particles.emit({
+        pos: { ...c.pos },
+        vel: fromAngle(angle, speed),
+        life: rand(1.5, 3.0),
+        maxLife: 3.0,
+        size: rand(2.0, 3.4),
+        hue: c.hue + rand(-40, 40),
+        shrink: 1,
+        drag: 0.7,
+      });
+    }
+  }
+
+  // Snapshot a freshly-killed comet into the killed-row sprite list. The
+  // comet's render() reads its current age via brightness(); we briefly
+  // override age + position so the snapshot captures the comet at its
+  // brightest with no trail (a single still bloom is what reads at parade
+  // scale, not a streak).
+  snapshotCometKill(c: Comet, killSound: SoundName) {
+    const margin = 12;
+    const tile = Math.ceil(c.radius * 4 + margin * 2);
+    const cnv = document.createElement("canvas");
+    cnv.width = tile;
+    cnv.height = tile;
+    const cx = cnv.getContext("2d");
+    if (!cx) return;
+    cx.translate(tile / 2, tile / 2);
+    const prevPos = c.pos;
+    const prevTrail = c.trail;
+    const prevAge = c.age;
+    c.pos = v(0, 0);
+    c.trail = [];
+    // Force full brightness (past FADE_IN, well before FADE_OUT).
+    c.age = Comet.FADE_IN + 0.1;
+    c.render(cx);
+    c.pos = prevPos;
+    c.trail = prevTrail;
+    c.age = prevAge;
+    this.killedSnapshots.push({
+      full: cnv,
+      fullRadius: c.radius,
+      killSound,
+      // Pace the parade as if this were a small/medium enemy: spacing is
+      // maxHp/4 beats after, so 4 means one beat of breathing room.
+      maxHp: 4,
+    });
+  }
+
   emitAlienExplosion(a: Alien) {
     const burstIndices = Array.from({ length: a.size === "big" ? 70 : a.size === "medium" ? 48 : 30 }, (_, i) => i);
     for (const _ of burstIndices) {
@@ -837,11 +923,16 @@ export class Game {
     const windowFractionOfGrid = BEAT_WINDOW / grid;
     const normalized = signedBeatsFromNearestBeat / windowFractionOfGrid;
     if (normalized < -1 || normalized > 1) return 0;
-    // Asymmetric envelope: snap up to full brightness on the approach (steep
-    // attack), then linger with a slow squared falloff after the beat passes.
-    return normalized <= 0
-      ? Math.sqrt(1 + normalized)
-      : (1 - normalized) * (1 - normalized);
+    // Asymmetric envelope: snap to full brightness within ~10ms of window
+    // entry so the beat onset reads as an instant pop, then linger with a
+    // slow squared falloff after the beat passes.
+    // Attack fraction: 10ms / 80ms half-window = 0.125 of normalized space.
+    const ATTACK_FRAC = 0.125;
+    if (normalized <= 0) {
+      const t = (normalized + 1) / ATTACK_FRAC;
+      return t >= 1 ? 1 : t;
+    }
+    return (1 - normalized) * (1 - normalized);
   }
 
   // True iff `time` sits inside the ±BEAT_WINDOW around any beat on the
@@ -1041,6 +1132,7 @@ export class Game {
       this.handleCollisions();
       this.handleAlienHits();
       this.handleAlienBulletHits();
+      this.handleCometHits();
       this.handleCanisterPickups();
       this.handleCanisterShots();
       // Run after collisions so any beat marked by a kill this frame is
@@ -1286,8 +1378,38 @@ export class Game {
     this.asteroids = surviving;
 
     if (this.ship.alive && this.ship.invuln <= 0) {
-      for (const a of this.asteroids) {
+      for (let i = 0; i < this.asteroids.length; i++) {
+        const a = this.asteroids[i];
         if (a.collidesWith(this.ship.pos, this.ship.radius * 0.6)) {
+          // The ship dishes 4 damage to whatever it rammed. If that kills
+          // the asteroid, run the same kill bookkeeping a bullet would (no
+          // score / combo — a ramming kill isn't a rhythm hit).
+          const { killed: didKill } = a.applyDamage(4);
+          if (didKill) {
+            if (a.isBass()) this.sound.play("bassHit");
+            const asteroidHit = this.hitSoundFor(a);
+            this.sound.play(asteroidHit);
+            this.emitExplosion(a, false);
+            if (a.isBass()) {
+              this.sound.play("bassEcho");
+              this.sound.stopBassteroidDrone(a);
+            }
+            this.snapshotAsteroidKill(a, a.isBass() ? "bassEcho" : asteroidHit);
+            const children = a.split(this.ship.vel);
+            for (const c of children) {
+              if (a.isBass()) {
+                this.alignBassBeat(c);
+                if (c.size === "medium" || c.size === "small") {
+                  this.sound.startBassteroidDrone(c, c.kind as "bassA" | "bassB" | "bassC" | "bassD", c.size);
+                }
+              }
+              this.asteroids.push(c);
+            }
+            this.asteroids.splice(i, 1);
+          } else {
+            this.sound.play(a.isBass() ? "bassHit" : this.hitSoundFor(a));
+            this.emitCrackParticles(a, false);
+          }
           if (this.ship.shieldActive) {
             this.ship.shieldActive = false;
             this.ship.invuln = 0.8;
@@ -1832,7 +1954,7 @@ export class Game {
       ...this.aliens,
       ...this.alienBullets,
       ...this.canisters,
-    ]);
+    ], this.beatTime);
     this.ship.render(ctx, this.time, this.currentBeatPulse());
     this.renderComboPopups(ctx);
 

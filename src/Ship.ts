@@ -15,7 +15,7 @@ const RETICULE_LINE_DASH: [number, number] = [4, 4];
 // Shared colour for every dashed element in the reticule family (hitbox rings
 // + radar circle) so they read as one system. HSL only — opacity is applied
 // per-element via the alpha constants below.
-const RETICULE_DASH_HSL = "220, 100%, 85%";
+const RETICULE_DASH_HSL = "220, 100%, 100%";
 // Opacity for the two dashed hitbox rings (off-beat + on-beat). Tuned to sit
 // just above the radar circle's visibility — faint but definitely present.
 const RETICULE_HITBOX_ALPHA = 0.28;
@@ -25,11 +25,28 @@ const RETICULE_RADAR_ALPHA = 0.2;
 // Fire-cooldown dim factor applied to the hitbox rings so the player can read
 // at a glance when the next shot is available.
 const RETICULE_COOLDOWN_DIM = 0.3;
-// Peak opacity for trajectory-preview lines projected from targets inside the
-// radar. Lines fade from this value to 0 over RETICULE_TRAJECTORY_FADE_DURATION
-// seconds, so fresh entries draw bright and lingerers dissolve.
-const RETICULE_TRAJECTORY_ALPHA = 1;
-const RETICULE_TRAJECTORY_FADE_DURATION = 0.1;
+// Peak opacity for trajectory-preview lines projected from targets inside
+// the radar. The line holds this value from its start (just past the
+// target's leading edge) up to RETICULE_TRAJECTORY_FADE_START along its
+// length, then linearly fades to 0 by the far end at the radar boundary.
+// Keeps the near end of the forecast crisp while letting the far end
+// dissolve into the radar circle.
+const RETICULE_TRAJECTORY_ALPHA = 0.5;
+// Fraction along the trajectory line (0 = near end at the target, 1 = far
+// end at the radar boundary) where the fade begins. Before this point the
+// line is at full alpha; after it, alpha ramps linearly down to 0 at the
+// far end.
+const RETICULE_TRAJECTORY_FADE_START = 0.3;
+// Period of the trajectory-line opacity pulse, expressed as a whole
+// number of beats so peaks land on beat boundaries by construction and the
+// radar "breathes" with the music. The runtime period in seconds is
+// derived per-frame as PULSE_PERIOD_BEATS * beatGrid (passed into
+// renderReticules) — we can't multiply by BEAT_GRID at module top-level
+// because Ship.ts and Game.ts form a circular import.
+const RETICULE_TRAJECTORY_PULSE_PERIOD_BEATS = 4;
+// Floor opacity (as a fraction of RETICULE_TRAJECTORY_ALPHA) at the dim end
+// of the pulse. 1 disables the pulse; 0 would dip to fully transparent.
+const RETICULE_TRAJECTORY_PULSE_MIN_ALPHA = 0.2
 // Mirrors Bullet.hitRadius() for an on-beat shot: base radius 1.8 × on-beat
 // scale 2.38 × hit multiplier 2.5. Hard-coded here so the reticule preview
 // doesn't need a live bullet to size itself.
@@ -83,12 +100,13 @@ export class Ship {
   private comboRings: { age: number; gold: boolean }[] = [];
   // Last beatPulse seen by tickComboHalo, for rising-edge ring emission.
   private prevBeatPulse = 0;
-  // First time each target was seen inside the rhythm-radar circle. Used to
-  // fade its trajectory line out as it lingers — fresh entries draw bright,
-  // old ones fade so the radar reads as a forecast that decays rather than a
-  // permanent tether. WeakMap so dead targets get GC'd automatically.
+  // beatTime at which each target was first seen inside the rhythm-radar
+  // circle. Used to anchor the trajectory-line opacity ramp: each line
+  // ramps 0 → 1 from firstSeenBeat to the next beat boundary, then
+  // oscillates with period RETICULE_TRAJECTORY_PULSE_PERIOD_BEATS beats
+  // whose peaks land on beats. WeakMap so dead targets get GC'd
+  // automatically.
   private trajectoryFirstSeen = new WeakMap<object, number>();
-
   constructor(pos: Vec) {
     this.pos = pos;
   }
@@ -321,7 +339,8 @@ export class Ship {
     beatGrid: number,
     w: number,
     h: number,
-    targets: ReadonlyArray<{ pos: Vec; vel: Vec; radius?: number }> = []
+    targets: ReadonlyArray<{ pos: Vec; vel: Vec; radius?: number }> = [],
+    beatTime: number = 0
   ) {
     if (!this.alive) return;
     const dir = fromAngle(this.heading, 1);
@@ -363,15 +382,20 @@ export class Ship {
     // Trajectory previews for anything inside the radar. Extends from the
     // leading edge of the object out to the radar boundary along its
     // velocity vector, dashed so it reads as a forecast rather than a
-    // permanent tether. Each line fades out the longer its target has been
-    // inside the radar — fresh entries are bright, lingerers dissolve so the
-    // radar reads as a decaying forecast rather than a permanent tether.
+    // permanent tether. Each line holds full alpha for the first
+    // RETICULE_TRAJECTORY_FADE_START fraction of its length, then linearly
+    // fades to 0 at the far end — keeps the near forecast crisp while the
+    // tip dissolves into the radar boundary.
     if (targets.length > 0) {
       ctx.save();
       ctx.setLineDash(RETICULE_LINE_DASH);
-      ctx.shadowBlur = 4;
+      ctx.lineWidth = 1.5;
+      // No shadowBlur here on purpose: canvas drop-shadows on gradient strokes
+      // are very expensive, and cost scales with target count. The dashed
+      // line + lighter composite already reads as glowing.
+      ctx.shadowBlur = 0;
       const radarR2 = RADAR_RADIUS * RADAR_RADIUS;
-      const now = performance.now() / 1000;
+      const pulsePeriod = RETICULE_TRAJECTORY_PULSE_PERIOD_BEATS * beatGrid;
       for (const t of targets) {
         // Account for screen-wrap: pick whichever toroidal image of the
         // target sits closest to the reticule so objects near a seam still
@@ -389,19 +413,40 @@ export class Ship {
         const inclusionR = RADAR_RADIUS + tr;
         if (dx * dx + dy * dy > inclusionR * inclusionR) {
           // Out of range — clear the timestamp so a re-entry starts a fresh
-          // fade rather than picking up where the previous visit left off.
+          // ramp from 0 rather than picking up where it left off.
           this.trajectoryFirstSeen.delete(t as unknown as object);
           continue;
         }
-        let firstSeen = this.trajectoryFirstSeen.get(t as unknown as object);
-        if (firstSeen === undefined) {
-          firstSeen = now;
-          this.trajectoryFirstSeen.set(t as unknown as object, now);
+        let firstSeenBeat = this.trajectoryFirstSeen.get(t as unknown as object);
+        if (firstSeenBeat === undefined) {
+          firstSeenBeat = beatTime;
+          this.trajectoryFirstSeen.set(t as unknown as object, beatTime);
         }
-        const age = now - firstSeen;
-        if (age >= RETICULE_TRAJECTORY_FADE_DURATION) continue;
-        const fade = 1 - age / RETICULE_TRAJECTORY_FADE_DURATION;
-        ctx.globalAlpha = RETICULE_TRAJECTORY_ALPHA * fade;
+        // Per-target opacity pulse driven by the musical clock. First the
+        // line ramps 0 → 1 from when the target appeared up to the next
+        // beat boundary, so the very first peak lands ON a beat. After
+        // that, it settles into the steady cos pulse between MIN and 1,
+        // whose period (RETICULE_TRAJECTORY_PULSE_PERIOD_BEATS beats) is a
+        // whole multiple of BEAT_GRID, so subsequent peaks also land on
+        // beats.
+        const firstPeakBeat =
+          Math.ceil((firstSeenBeat + 1e-6) / beatGrid) * beatGrid;
+        let pulse01: number;
+        if (beatTime < firstPeakBeat) {
+          const rampSpan = firstPeakBeat - firstSeenBeat;
+          pulse01 = rampSpan > 0 ? (beatTime - firstSeenBeat) / rampSpan : 1;
+        } else {
+          // cos puts the peak (pulse01 = 1) exactly at firstPeakBeat and at
+          // every firstPeakBeat + k*PERIOD after that.
+          pulse01 =
+            0.5 +
+            0.5 *
+              Math.cos(((beatTime - firstPeakBeat) / pulsePeriod) * TAU);
+        }
+        const floor =
+          beatTime < firstPeakBeat ? 0 : RETICULE_TRAJECTORY_PULSE_MIN_ALPHA;
+        const pulse = floor + (1 - floor) * pulse01;
+        ctx.globalAlpha = RETICULE_TRAJECTORY_ALPHA * pulse;
         const cx = reticulePos.x + dx;
         const cy = reticulePos.y + dy;
         const speed = Math.hypot(t.vel.x, t.vel.y);
@@ -412,9 +457,13 @@ export class Ship {
         // visibly emerges from its front, not its centre. For objects whose
         // centre sits outside the radar (only their silhouette overlaps),
         // we'll clip this start forward to wherever the ray enters the disc.
+        // The extra pad past `r` keeps the dash from kissing or crossing the
+        // silhouette — `r` is a bounding-circle radius and polygonal targets
+        // (asteroids) can otherwise nick the line.
         const r = t.radius ?? 0;
-        const rawStartX = cx + ux * (r + 2);
-        const rawStartY = cy + uy * (r + 2);
+        const edgePad = 6;
+        const rawStartX = cx + ux * (r + edgePad);
+        const rawStartY = cy + uy * (r + edgePad);
         // Solve for the segment of the ray that lies inside the radar disc.
         // |(rawStart + s*u) - reticule|^2 = RADAR_RADIUS^2 → s^2 + 2b s + c = 0.
         const sx = rawStartX - reticulePos.x;
@@ -435,6 +484,14 @@ export class Ship {
         const startY = rawStartY + uy * sEntry;
         const endX = rawStartX + ux * sExit;
         const endY = rawStartY + uy * sExit;
+        // Linear gradient along the segment: opaque from 0 to
+        // RETICULE_TRAJECTORY_FADE_START, then ramps to transparent at the
+        // far end so the tip dissolves into the radar boundary.
+        const grad = ctx.createLinearGradient(startX, startY, endX, endY);
+        grad.addColorStop(0, `hsla(${RETICULE_DASH_HSL}, 1)`);
+        grad.addColorStop(RETICULE_TRAJECTORY_FADE_START, `hsla(${RETICULE_DASH_HSL}, 1)`);
+        grad.addColorStop(1, `hsla(${RETICULE_DASH_HSL}, 0)`);
+        ctx.strokeStyle = grad;
         ctx.beginPath();
         ctx.moveTo(startX, startY);
         ctx.lineTo(endX, endY);
@@ -494,22 +551,6 @@ export class Ship {
 
     ctx.fillStyle = `hsla(195, 100%, 60%, ${(0.08 + 0.22 * beatPulse) * pulse})`;
     ctx.fill();
-
-    ctx.shadowBlur = 12;
-    for (const vert of verticesOfShip) {
-      const grad = ctx.createRadialGradient(vert.x, vert.y, 0, vert.x, vert.y, 4);
-      grad.addColorStop(0, "hsla(195, 100%, 95%, 1)");
-      grad.addColorStop(0.4, "hsla(195, 100%, 70%, 0.7)");
-      grad.addColorStop(1, "hsla(195, 100%, 60%, 0)");
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(vert.x, vert.y, 4, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = "hsla(195, 100%, 98%, 1)";
-      ctx.beginPath();
-      ctx.arc(vert.x, vert.y, 0.6, 0, TAU);
-      ctx.fill();
-    }
 
     if (this.thrustOn) {
       const back = fromAngle(this.heading + Math.PI, this.radius * 1.8 + Math.random() * 4);

@@ -110,7 +110,8 @@ export type SoundName =
   | "alienFireSmall"
   | "alienHit"
   | "alienExplode"
-  | "cometNote";
+  | "cometNote"
+  | "cometDestroyed";
 
 export class Sound {
   ctx: AudioContext | null = null;
@@ -139,8 +140,8 @@ export class Sound {
   bassDrones: Map<object, BassDroneNode> = new Map();
   // Per-comet shimmer pad, keyed by the Comet instance.
   cometShimmers: Map<object, CometShimmerNode> = new Map();
-  // Which engine routes the audio. Toggle in-game with B to A/B legacy hand-
-  // built WebAudio vs the Tone.js polished path. In tone mode, *every* sound
+  // Which engine routes the audio. Legacy hand-built WebAudio vs the Tone.js
+  // polished path (default). In tone mode, *every* sound
   // (including hand-written synthesis that targets `this.master`) is siphoned
   // through the Tone fx bus → compressor → limiter, so the global character
   // changes engine-wide without rewriting each voice individually.
@@ -239,18 +240,20 @@ export class Sound {
     legacyBusDry.connect(toneMaster);
     legacyBusWet.connect(reverbSend);
 
-    // Comet melody voice: FM synth with a slow-attack envelope and a touch
-    // of harmonic content from the modulator. Routed mostly wet (heavy
-    // reverb + chorus) to give each note a glassy, bell-like halo that
-    // bleeds into the next.
+    // Comet melody voice: FM synth tuned for an unsettling, hollow timbre.
+    // Inharmonic harmonicity (2.41 ≈ a sour just-out-of-tune interval) plus
+    // a sawtooth modulator give every note a slight metallic warble that
+    // reads as "not quite right" against the bass kit's clean tonal bed.
+    // Slow attack and long release let notes overlap into a fog rather than
+    // landing as discrete bells.
     const cometMelodySynth = new Tone.PolySynth(Tone.FMSynth, {
-      harmonicity: 3.01,
-      modulationIndex: 6,
+      harmonicity: 2.41,
+      modulationIndex: 11,
       oscillator: { type: "sine" },
-      modulation: { type: "sine" },
-      envelope: { attack: 0.005, decay: 0.4, sustain: 0.2, release: 2.6 },
-      modulationEnvelope: { attack: 0.01, decay: 0.3, sustain: 0, release: 1.2 },
-      volume: -10,
+      modulation: { type: "sawtooth" },
+      envelope: { attack: 0.05, decay: 0.6, sustain: 0.35, release: 3.4 },
+      modulationEnvelope: { attack: 0.04, decay: 0.5, sustain: 0.1, release: 2.0 },
+      volume: -12,
     });
     // Dry path (small amount, for presence) and wet (lush tail).
     const cometDry = new Tone.Gain(0.35);
@@ -949,21 +952,21 @@ export class Sound {
     for (const key of Array.from(this.bassDrones.keys())) this.stopBassteroidDrone(key);
   }
 
-  // Comet melody: a slow, sparse C-major motif designed to weave over the
-  // bassteroid percussion and the broken-open drone bed. Pitches are picked
-  // from C major (with one expressive 6th and 9th) so any note can land on
-  // top of any combination of the bass voices (rooted at C2) and the medium/
-  // small drone chord (C/E/G/A at C3-octave; C/B/D/E at C5-octave) without
-  // dissonance. Rests (null) leave breathing room — the bass kit is doing
-  // the rhythmic heavy lifting, so the comet should feel airy.
+  // Comet melody: an unsettling Phrygian/diminished motif that sits over
+  // the bassteroid percussion. Pitches centre on C with a flattened 2nd
+  // (Db) and a tritone (F#) so every phrase visits a tension interval
+  // before resolving — the listener never quite settles. The line lives in
+  // a lower octave than the old major-add9 version so it reads as looming
+  // rather than ethereal.
   //
   // The melody is 16 steps long; one step plays per BEAT_GRID tick (0.5s), so
   // the full phrase is 8 seconds = 4 bass measures. Long-form: rises through
-  // a pentatonic-ish ascent, lingers on the 9th, falls back to the tonic.
+  // a half-step climb (C → Db) to the tritone (F#), sits on the b6 (Ab) for
+  // dread, then falls chromatically back toward the root.
   private static readonly COMET_MELODY: (number | null)[] = [
-    // C5  E5  G5   -   A5   G5  E5   -    F5  A5  C6   -    B5   G5  E5  -
-    523.25, 659.25, 783.99, null, 880.00, 783.99, 659.25, null,
-    698.46, 880.00, 1046.5, null, 987.77, 783.99, 659.25, null,
+    // C4  Db4  F#4   -   Ab4   G4  Db4   -    F4  Ab4  C5    -    B4   F#4  Eb4  -
+    261.63, 277.18, 369.99, null, 415.30, 392.00, 277.18, null,
+    349.23, 415.30, 523.25, null, 493.88, 369.99, 311.13, null,
   ];
 
   // Fire one note of the comet melody. `step` is the global step index since
@@ -1030,98 +1033,133 @@ export class Sound {
     high.stop(t + 2.5);
   }
 
-  // Soft chord pad held under the comet's entire lifetime. Adds a continuous
-  // C-major ninth wash (C - E - G - D) that fills in the spaces between
-  // melody notes and the bass percussion. Very quiet — it's *atmosphere*,
-  // not a lead voice.
+  // Ominous voice held under the comet's entire lifetime. Begins with a
+  // big "shhwwwoorrr" — a wide noise band sweeping from high down to mid,
+  // panning the listener's attention to the comet's arrival — then settles
+  // into a low, dissonant drone (minor 2nd + tritone over the root) that
+  // hums for the comet's life. The drone is intentionally unresolved so
+  // the comet feels threatening rather than tranquil.
   startCometShimmer(key: object) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
 
-    if (this.engine === "tone") {
-      const eng = this.ensureToneEngine();
-      if (!eng) return;
-      if (eng.cometShimmerByKey.has(key)) return;
-
-      // Add9 voicing across two octaves, soft sine pad with chorus on the
-      // shared fx bus + heavy reverb. Independent LFOs per-voice are baked
-      // into the chorus.
-      const chord = ["C4", "E4", "G4", "D5"];
-      const pad = new Tone.PolySynth(Tone.Synth, {
-        oscillator: { type: "sine" },
-        envelope: { attack: 1.6, decay: 0.2, sustain: 1, release: 2.0 },
-        volume: -22,
-      });
-      const fadeGain = new Tone.Gain(1);
-      // Slow amplitude wobble so the pad breathes — done at the pad gain
-      // level instead of per-voice so we don't fight tone's polysynth.
-      const breath = new Tone.LFO({ frequency: 0.13, min: 0.75, max: 1.0 });
-      breath.connect(fadeGain.gain);
-      breath.start();
-
-      pad.connect(fadeGain);
-      // Pad sits mostly in the wet bus — it's atmosphere, not a lead.
-      const dry = new Tone.Gain(0.25);
-      const wet = new Tone.Gain(1.0);
-      fadeGain.connect(dry);
-      fadeGain.connect(wet);
-      dry.connect(eng.toneMaster);
-      wet.connect(eng.reverbSend);
-
-      pad.triggerAttack(chord);
-
-      eng.cometShimmerByKey.set(key, { synth: pad, chord, fadeGain, lfos: [breath] });
-      return;
-    }
-
+    // The comet voice is built on the legacy WebAudio path for both engines —
+    // the bandpass-swept noise + saw-cluster drone is easier to express here
+    // than in Tone, and in tone-engine mode the legacy bus already routes
+    // through the same compressor/limiter chain, so polish is shared.
     if (this.cometShimmers.has(key)) return;
     const t = this.ctx.currentTime;
 
-    // C major add-9 voicing: C4, E4, G4, D5. Each note gets a very slight
-    // detune partner and an independent slow tremolo so the chord shimmers
-    // continuously instead of sitting as a flat pad.
-    const chordFreqs = [261.63, 329.63, 392.00, 587.33];
-    const tremRates = [0.11, 0.17, 0.13, 0.19];
-
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.Q.value = 0.8;
-    filter.frequency.value = 1800;
-
+    // ── Master comet voice gain ──────────────────────────────────────────
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
-    mainGain.gain.exponentialRampToValueAtTime(0.05, t + 1.6 /* COMET_FADE_IN */);
-    filter.connect(mainGain);
+    // Big swell up over the FADE_IN window so the entrance lands hard.
+    // Fade-in window matches Comet.FADE_IN (1.6s) so the audio swell tracks
+    // the visual bloom landing.
+    const audioFadeIn = 1.6;
+    mainGain.gain.exponentialRampToValueAtTime(0.32, t + audioFadeIn);
+    // Then ease back to a sustained but quieter drone level so the melody
+    // notes have headroom to cut through.
+    mainGain.gain.exponentialRampToValueAtTime(0.085, t + audioFadeIn + 2.0);
     mainGain.connect(this.master);
 
     const oscs: OscillatorNode[] = [];
     const lfos: OscillatorNode[] = [];
 
-    for (let i = 0; i < chordFreqs.length; i++) {
-      const f = chordFreqs[i];
+    // ── "Shhwwwoorrr" entrance: bandpass-swept noise ────────────────────
+    // 6 seconds of looped pink-ish noise routed through a bandpass that
+    // sweeps from ~5kHz down to ~600Hz over the first ~3 seconds — gives
+    // the classic "approaching from a distance" wind/whoosh, then tails
+    // off into the drone bed.
+    const noiseBuf = this.makeNoiseBuffer(8);
+    if (noiseBuf) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+      noise.loop = true;
+
+      const noiseBp = this.ctx.createBiquadFilter();
+      noiseBp.type = "bandpass";
+      noiseBp.Q.value = 2.4;
+      noiseBp.frequency.setValueAtTime(5200, t);
+      noiseBp.frequency.exponentialRampToValueAtTime(1200, t + 1.6);
+      noiseBp.frequency.exponentialRampToValueAtTime(620, t + 3.2);
+      // A slow LFO on the bandpass after the sweep gives the drone its
+      // restless, breathing quality — the wind never settles.
+      const sweepLfo = this.ctx.createOscillator();
+      sweepLfo.type = "sine";
+      sweepLfo.frequency.value = 0.09;
+      const sweepDepth = this.ctx.createGain();
+      sweepDepth.gain.value = 220;
+      sweepLfo.connect(sweepDepth);
+      sweepDepth.connect(noiseBp.frequency);
+      sweepLfo.start(t + 3.2);
+
+      const noiseGain = this.ctx.createGain();
+      // The whoosh is loud at entry, then drops to a thin hiss under the
+      // drone. Time these to the master swell.
+      noiseGain.gain.setValueAtTime(0.0001, t);
+      noiseGain.gain.exponentialRampToValueAtTime(0.85, t + 0.45);
+      noiseGain.gain.exponentialRampToValueAtTime(0.55, t + 2.0);
+      noiseGain.gain.exponentialRampToValueAtTime(0.12, t + 4.5);
+
+      noise.connect(noiseBp);
+      noiseBp.connect(noiseGain);
+      noiseGain.connect(mainGain);
+      noise.start(t);
+
+      // Track the noise source under oscs so stopCometShimmer cleans it up.
+      // (OscillatorNode and AudioBufferSourceNode both have .stop, and the
+      // cleanup loop only calls .stop — close enough that we can store as
+      // OscillatorNode for the type without runtime fallout.)
+      oscs.push(noise as unknown as OscillatorNode);
+      lfos.push(sweepLfo);
+    }
+
+    // ── Unsettling drone bed ─────────────────────────────────────────────
+    // Low cluster: root C2 (65.4) + minor 2nd above (Db2 = 69.3) + tritone
+    // (F#2 = 92.5). The minor-2nd interval is the textbook horror-movie
+    // "wrong note"; the tritone is the medieval "diabolus in musica". Each
+    // voice is two slightly detuned sawtooth oscillators run through a
+    // dark lowpass, so the cluster reads as a thick rumbling drone rather
+    // than three distinct pitches.
+    const droneFreqs = [65.41, 69.30, 92.50];
+    const tremRates = [0.07, 0.11, 0.13];
+
+    const droneFilter = this.ctx.createBiquadFilter();
+    droneFilter.type = "lowpass";
+    droneFilter.Q.value = 1.4;
+    // Filter opens slowly during the entry, then settles dark.
+    droneFilter.frequency.setValueAtTime(400, t);
+    droneFilter.frequency.exponentialRampToValueAtTime(1100, t + 2.5);
+    droneFilter.frequency.exponentialRampToValueAtTime(620, t + 6.0);
+    droneFilter.connect(mainGain);
+
+    for (let i = 0; i < droneFreqs.length; i++) {
+      const f = droneFreqs[i];
       const oscA = this.ctx.createOscillator();
       const oscB = this.ctx.createOscillator();
-      oscA.type = "sine";
-      oscB.type = "sine";
+      oscA.type = "sawtooth";
+      oscB.type = "sawtooth";
       oscA.frequency.value = f;
-      oscB.frequency.value = f * 1.005;
+      oscB.frequency.value = f * 1.011; // wider detune than the old pad — beats slowly
 
-      // Per-voice tremolo so the four chord tones beat against each other
-      // at different rates — gives the pad its breathing, drifting quality.
       const trem = this.ctx.createOscillator();
       trem.type = "sine";
       trem.frequency.value = tremRates[i];
       const tremDepth = this.ctx.createGain();
-      tremDepth.gain.value = 0.35;
+      tremDepth.gain.value = 0.4;
       const voiceGain = this.ctx.createGain();
-      voiceGain.gain.value = 0.65;
+      // Root strongest, tritone next, minor-2nd quietest so the wrong
+      // note tints the cluster without dominating.
+      const voiceLevel = i === 0 ? 0.55 : i === 2 ? 0.35 : 0.22;
+      voiceGain.gain.value = voiceLevel;
       trem.connect(tremDepth);
       tremDepth.connect(voiceGain.gain);
 
       oscA.connect(voiceGain);
       oscB.connect(voiceGain);
-      voiceGain.connect(filter);
+      voiceGain.connect(droneFilter);
 
       oscA.start(t);
       oscB.start(t);
@@ -1165,6 +1203,116 @@ export class Sound {
     for (const o of node.oscs) o.stop(stopAt);
     for (const l of node.lfos) l.stop(stopAt);
     this.cometShimmers.delete(key);
+  }
+
+  // Big explosive-into-quiet death sound for a player-destroyed comet.
+  // Begins with a sharp white-noise crack + low sub-thump (the actual
+  // explosion impact) and resolves into a long noise + sub drone that
+  // fades out over 15 seconds — the wreckage echoing through the void.
+  // Played on top of (and louder than) the comet's own drone, which
+  // continues its normal ~2s fade-out via stopCometShimmer.
+  playCometDestroyed() {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const TAIL = 15.0;
+
+    // ── Initial crack: short broadband noise burst with a fast HP→LP
+    // sweep so it reads as "explosion now, then debris".
+    const crackBuf = this.makeNoiseBuffer(0.4);
+    if (crackBuf) {
+      const crack = this.ctx.createBufferSource();
+      crack.buffer = crackBuf;
+      const crackFilter = this.ctx.createBiquadFilter();
+      crackFilter.type = "lowpass";
+      crackFilter.Q.value = 0.9;
+      crackFilter.frequency.setValueAtTime(8000, t);
+      crackFilter.frequency.exponentialRampToValueAtTime(1400, t + 0.18);
+      const crackGain = this.ctx.createGain();
+      crackGain.gain.setValueAtTime(0.85, t);
+      crackGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      crack.connect(crackFilter);
+      crackFilter.connect(crackGain);
+      crackGain.connect(this.master);
+      crack.start(t);
+      crack.stop(t + 0.4);
+    }
+
+    // ── Sub-bass thump: pitched sine sweep from ~120Hz down to ~30Hz.
+    // The chest-thump under the crack — gives the explosion physical weight.
+    const sub = this.ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(140, t);
+    sub.frequency.exponentialRampToValueAtTime(30, t + 0.9);
+    const subGain = this.ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.55, t + 0.01);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + 1.5);
+
+    // ── Long tail: looped pink noise through a slow-closing bandpass.
+    // After the initial crack settles, the noise band drops from ~1200Hz
+    // down to ~80Hz over the 15-second tail, so the "wreckage" gets
+    // duller (more felt than heard) as it fades.
+    const tailBuf = this.makeNoiseBuffer(4);
+    if (tailBuf) {
+      const tail = this.ctx.createBufferSource();
+      tail.buffer = tailBuf;
+      tail.loop = true;
+
+      const tailFilter = this.ctx.createBiquadFilter();
+      tailFilter.type = "bandpass";
+      tailFilter.Q.value = 1.6;
+      tailFilter.frequency.setValueAtTime(2400, t);
+      tailFilter.frequency.exponentialRampToValueAtTime(1200, t + 0.6);
+      tailFilter.frequency.exponentialRampToValueAtTime(80, t + TAIL);
+
+      const tailGain = this.ctx.createGain();
+      // Big at the impact, then a long exponential fade to silence at
+      // exactly TAIL seconds. The shape uses two segments so the first
+      // ~2s of tail are still meaty before the long quiet fade takes over.
+      tailGain.gain.setValueAtTime(0.0001, t);
+      tailGain.gain.exponentialRampToValueAtTime(0.45, t + 0.05);
+      tailGain.gain.exponentialRampToValueAtTime(0.18, t + 2.0);
+      tailGain.gain.exponentialRampToValueAtTime(0.0001, t + TAIL);
+
+      tail.connect(tailFilter);
+      tailFilter.connect(tailGain);
+      tailGain.connect(this.master);
+      tail.start(t);
+      tail.stop(t + TAIL + 0.2);
+    }
+
+    // ── Sub-drone under the tail: low sawtooth that hums for the full
+    // 15s. Gives the fade a tangible low-end presence so the player can
+    // still feel the comet's ghost long after the visual is gone.
+    const droneRoot = this.ctx.createOscillator();
+    const droneOct = this.ctx.createOscillator();
+    droneRoot.type = "sawtooth";
+    droneOct.type = "sawtooth";
+    droneRoot.frequency.value = 49.0; // G1 — sits below the bassteroid bed
+    droneOct.frequency.value = 49.0 * 1.013; // wide detune for slow beating
+    const droneLp = this.ctx.createBiquadFilter();
+    droneLp.type = "lowpass";
+    droneLp.Q.value = 0.8;
+    droneLp.frequency.setValueAtTime(600, t);
+    droneLp.frequency.exponentialRampToValueAtTime(120, t + TAIL);
+    const droneGain = this.ctx.createGain();
+    droneGain.gain.setValueAtTime(0.0001, t);
+    droneGain.gain.exponentialRampToValueAtTime(0.22, t + 0.4);
+    droneGain.gain.exponentialRampToValueAtTime(0.0001, t + TAIL);
+    droneRoot.connect(droneLp);
+    droneOct.connect(droneLp);
+    droneLp.connect(droneGain);
+    droneGain.connect(this.master);
+    droneRoot.start(t);
+    droneOct.start(t);
+    droneRoot.stop(t + TAIL + 0.2);
+    droneOct.stop(t + TAIL + 0.2);
   }
 
   stopAllCometShimmers() {
@@ -1239,6 +1387,7 @@ export class Sound {
       case "alienHit": this.playAlienHit(); break;
       case "alienExplode": this.playAlienExplode(); break;
       case "cometNote": this.playCometNote(Math.round(effectivePitch)); break;
+      case "cometDestroyed": this.playCometDestroyed(); break;
     }
 
     if (voiceGain) this.master = realMaster;

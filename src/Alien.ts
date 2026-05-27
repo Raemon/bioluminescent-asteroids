@@ -278,11 +278,17 @@ export class Alien {
     }
     ctx.shadowBlur = 0;
 
-    // Damage cracks — one per HP lost. Drawn over the body as dark
-    // fracture lines, matching the bassteroid visual vocabulary so the
-    // player learns "armoured = cracks accumulate".
+    // Damage cracks — one per HP lost. Drawn over the body as faint white
+    // fracture lines, clipped to the saucer silhouette so they never spill
+    // off the disc/dome.
     const cracksToDraw = this.maxHp - this.hp;
     if (cracksToDraw > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(0, 0.18 * r, r, r * 0.42, 0, 0, TAU);
+      ctx.ellipse(0, -0.1 * r, r * 0.46, r * 0.4, 0, 0, TAU);
+      ctx.clip();
+      const crackScale = 0.65;
       for (let i = 0; i < cracksToDraw; i++) {
         const crack = this.cracks[i];
         const dx = crack.pos.x * r;
@@ -290,9 +296,10 @@ export class Alien {
         ctx.save();
         ctx.translate(dx, dy);
         ctx.rotate(crack.angle);
+        ctx.scale(crackScale, crackScale);
         ctx.globalCompositeOperation = "source-over";
-        ctx.strokeStyle = "rgba(6,2,1,0.95)";
-        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = "rgba(245,245,250,0.45)";
+        ctx.lineWidth = 1.0;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
         for (const branch of crack.branches) {
@@ -306,10 +313,8 @@ export class Alien {
           ctx.stroke();
         }
         ctx.globalCompositeOperation = "lighter";
-        ctx.strokeStyle = `hsla(20, 100%, 70%, 0.55)`;
-        ctx.lineWidth = 0.7;
-        ctx.shadowColor = `hsla(15, 100%, 55%, 1)`;
-        ctx.shadowBlur = 5;
+        ctx.strokeStyle = `rgba(255,255,255,0.28)`;
+        ctx.lineWidth = 0.45;
         for (const branch of crack.branches) {
           ctx.beginPath();
           for (let p = 0; p < branch.points.length; p++) {
@@ -320,9 +325,9 @@ export class Alien {
           }
           ctx.stroke();
         }
-        ctx.shadowBlur = 0;
         ctx.restore();
       }
+      ctx.restore();
     }
 
     if (this.flashAmount > 0) {

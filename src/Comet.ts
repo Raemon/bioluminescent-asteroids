@@ -43,11 +43,24 @@ export class Comet {
   static readonly FADE_IN = 1.6;
   static readonly FADE_OUT = 2.0;
 
+  // Hit radius for the head. Roughly matches the bright pin-prick + halo so
+  // a bullet that visually clips the head reads as a hit. The visual halo
+  // extends a bit further but isn't part of the body — only the burning
+  // core counts.
+  static readonly HIT_RADIUS = 24;
+  readonly radius = Comet.HIT_RADIUS;
+
   constructor(pos: Vec, vel: Vec, hue: number) {
     this.pos = pos;
     this.vel = vel;
     this.hue = hue;
     this.glowTrail = new Trail(hue, 18, 0.32, "shimmer", 1.6);
+  }
+
+  collidesWith(p: Vec, r: number): boolean {
+    const dx = this.pos.x - p.x;
+    const dy = this.pos.y - p.y;
+    return dx * dx + dy * dy <= (this.radius + r) * (this.radius + r);
   }
 
   // Brightness envelope: rises during FADE_IN, holds at 1, eases out during

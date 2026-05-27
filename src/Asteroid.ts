@@ -924,6 +924,10 @@ export class Asteroid {
   renderCracks(ctx: CanvasRenderingContext2D) {
     const cracksToDraw = Math.min(this.maxHp - this.hp, this.cracks.length);
     if (cracksToDraw <= 0) return;
+    ctx.save();
+    this.tracePath(ctx, 1);
+    ctx.clip();
+    const crackScale = 0.7;
     for (let i = 0; i < cracksToDraw; i++) {
       const crack = this.cracks[i];
       const dx = crack.pos.x * this.radius;
@@ -931,10 +935,11 @@ export class Asteroid {
       ctx.save();
       ctx.translate(dx, dy);
       ctx.rotate(crack.angle);
+      ctx.scale(crackScale, crackScale);
 
       ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = "rgba(6,2,1,0.95)";
-      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = "rgba(245,245,250,0.45)";
+      ctx.lineWidth = 1.2;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       for (const branch of crack.branches) {
@@ -949,10 +954,8 @@ export class Asteroid {
       }
 
       ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = `hsla(20, 100%, 70%, 0.55)`;
-      ctx.lineWidth = 0.8;
-      ctx.shadowColor = `hsla(15, 100%, 55%, 1)`;
-      ctx.shadowBlur = 5;
+      ctx.strokeStyle = `rgba(255,255,255,0.3)`;
+      ctx.lineWidth = 0.5;
       for (const branch of crack.branches) {
         ctx.beginPath();
         for (let p = 0; p < branch.points.length; p++) {
@@ -963,9 +966,9 @@ export class Asteroid {
         }
         ctx.stroke();
       }
-      ctx.shadowBlur = 0;
       ctx.restore();
     }
+    ctx.restore();
   }
 
   // Render path for bassteroids: pre-baked modular sprite + live cracks
@@ -1227,6 +1230,11 @@ export class Asteroid {
   renderBossCracks(ctx: CanvasRenderingContext2D, damageT: number) {
     if (damageT <= 0.01) return;
     const cracksToDraw = Math.min(Math.ceil(damageT * this.cracks.length * 1.4), this.cracks.length);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, this.radius, 0, TAU);
+    ctx.clip();
+    const crackScale = 0.7;
     for (let i = 0; i < cracksToDraw; i++) {
       const crack = this.cracks[i];
       const dx = crack.pos.x * this.radius;
@@ -1234,11 +1242,12 @@ export class Asteroid {
       ctx.save();
       ctx.translate(dx, dy);
       ctx.rotate(crack.angle);
+      ctx.scale(crackScale, crackScale);
 
-      // Dark fracture line (the crack itself).
+      // Faint white fracture line (the crack itself).
       ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = `rgba(2, 0, 0, ${0.85 + 0.15 * damageT})`;
-      ctx.lineWidth = 2.6 + damageT * 1.8;
+      ctx.strokeStyle = `rgba(245,245,250, ${0.35 + 0.2 * damageT})`;
+      ctx.lineWidth = 1.4 + damageT * 1.0;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       for (const branch of crack.branches) {
@@ -1252,14 +1261,11 @@ export class Asteroid {
         ctx.stroke();
       }
 
-      // Molten glow inside the crack — gets brighter and wider as the boss
-      // takes more damage so the planetoid visibly heats up before it
-      // shatters.
+      // Subtle bright over-stroke — still scales with damage so the boss
+      // visibly stresses, but desaturated to white rather than molten orange.
       ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = `hsla(${this.hue + 20}, 100%, ${55 + damageT * 25}%, ${0.5 + 0.45 * damageT})`;
-      ctx.lineWidth = 1.0 + damageT * 1.4;
-      ctx.shadowColor = `hsla(${this.hue + 10}, 100%, 55%, 1)`;
-      ctx.shadowBlur = 8 + damageT * 14;
+      ctx.strokeStyle = `rgba(255,255,255, ${0.25 + 0.3 * damageT})`;
+      ctx.lineWidth = 0.6 + damageT * 0.8;
       for (const branch of crack.branches) {
         ctx.beginPath();
         for (let p = 0; p < branch.points.length; p++) {
@@ -1270,9 +1276,9 @@ export class Asteroid {
         }
         ctx.stroke();
       }
-      ctx.shadowBlur = 0;
       ctx.restore();
     }
+    ctx.restore();
   }
 }
 
