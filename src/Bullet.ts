@@ -9,6 +9,9 @@ export const BULLET_DAMAGE_BASE = 1;
 // HP multiplier of its own, so an on-beat shot does a "normal hit" against
 // armour).
 export const BULLET_DAMAGE_BEAT = 4;
+// Damage dealt by a boosted on-beat bullet — fired while the yellow combo
+// halo is up (combo ≥ 4). Doubles the on-beat damage to reward the streak.
+export const BULLET_DAMAGE_BEAT_BOOSTED = 8;
 
 export class Bullet {
   pos: Vec;
@@ -24,6 +27,10 @@ export class Bullet {
   // and is read by Game on collision to apply the combo score multiplier.
   // Also bumps the damage from BULLET_DAMAGE_BASE to BULLET_DAMAGE_BEAT.
   onBeat = false;
+  // True when this on-beat bullet was fired while the yellow combo halo was
+  // up (combo ≥ 4). Renders yellow instead of blue and deals 2× the on-beat
+  // damage so the gold-tier streak feels lethal as well as visible.
+  boosted = false;
   // Set by Ship.fire when the player has the pierce powerup active. Game's
   // collision pass keeps a piercing bullet alive on hit instead of consuming
   // it, so a single shot can punch through a row of asteroids.
@@ -41,6 +48,7 @@ export class Bullet {
   }
 
   damage(): number {
+    if (this.boosted) return BULLET_DAMAGE_BEAT_BOOSTED;
     return this.onBeat ? BULLET_DAMAGE_BEAT : BULLET_DAMAGE_BASE;
   }
 
@@ -66,10 +74,11 @@ export class Bullet {
   render(ctx: CanvasRenderingContext2D) {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
+    // Boosted on-beat: gold (hue 45) to match the tier-2 combo halo.
     // On-beat: deep saturated blue (hue 220) — sells "weightier" rhythm shot.
     // Pierce: yellow. Non-beat: pale cyan, smaller and quieter visually.
-    const trailHue = this.onBeat ? 220 : this.pierce ? 60 : 180;
-    const headHue = this.onBeat ? 222 : this.pierce ? 60 : 180;
+    const trailHue = this.boosted ? 45 : this.onBeat ? 220 : this.pierce ? 60 : 180;
+    const headHue = this.boosted ? 48 : this.onBeat ? 222 : this.pierce ? 60 : 180;
     const trailAlphaScale = this.onBeat ? 0.85 : 0.4;
     const headAlpha = this.onBeat ? 1.0 : 0.75;
     const headRadiusMul = this.onBeat ? 10 : 6;
@@ -85,11 +94,13 @@ export class Bullet {
     ctx.globalAlpha = 1;
     // Bright core dot — for on-beat use a near-white blue-tinted highlight so
     // the deep-blue halo reads as the carrier and the core still pops.
-    ctx.fillStyle = this.onBeat
-      ? "hsla(220, 100%, 85%, 1)"
-      : this.pierce
-        ? "hsla(60, 100%, 96%, 1)"
-        : "hsla(180, 100%, 98%, 1)";
+    ctx.fillStyle = this.boosted
+      ? "hsla(50, 100%, 90%, 1)"
+      : this.onBeat
+        ? "hsla(220, 100%, 85%, 1)"
+        : this.pierce
+          ? "hsla(60, 100%, 96%, 1)"
+          : "hsla(180, 100%, 98%, 1)";
     ctx.beginPath();
     ctx.arc(this.pos.x, this.pos.y, coreRadius, 0, TAU);
     ctx.fill();

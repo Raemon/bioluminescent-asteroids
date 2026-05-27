@@ -254,6 +254,105 @@ const buildBassteroidShape = (kind: "bassA" | "bassB" | "bassC" | "bassD"): Bass
   };
 };
 
+// Partition a parent's modules into `count` spatially-coherent chunks so a
+// split child can render as "a piece of the original ship" rather than a
+// scaled-down copy of the whole thing. We pick a random axis through the
+// parent's centroid, sort modules by their centroid's projection onto that
+// axis, and slice the sorted list into `count` contiguous groups. Lights are
+// then assigned to whichever group's centroid is nearest.
+//
+// Each output BassShip's vertices are re-expressed in child-radius units:
+// chunks are translated so the group centroid sits at local origin, and
+// scaled so the chunk's bounding radius ~= 1 (i.e. the existing renderer's
+// `vertex * this.radius` pipeline lands it at the child's tier radius).
+const moduleCentroid = (m: BassModule): Vec => {
+  let sx = 0;
+  let sy = 0;
+  for (const p of m.vertices) {
+    sx += p.x;
+    sy += p.y;
+  }
+  return v(sx / m.vertices.length, sy / m.vertices.length);
+};
+
+const partitionBassShip = (ship: BassShip, count: number): BassShip[] => {
+  if (count <= 1) return [ship];
+  const axisAngle = rand(0, TAU);
+  const ax = Math.cos(axisAngle);
+  const ay = Math.sin(axisAngle);
+  const annotated = ship.modules.map(m => {
+    const c = moduleCentroid(m);
+    return { module: m, centroid: c, proj: c.x * ax + c.y * ay };
+  });
+  annotated.sort((a, b) => a.proj - b.proj);
+  // Slice into `count` contiguous groups (last group absorbs the remainder).
+  const groups: typeof annotated[] = [];
+  const base = Math.floor(annotated.length / count);
+  const extra = annotated.length - base * count;
+  let cursor = 0;
+  for (let i = 0; i < count; i++) {
+    const take = base + (i < extra ? 1 : 0);
+    groups.push(annotated.slice(cursor, cursor + take));
+    cursor += take;
+  }
+  // Build a child BassShip per group. Centre vertices around the group's
+  // centroid, then rescale so the chunk's max vertex radius is 1 — that way
+  // when the renderer multiplies by the child's tier radius, the visible
+  // chunk fills the child's footprint cleanly.
+  return groups.map(group => {
+    if (group.length === 0) return { modules: [], lights: [] };
+    let gx = 0;
+    let gy = 0;
+    for (const entry of group) {
+      gx += entry.centroid.x;
+      gy += entry.centroid.y;
+    }
+    gx /= group.length;
+    gy /= group.length;
+    let maxR = 0;
+    for (const entry of group) {
+      for (const p of entry.module.vertices) {
+        const r = Math.hypot(p.x - gx, p.y - gy);
+        if (r > maxR) maxR = r;
+      }
+    }
+    const scale = maxR > 0 ? 1 / maxR : 1;
+    const modules = group.map(entry => ({
+      vertices: entry.module.vertices.map(p => v((p.x - gx) * scale, (p.y - gy) * scale)),
+    }));
+    // Assign each light to the nearest group by centroid distance, then
+    // recentre/rescale to match.
+    const lights: BassLight[] = [];
+    for (const light of ship.lights) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < groups.length; i++) {
+        if (groups[i].length === 0) continue;
+        let cx = 0;
+        let cy = 0;
+        for (const entry of groups[i]) {
+          cx += entry.centroid.x;
+          cy += entry.centroid.y;
+        }
+        cx /= groups[i].length;
+        cy /= groups[i].length;
+        const d = Math.hypot(light.pos.x - cx, light.pos.y - cy);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
+      }
+      if (groups[bestIdx] === group) {
+        lights.push({
+          pos: v((light.pos.x - gx) * scale, (light.pos.y - gy) * scale),
+          size: light.size * scale,
+        });
+      }
+    }
+    return { modules, lights };
+  });
+};
+
 // Pre-rolled local-space placements for crack damage. We generate one entry
 // per HP — cracks reveal in order as hits land so the same bassteroid gives
 // a consistent, escalating fracture pattern per playthrough. Each crack is
@@ -350,7 +449,7 @@ export class Asteroid {
   // per-frame allocation. See Trail.ts.
   trail: Trail | null = null;
 
-  constructor(pos: Vec, vel: Vec, size: AsteroidSize, hue?: number, kind: AsteroidKind = "normal") {
+  constructor(pos: Vec, vel: Vec, size: AsteroidSize, hue?: number, kind: AsteroidKind = "normal", inheritBass?: BassShip) {
     this.pos = pos;
     this.vel = vel;
     this.size = size;
@@ -362,7 +461,11 @@ export class Asteroid {
     const isBoss = kind === "boss";
     if (isBass) {
       this.measureOffset = BASS_KIND_BASE_OFFSET[kind];
-      this.bassShip = buildBassteroidShape(kind);
+      // Split children inherit a chunk of the parent's modules so they look
+      // like a literal piece of the original ship rather than a scaled-down
+      // copy of the whole silhouette. Gen-0 spawns use the full hand-built
+      // ship.
+      this.bassShip = inheritBass ?? buildBassteroidShape(kind);
       // Bassteroids orient by intent (engines/cockpit point a way) so a
       // wildly spinning silhouette would muddy the modular read. Keep them
       // drifting slowly.
@@ -707,6 +810,18 @@ export class Asteroid {
     return { killed: this.hp <= 0 };
   }
 
+  // Why: a non-killing hit should visibly shove the target — fraction of "kill-worth"
+  // damage maps to a fraction of a reference speed bump along the impact direction.
+  // Heavier targets (high maxHp) get pushed proportionally less for the same damage.
+  applyKnockback(dirX: number, dirY: number, amount: number, referenceSpeed: number = 120) {
+    const len = Math.hypot(dirX, dirY);
+    if (len === 0) return;
+    const fraction = Math.min(1, amount / Math.max(1, this.maxHp));
+    const dv = fraction * referenceSpeed;
+    this.vel.x += (dirX / len) * dv;
+    this.vel.y += (dirY / len) * dv;
+  }
+
   update(dt: number, w: number, h: number) {
     this.rotation += this.rotSpeed * dt;
     this.membranePhase += dt * 0.8;
@@ -802,6 +917,11 @@ export class Asteroid {
       const baseAngle = impactDir
         ? Math.atan2(impactDir.y, impactDir.x)
         : Math.atan2(this.vel.y, this.vel.x);
+      // Carve the parent's silhouette into 2 spatially-coherent chunks so
+      // each child wears a recognisable piece of the original. Gen-1 mediums
+      // split a gen-0 hand-built ship; gen-2 smalls split the gen-1 chunk
+      // again — the fragmentation compounds naturally.
+      const chunks = partitionBassShip(this.bassShip!, 2);
       for (let i = 0; i < 2; i++) {
         // Fan ±~0.9 rad off the bullet's heading (one to each side), forward
         // of the impact point — within ~±π/2, so both pieces head away from
@@ -809,7 +929,7 @@ export class Asteroid {
         const sideOffset = (i === 0 ? -1 : 1) * (0.9 + rand(-0.2, 0.2));
         const a = baseAngle + sideOffset + rand(-0.2, 0.2);
         const speedMag = splitChildSpeed(this.vel, childSize);
-        const child = new Asteroid({ ...this.pos }, fromAngle(a, speedMag), childSize, this.hue, this.kind);
+        const child = new Asteroid({ ...this.pos }, fromAngle(a, speedMag), childSize, this.hue, this.kind, chunks[i]);
         child.splitLevel = childLevel;
         child.measureOffset = childOffsets[i];
         fragmentList.push(child);

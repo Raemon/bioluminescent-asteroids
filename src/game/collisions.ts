@@ -70,10 +70,12 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     consumeBullet(b);
     const onBeat = isHitOnBeat(game, b);
     logBulletHit(game, "HIT asteroid", b);
-    const { killed } = a.applyDamage(b.damage());
+    const dmg = b.damage();
+    const { killed } = a.applyDamage(dmg);
     game.shake = Math.min(game.shake + (killed ? 0.4 : 0.2), 1.2);
     applyHitToCombo(game, onBeat);
     if (!killed) {
+      a.applyKnockback(b.vel.x, b.vel.y, dmg);
       onAsteroidCrackedByBullet(game, a, onBeat);
       return null;
     }
@@ -105,12 +107,17 @@ export const shipAsteroidHit = (game: Game, a: Asteroid): boolean => {
 
 // Why: encapsulates the in-place splice when a ram kills, so the outer loop stays a simple sweep.
 const handleSingleShipAsteroidImpact = (game: Game, a: Asteroid, asteroidIdx: number) => {
-  const { killed } = a.applyDamage(4);
+  const ramDamage = 4;
+  const { killed } = a.applyDamage(ramDamage);
   if (killed) {
     const children = onAsteroidKilledByRam(game, a, game.ship.vel);
     for (const c of children) game.asteroids.push(c);
     game.asteroids.splice(asteroidIdx, 1);
   } else {
+    // Why: ram knockback uses the ship's own speed as the energy budget so a
+    // gentle bump barely nudges a rock and a full-speed slam shoves it hard.
+    const shipSpeed = Math.hypot(game.ship.vel.x, game.ship.vel.y);
+    a.applyKnockback(game.ship.vel.x, game.ship.vel.y, ramDamage, shipSpeed);
     onAsteroidCrackedByRam(game, a);
   }
   if (game.ship.shieldActive) {
@@ -142,6 +149,7 @@ const tryKillAlienWithBullets = (game: Game, a: Alien): boolean => {
     const { killed } = a.applyDamage();
     applyHitToCombo(game, onBeat);
     if (!killed) {
+      a.applyKnockback(b.vel.x, b.vel.y, 1);
       onAlienCracked(game, onBeat);
       return false;
     }

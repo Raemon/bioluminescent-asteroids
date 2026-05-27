@@ -4,7 +4,7 @@ import { spawnAsteroidAtEdge, BASS_KINDS } from "../Asteroid";
 import { ParticleSystem } from "../Particle";
 import { v } from "../vec";
 import { BEAT_WINDOW } from "./rhythmConstants";
-import { syncHud, syncComboHud } from "./hud";
+import { syncHud, syncComboHud, syncPowerupHud } from "./hud";
 import { comboGrid } from "./rhythmGate";
 import { spawnWave, updateBgBeatIntensity } from "./waveDirector";
 import { newWaveEventSchedule } from "./waveEvents";
@@ -63,6 +63,11 @@ export const showTitle = (game: Game) => {
   game.sound.bgBeatIntensity = 0;
   game.pulsar.setBossPlanetState("idle");
   spawnTitleDecorativeAsteroids(game);
+  game.ship.tridentActive = false;
+  game.ship.rapidActive = false;
+  game.ship.pierceActive = false;
+  game.ship.shieldActive = false;
+  syncPowerupHud(game);
 };
 
 // Why: per-run randomised bass intro order means the wave-2/3 picks vary between runs.

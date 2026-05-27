@@ -13,6 +13,38 @@
         <div id="score">0</div>
         <div id="combo" class="hidden"><span id="combo-value">0</span><span id="combo-label">combo</span></div>
       </div>
+      <div id="powerups">
+        <div class="powerup-slot" data-kind="trident" title="Trident — three-bullet spread">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 4 L5 11 L7 13 M12 4 L12 14 M19 4 L19 11 L17 13 M7 13 L17 13 M12 14 L12 21 M9 19 L15 19" />
+          </svg>
+        </div>
+        <div class="powerup-slot" data-kind="rapid" title="Rapid Fire — eighth-note cadence">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 12 L10 12 M6 7 L12 12 L6 17 M12 7 L18 12 L12 17 M18 7 L20 9" />
+          </svg>
+        </div>
+        <div class="powerup-slot" data-kind="pierce" title="Pierce — bullets cut through">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="8" cy="12" r="2.5" />
+            <circle cx="16" cy="12" r="2.5" />
+            <path d="M2 12 L22 12 M19 9 L22 12 L19 15" />
+          </svg>
+        </div>
+        <div class="powerup-slot" data-kind="shield" title="Shield — absorbs one hit">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3 L20 6 L20 12 Q20 17 12 21 Q4 17 4 12 L4 6 Z" />
+            <path d="M12 8 L12 16 M8 12 L16 12" opacity="0.6" />
+          </svg>
+        </div>
+        <div class="powerup-slot" data-kind="slow" title="Slow-Mo — time dilation">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="13" r="7" />
+            <path d="M12 13 L12 8 M12 13 L16 15 M9 3 L15 3 M12 3 L12 6" />
+          </svg>
+          <div class="powerup-progress"></div>
+        </div>
+      </div>
       <div id="wave">WAVE 1</div>
       <div id="hud-right">
         <button id="mute" type="button" title="Mute (M)" aria-label="Mute">♪</button>

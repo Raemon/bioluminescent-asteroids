@@ -24,7 +24,7 @@ import {
   handleCanisterShots,
 } from "./collisions";
 import { startGame, showTitle, togglePause, respawn } from "./lifecycle";
-import { syncHud } from "./hud";
+import { syncHud, syncPowerupHud } from "./hud";
 import { renderKilledRow } from "./killedParade";
 import { updatePopups } from "./popups";
 import { emitExplosion } from "./particleBursts";
@@ -128,6 +128,7 @@ const updatePlaying = (game: Game, dt: number) => {
   game.popups = updatePopups(game.popups, dt);
   runCollisionPasses(game);
   evaluateClosedBeats(game);
+  syncPowerupHud(game);
   if (game.asteroids.length === 0) advanceWave(game);
 };
 
@@ -152,7 +153,12 @@ const classifyNewBullets = (game: Game, firstNewIndex: number) => {
 
 // Why: 0→1 priming step; above 1 only on-beat hits + beat closures bump combo, not consecutive fires.
 const handleOnBeatFire = (game: Game, newBullets: Bullet[]) => {
-  for (const newBullet of newBullets) newBullet.onBeat = true;
+  // Why: boosted bullets fly while the yellow halo (combo ≥ 4, tier 2) is up.
+  const boosted = game.ship.comboHaloTier >= 2;
+  for (const newBullet of newBullets) {
+    newBullet.onBeat = true;
+    newBullet.boosted = boosted;
+  }
   game.sound.play("comboTick");
   if (game.beatCombo === 0) {
     game.beatCombo = 1;

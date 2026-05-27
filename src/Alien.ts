@@ -7,7 +7,7 @@ import { Trail } from "./Trail";
 //              Uses the same multi-hit pipeline as bassteroids — each hit
 //              decrements hp by 1, the killing hit explodes it.
 //   "medium" : 2 HP, fires every beat (BEAT_GRID).
-//   "small"  : 1 HP, fires every half-beat (BEAT_GRID/2).
+//   "small"  : 1 HP, fires every beat (BEAT_GRID).
 //
 // Aliens drift across the field on a slow lazy weave. They're not aiming for
 // the player directly — they shoot toward the player's current position when
@@ -59,7 +59,7 @@ const SIZE_HUE: Record<AlienSize, number> = {
 export const ALIEN_FIRE_PERIOD_BEATS: Record<AlienSize, number> = {
   big: 2,
   medium: 1,
-  small: 0.5,
+  small: 1,
 };
 
 type AlienCrack = {
@@ -171,6 +171,17 @@ export class Alien {
     this.flashAmount = 1;
     if (this.hp <= 0) this.alive = false;
     return { killed: this.hp <= 0 };
+  }
+
+  // Why: same hp-as-momentum proxy as asteroids — a chip hit shoves a small
+  // alien noticeably, barely budges a big one.
+  applyKnockback(dirX: number, dirY: number, amount: number, referenceSpeed: number = 120) {
+    const len = Math.hypot(dirX, dirY);
+    if (len === 0) return;
+    const fraction = Math.min(1, amount / Math.max(1, this.maxHp));
+    const dv = fraction * referenceSpeed;
+    this.vel.x += (dirX / len) * dv;
+    this.vel.y += (dirY / len) * dv;
   }
 
   // Fire a bullet aimed at `target`. Returns the new bullet so Game can
