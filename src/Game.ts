@@ -64,7 +64,7 @@ const BEAT_WINDOW = 0.065;
 // the offset from the nearest beat center on the active combo grid, and
 // whether it was classified as on-beat. Used to diagnose drift between the
 // rhythm gate and what the player hears/sees.
-const DEBUG_BEAT_TIMING = true;
+const DEBUG_BEAT_TIMING = false;
 // On-beat kill multiplier equals the current beatCombo value. The combo
 // counts hits-in-a-row since the player primed the streak by firing on-beat;
 // combo=1 means "primed but no hits yet" (multiplier 1×, no bonus shown),
@@ -317,7 +317,9 @@ export class Game {
     if (this.state === "playing") {
       this.state = "paused";
       this.ship.thrustOn = false;
+      this.ship.reverseThrustOn = false;
       this.sound.stopThrust();
+      this.sound.stopReverseThrust();
       this.overlayTitleEl.textContent = "Paused";
       this.overlayStartEl.innerHTML = 'press <span class="key">esc</span> to resume';
       this.overlayEl.classList.remove("hidden");
@@ -333,7 +335,9 @@ export class Game {
     if (this.state !== "paused") return;
     this.state = "gameover";
     this.ship.thrustOn = false;
+    this.ship.reverseThrustOn = false;
     this.sound.stopThrust();
+    this.sound.stopReverseThrust();
     this.sound.stopAllAlienDrones();
     this.sound.stopAllBassteroidDrones();
     this.sound.stopAllCometShimmers();
@@ -1943,6 +1947,7 @@ export class Game {
     this.firedOffBeatSinceLastBeat = false;
     this.syncComboHud();
     this.sound.stopThrust();
+    this.sound.stopReverseThrust();
     this.sound.play("death");
     const debrisParticleIndices = Array.from({ length: 70 }, (_, i) => i);
     for (const _ of debrisParticleIndices) {

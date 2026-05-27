@@ -14,26 +14,45 @@ const RETICULE_LINE_DASH: [number, number] = [4, 4];
 const RETICULE_DASH_HSL = "220, 100%, 100%";
 const RETICULE_HITBOX_ALPHA = 0.28;
 const RETICULE_COOLDOWN_DIM = 0.3;
+// Brightness multiplier when the aim disc overlaps a target or its trajectory.
+const RETICULE_OVERLAP_BRIGHTNESS = 3;
 
 const RETICULE_HITBOX_PULSE_MAX = 1.0;
 const RETICULE_HITBOX_PULSE_MIN = .75;
 const RETICULE_HITBOX_PULSE_PERIOD_SEC = 2.0;
 
-const RETICULE_RADAR_PULSE_MAX = 1.0;
+const RETICULE_RADAR_PULSE_MAX = 1;
 const RETICULE_RADAR_PULSE_MIN = 0.4;
 const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
 
-const RETICULE_TRAJECTORY_ALPHA = 0.5;
-const RETICULE_TRAJECTORY_FADE_START = 0.3;
-const RETICULE_TRAJECTORY_PULSE_PERIOD_BEATS = 4;
-const RETICULE_TRAJECTORY_PULSE_MIN_ALPHA = 0.2
+const TRAJECTORY_ALPHA = 1;
+const TRAJECTORY_PULSE_PERIOD_BEATS = 4;
+const TRAJECTORY_PULSE_MIN_ALPHA = 1
+const TRAJECTORY_BEAT_DOT_RADIUS = 1;
+const TRAJECTORY_BEAT_DOT_ALPHA = .25;
+const TRAJECTORY_FIRST_BEAT_DOT_RADIUS = 8;
+const TRAJECTORY_FIRST_BEAT_DOT_ALPHA = .25;
+const TRAJECTORY_FIRST_BEAT_DOT_LINE_WIDTH = 1;
+const TRAJECTORY_FIRST_BEAT_DOT_DASH: number[] = [2, 2];
+const TRAJECTORY_FIRST_BEAT_DOT_DASH_OFFSET = 0;
 
-const RADAR_CONE_HALF_ANGLE = 0.60;
-const RADAR_CONE_LENGTH = 500;
-// Cone fill brightness at the apex; the gradient fades from this to 0 at the tip.
-const RADAR_CONE_FILL_ALPHA = 0.05;
-// Pulse swing applied on top of RADAR_CONE_FILL_ALPHA (0 = no pulse, 1 = full).
-const RADAR_CONE_FILL_PULSE_AMOUNT = 0.1;
+const RADAR_HALF_ANGLE = 0.60;
+const RADAR_LENGTH = 800;
+const RADAR_FRACTIONS: number[] = [0.33, 0.66, 1.0];
+const RADAR_ALPHA = 0;
+const RADAR_PULSE_AMOUNT = 0.1;
+const RADAR_LINE_WIDTH = 1;
+const RADAR_SWEEP_PHASE_OFFSET_SEC = 0.6;
+const RADAR_SWEEP_DEPTH = 0.7;
+const RADAR_SWEEP_PERIOD_SEC = 2.4;
+
+// Background gradient + travelling pulse inside the radar cone.
+const RADAR_BG_INNER_ALPHA = 0.02
+const RADAR_BG_OUTER_ALPHA = 0.0;
+const RADAR_PULSE_PERIOD_BEATS = 4;
+// Pulse band thickness as a fraction of RADAR_LENGTH.
+const RADAR_PULSE_WIDTH = 0.03;
+const RADAR_PULSE_BAND_ALPHA = 0.02;
 
 const BULLET_HIT_RADIUS_ON_BEAT = 1.8 * 2.38 * 2.5;
 const BULLET_HIT_RADIUS_OFF_BEAT = 1.8 * 2.5;
@@ -46,7 +65,9 @@ export class Ship {
   // Rotation ramp: 0 at tap, climbs to 1 on hold.
   rotRamp = 0;
   thrustPower = 320;
-  drag = 0.6;
+  // Newtonian space drift: thrust and retro-thrust set velocity; nothing
+  // slows the ship by itself.
+  drag = 0;
   maxSpeed = 460;
   radius = 14;
   // Outer outline sits ~haloOffset past the hull; this is what collisions use.
@@ -64,6 +85,7 @@ export class Ship {
   alive = true;
   invuln = 2.0;
   thrustOn = false;
+  reverseThrustOn = false;
   fireCooldown = 0;
   // One beat per shot; reticule previews next-beat impact.
   fireRate = BEAT_GRID;
@@ -231,6 +253,19 @@ export class Ship {
       sound.stopThrust();
     }
 
+    // Retro-thrust: same magnitude as forward thrust, opposite direction.
+    // Two small jets vent forward from the front corners of the hull.
+    const wasReversing = this.reverseThrustOn;
+    this.reverseThrustOn = input.down("arrowdown") || input.down("s");
+    if (this.reverseThrustOn) {
+      const accel = fromAngle(this.heading + Math.PI, this.thrustPower);
+      this.vel = add(this.vel, mul(accel, dt));
+      this.emitReverseThrust(particles, t);
+      if (!wasReversing) sound.play("reverseThrust");
+    } else if (wasReversing) {
+      sound.stopReverseThrust();
+    }
+
     if ((input.down(" ") || input.down("spacebar")) && this.fireCooldown <= 0) {
       this.fire(bullets);
       const effectiveFireRate = this.rapidActive ? this.fireRate * RAPID_FIRE_RATE_MULTIPLIER : this.fireRate;
@@ -283,6 +318,61 @@ export class Ship {
     });
   }
 
+  // Two jets venting forward from the hull's rear corners. Punchier than the
+  // main thruster: per-frame burst of bright hot-core particles + cooler
+  // outer halo, plus a brief spark fan so the retro-fire reads as a sharp
+  // braking blast rather than a steady plume.
+  emitReverseThrust(particles: ParticleSystem, t: number) {
+    const flicker = 0.7 + 0.3 * Math.sin(t * 0.06);
+    for (const cornerOffset of [Math.PI * 0.78, -Math.PI * 0.78]) {
+      const corner = fromAngle(this.heading + cornerOffset, this.radius * 1.0);
+      const muzzle = add(this.pos, corner);
+      // Hot white-blue core: a few fast, bright pixels per frame.
+      for (let i = 0; i < 2; i++) {
+        const jitter = (Math.random() - 0.5) * 0.35;
+        const spread = fromAngle(this.heading + jitter, 1);
+        particles.emit({
+          pos: muzzle,
+          vel: add(mul(spread, 220 + Math.random() * 140), mul(this.vel, 0.3)),
+          life: 0.18 + Math.random() * 0.12,
+          maxLife: 0.3,
+          size: 1.6 * flicker,
+          hue: 195 + Math.random() * 25,
+          shrink: 1,
+          drag: 2.4,
+        });
+      }
+      // Cooler outer puff: slower, wider, longer-lived halo.
+      const haloJitter = (Math.random() - 0.5) * 0.8;
+      const haloSpread = fromAngle(this.heading + haloJitter, 1);
+      particles.emit({
+        pos: muzzle,
+        vel: add(mul(haloSpread, 90 + Math.random() * 80), mul(this.vel, 0.25)),
+        life: 0.35 + Math.random() * 0.2,
+        maxLife: 0.55,
+        size: 2.2 * flicker,
+        hue: 210 + Math.random() * 20,
+        shrink: 1,
+        drag: 1.6,
+      });
+      // Occasional bright spark for that "flashy" jet pop.
+      if (Math.random() < 0.5) {
+        const sparkJitter = (Math.random() - 0.5) * 0.5;
+        const sparkDir = fromAngle(this.heading + sparkJitter, 1);
+        particles.emit({
+          pos: muzzle,
+          vel: add(mul(sparkDir, 320 + Math.random() * 160), mul(this.vel, 0.2)),
+          life: 0.12 + Math.random() * 0.08,
+          maxLife: 0.2,
+          size: 1.0,
+          hue: 50 + Math.random() * 30,
+          shrink: 1,
+          drag: 3.0,
+        });
+      }
+    }
+  }
+
   // Aim ring at next-beat bullet pos + radar trajectories.
   renderReticules(
     ctx: CanvasRenderingContext2D,
@@ -300,10 +390,6 @@ export class Ship {
     const onCooldown = this.fireCooldown > 0;
     // Cone apex sits at the ship; edges fan forward from the hull.
     const coneApex = this.pos;
-    const leftAngle = this.heading - RADAR_CONE_HALF_ANGLE;
-    const rightAngle = this.heading + RADAR_CONE_HALF_ANGLE;
-    const leftEdgeEnd = add(coneApex, fromAngle(leftAngle, RADAR_CONE_LENGTH));
-    const rightEdgeEnd = add(coneApex, fromAngle(rightAngle, RADAR_CONE_LENGTH));
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
 
@@ -320,51 +406,112 @@ export class Ship {
       (RETICULE_RADAR_PULSE_MAX - RETICULE_RADAR_PULSE_MIN) * radarPulse01;
 
     // Inner = off-beat hitbox, outer = on-beat hitbox.
-    const hitAlpha =
+    // Hitbox is drawn AFTER trajectory previews so we can boost brightness
+    // when the disc overlaps a target or one of the previewed trajectory lines.
+    const baseHitAlpha =
       RETICULE_HITBOX_ALPHA * (onCooldown ? RETICULE_COOLDOWN_DIM : 1) * hitboxPulse;
-    ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${hitAlpha})`;
-    ctx.lineWidth = 1;
-    ctx.setLineDash(RETICULE_LINE_DASH);
-    ctx.beginPath();
-    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_OFF_BEAT, 0, TAU);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_ON_BEAT, 0, TAU);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // Pre-check: does the on-beat disc overlap any target's silhouette? Uses
+    // toroidal distance so the test works across screen wrap.
+    let overlapsTarget = false;
+    for (const t of targets) {
+      let dx = reticulePos.x - t.pos.x;
+      let dy = reticulePos.y - t.pos.y;
+      if (dx > w / 2) dx -= w;
+      else if (dx < -w / 2) dx += w;
+      if (dy > h / 2) dy -= h;
+      else if (dy < -h / 2) dy += h;
+      const rSum = (t.radius ?? 0) + BULLET_HIT_RADIUS_ON_BEAT;
+      if (dx * dx + dy * dy <= rSum * rSum) {
+        overlapsTarget = true;
+        break;
+      }
+    }
 
-    // Radar cone — filled triangle with a gradient along the axis: bright at
-    // the ship, fades to fully transparent at the far edge. The side-tip
-    // corners project onto the axis at length*cos(halfAngle), so the
-    // gradient's 0-alpha stop sits there to guarantee the corners hit 0.
+    // Background gradient + travelling pulse inside the radar cone wedge.
+    // Drawn first so range arcs and trajectory previews overlay cleanly.
+    // The pulse band's centre travels apex->tip every `pulsePeriodBeats`.
+    {
+      ctx.save();
+      ctx.shadowBlur = 0;
+      ctx.setLineDash([]);
+      const wedgeStart = this.heading - RADAR_HALF_ANGLE;
+      const wedgeEnd = this.heading + RADAR_HALF_ANGLE;
+      ctx.beginPath();
+      ctx.moveTo(coneApex.x, coneApex.y);
+      ctx.arc(coneApex.x, coneApex.y, RADAR_LENGTH, wedgeStart, wedgeEnd);
+      ctx.closePath();
+      const bg = ctx.createRadialGradient(
+        coneApex.x, coneApex.y, 0,
+        coneApex.x, coneApex.y, RADAR_LENGTH
+      );
+      bg.addColorStop(0, `hsla(${RETICULE_DASH_HSL}, ${RADAR_BG_INNER_ALPHA})`);
+      bg.addColorStop(1, `hsla(${RETICULE_DASH_HSL}, ${RADAR_BG_OUTER_ALPHA})`);
+      ctx.fillStyle = bg;
+      ctx.fill();
+      const periodSec = Math.max(1e-3, RADAR_PULSE_PERIOD_BEATS * beatGrid);
+      const phase = ((beatTime % periodSec) + periodSec) % periodSec;
+      const pulseR = (phase / periodSec) * RADAR_LENGTH;
+      const halfW = Math.max(1e-3, RADAR_PULSE_WIDTH) * RADAR_LENGTH * 0.5;
+      const r0 = Math.max(0, pulseR - halfW);
+      const r1 = Math.min(RADAR_LENGTH, pulseR + halfW);
+      if (r1 > r0 && RADAR_PULSE_BAND_ALPHA > 0.001) {
+        const pulseGrad = ctx.createRadialGradient(
+          coneApex.x, coneApex.y, r0,
+          coneApex.x, coneApex.y, r1
+        );
+        const peakT = (pulseR - r0) / (r1 - r0);
+        pulseGrad.addColorStop(0, `hsla(${RETICULE_DASH_HSL}, 0)`);
+        pulseGrad.addColorStop(Math.min(0.999, Math.max(0.001, peakT)), `hsla(${RETICULE_DASH_HSL}, ${RADAR_PULSE_BAND_ALPHA})`);
+        pulseGrad.addColorStop(1, `hsla(${RETICULE_DASH_HSL}, 0)`);
+        ctx.fillStyle = pulseGrad;
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Radar cone — faint stationary range arcs spanning the wedge. Curved
+    // strokes read as "sensor HUD" and stay visually distinct from the
+    // straight trajectory dashes. Arcs farther from the ship fade toward 0.
     ctx.save();
     ctx.shadowBlur = 0;
     ctx.setLineDash([]);
-    const axisFadeDist = RADAR_CONE_LENGTH * Math.cos(RADAR_CONE_HALF_ANGLE);
-    const axisEndX = coneApex.x + Math.cos(this.heading) * axisFadeDist;
-    const axisEndY = coneApex.y + Math.sin(this.heading) * axisFadeDist;
-    const pulseMix = 1 - RADAR_CONE_FILL_PULSE_AMOUNT + RADAR_CONE_FILL_PULSE_AMOUNT * radarPulse;
-    const coneAlpha = Math.min(1, RADAR_CONE_FILL_ALPHA * pulseMix);
-    const coneGrad = ctx.createLinearGradient(coneApex.x, coneApex.y, axisEndX, axisEndY);
-    coneGrad.addColorStop(0, `hsla(${RETICULE_DASH_HSL}, ${coneAlpha})`);
-    coneGrad.addColorStop(1, `hsla(${RETICULE_DASH_HSL}, 0)`);
-    ctx.fillStyle = coneGrad;
-    ctx.beginPath();
-    ctx.moveTo(coneApex.x, coneApex.y);
-    ctx.lineTo(leftEdgeEnd.x, leftEdgeEnd.y);
-    ctx.lineTo(rightEdgeEnd.x, rightEdgeEnd.y);
-    ctx.closePath();
-    ctx.fill();
+    ctx.lineWidth = RADAR_LINE_WIDTH;
+    const pulseMix = 1 - RADAR_PULSE_AMOUNT + RADAR_PULSE_AMOUNT * radarPulse;
+    const arcStart = this.heading - RADAR_HALF_ANGLE;
+    const arcEnd = this.heading + RADAR_HALF_ANGLE;
+    for (let i = 0; i < RADAR_FRACTIONS.length; i++) {
+      const frac = RADAR_FRACTIONS[i];
+      const radius = RADAR_LENGTH * frac;
+      // Linear falloff: closest arc full, farthest arc 0.
+      const distanceFade = 1 - frac;
+      // Sweep shimmer: each arc's pulse is phase-shifted so brightness travels
+      // apex → tip without anything actually moving.
+      const sweep01 =
+        0.5 +
+        0.5 *
+          Math.cos(
+            ((beatTime - i * RADAR_SWEEP_PHASE_OFFSET_SEC) /
+              RADAR_SWEEP_PERIOD_SEC) *
+              TAU
+          );
+      const sweepMul = 1 - RADAR_SWEEP_DEPTH + RADAR_SWEEP_DEPTH * sweep01;
+      const a = Math.min(1, RADAR_ALPHA * pulseMix * distanceFade * sweepMul);
+      if (a <= 0.001) continue;
+      ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${a})`;
+      ctx.beginPath();
+      ctx.arc(coneApex.x, coneApex.y, radius, arcStart, arcEnd);
+      ctx.stroke();
+    }
     ctx.restore();
 
     // Trajectory previews for targets inside the cone.
     if (targets.length > 0) {
       ctx.save();
-      ctx.setLineDash(RETICULE_LINE_DASH);
+      ctx.setLineDash([]);
       ctx.lineWidth = 1.5;
       // No shadowBlur: gradient-stroke drop-shadows are slow.
       ctx.shadowBlur = 0;
-      const pulsePeriod = RETICULE_TRAJECTORY_PULSE_PERIOD_BEATS * beatGrid;
+      const pulsePeriod = TRAJECTORY_PULSE_PERIOD_BEATS * beatGrid;
       // Cone axis (unit) and outward normals of the two side edges (pointing out of the cone).
       const axisX = Math.cos(this.heading);
       const axisY = Math.sin(this.heading);
@@ -372,10 +519,10 @@ export class Ship {
       // sin(h-half)); rotating by -90° gives the outward (cone-left) normal.
       // Right edge direction is (cos(h+half), sin(h+half)); rotating by +90°
       // gives the outward (cone-right) normal.
-      const leftNx = Math.sin(this.heading - RADAR_CONE_HALF_ANGLE);
-      const leftNy = -Math.cos(this.heading - RADAR_CONE_HALF_ANGLE);
-      const rightNx = -Math.sin(this.heading + RADAR_CONE_HALF_ANGLE);
-      const rightNy = Math.cos(this.heading + RADAR_CONE_HALF_ANGLE);
+      const leftNx = Math.sin(this.heading - RADAR_HALF_ANGLE);
+      const leftNy = -Math.cos(this.heading - RADAR_HALF_ANGLE);
+      const rightNx = -Math.sin(this.heading + RADAR_HALF_ANGLE);
+      const rightNy = Math.cos(this.heading + RADAR_HALF_ANGLE);
       // Inside the cone, the dot product of (point - apex) with each outward normal is ≤ 0.
       for (const t of targets) {
         // Pick nearest toroidal image for screen-wrap, relative to the cone apex (ship).
@@ -390,7 +537,7 @@ export class Ship {
         // perpendicular distance to either edge within r (i.e., the target's circle bulges
         // into the cone). Use signed distances against side-edge outward normals.
         const forward = dx * axisX + dy * axisY;
-        if (forward < -tr || forward > RADAR_CONE_LENGTH + tr) {
+        if (forward < -tr || forward > RADAR_LENGTH + tr) {
           this.trajectoryFirstSeen.delete(t as unknown as object);
           continue;
         }
@@ -420,9 +567,9 @@ export class Ship {
               Math.cos(((beatTime - firstPeakBeat) / pulsePeriod) * TAU);
         }
         const floor =
-          beatTime < firstPeakBeat ? 0 : RETICULE_TRAJECTORY_PULSE_MIN_ALPHA;
+          beatTime < firstPeakBeat ? 0 : TRAJECTORY_PULSE_MIN_ALPHA;
         const pulse = floor + (1 - floor) * pulse01;
-        ctx.globalAlpha = RETICULE_TRAJECTORY_ALPHA * pulse;
+        ctx.globalAlpha = TRAJECTORY_ALPHA * pulse;
         const cx = coneApex.x + dx;
         const cy = coneApex.y + dy;
         const speed = Math.hypot(t.vel.x, t.vel.y);
@@ -460,27 +607,82 @@ export class Ship {
           }
         };
         clip(-axisX, -axisY, 0);                       // forward ≥ 0
-        clip(axisX, axisY, RADAR_CONE_LENGTH);         // forward ≤ length
+        clip(axisX, axisY, RADAR_LENGTH);         // forward ≤ length
         clip(leftNx, leftNy, 0);                       // leftSigned ≤ 0
         clip(rightNx, rightNy, 0);                     // rightSigned ≤ 0
         if (sMax <= sMin) continue;
-        const startX = rawStartX + ux * sMin;
-        const startY = rawStartY + uy * sMin;
-        const endX = rawStartX + ux * sMax;
-        const endY = rawStartY + uy * sMax;
-        // Gradient: opaque, then fade out at far end.
-        const grad = ctx.createLinearGradient(startX, startY, endX, endY);
-        grad.addColorStop(0, `hsla(${RETICULE_DASH_HSL}, 1)`);
-        grad.addColorStop(RETICULE_TRAJECTORY_FADE_START, `hsla(${RETICULE_DASH_HSL}, 1)`);
-        grad.addColorStop(1, `hsla(${RETICULE_DASH_HSL}, 0)`);
-        ctx.strokeStyle = grad;
-        ctx.beginPath();
-        ctx.moveTo(startX, startY);
-        ctx.lineTo(endX, endY);
-        ctx.stroke();
+        // Per-beat dots: object's position at beatTime + k*beatGrid for k=1,2,...
+        // The ray param s is measured from rawStart = cx + u*(r+edgePad), so the
+        // s value for beat k is speed*beatGrid*k - (r+edgePad). Skip dots outside
+        // the visible clip [sMin, sMax].
+        const dotStep = speed * beatGrid;
+        const dotOffset = -(r + edgePad);
+        // Reticule position remapped to this target's toroidal image, for
+        // detecting beat-dots that fall inside the hitbox disc.
+        let retDx = reticulePos.x - coneApex.x;
+        let retDy = reticulePos.y - coneApex.y;
+        if (retDx > w / 2) retDx -= w;
+        else if (retDx < -w / 2) retDx += w;
+        if (retDy > h / 2) retDy -= h;
+        else if (retDy < -h / 2) retDy += h;
+        const retX = coneApex.x + retDx;
+        const retY = coneApex.y + retDy;
+        const R = BULLET_HIT_RADIUS_ON_BEAT;
+        ctx.save();
+        ctx.setLineDash([]);
+        let drawnDots = 0;
+        for (let k = 1; ; k++) {
+          const sK = dotOffset + dotStep * k;
+          if (sK > sMax) break;
+          if (sK < sMin) continue;
+          const px = rawStartX + ux * sK;
+          const py = rawStartY + uy * sK;
+          const isFirst = drawnDots === 0;
+          const dotRadius = isFirst ? TRAJECTORY_FIRST_BEAT_DOT_RADIUS : TRAJECTORY_BEAT_DOT_RADIUS;
+          const dotAlpha = isFirst ? TRAJECTORY_FIRST_BEAT_DOT_ALPHA : TRAJECTORY_BEAT_DOT_ALPHA;
+          ctx.globalAlpha = TRAJECTORY_ALPHA * pulse;
+          ctx.beginPath();
+          ctx.arc(px, py, dotRadius, 0, TAU);
+          if (isFirst) {
+            ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${dotAlpha})`;
+            ctx.lineWidth = TRAJECTORY_FIRST_BEAT_DOT_LINE_WIDTH;
+            ctx.setLineDash(TRAJECTORY_FIRST_BEAT_DOT_DASH);
+            ctx.lineDashOffset = TRAJECTORY_FIRST_BEAT_DOT_DASH_OFFSET;
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.lineDashOffset = 0;
+          } else {
+            ctx.fillStyle = `hsla(${RETICULE_DASH_HSL}, ${dotAlpha})`;
+            ctx.fill();
+          }
+          if (isFirst) {
+            const ddx = px - retX;
+            const ddy = py - retY;
+            if (ddx * ddx + ddy * ddy <= (R + dotRadius) * (R + dotRadius)) {
+              overlapsTarget = true;
+            }
+          }
+          drawnDots++;
+        }
+        ctx.restore();
       }
       ctx.restore();
     }
+
+    // Hitbox arcs (drawn last so the brightness boost stacks above the
+    // trajectory lines via "lighter" compositing).
+    const hitAlpha = baseHitAlpha * (overlapsTarget ? RETICULE_OVERLAP_BRIGHTNESS : 1);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${hitAlpha})`;
+    ctx.lineWidth = 1;
+    ctx.setLineDash(RETICULE_LINE_DASH);
+    ctx.beginPath();
+    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_OFF_BEAT, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_ON_BEAT, 0, TAU);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
     ctx.restore();
   }
@@ -534,6 +736,31 @@ export class Ship {
       ctx.beginPath();
       ctx.arc(back.x, back.y, 18, 0, TAU);
       ctx.fill();
+    }
+
+    if (this.reverseThrustOn) {
+      // Twin radial flares venting forward from each rear corner. Hot white
+      // core with a cyan halo and a fine outer ring of glow that flickers
+      // per frame.
+      const flarePulse = 0.85 + Math.random() * 0.3;
+      for (const cornerOffset of [Math.PI * 0.78, -Math.PI * 0.78]) {
+        const corner = fromAngle(this.heading + cornerOffset, this.radius * 1.0);
+        const tip = add(corner, fromAngle(this.heading, this.radius * 0.55 + Math.random() * 3));
+        const flareR = 12 * flarePulse;
+        const grad = ctx.createRadialGradient(tip.x, tip.y, 0, tip.x, tip.y, flareR);
+        grad.addColorStop(0, "hsla(200, 100%, 92%, 1.0)");
+        grad.addColorStop(0.35, "hsla(200, 100%, 70%, 0.55)");
+        grad.addColorStop(1, "hsla(200, 100%, 60%, 0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(tip.x, tip.y, flareR, 0, TAU);
+        ctx.fill();
+        // Bright hot pinpoint inside the flare for that arc-light look.
+        ctx.fillStyle = `hsla(50, 100%, 92%, ${0.85 * flarePulse})`;
+        ctx.beginPath();
+        ctx.arc(tip.x, tip.y, 1.6, 0, TAU);
+        ctx.fill();
+      }
     }
 
     if (this.shieldActive) {
