@@ -1613,135 +1613,195 @@ export class Sound {
     }
   }
 
-  // Warm-up tone played when the pulsar starts vibrating. Rising sawtooth
-  // sweep with a parallel high partial — "winding up" the way an emergency
-  // siren announces itself. Length matches Pulsar.SHOCK_VIBRATE_DURATION
-  // (2.0s) so it tops out exactly as the flash fires.
+  // Long tension-building windup played while the pulsar vibrates and spins
+  // itself up. Length matches Pulsar.SHOCK_VIBRATE_DURATION (5.0s) so it
+  // tops out exactly as the flash fires. Layers a deep sub that holds low
+  // then climbs into the drop, a near-DC sine for chest pressure, an
+  // accelerating "spin-up whine" whose frequency tracks the pulsar's
+  // quadratic angular acceleration on screen, and a snare-roll noise wash
+  // that ducks to silence right before the apex.
   private playShockwaveCharge() {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    const duration = 2.0;
+    const duration = 5.0;
 
-    // Sub carrier: deep sawtooth that rises only into the low bass, never
-    // breaking into mid-range. Keeping the top end well under 200 Hz is what
-    // makes the charge read as cavernous rather than whiny.
-    const osc = this.ctx.createOscillator();
-    osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(32, t);
-    osc.frequency.exponentialRampToValueAtTime(160, t + duration);
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.Q.value = 8;
-    filter.frequency.setValueAtTime(160, t);
-    filter.frequency.exponentialRampToValueAtTime(700, t + duration);
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.34, t + duration);
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.master);
-    osc.start(t);
-    osc.stop(t + duration + 0.05);
+    // Sub carrier — held low for the first 60% of the windup then sweeps up
+    // sharply so the tension peak lands right before the drop.
+    const sub = this.ctx.createOscillator();
+    sub.type = "sawtooth";
+    sub.frequency.setValueAtTime(28, t);
+    sub.frequency.exponentialRampToValueAtTime(36, t + duration * 0.6);
+    sub.frequency.exponentialRampToValueAtTime(190, t + duration);
+    const subFilter = this.ctx.createBiquadFilter();
+    subFilter.type = "lowpass";
+    subFilter.Q.value = 8;
+    subFilter.frequency.setValueAtTime(120, t);
+    subFilter.frequency.exponentialRampToValueAtTime(900, t + duration);
+    const subGain = this.ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.42, t + duration);
+    sub.connect(subFilter);
+    subFilter.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + duration + 0.05);
 
-    // Sub-sine reinforcement: a near-DC tone that gives the charge real
-    // chest-pressure presence even on speakers that roll off the saw's
-    // fundamental.
+    // Near-DC reinforcement — gives the long windup real chest pressure even
+    // before the sub carrier starts climbing.
     const subSine = this.ctx.createOscillator();
     subSine.type = "sine";
-    subSine.frequency.setValueAtTime(24, t);
-    subSine.frequency.exponentialRampToValueAtTime(80, t + duration);
+    subSine.frequency.setValueAtTime(22, t);
+    subSine.frequency.exponentialRampToValueAtTime(90, t + duration);
     const subSineGain = this.ctx.createGain();
     subSineGain.gain.setValueAtTime(0.0001, t);
-    subSineGain.gain.exponentialRampToValueAtTime(0.45, t + duration);
+    subSineGain.gain.exponentialRampToValueAtTime(0.55, t + duration);
     subSine.connect(subSineGain);
     subSineGain.connect(this.master);
     subSine.start(t);
     subSine.stop(t + duration + 0.05);
 
-    // Upper "shimmer" — kept low to preserve the deep character. Sits on a
-    // fifth above the sub carrier and only reaches the low-mid band so the
-    // pair reads as a chord winding up rather than a single rising tone.
-    const sh = this.ctx.createOscillator();
-    sh.type = "sine";
-    sh.frequency.setValueAtTime(80, t);
-    sh.frequency.exponentialRampToValueAtTime(480, t + duration);
-    const shGain = this.ctx.createGain();
-    shGain.gain.setValueAtTime(0.0001, t);
-    shGain.gain.exponentialRampToValueAtTime(0.0001, t + duration * 0.4);
-    shGain.gain.exponentialRampToValueAtTime(0.10, t + duration);
-    sh.connect(shGain);
-    shGain.connect(this.master);
-    sh.start(t);
-    sh.stop(t + duration + 0.05);
-  }
+    // Spin-up whine. Frequency rises quadratically in t (matches the
+    // quadratic angular acceleration on the visual side) so the player hears
+    // the pulsar speeding up. We sample the curve at 24 control points so
+    // it sweeps smoothly without us having to schedule one ramp per frame.
+    const whine = this.ctx.createOscillator();
+    whine.type = "sawtooth";
+    const startHz = 120;
+    const endHz = 1800;
+    const samples = 24;
+    whine.frequency.setValueAtTime(startHz, t);
+    for (let i = 1; i <= samples; i++) {
+      const ti = i / samples;
+      const f = startHz + (endHz - startHz) * ti * ti;
+      whine.frequency.linearRampToValueAtTime(f, t + ti * duration);
+    }
+    const whineFilter = this.ctx.createBiquadFilter();
+    whineFilter.type = "bandpass";
+    whineFilter.Q.value = 3;
+    whineFilter.frequency.setValueAtTime(startHz, t);
+    whineFilter.frequency.exponentialRampToValueAtTime(endHz, t + duration);
+    const whineGain = this.ctx.createGain();
+    whineGain.gain.setValueAtTime(0.0001, t);
+    // Stays quiet for the first second so the windup builds, then climbs
+    // hard. Capped well below the sub so the spin-up colours the sound
+    // rather than dominating it.
+    whineGain.gain.exponentialRampToValueAtTime(0.04, t + duration * 0.4);
+    whineGain.gain.exponentialRampToValueAtTime(0.22, t + duration);
+    whine.connect(whineFilter);
+    whineFilter.connect(whineGain);
+    whineGain.connect(this.master);
+    whine.start(t);
+    whine.stop(t + duration + 0.05);
 
-  // Detonation: deep impact thud + low-mid pitched boom + a noise burst for
-  // the wavefront. Hits hard at t=0 and decays in ~1.5s so it overlaps the
-  // expanding ring without sustaining into the next several seconds of play.
-  private playShockwaveBoom() {
-    if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
-
-    // Sub thud — chest-thump kick to land the impact moment. Settles into
-    // a near-DC rumble so the impact reads as a tectonic shift rather than
-    // a snare-style transient.
-    const sub = this.ctx.createOscillator();
-    sub.type = "sine";
-    sub.frequency.setValueAtTime(70, t);
-    sub.frequency.exponentialRampToValueAtTime(16, t + 0.6);
-    const subGain = this.ctx.createGain();
-    subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(0.95, t + 0.012);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
-    sub.connect(subGain);
-    subGain.connect(this.master);
-    sub.start(t);
-    sub.stop(t + 1.9);
-
-    // Body — sawtooth booming pitch-down for the "wall of force" sense.
-    // Kept entirely in the bass range with a low filter ceiling so the
-    // detonation never gets bright or honky.
-    const body = this.ctx.createOscillator();
-    body.type = "sawtooth";
-    body.frequency.setValueAtTime(110, t);
-    body.frequency.exponentialRampToValueAtTime(28, t + 0.7);
-    const bodyFilter = this.ctx.createBiquadFilter();
-    bodyFilter.type = "lowpass";
-    bodyFilter.Q.value = 3;
-    bodyFilter.frequency.setValueAtTime(700, t);
-    bodyFilter.frequency.exponentialRampToValueAtTime(110, t + 1.4);
-    const bodyGain = this.ctx.createGain();
-    bodyGain.gain.setValueAtTime(0.0001, t);
-    bodyGain.gain.exponentialRampToValueAtTime(0.6, t + 0.02);
-    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
-    body.connect(bodyFilter);
-    bodyFilter.connect(bodyGain);
-    bodyGain.connect(this.master);
-    body.start(t);
-    body.stop(t + 1.8);
-
-    // Noise wash — the wavefront passing over you. Bandpass sweep
-    // downward into a deep rumble; we start lower and end lower than
-    // before so the texture stays in "earthquake" territory rather than
-    // ever brushing the highs.
-    const noiseBuf = this.makeNoiseBuffer(1.8);
+    // Tail-end "snare roll" noise wash — accelerates the same way the visual
+    // jitter does, so the last second feels like the universe is about to
+    // tear. Bandpass swept upward; gain ramps in late and ducks just before
+    // the drop to leave silence at the apex.
+    const noiseBuf = this.makeNoiseBuffer(duration);
     if (noiseBuf) {
       const noise = this.ctx.createBufferSource();
       noise.buffer = noiseBuf;
       const nFilter = this.ctx.createBiquadFilter();
       nFilter.type = "bandpass";
-      nFilter.frequency.setValueAtTime(900, t);
-      nFilter.frequency.exponentialRampToValueAtTime(70, t + 1.2);
-      nFilter.Q.value = 1.6;
+      nFilter.frequency.setValueAtTime(400, t);
+      nFilter.frequency.exponentialRampToValueAtTime(3500, t + duration);
+      nFilter.Q.value = 1.2;
       const nGain = this.ctx.createGain();
       nGain.gain.setValueAtTime(0.0001, t);
-      nGain.gain.exponentialRampToValueAtTime(0.32, t + 0.025);
-      nGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
+      nGain.gain.exponentialRampToValueAtTime(0.0001, t + duration * 0.5);
+      nGain.gain.exponentialRampToValueAtTime(0.18, t + duration * 0.95);
+      nGain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
       noise.connect(nFilter);
       nFilter.connect(nGain);
       nGain.connect(this.master);
       noise.start(t);
-      noise.stop(t + 1.85);
+      noise.stop(t + duration + 0.05);
+    }
+  }
+
+  // Bass drop — the payoff for the long windup. Deep sub fundamental that
+  // punches in at t=0, fat saw body pitching down, square sub-octave growl
+  // for grit, and a wide noise wash for the wavefront. Designed to feel
+  // like the floor dropping out under the player.
+  private playShockwaveBoom() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+
+    // Sub thud — louder, lower, and with a long decay so the floor stays
+    // gone for a beat.
+    const sub = this.ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(95, t);
+    sub.frequency.exponentialRampToValueAtTime(12, t + 1.0);
+    const subGain = this.ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(1.0, t + 0.012);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 3.2);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + 3.3);
+
+    // Body — fat sawtooth pitch-down with hard front transient.
+    const body = this.ctx.createOscillator();
+    body.type = "sawtooth";
+    body.frequency.setValueAtTime(150, t);
+    body.frequency.exponentialRampToValueAtTime(22, t + 1.2);
+    const bodyFilter = this.ctx.createBiquadFilter();
+    bodyFilter.type = "lowpass";
+    bodyFilter.Q.value = 4;
+    bodyFilter.frequency.setValueAtTime(900, t);
+    bodyFilter.frequency.exponentialRampToValueAtTime(90, t + 2.5);
+    const bodyGain = this.ctx.createGain();
+    bodyGain.gain.setValueAtTime(0.0001, t);
+    bodyGain.gain.exponentialRampToValueAtTime(0.85, t + 0.02);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 3.0);
+    body.connect(bodyFilter);
+    bodyFilter.connect(bodyGain);
+    bodyGain.connect(this.master);
+    body.start(t);
+    body.stop(t + 3.1);
+
+    // Square sub-octave growl — adds the gritty edge classic bass drops have
+    // without taking the low end out of pure-sine territory.
+    const growl = this.ctx.createOscillator();
+    growl.type = "square";
+    growl.frequency.setValueAtTime(58, t);
+    growl.frequency.exponentialRampToValueAtTime(20, t + 1.4);
+    const growlFilter = this.ctx.createBiquadFilter();
+    growlFilter.type = "lowpass";
+    growlFilter.Q.value = 2;
+    growlFilter.frequency.setValueAtTime(220, t);
+    growlFilter.frequency.exponentialRampToValueAtTime(70, t + 2.0);
+    const growlGain = this.ctx.createGain();
+    growlGain.gain.setValueAtTime(0.0001, t);
+    growlGain.gain.exponentialRampToValueAtTime(0.32, t + 0.03);
+    growlGain.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
+    growl.connect(growlFilter);
+    growlFilter.connect(growlGain);
+    growlGain.connect(this.master);
+    growl.start(t);
+    growl.stop(t + 2.5);
+
+    // Wide noise wash — the wavefront passing over you.
+    const noiseBuf = this.makeNoiseBuffer(2.5);
+    if (noiseBuf) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+      const nFilter = this.ctx.createBiquadFilter();
+      nFilter.type = "bandpass";
+      nFilter.frequency.setValueAtTime(1600, t);
+      nFilter.frequency.exponentialRampToValueAtTime(60, t + 1.8);
+      nFilter.Q.value = 1.0;
+      const nGain = this.ctx.createGain();
+      nGain.gain.setValueAtTime(0.0001, t);
+      nGain.gain.exponentialRampToValueAtTime(0.48, t + 0.025);
+      nGain.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
+      noise.connect(nFilter);
+      nFilter.connect(nGain);
+      nGain.connect(this.master);
+      noise.start(t);
+      noise.stop(t + 2.5);
     }
   }
 

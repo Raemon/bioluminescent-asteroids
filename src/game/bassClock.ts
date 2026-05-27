@@ -60,3 +60,11 @@ export const tickBassBeats = (game: Game, musicDt: number) => {
   tickBassAsteroids(game);
   tickCometMelodies(game);
 };
+
+// Why: gameover advances beatTime itself and detonates bass rocks on its own schedule, but the
+//   bgBeat sub-bass + comet notes still need to fire — this keeps the music ticking under the
+//   post-mortem parade without re-triggering the bass voices that detonation already plays.
+export const tickAuxBeats = (game: Game) => {
+  tickBgBeats(game);
+  tickCometMelodies(game);
+};

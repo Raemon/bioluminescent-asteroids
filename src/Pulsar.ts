@@ -104,6 +104,10 @@ export class Pulsar {
   //   "expanding"  — ring grows out to cover the screen, then we go idle
   shockPhase: "idle" | "vibrating" | "flashing" | "expanding" = "idle";
   shockTimer = 0;
+  // Extra spin contribution added on top of the music-locked spin during the
+  // windup. Integrates an accelerating angular velocity so the pulsar
+  // visibly speeds up over several seconds before the drop.
+  shockSpinExtra = 0;
   // Where the ring originated (locked when we enter "flashing" so it doesn't
   // drift with pulsar approach mid-expansion). Set on the transition.
   shockOriginX = 0;
@@ -114,10 +118,10 @@ export class Pulsar {
   // Game polls this each frame: true exactly once, on the frame the shock
   // ring is born, so the game can apply impact effects atomically.
   shockJustFired = false;
-  // Tuning constants. The vibrate-then-flash beat is critical — players need
-  // a beat of warning before the screen reorganises around them.
-  static readonly SHOCK_VIBRATE_DURATION = 2.0;
-  static readonly SHOCK_FLASH_DURATION = 0.18;
+  // Tuning constants. The long vibrate-then-flash beat is the tension build —
+  // the bass-drop white-flash detonation is the payoff.
+  static readonly SHOCK_VIBRATE_DURATION = 5.0;
+  static readonly SHOCK_FLASH_DURATION = 0.42;
   static readonly SHOCK_EXPAND_DURATION = 1.5;
 
   // Boss-planet state. planets[0] (the prominent blue one) doubles as the
@@ -224,6 +228,7 @@ export class Pulsar {
     if (this.shockPhase !== "idle") return;
     this.shockPhase = "vibrating";
     this.shockTimer = 0;
+    this.shockSpinExtra = 0;
   }
 
   // True iff the shockwave has reached its flash apex — game uses this to
@@ -255,6 +260,16 @@ export class Pulsar {
     this.shockJustFired = false;
     if (this.shockPhase !== "idle") {
       this.shockTimer += dt;
+      // Spin-up: integrate an accelerating angular velocity so the pulsar
+      // visibly winds itself up over the vibrate window. Quadratic in t
+      // means the player reads "it's spinning faster" rather than a constant
+      // fast spin. Frozen at the apex while flashing so the moment of impact
+      // isn't a blur.
+      if (this.shockPhase === "vibrating") {
+        const t = Math.min(1, this.shockTimer / Pulsar.SHOCK_VIBRATE_DURATION);
+        const omega = TAU * 0.5 + TAU * 18 * t * t;
+        this.shockSpinExtra += omega * dt;
+      }
       if (this.shockPhase === "vibrating" && this.shockTimer >= Pulsar.SHOCK_VIBRATE_DURATION) {
         const { x, y } = this.pulsarPos();
         this.shockOriginX = x;
@@ -279,6 +294,7 @@ export class Pulsar {
       } else if (this.shockPhase === "expanding" && this.shockTimer >= Pulsar.SHOCK_EXPAND_DURATION) {
         this.shockPhase = "idle";
         this.shockTimer = 0;
+        this.shockSpinExtra = 0;
       }
     }
 
@@ -299,8 +315,10 @@ export class Pulsar {
     // the music regardless of slow-mo or frame stutter. Period = 2 beats
     // means each of the two opposing beams crosses any given line of sight
     // once per beat (alternating), naturally producing a main-pulse +
-    // inter-pulse rhythm at the beat level.
-    this.spinAngle = (beatTime / (beatGrid * 2)) * TAU;
+    // inter-pulse rhythm at the beat level. shockSpinExtra is added on top
+    // during a big windup so the pulsar visibly accelerates past its normal
+    // music-locked rotation.
+    this.spinAngle = (beatTime / (beatGrid * 2)) * TAU + this.shockSpinExtra;
 
     // Trigger a soft pulse on each beat tick. Using floor(beatTime / grid)
     // means we'll catch up if multiple beats elapse in a single frame, and
@@ -347,7 +365,9 @@ export class Pulsar {
     // vibrating phase only.
     if (this.shockPhase === "vibrating") {
       const t = Math.min(1, this.shockTimer / Pulsar.SHOCK_VIBRATE_DURATION);
-      const intensity = t * t * 12;
+      // Peaks heavy at the apex so the visual tension matches the audio
+      // rising into the bass drop.
+      const intensity = t * t * 22;
       x += (Math.random() - 0.5) * 2 * intensity;
       y += (Math.random() - 0.5) * 2 * intensity;
     }
@@ -608,9 +628,10 @@ export class Pulsar {
     ctx.globalCompositeOperation = "lighter";
 
     if (this.shockPhase === "flashing") {
-      // White-hot bloom centred on the origin. Quick attack, quick decay
-      // across the flash window so it punctuates the impact rather than
-      // hanging on the screen.
+      // Blue-tinted bloom centred on the origin, drawn underneath the entity
+      // layers. The pure-white wash that actually covers the screen on the
+      // bass drop is rendered separately by renderShockwaveOverlay() so it
+      // sits above everything else.
       const t = this.shockTimer / Pulsar.SHOCK_FLASH_DURATION;
       const env = Math.sin(Math.min(1, t) * Math.PI);
       const flashRadius = Math.max(this.w, this.h);
@@ -650,6 +671,23 @@ export class Pulsar {
       ctx.stroke();
     }
 
+    ctx.restore();
+  }
+
+  // Full-screen overlay drawn AFTER all entities so it actually covers the
+  // scene — slams the whole frame white on the bass drop. The tinted radial
+  // in renderShockwave() stays underneath the entity layers as a coloured
+  // backdrop; this is the wash that actually whites out the view.
+  renderShockwaveOverlay(ctx: CanvasRenderingContext2D) {
+    if (this.shockPhase !== "flashing") return;
+    const t = this.shockTimer / Pulsar.SHOCK_FLASH_DURATION;
+    // Hold pure white for the first ~30% of the flash window so the moment
+    // of impact is unambiguous, then fade linearly back to clear over the
+    // remainder — feels like an overload recovering, not a single frame.
+    const whiteAlpha = t < 0.3 ? 1 : Math.max(0, 1 - (t - 0.3) / 0.7);
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 255, 255, ${whiteAlpha})`;
+    ctx.fillRect(0, 0, this.w, this.h);
     ctx.restore();
   }
 

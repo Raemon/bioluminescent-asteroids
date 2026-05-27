@@ -5,9 +5,14 @@ import { BEAT_GRID } from "./rhythmConstants";
 // Why: high enough scroll speed that sprites move visibly between beats — reads as marching past.
 const PARADE_PX_PER_BEAT = 140;
 
-// Why: tall enough to fit a boss-large (160 radius → 320px diameter) plus padding.
-const PARADE_CANVAS_H = 360;
+// Why: canvas height grows to fit the tallest snap (+padding) so a boss-large with its
+//   additive glow halo isn't clipped at the top/bottom of the row.
+const PARADE_MIN_H = 220;
+const PARADE_VPAD = 24;
 const PARADE_MIN_W = 320;
+// Why: bgBeat fires on every whole BEAT_GRID tick (alternating downbeat/offbeat pitch), so
+//   snapping offsets to integer beats guarantees the kill-sound trigger lands on a bg beat.
+const PARADE_BEAT_SUBDIV = 1.0;
 
 // Why: `played` latches true so each kill sound replays once when its sprite crosses centre.
 export type ParadeEntry = {
@@ -28,23 +33,30 @@ export const renderKilledRow = (game: Game) => {
   startParadeLoop(game);
 };
 
-// Why: clamp at 0.25 so even 1-HP kills get a quarter-beat of breathing room (else they'd stack).
+// Why: clamp at 0.5 (one eighth-note grid step) so spacing always lands on the bg beat lattice.
+//   maxHp/4 is then rounded up to the same grid so big kills still feel slower without drifting.
 const layOutParade = (game: Game) => {
   const entries: ParadeEntry[] = [];
   let cursor = 0;
   for (const snap of game.killedSnapshots) {
     entries.push({ snap, beatOffset: cursor, played: false });
-    cursor += Math.max(0.25, snap.maxHp / 4);
+    const raw = Math.max(PARADE_BEAT_SUBDIV, snap.maxHp / 4);
+    const snapped = Math.ceil(raw / PARADE_BEAT_SUBDIV) * PARADE_BEAT_SUBDIV;
+    cursor += snapped;
   }
   game.paradeEntries = entries;
   game.paradeTotalBeats = cursor;
 };
 
 // Why: DPR-aware backing store needed so the parade looks crisp at high-density display ratios.
+// Why: height is sized to the tallest captured snap (which already includes its glow margin)
+//   plus a small vpad — fixed-360 used to crop the boss-large halo.
 const configureParadeCanvas = (game: Game) => {
   const canvas = game.killedRowEl;
   const cssW = Math.max(PARADE_MIN_W, window.innerWidth);
-  const cssH = PARADE_CANVAS_H;
+  let tallest = 0;
+  for (const e of game.paradeEntries) tallest = Math.max(tallest, e.snap.full.height);
+  const cssH = Math.max(PARADE_MIN_H, tallest + PARADE_VPAD * 2);
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(cssW * dpr);
   canvas.height = Math.round(cssH * dpr);
@@ -58,11 +70,13 @@ const configureParadeCanvas = (game: Game) => {
 };
 
 // Why: rAF id held so stopParade can cancel cleanly on restart / abort.
+// Why: anchor parade time to game.beatTime (snapped to BEAT_GRID) so the eighth-note kill-sound
+//   triggers land exactly on the bg bass beat that keeps ticking during gameover.
 const startParadeLoop = (game: Game) => {
   const ctx = game.killedRowEl.getContext("2d");
   if (!ctx) return;
   game.paradeActive = true;
-  game.paradeStartTime = performance.now();
+  game.paradeStartBeatTime = Math.ceil(game.beatTime / BEAT_GRID) * BEAT_GRID;
   const step = () => {
     if (!game.paradeActive) return;
     tickParade(game, ctx);
@@ -92,11 +106,12 @@ const tickParade = (game: Game, ctx: CanvasRenderingContext2D) => {
   maybeEndParade(game, t, cssW);
 };
 
-// Why: subtract pre-roll so beatOffset=0 means "sprite at centre", not "sprite at right edge".
+// Why: pre-roll itself is snapped to BEAT_GRID so the first sprite still reaches centre on a beat
+//   even though the canvas-width-derived pre-roll would otherwise land on a fractional beat.
 const currentParadeBeat = (game: Game, cssW: number): number => {
-  const elapsedSec = (performance.now() - game.paradeStartTime) / 1000;
-  const elapsedBeats = elapsedSec / BEAT_GRID;
-  const preRollBeats = cssW / (2 * PARADE_PX_PER_BEAT);
+  const elapsedBeats = (game.beatTime - game.paradeStartBeatTime) / BEAT_GRID;
+  const rawPreRoll = cssW / (2 * PARADE_PX_PER_BEAT);
+  const preRollBeats = Math.ceil(rawPreRoll / PARADE_BEAT_SUBDIV) * PARADE_BEAT_SUBDIV;
   return elapsedBeats - preRollBeats;
 };
 

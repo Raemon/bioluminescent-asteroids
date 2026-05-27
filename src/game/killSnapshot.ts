@@ -25,9 +25,13 @@ const captureToCanvas = (tileSize: number, paint: (ctx: CanvasRenderingContext2D
 };
 
 // Why: trophy must be a still pose, not mid-explosion brightness — freeze rotation + flashes.
+// Why: asteroid sprites bake a halo extending to ~2.3×radius + 14px padding (see buildSprite),
+//   plus an extra margin for any live shadowBlur drawn on top — taking the max of the sprite's
+//   own half-size and (radius + margin) ensures the parade tile never crops the halo.
 export const snapshotAsteroidKill = (a: Asteroid, killSound: SoundName): KilledSnapshot | null => {
-  const margin = 8;
-  const tile = Math.ceil(a.radius * 2 + margin * 2);
+  const margin = 32;
+  const halfExtent = Math.max(a.radius + margin, a.spriteHalfSize + margin / 2);
+  const tile = Math.ceil(halfExtent * 2);
   const cnv = captureToCanvas(tile, (cx) => {
     const prevPos = a.pos, prevRot = a.rotation, prevFlash = a.flashAmount, prevBeat = a.beatFlash;
     a.pos = v(0, 0); a.rotation = 0; a.flashAmount = 0; a.beatFlash = 0;
@@ -39,9 +43,11 @@ export const snapshotAsteroidKill = (a: Asteroid, killSound: SoundName): KilledS
 };
 
 // Why: aliens carry fireFlash on top of flashAmount; both must clear for a still pose.
+// Why: alien halo gradient extends to ~2.2×radius from centre even with fireFlash zeroed (see
+//   Alien.render), and shadowBlur adds ~12px on top — size the tile so neither is clipped.
 export const snapshotAlienKill = (al: Alien, killSound: SoundName): KilledSnapshot | null => {
-  const margin = 8;
-  const tile = Math.ceil(al.radius * 2 + margin * 2);
+  const haloExtent = al.radius * 2.2 + 16;
+  const tile = Math.ceil(haloExtent * 2);
   const cnv = captureToCanvas(tile, (cx) => {
     const prevPos = al.pos, prevRot = al.rotation, prevFlash = al.flashAmount, prevFire = al.fireFlash;
     al.pos = v(0, 0); al.rotation = 0; al.flashAmount = 0; al.fireFlash = 0;

@@ -11,7 +11,7 @@ import {
   evaluateClosedBeats,
   currentBeatPulse,
 } from "./rhythmGate";
-import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats } from "./bassClock";
+import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } from "./bassClock";
 import { tickWaveEvents } from "./waveEvents";
 import { detonateShockwave } from "./shockwave";
 import { spawnWave, isBossWave, updateBgBeatIntensity } from "./waveDirector";
@@ -57,10 +57,13 @@ const updateTitle = (game: Game, dt: number) => {
 };
 
 // Why: gameover drains the bassteroid field one downbeat at a time — music outlives the player.
+// Why: bgBeat sub-bass + comet notes keep ticking so the parade has a steady pulse to align to,
+//   and the pulsar's beat-driven flash piggybacks on the same beatTime via Pulsar.update().
 const updateGameOver = (game: Game, dt: number) => {
   if (game.input.pressed("enter") || game.input.pressed("return")) showTitle(game);
   for (const a of game.asteroids) a.update(dt, game.w, game.h);
   game.beatTime += dt;
+  tickAuxBeats(game);
   detonateScheduledBassRocks(game);
   for (const s of game.shards) s.update(dt);
   game.shards = game.shards.filter((s) => s.life > 0);

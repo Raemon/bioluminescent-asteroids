@@ -78,7 +78,9 @@ const kickShipFromShockwave = (game: Game) => {
 // Why: environment event — no score / combo so the ring stays a "free-of-charge" hazard reshape.
 export const detonateShockwave = (game: Game) => {
   game.sound.play("shockwaveBoom");
-  game.shake = Math.min(game.shake + 1.4, 2.0);
+  // Bass-drop shake kicks the screen hard so the impact registers in the
+  // body as well as the ears. Capped so we never lose all sense of the frame.
+  game.shake = Math.min(game.shake + 2.4, 3.0);
   shatterAllAsteroids(game);
   kickShipFromShockwave(game);
   emitShockwaveSparks(game.particles, { x: game.pulsar.shockOriginX, y: game.pulsar.shockOriginY });

@@ -86,7 +86,9 @@ export class Game implements HudElements {
   // Why: post-run trophy lineup; replayed in the end-of-mission parade with original kill sounds.
   killedSnapshots: KilledSnapshot[] = [];
   paradeActive = false;
-  paradeStartTime = 0;
+  // Why: parade timing reads game.beatTime (which keeps ticking through gameover) so
+  //   sprite-crosses-centre events land on the same beat grid as the bg bass beat.
+  paradeStartBeatTime = 0;
   paradeRafId: number | null = null;
   paradeEntries: ParadeEntry[] = [];
   paradeTotalBeats = 0;

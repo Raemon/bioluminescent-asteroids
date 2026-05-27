@@ -69,5 +69,7 @@ export const renderGame = (game: Game) => {
   paintBackgroundLayers(game);
   paintEntityLayers(game);
   paintForeground(game);
+  // Why: bass-drop white flash has to sit above every other layer to actually wash the screen.
+  game.pulsar.renderShockwaveOverlay(ctx);
   ctx.restore();
 };
