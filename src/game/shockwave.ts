@@ -1,7 +1,7 @@
 import type { Game } from "../Game";
 import { Asteroid } from "../Asteroid";
 import { emitExplosion, emitShockwaveSparks } from "./particleBursts";
-import { alignBassBeat } from "./waveDirector";
+import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet, BeatClaimSet } from "./waveDirector";
 
 // Why: strong enough to redirect, weak enough to avoid an unrecoverable spin.
 const SHOCKWAVE_SHIP_IMPULSE = 320;
@@ -27,7 +27,12 @@ const kickChildFromShockwave = (game: Game, child: Asteroid) => {
 };
 
 // Why: bass children stay grid-aligned + inherit drones so the music keeps marching post-shatter.
-const shatterBassRock = (game: Game, a: Asteroid, surviving: Asteroid[]) => {
+//   Rhythm trajectory alignment runs *after* the shockwave kick so we're not
+//   immediately undoing the kick's force; instead it tunes the net post-kick
+//   speed so the child's first re-engagement still falls on a beat. All
+//   shockwave-spawned children share one claim set so the field that
+//   re-forms is spread across the beat grid, not stacked on one beat.
+const shatterBassRock = (game: Game, a: Asteroid, surviving: Asteroid[], claimed: BeatClaimSet) => {
   a.hp = 0;
   a.flashAmount = 1;
   emitExplosion(game.particles, game.shards, a, false);
@@ -38,16 +43,18 @@ const shatterBassRock = (game: Game, a: Asteroid, surviving: Asteroid[]) => {
       game.sound.startBassteroidDrone(c, c.kind as "bassA" | "bassB" | "bassC" | "bassD", c.size, c.pos);
     }
     kickChildFromShockwave(game, c);
+    alignSplitChildToRhythm(game, c, claimed);
     surviving.push(c);
   }
 };
 
 // Why: non-bass rocks have no drone or beat schedule, so the path stays free of audio bookkeeping.
-const shatterPlainRock = (game: Game, a: Asteroid, surviving: Asteroid[]) => {
+const shatterPlainRock = (game: Game, a: Asteroid, surviving: Asteroid[], claimed: BeatClaimSet) => {
   a.flashAmount = 1;
   emitExplosion(game.particles, game.shards, a, false);
   for (const c of a.split()) {
     kickChildFromShockwave(game, c);
+    alignSplitChildToRhythm(game, c, claimed);
     surviving.push(c);
   }
 };
@@ -55,10 +62,11 @@ const shatterPlainRock = (game: Game, a: Asteroid, surviving: Asteroid[]) => {
 // Why: rebuild via surviving[] so we don't mutate the array we're iterating over.
 const shatterAllAsteroids = (game: Game) => {
   const surviving: Asteroid[] = [];
+  const claimed = newBeatClaimSet();
   for (const a of game.asteroids) {
     if (a.isBoss()) bossWeathersShockwave(game, a, surviving);
-    else if (a.isBass()) shatterBassRock(game, a, surviving);
-    else shatterPlainRock(game, a, surviving);
+    else if (a.isBass()) shatterBassRock(game, a, surviving, claimed);
+    else shatterPlainRock(game, a, surviving, claimed);
   }
   game.asteroids = surviving;
 };

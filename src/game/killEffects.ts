@@ -15,7 +15,7 @@ import {
   emitCometExplosion,
 } from "./particleBursts";
 import { snapshotAsteroidKill, snapshotAlienKill, snapshotCometKill } from "./killSnapshot";
-import { alignBassBeat } from "./waveDirector";
+import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet } from "./waveDirector";
 import type { KillBucket } from "./killBuckets";
 
 // Why: feeds the leaderboard's per-run breakdown; bucket names stay human-readable for display.
@@ -95,6 +95,11 @@ const finishAsteroidKillCore = (
   if (snap) game.killedSnapshots.push(snap);
   bumpKill(game, asteroidBucket(a));
   const children = a.split(killerVel);
+  // Why: sibling fragments share one beat-claim set so the two pieces target
+  //   *different* beats — otherwise the player can only combo one of them
+  //   before the second drifts past the engagement ring on the same tick.
+  const claimed = newBeatClaimSet();
+  for (const c of children) alignSplitChildToRhythm(game, c, claimed);
   if (a.isBass()) restartChildBassDrones(game, children);
   return children;
 };

@@ -75,7 +75,7 @@ export const BOSS_HP: Record<AsteroidSize, number> = {
 // the "the planetoid just dropped in" read is unbroken. Children inherit.
 export const BOSS_HUE = 12;
 
-const SIZE_SPAWN_SPEED: Record<AsteroidSize, [number, number]> = {
+export const SIZE_SPAWN_SPEED: Record<AsteroidSize, [number, number]> = {
   large: [40, 90],
   medium: [55, 105],
   small: [75, 125],

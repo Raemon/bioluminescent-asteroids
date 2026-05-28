@@ -1,6 +1,10 @@
-import { defineConfig } from "vite";
+import { defineConfig, type ViteDevServer } from "vite";
 import { resolve } from "node:path";
 import { writeFile } from "node:fs/promises";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { config as loadDotenv } from "dotenv";
+
+loadDotenv();
 
 // Clean-URL middleware: rewrite extensionless /soundeditor → /soundeditor.html
 // so the address bar can show /soundeditor in dev/preview.
@@ -63,11 +67,113 @@ const soundConfigWriter = () => {
   };
 };
 
+// Dev-only adapter that serves /api/* by loading the Vercel-style handlers
+// (api/*.ts) through Vite's SSR module loader and feeding them a minimal
+// VercelRequest/VercelResponse shape. In prod these run on Vercel; this just
+// closes the gap locally so the leaderboard can talk to the dev DB.
+const devApi = () => {
+  type Handler = (req: any, res: any) => void | Promise<void>;
+  const routes: Record<string, string> = {
+    "/api/highscores": "/api/highscores.ts",
+  };
+
+  const decorateRes = (res: ServerResponse) => {
+    const r = res as ServerResponse & {
+      status: (code: number) => typeof r;
+      json: (body: unknown) => typeof r;
+      send: (body: unknown) => typeof r;
+    };
+    r.status = (code) => {
+      r.statusCode = code;
+      return r;
+    };
+    r.json = (body) => {
+      if (!r.getHeader("content-type")) r.setHeader("content-type", "application/json");
+      r.end(JSON.stringify(body));
+      return r;
+    };
+    r.send = (body) => {
+      if (body == null) r.end();
+      else if (typeof body === "string" || Buffer.isBuffer(body)) r.end(body as any);
+      else r.json(body);
+      return r;
+    };
+    return r;
+  };
+
+  const parseBody = (req: IncomingMessage): Promise<unknown> =>
+    new Promise((resolveBody, rejectBody) => {
+      const method = (req.method ?? "GET").toUpperCase();
+      if (method === "GET" || method === "HEAD") return resolveBody(undefined);
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        if (raw.length === 0) return resolveBody(undefined);
+        const ct = String(req.headers["content-type"] ?? "");
+        if (ct.includes("application/json")) {
+          try {
+            resolveBody(JSON.parse(raw));
+          } catch (err) {
+            rejectBody(err);
+          }
+        } else {
+          resolveBody(raw);
+        }
+      });
+      req.on("error", rejectBody);
+    });
+
+  return {
+    name: "dev-api",
+    configureServer(server: ViteDevServer) {
+      server.middlewares.use(async (req, res, next) => {
+        const rawUrl = req.url ?? "";
+        const [pathname, search = ""] = rawUrl.split("?");
+        const handlerPath = routes[pathname];
+        if (!handlerPath) return next();
+
+        try {
+          const mod = await server.ssrLoadModule(handlerPath);
+          const handler = (mod.default ?? mod.handler) as Handler | undefined;
+          if (typeof handler !== "function") {
+            res.statusCode = 500;
+            res.end(`No default export from ${handlerPath}`);
+            return;
+          }
+
+          const query: Record<string, string | string[]> = {};
+          for (const [k, v] of new URLSearchParams(search)) {
+            const existing = query[k];
+            if (existing === undefined) query[k] = v;
+            else if (Array.isArray(existing)) existing.push(v);
+            else query[k] = [existing, v];
+          }
+
+          const body = await parseBody(req);
+          const vReq = Object.assign(req, { query, cookies: {}, body });
+          const vRes = decorateRes(res);
+          await handler(vReq, vRes);
+        } catch (err) {
+          console.error(`[dev-api] ${pathname} failed:`, err);
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ error: "dev-api handler threw" }));
+          } else {
+            res.end();
+          }
+        }
+      });
+    },
+  };
+};
+
 export default defineConfig({
   server: {
     host: true,
   },
-  plugins: [cleanUrls(), soundConfigWriter()],
+  plugins: [cleanUrls(), soundConfigWriter(), devApi()],
   build: {
     rollupOptions: {
       input: {

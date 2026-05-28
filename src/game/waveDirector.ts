@@ -1,5 +1,5 @@
 import type { Game } from "../Game";
-import { Asteroid, AsteroidKind, BASS_MEASURE_LENGTH, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
+import { Asteroid, AsteroidKind, BASS_MEASURE_LENGTH, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
 import { spawnComet as spawnCometAtEdge } from "../Comet";
 import { AlienSize, ALIEN_FIRE_PERIOD_BEATS, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
@@ -8,6 +8,80 @@ import { BEAT_GRID } from "./rhythmConstants";
 import { spawnAwayFromShip } from "./spawnAwayFromShip";
 import { newWaveEventSchedule, maybeSchedule } from "./waveEvents";
 import { startShockwave } from "./shockwave";
+import { alignVelocityToRhythm, BeatClaimSet, newBeatClaimSet } from "./rhythmTrajectory";
+
+// Why: 0.5 s (one BEAT_GRID) of bullet flight = 310 px at the ship's 620 px/s
+// muzzle velocity. An asteroid crossing this ring on beat N+1 can be hit by
+// a bullet fired on beat N — the canonical "fire to the metronome" rhythm
+// that drives the combo system. Closer rings collapse fire and hit to the
+// same beat; farther rings push the hit out to beat N+2 (harder to track).
+const INCOMING_ENGAGE_RADIUS = 310;
+
+// Why: split children spawn essentially on top of the ship (right where the
+// parent died); the player's natural follow-up shot lands when they've
+// drifted ~150 px outward — far enough that the bullet flight (~0.25 s) is
+// short and the hit can land on the *next* beat after the kill, which is
+// exactly when the player will fire next.
+const SPLIT_ENGAGE_RADIUS = 150;
+
+// Why: snap each fresh edge-spawn so its crossing of the player's natural
+// kill range lands on a beat. Boss is exempt — it has its own slow drift.
+//
+// Reference point is the screen centre, *not* the ship — incoming rocks take
+// several seconds to cross the field, by which time a moving ship has long
+// left where it was. Using the screen centre as the encounter anchor means
+// the timing is stable: the player can position themselves anywhere near
+// the centre and still get a predictable beat-aligned procession of rocks.
+const alignIncomingToRhythm = (game: Game, a: Asteroid, claimed?: BeatClaimSet) => {
+  if (a.isBoss()) return;
+  const range = SIZE_SPAWN_SPEED[a.size];
+  const centre = { x: game.w / 2, y: game.h / 2 };
+  alignVelocityToRhythm(a.pos, a.vel, {
+    refPos: centre,
+    beatTime: game.beatTime,
+    speedRange: range,
+    engageRadius: INCOMING_ENGAGE_RADIUS,
+    // Why: edge spawns sit far away — many beats out. Allowing up to 24
+    // candidate slots covers even the slowest large rock's crossing time.
+    maxBeats: 24,
+    claimed,
+  });
+};
+
+// Why: a split child inherits the bullet's impact velocity (fast, fan-shaped)
+// and starts essentially on top of the ship. We let its outward speed flex
+// ±~35% so the moment it reaches SPLIT_ENGAGE_RADIUS lands on a beat — and
+// give it up to ±18 px of position nudge along its outward direction as a
+// second degree of freedom (reads as "explosion shoved it a bit further
+// out", not a teleport). Min 1 beat ahead so the player has at least 500 ms
+// to react and re-aim. Sibling children share a `claimed` set so a parent's
+// two kids end up on adjacent beats rather than colliding on one.
+//
+// refVel = ship.vel because an actively-flying player covers 200–460 px
+// in the 1–2 beat alignment window — more than a ring radius. Without this
+// the debris is aligned to a stale "ghost ship" position and a moving
+// player never sees combo-able children.
+export const alignSplitChildToRhythm = (game: Game, child: Asteroid, claimed?: BeatClaimSet) => {
+  if (child.isBoss()) return;
+  const speed = Math.hypot(child.vel.x, child.vel.y);
+  if (speed < 1) return;
+  alignVelocityToRhythm(child.pos, child.vel, {
+    refPos: game.ship.pos,
+    refVel: game.ship.vel,
+    beatTime: game.beatTime,
+    speedRange: [speed * 0.65, speed * 1.35],
+    engageRadius: SPLIT_ENGAGE_RADIUS,
+    minBeats: 1,
+    maxBeats: 6,
+    maxPosNudge: 18,
+    claimed,
+  });
+};
+
+// Why: re-export so kill-effects callers don't have to import from two
+// modules just to share a per-event claim set among sibling children.
+export { newBeatClaimSet };
+export type { BeatClaimSet };
 
 // Why: mid-wave window means the canister can't appear at warm-up start nor wave-clear end.
 const CANISTER_CHANCE_PER_WAVE = 1 / 3;
@@ -86,18 +160,32 @@ export const activeSpecialsForWave = (game: Game, wave: number): AsteroidKind[] 
 };
 
 // Why: shared retry helper keeps the "no rock on top of the ship" rule in one place.
-const spawnAsteroidAway = (game: Game, minDist: number, kind?: AsteroidKind, size?: "large" | "medium" | "small") =>
-  spawnAwayFromShip(() => spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size), game.ship.pos, minDist);
+//   Every fresh spawn is rhythm-aligned post-roll so the player's first clean
+//   shot at the rock can land on a beat — see alignIncomingToRhythm. The
+//   optional `claimed` set spreads a batch of spawns across distinct beat
+//   slots instead of stacking them all on the same beat.
+const spawnAsteroidAway = (
+  game: Game,
+  minDist: number,
+  kind?: AsteroidKind,
+  size?: "large" | "medium" | "small",
+  claimed?: BeatClaimSet,
+) => {
+  const a = spawnAwayFromShip(() => spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size), game.ship.pos, minDist);
+  alignIncomingToRhythm(game, a, claimed);
+  return a;
+};
 
 // Why: specials need alignBassBeat so their first downbeat lands on the pulsar grid immediately.
-const spawnSpecial = (game: Game, kind: AsteroidKind): Asteroid => {
-  const a = spawnAsteroidAway(game, 220, kind);
+const spawnSpecial = (game: Game, kind: AsteroidKind, claimed?: BeatClaimSet): Asteroid => {
+  const a = spawnAsteroidAway(game, 220, kind, undefined, claimed);
   alignBassBeat(game, a);
   return a;
 };
 
 // Why: tink has a fixed small size + kind so we roll it outside activeSpecialsForWave.
-const spawnTink = (game: Game): Asteroid => spawnAsteroidAway(game, 200, "tink", "small");
+const spawnTink = (game: Game, claimed?: BeatClaimSet): Asteroid =>
+  spawnAsteroidAway(game, 200, "tink", "small", claimed);
 
 // Why: pre-align first fire to the global beat so saucer shots sync to the rhythm immediately.
 export const spawnAlien = (game: Game, size: AlienSize) => {
@@ -112,16 +200,37 @@ export const spawnAlien = (game: Game, size: AlienSize) => {
 //   not just the next BEAT_GRID — gives the entrance whoosh ~1–2s of solo space before the line begins
 //   and ensures the sung-in pitch coincides with a downbeat hit instead of an interior tick. Each
 //   subsequent note steps by 2 BEAT_GRID (=1s) per COMET_MELODY's slower phrase pulse.
+//
+// Comets are worth 5000 × combo on a kill — the single biggest combo payout
+// in the game. Aligning the traversal speed so the comet crosses the
+// engagement ring on a beat means an on-rhythm player can land the big
+// payout on-beat without having to guess the comet's individual phase.
+// ±15 % is enough wiggle room to absorb the small phase mismatch without
+// noticeably altering the comet's "slow celestial visitor" cadence.
 export const spawnComet = (game: Game) => {
   const c = spawnCometAtEdge(game.w, game.h);
   c.lifetime = rand(COMET_LIFETIME[0], COMET_LIFETIME[1]);
   const cometEntryLead = 0.6;
   c.nextNoteBeatTime = Math.ceil((game.beatTime + cometEntryLead) / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
+  const cometSpeed = Math.hypot(c.vel.x, c.vel.y);
+  if (cometSpeed > 0) {
+    const centre = { x: game.w / 2, y: game.h / 2 };
+    alignVelocityToRhythm(c.pos, c.vel, {
+      refPos: centre,
+      beatTime: game.beatTime,
+      speedRange: [cometSpeed * 0.85, cometSpeed * 1.15],
+      engageRadius: INCOMING_ENGAGE_RADIUS,
+      maxBeats: 24,
+    });
+  }
   game.comets.push(c);
   game.sound.startCometShimmer(c, c.pos);
 };
 
 // Why: one entry replaces the previous if/else maze covering boss/foreshadow/normal wave dispatch.
+//   One `claimed` set is shared across the wave's asteroid + tink rolls so
+//   each fresh rock takes a distinct beat slot — the result is a steady
+//   beat-by-beat target procession the player can combo through.
 export const spawnWave = (game: Game) => {
   game.asteroids = [];
   game.canisters = [];
@@ -131,8 +240,9 @@ export const spawnWave = (game: Game) => {
   if (handleBossWave(game)) return;
   setForeshadowState(game);
   rollWaveEvents(game);
-  spawnWaveAsteroids(game);
-  rollTinkSpawn(game);
+  const claimed = newBeatClaimSet();
+  spawnWaveAsteroids(game, claimed);
+  rollTinkSpawn(game, claimed);
   rollAlienSpawn(game);
 };
 
@@ -170,24 +280,27 @@ const rollWaveEvents = (game: Game) => {
 };
 
 // Why: 3, 3, 4, 4, 5, 5... per-wave count gives the player a wave to consolidate before density bumps.
-const spawnWaveAsteroids = (game: Game) => {
+//   A single `claimed` set is shared across the wave's spawns (including the
+//   tink roll below — see spawnWave) so each rock targets a distinct beat
+//   slot, giving the player a sustainable beat-by-beat target procession.
+const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet) => {
   const totalCount = 3 + Math.floor((game.wave - 1) / 2);
   const activeSpecials = activeSpecialsForWave(game, game.wave);
   const normalCount = Math.max(0, totalCount - activeSpecials.length);
 
   const newAsteroidIndices = Array.from({ length: normalCount }, (_, i) => i);
   for (const _ of newAsteroidIndices) {
-    game.asteroids.push(spawnAsteroidAway(game, 200));
+    game.asteroids.push(spawnAsteroidAway(game, 200, undefined, undefined, claimed));
   }
   for (const kind of activeSpecials) {
-    game.asteroids.push(spawnSpecial(game, kind));
+    game.asteroids.push(spawnSpecial(game, kind, claimed));
   }
 };
 
 // Why: tink is a "treat", not a fixture; gated chance + late first-wave keeps it feeling rare.
-const rollTinkSpawn = (game: Game) => {
+const rollTinkSpawn = (game: Game, claimed: BeatClaimSet) => {
   if (game.wave >= TINK_FIRST_WAVE && Math.random() < TINK_CHANCE_PER_WAVE) {
-    game.asteroids.push(spawnTink(game));
+    game.asteroids.push(spawnTink(game, claimed));
   }
 };
 
