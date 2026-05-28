@@ -27,6 +27,9 @@ const TRAJECTORY_DIRECT_FLASH_DEPTH = 0.55;
 // Why: shadow blur halo so the flash reads as a soft glow rather than just a brightness bump.
 const TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR = 18;
 const TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA = 0.85;
+const TRAJECTORY_AIM_INTERSECTION_X_RADIUS = 5;
+const TRAJECTORY_AIM_INTERSECTION_X_ALPHA = 0.55;
+const TRAJECTORY_AIM_INTERSECTION_X_LINE_WIDTH = 1.5;
 
 // Why: when a target first enters the cone, briefly boost alpha so the appearance reads as a flash.
 const TRAJECTORY_ENTRY_FLASH_DURATION_SEC = 0.35;
@@ -62,6 +65,8 @@ export type TrajectoryContext = {
   h: number;
   frame: ConeFrame;
   reticulePos: Vec;
+  aimCircleCenter: Vec;
+  aimCircleRadius: number;
   trajectoryTracks: TrajectoryTrackMap;
 };
 
@@ -140,6 +145,20 @@ const paintBeatDot = (
   ctx.fill();
 };
 
+const paintAimIntersectionX = (
+  ctx: CanvasRenderingContext2D, px: number, py: number, entryFlashBoost: number,
+) => {
+  const r = TRAJECTORY_AIM_INTERSECTION_X_RADIUS;
+  ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${Math.min(1, TRAJECTORY_AIM_INTERSECTION_X_ALPHA * entryFlashBoost)})`;
+  ctx.lineWidth = TRAJECTORY_AIM_INTERSECTION_X_LINE_WIDTH;
+  ctx.beginPath();
+  ctx.moveTo(px - r, py - r);
+  ctx.lineTo(px + r, py + r);
+  ctx.moveTo(px + r, py - r);
+  ctx.lineTo(px - r, py + r);
+  ctx.stroke();
+};
+
 // Why: detect whether the first-beat lock dot overlaps the aim disc, so the disc can brighten.
 const firstDotOverlapsReticule = (px: number, py: number, retX: number, retY: number): boolean => {
   const R = BULLET_HIT_RADIUS_ON_BEAT;
@@ -191,6 +210,26 @@ const drawBeatDotsAlongRay = (
     drawnDots++;
   }
   return { overlapsReticule };
+};
+
+const drawAimIntersectionsAlongRay = (
+  ctx: CanvasRenderingContext2D,
+  rawStartX: number, rawStartY: number, ux: number, uy: number,
+  centerX: number, centerY: number, radius: number,
+  sMin: number, sMax: number, entryFlashBoost: number,
+) => {
+  const dx = rawStartX - centerX;
+  const dy = rawStartY - centerY;
+  const q = dx * ux + dy * uy;
+  const c = dx * dx + dy * dy - radius * radius;
+  const disc = q * q - c;
+  if (disc < 0) return;
+  const root = Math.sqrt(disc);
+  const intersectionDistances = root <= 1e-6 ? [-q] : [-q - root, -q + root];
+  for (const s of intersectionDistances) {
+    if (s < sMin || s > sMax) continue;
+    paintAimIntersectionX(ctx, rawStartX + ux * s, rawStartY + uy * s, entryFlashBoost);
+  }
 };
 
 // Why: reticule pos may live on a different toroidal image of the world; remap before overlap checks.
@@ -245,10 +284,15 @@ const paintTrajectoryFromSnapshot = (
   ctx.ctx.globalAlpha = TRAJECTORY_ALPHA * effectivePulse * alphaMultiplier;
 
   const [retX, retY] = remapReticuleToTarget(ctx.apex, ctx.reticulePos, ctx.w, ctx.h);
+  const [aimCenterX, aimCenterY] = remapReticuleToTarget(ctx.apex, ctx.aimCircleCenter, ctx.w, ctx.h);
   const dotStep = speed * ctx.beatGrid;
   const dotOffset = -(r + edgePad);
   ctx.ctx.save();
   ctx.ctx.setLineDash([]);
+  drawAimIntersectionsAlongRay(
+    ctx.ctx, rawStartX, rawStartY, ux, uy, aimCenterX, aimCenterY,
+    ctx.aimCircleRadius, sMin, sMax, entryFlashBoost,
+  );
   const result = drawBeatDotsAlongRay(
     ctx.ctx, rawStartX, rawStartY, ux, uy, retX, retY,
     sMin, sMax, dotStep, dotOffset, flashPulse, entryFlashBoost,

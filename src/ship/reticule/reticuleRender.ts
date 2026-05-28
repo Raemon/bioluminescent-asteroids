@@ -66,6 +66,8 @@ export const renderShipReticules = (
   const reticulePositions = computeReticulePositions(ship, beatGrid, w, h);
   const primaryReticule = reticulePositions[reticulePositions.length - 1];
   const apex = ship.pos;
+  const aimCircleCenter = add(apex, mul(ship.vel, 0.4 * beatGrid));
+  const aimCircleRadius = ship.radius + 4 + ship.bulletSpeed * beatGrid;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   const hitboxPulse = cosineEnvelope(beatTime, RETICULE_HITBOX_PULSE_PERIOD_SEC, RETICULE_HITBOX_PULSE_MIN, RETICULE_HITBOX_PULSE_MAX);
@@ -75,7 +77,7 @@ export const renderShipReticules = (
   paintRangeArcs(ctx, ship, apex, beatTime, radarPulse);
   const frame = computeConeFrame(ship);
   const fromTrajectory = paintTrajectoryPreviews({
-    ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule,
+    ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule, aimCircleCenter, aimCircleRadius,
     trajectoryTracks: state.trajectoryTracks,
   }, targets);
   const flashPulse = computeDirectFlashPulse(beatTime);

@@ -1,8 +1,8 @@
 import type { Ship } from "../../Ship";
 
 // Why: base wedge geometry; the radar powerup doubles both at runtime via radarHalfAngle/radarLength.
-const RADAR_HALF_ANGLE_BASE = 0.90;
-const RADAR_LENGTH_BASE = 900;
+const RADAR_HALF_ANGLE_BASE = 0.5;
+const RADAR_LENGTH_BASE = 700;
 const RADAR_BOOST = 2;
 
 // Why: every wedge consumer reads from the ship so the radar powerup widens & extends the cone everywhere at once.
