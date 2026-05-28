@@ -6,11 +6,12 @@ import { Trail } from "./Trail";
 // with anything — it's purely an audio/visual flourish that decorates the
 // rhythm bed.
 //
-// The melody (see MELODY_NOTES in Sound.ts) cycles a C-major motif that
-// harmonises with the bassteroid voices (rooted at C2) and the broken-open
-// bassteroid drones (C-major triad bed). One note fires per BEAT_GRID
-// (every 0.5s), so the comet weaves a quarter-note line over whatever
-// bass/drone pattern is currently sounding.
+// The melody (COMET_MELODY in Sound.ts) cycles a C-minor pentatonic phrase
+// that layers cleanly under the halo ambient pad (C–G–Eb in comet mode) and
+// over the bassteroid bed. One note fires every 2 BEAT_GRID ticks (1.0 s)
+// — the same pulse as the halo melody — so the two lines hocket into a
+// single moving voice across the four-bar phrase rather than fighting at
+// different rates.
 export class Comet {
   pos: Vec;
   vel: Vec;

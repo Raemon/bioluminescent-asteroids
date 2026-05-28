@@ -86,7 +86,10 @@ type CometShimmerNode = {
 // so they layer pleasantly with both. The "third voice" frequency glides
 // between E4 (major third, bright with bass field) and Eb4 (minor third,
 // neutral with the comet's b2/tritone dissonance) — controlled by
-// setHaloAmbientCometMode.
+// setHaloAmbientCometMode. On top sits a slow, looping melody voice playing
+// a "determined" 8-step motif drawn entirely from mode-invariant pitches
+// (C, D, F, G), so the figure stays musical regardless of the wave's mode
+// without fighting the comet's b2/tritone cluster.
 type HaloAmbientNode = {
   oscs: OscillatorNode[];
   lfos: OscillatorNode[];
@@ -95,6 +98,12 @@ type HaloAmbientNode = {
   // tier1 (yellow halo only): C+G open fifth foundation + E/Eb third voice.
   // tier2 (white bullets): extra octave-up voice swells in for a brighter top.
   tier2Gain: GainNode;
+  // Slow melodic voice — a single oscillator whose frequency + gain envelope
+  // are re-scheduled once per step by a JS-side interval. Interval handle is
+  // stored so stopHaloAmbient can clear it.
+  melodyOsc: OscillatorNode;
+  melodyGain: GainNode;
+  melodyInterval: ReturnType<typeof setInterval> | null;
 };
 
 // Optional pan + distance-falloff splice. When a sound (one-shot or drone)
@@ -194,6 +203,15 @@ export class Sound {
   // fighting it.
   haloAmbientCometMode = false;
   toneEngine: ToneEngineNodes | null = null;
+
+  // Pilot's Log vocal one-shots. Decoded once on first play, cached forever.
+  // Voiced (ElevenLabs) + post-processed to scratchy astronaut-radio character;
+  // mixed dry to bakedOut so the comp/limiter/reverb master chain doesn't
+  // smear the spoken word. pilotLogPlaying is a soft mutex so a repeated
+  // trigger doesn't stack a second voice on top of the first.
+  pilotLogBuffers: Map<number, AudioBuffer> = new Map();
+  pilotLogPlaying = false;
+  private pilotLogLoading: Map<number, Promise<AudioBuffer | null>> = new Map();
 
   // Listener position (ship). Pan + distance falloff are computed relative
   // to this. Half-width/half-height scale the screen so pan saturates at the
@@ -1137,52 +1155,72 @@ export class Sound {
     for (const key of Array.from(this.bassDrones.keys())) this.stopBassteroidDrone(key);
   }
 
-  // Comet melody: an unsettling Phrygian/diminished motif that sits over
-  // the bassteroid percussion. Pitches centre on C with a flattened 2nd
-  // (Db) and a tritone (F#) so every phrase visits a tension interval
-  // before resolving — the listener never quite settles. The line lives in
-  // a lower octave than the old major-add9 version so it reads as looming
-  // rather than ethereal.
+  // Comet melody: a slow C-aeolian phrase that layers on top of the halo
+  // ambient pad (C–G + Eb-in-comet-mode = C minor triad). Pitches are drawn
+  // from C minor pentatonic (C / Eb / F / G / Bb) so every note is consonant
+  // with both the pad's C–G–Eb foundation and the halo melody's mode-safe
+  // C/D/F/G line. The looming quality comes from the timbre + lower octave
+  // and one ornamental Db (b2) grace step per phrase, not from a permanent
+  // tritone cluster — the b2 visits and resolves rather than sustaining and
+  // muddying the pad.
   //
-  // The melody is 16 steps long; one step plays per BEAT_GRID tick (0.5s), so
-  // the full phrase is 8 seconds = 4 bass measures. Long-form: rises through
-  // a half-step climb (C → Db) to the tritone (F#), sits on the b6 (Ab) for
-  // dread, then falls chromatically back toward the root.
+  // Step rate: one note every 2 BEAT_GRID ticks (1.0 s), matching the halo
+  // melody's pulse so the two lines hocket cleanly. The phrase is 8 steps ×
+  // 1.0 s = 8 s = 4 bass measures. Indices 0 and 4 are the phrase downbeats
+  // (sustained); 3 is the one octave-lift; 5 is a deliberate rest so the
+  // halo melody's bright C5 step has the floor; 7 is the b2 grace tension.
+  //
+  // Shape: G3 → Eb3 (downward yield) → F3 → ↑G4 (lift, octave answer) →
+  //        Eb3 → rest → Bb3 → Db3-grace (the one ornamental tension that
+  //        immediately bows back toward C the next phrase).
   private static readonly COMET_MELODY: (number | null)[] = [
-    // C4  Db4  F#4   -   Ab4   G4  Db4   -    F4  Ab4  C5    -    B4   F#4  Eb4  -
-    261.63, 277.18, 369.99, null, 415.30, 392.00, 277.18, null,
-    349.23, 415.30, 523.25, null, 493.88, 369.99, 311.13, null,
+    196.00,  // G3   — downbeat: pad's fifth, anchors the new entry
+    155.56,  // Eb3  — the b3 colour from the pad's third voice an octave down
+    174.61,  // F3   — neighbour-tone, sets up the lift
+    392.00,  // G4   — octave lift, one bright reach per phrase
+    155.56,  // Eb3  — settles back to the b3
+    null,    // rest — gives the halo melody's C5/G3 step the floor
+    233.08,  // Bb3  — pentatonic colour pitch, dark but consonant
+    138.59,  // Db3  — single low grace note: phrygian b2 flavour, low enough
+             //        and short enough that it tints rather than collides
   ];
 
   // Fire one note of the comet melody. `step` is the global step index since
   // the comet appeared; we modulo into the melody table so the phrase loops
-  // smoothly for as long as the comet is on screen. Bell-like timbre — sine
-  // fundamental with two soft inharmonic partials and a slow exponential
-  // decay so each note rings into the next.
+  // smoothly for as long as the comet is on screen. Velocity ducks on the
+  // ornamental Db grace step so the b2 tension passes by rather than lands;
+  // downbeats and the octave lift get longer durations so the pad-blend is
+  // felt, while interior steps stay short to leave space for the halo line.
   playCometNote(step: number) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     const melody = Sound.COMET_MELODY;
-    const freq = melody[((step % melody.length) + melody.length) % melody.length];
+    const idx = ((step % melody.length) + melody.length) % melody.length;
+    const freq = melody[idx];
     if (freq === null) return;
 
     const eng = this.ensureToneEngine();
     if (!eng) return;
-    // Light velocity variation per step so the looping melody breathes
-    // instead of mechanically repeating. Step 0/4/8/12 (the downbeats) hit
-    // a touch harder.
-    const isDownbeat = step % 4 === 0;
-    const velocity = isDownbeat ? 0.85 : 0.6;
-    eng.cometMelodySynth.triggerAttackRelease(freq, "2n", undefined, velocity);
+    const isPhraseDownbeat = idx === 0 || idx === 4;
+    const isLift = idx === 3;
+    const isGrace = idx === 7;
+    const velocity = isPhraseDownbeat ? 0.7 : isLift ? 0.64 : isGrace ? 0.3 : 0.5;
+    const duration = isPhraseDownbeat || isLift ? "1n" : isGrace ? "4n" : "2n";
+    eng.cometMelodySynth.triggerAttackRelease(freq, duration, undefined, velocity);
   }
 
   // Ominous voice held under the comet's entire lifetime. Begins with a
-  // big "shhwwwoorrr" — a wide noise band sweeping from high down to mid,
-  // panning the listener's attention to the comet's arrival — then settles
-  // into a low, dissonant drone (minor 2nd + tritone over the root) that
-  // hums for the comet's life. The drone is intentionally unresolved so
-  // the comet feels threatening rather than tranquil.
+  // big "shhwwwoorrr" — a wide noise band sweeping from high down to mid —
+  // plus a short-lived dissonant cluster (Db2 + F#2 over the C2 root) that
+  // makes the arrival feel like something *wrong* is approaching. After
+  // ~3 s the tension voices fade out entirely, leaving a stable low C-minor
+  // triad (C2 + Eb2 + G2) that matches the halo ambient pad's C–G–Eb voicing
+  // an octave down. The bed therefore layers with the halo pad rather than
+  // muddying it: same chord, deeper register, slow tremolo for life.
+  // Also briefly ducks the halo pad during the entrance so the arrival
+  // reads as a dramatic event that the music bows to, then everyone
+  // re-balances together.
   startCometShimmer(key: object, pos?: Pos) {
     if (!this.enabled) return;
     this.ensureContext();
@@ -1262,33 +1300,35 @@ export class Sound {
       lfos.push(sweepLfo);
     }
 
-    // ── Unsettling drone bed ─────────────────────────────────────────────
-    // Low cluster: root C2 (65.4) + minor 2nd above (Db2 = 69.3) + tritone
-    // (F#2 = 92.5). The minor-2nd interval is the textbook horror-movie
-    // "wrong note"; the tritone is the medieval "diabolus in musica". Each
-    // voice is two slightly detuned sawtooth oscillators run through a
-    // dark lowpass, so the cluster reads as a thick rumbling drone rather
-    // than three distinct pitches.
-    const droneFreqs = [65.41, 69.30, 92.50];
+    // ── Sustained drone bed (life of the comet) ────────────────────────
+    // Low C-minor triad — C2 (65.4) + Eb2 (77.8) + G2 (98.0). Same chord the
+    // halo ambient pad outlines in comet mode (C3 + Eb4 + G3), an octave
+    // down, so the comet bed reinforces the pad's harmonic root instead of
+    // fighting it. Each voice is two slightly detuned sawtooths through a
+    // dark lowpass, so the triad reads as a thick rumble rather than three
+    // distinct pitches.
+    const sustainFreqs = [65.41, 77.78, 98.00]; // C2, Eb2, G2
+    const sustainLevels = [0.55, 0.30, 0.34];
     const tremRates = [0.07, 0.11, 0.13];
 
     const droneFilter = this.ctx.createBiquadFilter();
     droneFilter.type = "lowpass";
     droneFilter.Q.value = 1.4;
-    // Filter opens slowly during the entry, then settles dark.
+    // Filter opens during the entry then settles dark — gives the bed a slow
+    // unwrapping quality that matches the visual bloom.
     droneFilter.frequency.setValueAtTime(400, t);
     droneFilter.frequency.exponentialRampToValueAtTime(1100, t + 2.5);
     droneFilter.frequency.exponentialRampToValueAtTime(620, t + 6.0);
     droneFilter.connect(mainGain);
 
-    for (let i = 0; i < droneFreqs.length; i++) {
-      const f = droneFreqs[i];
+    for (let i = 0; i < sustainFreqs.length; i++) {
+      const f = sustainFreqs[i];
       const oscA = this.ctx.createOscillator();
       const oscB = this.ctx.createOscillator();
       oscA.type = "sawtooth";
       oscB.type = "sawtooth";
       oscA.frequency.value = f;
-      oscB.frequency.value = f * 1.011; // wider detune than the old pad — beats slowly
+      oscB.frequency.value = f * 1.011;
 
       const trem = this.ctx.createOscillator();
       trem.type = "sine";
@@ -1296,10 +1336,7 @@ export class Sound {
       const tremDepth = this.ctx.createGain();
       tremDepth.gain.value = 0.4;
       const voiceGain = this.ctx.createGain();
-      // Root strongest, tritone next, minor-2nd quietest so the wrong
-      // note tints the cluster without dominating.
-      const voiceLevel = i === 0 ? 0.55 : i === 2 ? 0.35 : 0.22;
-      voiceGain.gain.value = voiceLevel;
+      voiceGain.gain.value = sustainLevels[i];
       trem.connect(tremDepth);
       tremDepth.connect(voiceGain.gain);
 
@@ -1313,6 +1350,63 @@ export class Sound {
 
       oscs.push(oscA, oscB);
       lfos.push(trem);
+    }
+
+    // ── Transient tension cluster (entrance only) ───────────────────────
+    // Db2 (b2, "wrong note") and F#2 (tritone, "diabolus") swell in with
+    // the whoosh and fade out fully by ~3.5s. The brief collision makes the
+    // arrival feel ominous, but the cluster doesn't sustain — once the
+    // melody starts singing, the bed is the pure C-minor triad above.
+    const tensionFreqs = [69.30, 92.50]; // Db2, F#2
+    const tensionPeaks = [0.16, 0.20];
+    for (let i = 0; i < tensionFreqs.length; i++) {
+      const f = tensionFreqs[i];
+      const oscA = this.ctx.createOscillator();
+      const oscB = this.ctx.createOscillator();
+      oscA.type = "sawtooth";
+      oscB.type = "sawtooth";
+      oscA.frequency.value = f;
+      oscB.frequency.value = f * 1.011;
+
+      const voiceGain = this.ctx.createGain();
+      voiceGain.gain.setValueAtTime(0.0001, t);
+      voiceGain.gain.exponentialRampToValueAtTime(tensionPeaks[i], t + 0.7);
+      // Hold briefly, then fade out to silence by t+3.5s — by the time the
+      // first melody note plays (typically t+~1–2s on the next downbeat),
+      // these tension voices are already on their way out.
+      voiceGain.gain.exponentialRampToValueAtTime(tensionPeaks[i] * 0.6, t + 1.6);
+      voiceGain.gain.exponentialRampToValueAtTime(0.0001, t + 3.5);
+
+      oscA.connect(voiceGain);
+      oscB.connect(voiceGain);
+      voiceGain.connect(droneFilter);
+
+      oscA.start(t);
+      oscB.start(t);
+      // Stop the voices after they're inaudible so we don't keep silent
+      // oscillators alive for the comet's entire lifetime.
+      oscA.stop(t + 3.6);
+      oscB.stop(t + 3.6);
+      // Not pushed into oscs[] because they self-terminate before
+      // stopCometShimmer runs — adding them would re-call .stop() on a
+      // node that's already ended, which is harmless but noisy in DevTools.
+    }
+
+    // ── Brief duck on the halo ambient pad during the entrance ──────────
+    // If the player has the halo up (combo ≥ 4) when the comet arrives,
+    // bow the pad ~6 dB for the duration of the whoosh, then restore.
+    // Makes the comet's entry feel like the music yielding to a new
+    // presence — small dramatic gesture, paid back as everything balances.
+    if (this.haloAmbient) {
+      const hG = this.haloAmbient.mainGain.gain;
+      const current = hG.value;
+      hG.cancelScheduledValues(t);
+      hG.setValueAtTime(current, t);
+      hG.exponentialRampToValueAtTime(Math.max(current * 0.45, 0.0001), t + 0.5);
+      // Hold the duck through the whoosh peak, then unduck over ~2.5s so the
+      // pad re-emerges naturally as the comet bed settles.
+      hG.setValueAtTime(Math.max(current * 0.45, 0.0001), t + 1.8);
+      hG.exponentialRampToValueAtTime(Math.max(current, 0.0001), t + 4.3);
     }
 
     this.cometShimmers.set(key, { oscs, lfos, mainGain, spatial: spatial ?? undefined });
@@ -1474,15 +1568,24 @@ export class Sound {
     }
   }
 
-  // Yellow-halo ambient pad. A soft, beatless C-rooted shimmer that hangs
-  // under the bass field whenever the player is holding a halo. The voicing
-  // is deliberately a stable open-fifth (C+G) with a single colour-third
-  // floating over it — the open fifth is at home in *both* the bassteroids'
-  // C-major bed AND the comet's C-rooted phrygian/diminished cluster, and
-  // the colour third slides between E (bright over major bass) and Eb
-  // (neutral over the comet) via setHaloAmbientCometMode. Because the pad
-  // has no rhythmic content, it sounds equally good at quarter-note and
-  // doubletime (white-bullet tier) bg-beat tempos.
+  // Yellow-halo ambient pad. A soft, C-rooted bed that hangs under the bass
+  // field whenever the player is holding a halo. The voicing is a stable
+  // open-fifth (C+G) with a single colour-third floating over it — the open
+  // fifth is at home in *both* the bassteroids' C-major bed AND the comet's
+  // C-rooted phrygian/diminished cluster, and the colour third slides
+  // between E (bright over major bass) and Eb (neutral over the comet) via
+  // setHaloAmbientCometMode.
+  //
+  // Over that bed sits a quiet looping melody — a 1-second-per-step "keep
+  // going" motif played on a soft triangle. The line is built only from
+  // C/D/F/G (the four pitches that are mode-invariant across all six modes
+  // the game visits), so it stays in tune on a Lydian wave 3 and on a
+  // Phrygian wave 30 alike, and never collides with the comet's b2/tritone.
+  // The shape — G → F → G → C5 → G → F → D → (rest) — climbs to the octave
+  // once per phrase then settles back, like a quiet determined breath:
+  // forward, settle, forward, settle. Slow attack/release per note keeps
+  // each step blooming rather than punching, so the pad still reads as
+  // ambient at white-bullet tier doubletime.
   startHaloAmbient(tier: 1 | 2 = 1) {
     if (!this.enabled) return;
     this.ensureContext();
@@ -1600,9 +1703,102 @@ export class Sound {
     topG.start(t);
     oscs.push(topC, topG);
 
+    // ── Melody voice ──────────────────────────────────────────────────────
+    // One triangle oscillator runs continuously; per-step we cancel the
+    // previous envelope, retune the frequency, and schedule a fresh
+    // attack/sustain/release. Triangle has a warmer, slightly hollow voice
+    // than sine — it carries the line above the sine bed without the bite
+    // of a saw, so the motif reads as introspective rather than declarative.
+    const melodyOsc = this.ctx.createOscillator();
+    melodyOsc.type = "triangle";
+    // A gentle lowpass softens the triangle's high partials so the line sits
+    // *behind* the bass field's brightness instead of cutting through it.
+    const melodyFilter = this.ctx.createBiquadFilter();
+    melodyFilter.type = "lowpass";
+    melodyFilter.Q.value = 0.7;
+    melodyFilter.frequency.value = 1100;
+    const melodyGain = this.ctx.createGain();
+    melodyGain.gain.setValueAtTime(0.0001, t);
+    melodyOsc.connect(melodyFilter);
+    melodyFilter.connect(melodyGain);
+    // Routed through tremGain so the melody breathes with the same slow
+    // 16-second swell as the rest of the pad.
+    melodyGain.connect(tremGain);
+    // Start at the first phrase pitch (G3) — first step's frequency
+    // schedule below will override anyway, but giving it a sane initial
+    // value avoids any glitch on the very first attack.
+    melodyOsc.frequency.value = 196.00;
+    melodyOsc.start(t);
+    oscs.push(melodyOsc);
+
+    // Determined 8-step motif. One step every PAD_STEP_S seconds (1.0s, so
+    // two BEAT_GRID ticks — slow enough to feel like a held thought, fast
+    // enough that the line clearly *is* a line rather than a chord). Rests
+    // are null. Pitches are restricted to {C, D, F, G} in two octaves so
+    // the figure is mode-safe across the whole game.
+    //
+    //  step  pitch   feel
+    //  0     G3      "forward" — open fifth, settled but moving
+    //  1     F3      "step back" — a half-yield, acknowledges the dark
+    //  2     G3      "forward again" — same step, more resolved
+    //  3     C5      "lift" — the one bright reach per phrase
+    //  4     G3      "settle" — back to the foundation
+    //  5     F3      "breathe down"
+    //  6     D3      "lowest reach" — pulls under the root before resolving
+    //  7     null    rest — silence is the resolution; loop restarts at G
+    const MELODY_HZ: (number | null)[] = [
+      196.00,  // G3
+      174.61,  // F3
+      196.00,  // G3
+      523.25,  // C5
+      196.00,  // G3
+      174.61,  // F3
+      146.83,  // D3
+      null,
+    ];
+    const PAD_STEP_S = 1.0;
+    // Peak gain per note. Sits well below rootGain (0.55) and fifthGain
+    // (0.40) so the line stays subordinate to the bed it floats over —
+    // it's a hummed melody, not a lead. The C5 lift step gets a touch less
+    // gain so the upper octave doesn't pop forward in the mix.
+    const noteGainFor = (hz: number) => (hz >= 400 ? 0.16 : 0.22);
+
+    let step = 0;
+    const triggerStep = () => {
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const hz = MELODY_HZ[step % MELODY_HZ.length];
+      step++;
+      melodyGain.gain.cancelScheduledValues(now);
+      // Always start from the current value so we don't click if a previous
+      // envelope hasn't finished its release.
+      melodyGain.gain.setValueAtTime(melodyGain.gain.value, now);
+      if (hz === null) {
+        // Quiet release — let the previous note tail off into the rest.
+        melodyGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
+        return;
+      }
+      // Slight portamento between notes (60ms) so each pitch glides into
+      // place — the line sounds like a held human voice rather than a
+      // chord-stab sequencer.
+      melodyOsc.frequency.cancelScheduledValues(now);
+      melodyOsc.frequency.setValueAtTime(melodyOsc.frequency.value, now);
+      melodyOsc.frequency.exponentialRampToValueAtTime(hz, now + 0.06);
+      // ADSR-ish per note: 0.25s bloom in, hold ~0.45s, 0.30s release.
+      // Total ~1.0s = one step, so notes overlap minimally at the edges.
+      const peak = noteGainFor(hz);
+      melodyGain.gain.exponentialRampToValueAtTime(peak, now + 0.25);
+      melodyGain.gain.setValueAtTime(peak, now + 0.70);
+      melodyGain.gain.exponentialRampToValueAtTime(0.0001, now + 1.00);
+    };
+    // Fire the first step immediately so the pad arrives with a sung-into
+    // entrance rather than a second of silent build.
+    triggerStep();
+    const melodyInterval = setInterval(triggerStep, PAD_STEP_S * 1000);
+
     mainGain.connect(this.master);
 
-    this.haloAmbient = { oscs, lfos, mainGain, thirdOsc, tier2Gain };
+    this.haloAmbient = { oscs, lfos, mainGain, thirdOsc, tier2Gain, melodyOsc, melodyGain, melodyInterval };
     this.haloAmbientTier = 1;
     if (tier === 2) this.setHaloAmbientTier(2);
   }
@@ -1646,8 +1842,57 @@ export class Sound {
     const stopAt = t + 1.3;
     for (const o of node.oscs) o.stop(stopAt);
     for (const l of node.lfos) l.stop(stopAt);
+    if (node.melodyInterval !== null) clearInterval(node.melodyInterval);
     this.haloAmbient = null;
     this.haloAmbientTier = 0;
+  }
+
+  // Pilot's Log vocal loader. Files live at /sounds/vocals/pilot-log-N.mp3 —
+  // pre-rendered ElevenLabs takes with bandpass + bitcrush + hiss applied so
+  // they already sound like a scratchy astronaut radio. Decoded once and
+  // cached; subsequent plays are buffer-source cheap.
+  private loadPilotLogBuffer(index: number): Promise<AudioBuffer | null> {
+    const existing = this.pilotLogLoading.get(index);
+    if (existing) return existing;
+    if (this.pilotLogBuffers.has(index)) return Promise.resolve(this.pilotLogBuffers.get(index)!);
+    if (!this.ctx) return Promise.resolve(null);
+    const url = `/sounds/vocals/pilot-log-${index}.mp3`;
+    const ctx = this.ctx;
+    const p = fetch(url)
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
+      .then((buf) => {
+        if (buf) this.pilotLogBuffers.set(index, buf);
+        this.pilotLogLoading.delete(index);
+        return buf;
+      })
+      .catch(() => {
+        this.pilotLogLoading.delete(index);
+        return null;
+      });
+    this.pilotLogLoading.set(index, p);
+    return p;
+  }
+
+  // Fire a Pilot's Log vocal cue. `delaySec` lets the caller align the start
+  // to the next musical phrase boundary. Routes straight to bakedOut so the
+  // master comp/reverb doesn't smear the spoken word — the bandpass/static is
+  // already baked into the file. Returns the buffer duration once loaded so
+  // callers can clear their "playing" flag at the right moment.
+  async playPilotLog(index: number, delaySec = 0, gain = 1.0): Promise<number> {
+    if (!this.enabled) return 0;
+    this.ensureContext();
+    if (!this.ctx || !this.bakedOut) return 0;
+    const buf = await this.loadPilotLogBuffer(index);
+    if (!buf || !this.ctx || !this.bakedOut) return 0;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const g = this.ctx.createGain();
+    g.gain.value = gain;
+    src.connect(g);
+    g.connect(this.bakedOut);
+    src.start(this.ctx.currentTime + Math.max(0, delaySec));
+    return buf.duration;
   }
 
   // Lighter sibling of playBgBeat — used for the in-between eighths when the

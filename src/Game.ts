@@ -57,10 +57,15 @@ export class Game implements HudElements {
   lastBgBeatIndex = -1;
   nextBeatToEvaluate = 0;
   beatCombo = 0;
+  // Why: high-water mark of beatCombo during a run — submitted with the score so the leaderboard
+  //   can showcase a pilot's best streak, separately from the final score.
+  maxCombo = 0;
   // Why: latched on off-beat fire so the punishment can land at the next beat closure (not retroactive).
   firedOffBeatSinceLastBeat = false;
   // Why: first-ever meaningful combo loss in a run gets a labeled popup so the player learns the mechanic.
   hasLostComboEver = false;
+  // Why: combo x6 unlocks the first Pilot's Log vocal — fires once per run, gated by this flag.
+  pilotLog1Unlocked = false;
   // Why: beta-test mode disables the random wave director — the run only contains the elements
   //   the player selected in the beta panel; when they're all gone the wave doesn't auto-spawn.
   betaMode = false;

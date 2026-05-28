@@ -24,6 +24,7 @@ export type HighscoreRow = {
   name: string;
   score: number;
   wave: number;
+  max_combo: number;
   kill_count: number;
   kill_summary: Record<string, number>;
   created_at: string;
@@ -46,6 +47,7 @@ export const submitHighscore = async (
       name,
       score: game.score,
       wave: game.wave,
+      max_combo: game.maxCombo,
       kill_count: totalKills(game.killTally),
       kill_summary: game.killTally,
     }),

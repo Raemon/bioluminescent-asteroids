@@ -224,6 +224,7 @@ const startBetaWave = (game: Game) => {
   game.lastBgBeatIndex = -1;
   game.nextBeatToEvaluate = 0;
   game.beatCombo = 0;
+  game.maxCombo = 0;
   game.firedOffBeatSinceLastBeat = false;
   game.slowMoTimer = 0;
   game.hasLostComboEver = false;

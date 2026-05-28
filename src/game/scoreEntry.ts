@@ -115,9 +115,17 @@ const renderLeaderboardRows = (game: Game, rows: HighscoreRow[]) => {
       const summary = formatKillSummary(row.kill_summary ?? {});
       const meta = summary ? `W${row.wave} · ${kills}k · ${summary}` : `W${row.wave} · ${kills}k`;
       const safeName = escapeHtml(row.name);
+      const combo = row.max_combo ?? 0;
+      // Why: max combo is the headline stat — render it as a chip with its own label so
+      //   pilots can see at a glance whose streak game is strongest, not just whose score.
+      const comboTier = combo >= 8 ? "white" : combo >= 4 ? "gold" : combo >= 2 ? "cyan" : "dim";
       return `<li>
         <span class="lb-rank">${rank}</span>
         <span class="lb-name">${safeName}</span>
+        <span class="lb-combo lb-combo-${comboTier}">
+          <span class="lb-combo-value">${combo}<span class="lb-combo-x">×</span></span>
+          <span class="lb-combo-label">best combo</span>
+        </span>
         <span class="lb-score">${row.score.toLocaleString()}</span>
         <span class="lb-meta">${escapeHtml(meta)}</span>
       </li>`;

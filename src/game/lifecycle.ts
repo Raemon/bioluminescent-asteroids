@@ -106,9 +106,11 @@ const resetRunTimers = (game: Game) => {
   game.lastBgBeatIndex = -1;
   game.nextBeatToEvaluate = 0;
   game.beatCombo = 0;
+  game.maxCombo = 0;
   game.firedOffBeatSinceLastBeat = false;
   game.slowMoTimer = 0;
   game.hasLostComboEver = false;
+  game.pilotLog1Unlocked = false;
 };
 
 // Why: parade + drones from the previous title screen must be torn down before the new run runs.

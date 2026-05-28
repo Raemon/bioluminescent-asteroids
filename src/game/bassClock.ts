@@ -64,12 +64,15 @@ const tickBassAsteroids = (game: Game) => {
 };
 
 // Why: shared beat clock makes comet notes land on the same audio frame as coincident bass hits.
+// Why: comet melody pulse is 2 BEAT_GRID per step (1.0 s) — matches the halo ambient melody's
+//   step rate so the two lines hocket cleanly instead of stuttering at different rates.
+const COMET_STEP = BEAT_GRID * 2;
 const tickCometMelodies = (game: Game) => {
   for (const c of game.comets) {
     while (game.beatTime >= c.nextNoteBeatTime) {
       game.sound.play("cometNote", c.noteIndex, c.pos);
       c.noteIndex += 1;
-      c.nextNoteBeatTime = Math.round((c.nextNoteBeatTime + BEAT_GRID) / BEAT_GRID) * BEAT_GRID;
+      c.nextNoteBeatTime = Math.round((c.nextNoteBeatTime + COMET_STEP) / BEAT_GRID) * BEAT_GRID;
     }
   }
 };

@@ -6,6 +6,7 @@ import { Bullet } from "../Bullet";
 import { Vec } from "../vec";
 import { loseCombo } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
+import { tryUnlockPilotLog1 } from "./pilotLog";
 import { popupCombo, popupScore } from "./popups";
 import {
   emitExplosion,
@@ -45,7 +46,9 @@ export const hitSoundFor = (
 export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) => {
   if (isOnBeatHit && game.beatCombo >= 1) {
     game.beatCombo += 1;
+    if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
     syncComboHud(game);
+    tryUnlockPilotLog1(game);
   } else if (!isOnBeatHit && game.beatCombo !== 0) {
     loseCombo(game, hitPos);
   }

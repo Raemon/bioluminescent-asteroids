@@ -189,6 +189,7 @@ const handleOnBeatFire = (game: Game, newBullets: Bullet[]) => {
   game.sound.play("comboTick");
   if (game.beatCombo === 0) {
     game.beatCombo = 1;
+    if (game.maxCombo < 1) game.maxCombo = 1;
     syncHud(game);
   }
 };

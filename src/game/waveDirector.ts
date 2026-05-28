@@ -108,11 +108,15 @@ export const spawnAlien = (game: Game, size: AlienSize) => {
   game.sound.startAlienDrone(a, size, a.pos);
 };
 
-// Why: shimmer fades up ~one beat before the first note so the comet sounds like it arrives, then plays.
+// Why: comet's first melody note locks to the next bass-measure downbeat (every BASS_MEASURE_LENGTH s),
+//   not just the next BEAT_GRID — gives the entrance whoosh ~1–2s of solo space before the line begins
+//   and ensures the sung-in pitch coincides with a downbeat hit instead of an interior tick. Each
+//   subsequent note steps by 2 BEAT_GRID (=1s) per COMET_MELODY's slower phrase pulse.
 export const spawnComet = (game: Game) => {
   const c = spawnCometAtEdge(game.w, game.h);
   c.lifetime = rand(COMET_LIFETIME[0], COMET_LIFETIME[1]);
-  c.nextNoteBeatTime = Math.ceil((game.beatTime + 0.6) / BEAT_GRID) * BEAT_GRID;
+  const cometEntryLead = 0.6;
+  c.nextNoteBeatTime = Math.ceil((game.beatTime + cometEntryLead) / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
   game.comets.push(c);
   game.sound.startCometShimmer(c, c.pos);
 };

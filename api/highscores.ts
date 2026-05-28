@@ -11,6 +11,7 @@ type IncomingScore = {
   name?: unknown;
   score?: unknown;
   wave?: unknown;
+  max_combo?: unknown;
   kill_count?: unknown;
   kill_summary?: unknown;
 };
@@ -62,6 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           name: r.name,
           score: r.score,
           wave: r.wave,
+          max_combo: r.maxCombo,
           kill_count: r.killCount,
           kill_summary: r.killSummary,
           created_at: r.createdAt,
@@ -80,6 +82,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const name = sanitizeName(body.name);
     const score = sanitizeInt(body.score, 0, 1_000_000_000);
     const wave = sanitizeInt(body.wave, 1, 10_000) ?? 1;
+    const maxCombo = sanitizeInt(body.max_combo, 0, 1_000_000) ?? 0;
     const killCount = sanitizeInt(body.kill_count, 0, 1_000_000) ?? 0;
     const killSummary = sanitizeKillSummary(body.kill_summary);
     if (!name || score === null) {
@@ -88,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     try {
       const row = await prisma.highscore.create({
-        data: { name, score, wave, killCount, killSummary },
+        data: { name, score, wave, maxCombo, killCount, killSummary },
       });
       res.status(201).json({
         score: {
@@ -96,6 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           name: row.name,
           score: row.score,
           wave: row.wave,
+          max_combo: row.maxCombo,
           kill_count: row.killCount,
           kill_summary: row.killSummary,
           created_at: row.createdAt,

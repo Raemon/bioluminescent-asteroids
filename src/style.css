@@ -434,10 +434,10 @@ html, body {
 
 #leaderboard-list li {
   display: grid;
-  grid-template-columns: 28px 1fr auto auto;
+  grid-template-columns: 28px 1fr auto auto auto;
   gap: 14px;
-  align-items: baseline;
-  padding: 6px 12px;
+  align-items: center;
+  padding: 8px 12px;
   font-size: 12px;
   letter-spacing: 0.15em;
   text-transform: uppercase;
@@ -465,6 +465,49 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.lb-combo {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  background: rgba(0, 0, 0, 0.25);
+  line-height: 1;
+}
+
+.lb-combo-value {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 12px currentColor;
+}
+
+.lb-combo-x {
+  font-size: 13px;
+  font-weight: 400;
+  opacity: 0.75;
+  margin-left: 1px;
+}
+
+.lb-combo-label {
+  font-size: 8px;
+  letter-spacing: 0.22em;
+  opacity: 0.75;
+  margin-top: 3px;
+}
+
+.lb-combo-dim   { color: #6ad7ff; opacity: 0.55; border-color: rgba(106, 215, 255, 0.2); }
+.lb-combo-cyan  { color: #6ad7ff; border-color: rgba(106, 215, 255, 0.55); }
+.lb-combo-gold  { color: #ffd86a; border-color: rgba(255, 216, 106, 0.7); }
+.lb-combo-white {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 16px rgba(255, 255, 255, 0.25), inset 0 0 8px rgba(255, 255, 255, 0.08);
 }
 
 .lb-score {
@@ -639,3 +682,44 @@ html, body {
   background: rgba(80, 96, 120, 0.32);
   color: #fff;
 }
+
+/* Pilot's Log unlock toast — astronaut-radio aesthetic that matches the
+   scratchy vocal cue it announces. Fixed top-center, mono spacing so it
+   reads as a transmission rather than a UI element. */
+#pilot-log-toast {
+  position: fixed;
+  top: 22%;
+  left: 50%;
+  transform: translate(-50%, -6px);
+  padding: 10px 18px;
+  font-family: "Space Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #ffd86a;
+  background: rgba(8, 14, 22, 0.78);
+  border: 1px solid rgba(255, 216, 106, 0.55);
+  border-radius: 2px;
+  box-shadow: 0 0 22px rgba(255, 200, 80, 0.35), inset 0 0 10px rgba(255, 200, 80, 0.15);
+  text-shadow: 0 0 10px rgba(255, 200, 80, 0.75);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 50;
+  transition: opacity 0.35s ease-out, transform 0.35s ease-out;
+}
+
+#pilot-log-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  animation: pilot-log-flicker 0.6s ease-out;
+}
+
+@keyframes pilot-log-flicker {
+  0%   { opacity: 0; }
+  10%  { opacity: 1; }
+  18%  { opacity: 0.35; }
+  26%  { opacity: 1; }
+  40%  { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+
