@@ -38,16 +38,21 @@ export const renderKilledRow = (game: Game) => {
   startParadeLoop(game);
 };
 
-// Why: clamp at 0.5 (one eighth-note grid step) so spacing always lands on the bg beat lattice.
-//   maxHp/4 is then rounded up to the same grid so big kills still feel slower without drifting.
+// Why: tiny kills get sub-beat rests (1hp → quarter, 2hp → half) so trash-mob trails machine-gun by;
+//   anything bigger snaps to the whole-beat grid so the kill-sound still lands on a bg bass tick.
 const layOutParade = (game: Game) => {
   const entries: ParadeEntry[] = [];
   let cursor = 0;
   for (const snap of game.killedSnapshots) {
     entries.push({ snap, beatOffset: cursor, played: false, playedAtBeat: 0 });
-    const raw = Math.max(PARADE_BEAT_SUBDIV, snap.maxHp / 4);
-    const snapped = Math.ceil(raw / PARADE_BEAT_SUBDIV) * PARADE_BEAT_SUBDIV;
-    cursor += snapped;
+    let rest: number;
+    if (snap.maxHp <= 1) rest = 0.25;
+    else if (snap.maxHp <= 2) rest = 0.5;
+    else {
+      const raw = Math.max(PARADE_BEAT_SUBDIV, snap.maxHp / 4);
+      rest = Math.ceil(raw / PARADE_BEAT_SUBDIV) * PARADE_BEAT_SUBDIV;
+    }
+    cursor += rest;
   }
   game.paradeEntries = entries;
   game.paradeTotalBeats = cursor;
