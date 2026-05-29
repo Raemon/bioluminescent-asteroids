@@ -578,29 +578,6 @@ const pickCenterMostTarget = (
 ): ReticuleTarget | null =>
   pickCenterMostTargetForFocus(ctx.apex, ctx.frame, ctx.w, ctx.h, targets);
 
-// Why: the renderer tints a target red when no on-beat hit is possible from the current ship
-// state — either it's running away faster than the bullet can catch (|D| > aimRadius + r) or
-// it's so close every shot lands early (|D| < aimRadius - r). Mirrors the aim-circle math in
-// computeOnBeatAim so the visual cue and the on-rhythm spot's bright/dim state stay in sync.
-export const isOnBeatHitReachable = (
-  apex: Vec, w: number, h: number,
-  target: ReticuleTarget, aimCircleCenter: Vec, aimCircleRadius: number, beatGrid: number,
-): boolean => {
-  const [dx, dy] = toroidalDelta(target.pos.x - apex.x, target.pos.y - apex.y, w, h);
-  const cx = apex.x + dx;
-  const cy = apex.y + dy;
-  const [acDx, acDy] = toroidalDelta(aimCircleCenter.x - apex.x, aimCircleCenter.y - apex.y, w, h);
-  const aimCenterX = apex.x + acDx;
-  const aimCenterY = apex.y + acDy;
-  const futureX = cx + target.vel.x * beatGrid;
-  const futureY = cy + target.vel.y * beatGrid;
-  const r = target.radius ?? 0;
-  const ddx = futureX - aimCenterX;
-  const ddy = futureY - aimCenterY;
-  const dist = Math.hypot(ddx, ddy);
-  return dist >= Math.max(0, aimCircleRadius - r) && dist <= aimCircleRadius + r;
-};
-
 // Why: walks every visible target and accumulates whether any of their lock dots touched the aim disc.
 export const paintTrajectoryPreviews = (
   ctx: TrajectoryContext, targets: ReadonlyArray<ReticuleTarget>,
