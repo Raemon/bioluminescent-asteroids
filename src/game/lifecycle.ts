@@ -12,6 +12,7 @@ import { stopParade } from "./killedParade";
 import { renderKilledRow } from "./killedParade";
 import { emitShipDebris } from "./particleBursts";
 import { hideScoreEntry, showLeaderboard, showScoreEntry } from "./scoreEntry";
+import { HALO_MUSIC_POOL } from "./haloMusicConfig";
 
 // Why: Fisher-Yates over Array.sort — sort's randomness is biased and varies across engines.
 const shuffled = <T,>(arr: ReadonlyArray<T>): T[] => {
@@ -80,6 +81,13 @@ export const showTitle = (game: Game) => {
 export const startGame = (game: Game) => {
   game.sound.resume();
   game.sound.preloadPilotLog(1);
+  // Warm every halo music stem in the pool so whichever variation gets
+  // randomly picked at the first 4x doesn't pay fetch+decode latency.
+  // Pool size × 2 stems × ~600 KB ≈ 2.5 MB for the current 2-variation pool —
+  // small enough to load eagerly at game start.
+  for (const variation of HALO_MUSIC_POOL) {
+    game.sound.preloadHaloMusic(variation);
+  }
   game.betaMode = false;
   game.state = "playing";
   game.score = 0;

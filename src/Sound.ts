@@ -106,6 +106,34 @@ type HaloAmbientNode = {
   melodyInterval: ReturnType<typeof setInterval> | null;
 };
 
+// Pre-rendered music variations for the 4x/6x combo halo. Each variation has
+// two looping stems — ambient (4x trigger) and melodic (6x trigger) — that
+// share key, tempo (120 BPM), and 8-second loop length so they mix cleanly.
+// The user picks one at HALO_MUSIC_VARIATION; "none" falls back to the legacy
+// synthesized startHaloAmbient pad.
+export type HaloMusicVariation =
+  | "r2-el"   // ElevenLabs 32-second C-pedal cinematic bed + sustained-tone piano
+  | "r2-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
+  | "none";   // Legacy synthesized pad (the original startHaloAmbient)
+
+type HaloMusicNode = {
+  // Two looping AudioBufferSourceNodes — ambient runs whenever music is
+  // active; melodic runs continuously but its gain is ducked to 0 until the
+  // melodic tier is requested (combo ≥ 6). Starting the melodic node only
+  // when 6x first hits would risk a phase-misalignment with the ambient loop,
+  // so we keep it always-playing-but-silent for sample-accurate phase lock.
+  ambientSrc: AudioBufferSourceNode;
+  melodicSrc: AudioBufferSourceNode;
+  ambientGain: GainNode;
+  melodicGain: GainNode;
+  mainGain: GainNode;
+  // Variation that's currently loaded — preserved so a 6x→4x→6x tier flick
+  // doesn't trigger a reload.
+  variation: HaloMusicVariation;
+  // Whether the melodic layer is currently ducked-up (combo ≥ 6) or down.
+  melodicActive: boolean;
+};
+
 // Optional pan + distance-falloff splice. When a sound (one-shot or drone)
 // is positional, its voices feed into spatial.in; spatial.out connects to the
 // usual master/bakedOut sink. The Game updates pan/gain values per frame for
@@ -202,6 +230,13 @@ export class Sound {
   // Eb4, which is consonant with the comet's phrygian dissonance instead of
   // fighting it.
   haloAmbientCometMode = false;
+  // Active pre-rendered halo music node — null when no music is playing
+  // (i.e. combo < 4 or the legacy synthesized pad is selected).
+  haloMusic: HaloMusicNode | null = null;
+  // Per-stem buffer cache, keyed by URL. AudioBuffers are decoded once and
+  // reused across all start/stop cycles for a given variation.
+  haloMusicBuffers: Map<string, AudioBuffer> = new Map();
+  private haloMusicLoading: Map<string, Promise<AudioBuffer | null>> = new Map();
   toneEngine: ToneEngineNodes | null = null;
 
   // Pilot's Log vocal one-shots. Decoded once on first play, cached forever.
@@ -857,6 +892,7 @@ export class Sound {
     if (!on) this.stopAllBassteroidDrones();
     if (!on) this.stopAllCometShimmers();
     if (!on) this.stopHaloAmbient();
+    if (!on) this.stopHaloMusic();
   }
 
   // Start a continuous theremin-ish drone for an alien. The `key` is the
@@ -1814,6 +1850,189 @@ export class Sound {
     // so a single mistimed shot doesn't strip the sparkle abruptly.
     this.haloAmbient.tier2Gain.gain.exponentialRampToValueAtTime(target, t + (tier === 2 ? 0.5 : 0.9));
     this.haloAmbientTier = tier;
+  }
+
+  // ── Pre-rendered halo music ────────────────────────────────────────────
+  // Loads a music variation (ambient + melodic stems) and schedules them as
+  // looping buffer sources. The ambient stem fades in immediately; the
+  // melodic stem starts ducked and only fades up when
+  // setHaloMusicMelodicLayer(true) is called (combo ≥ 6). Both stems share
+  // length and downbeat so they stay phase-locked for the lifetime of the
+  // music.
+  //
+  // Round 1 used 8-second loops at -6 dBFS peak with gain 0.55 — the audit
+  // showed those were ~7× hotter than the legacy synth pad and fighting the
+  // bass in the 200–500 Hz lo-mid. Round 2 uses 32-second loops at -12 dBFS
+  // peak with per-variation gain targets calibrated against the in-game-mix
+  // audit (`scripts/music-gen/ingame_mix.py`): EL stems pass with gain 0.25,
+  // self-built stems with 0.30, leaving the bass dominant by ≥7 dB in every
+  // band.
+  //
+  // Routed via this.master (not bakedOut) so the music sits inside the same
+  // reverb/compressor bus as live voices. The pre-rendered stems are already
+  // loop-faded so the master bus's reverb tail at the seam won't click.
+  private haloMusicUrl(variation: HaloMusicVariation, layer: "ambient" | "melodic"): string {
+    return `/sounds/halo-music/${variation}-${layer}.mp3`;
+  }
+
+  // Per-variation playback gain, calibrated against the in-game-mix audit
+  // (`scripts/music-gen/ingame_mix.py`) so the bass kit stays dominant by
+  // ≥7 dB in every band. EL stems are spectrally darker so they need a
+  // touch less gain to match perceived loudness with the self-built stems.
+  private haloMusicGain(variation: HaloMusicVariation): number {
+    switch (variation) {
+      case "r2-el": return 0.25;
+      case "r2-sb": return 0.30;
+      default:      return 0.30;
+    }
+  }
+
+  private loadHaloMusicBuffer(url: string): Promise<AudioBuffer | null> {
+    const cached = this.haloMusicBuffers.get(url);
+    if (cached) return Promise.resolve(cached);
+    const inflight = this.haloMusicLoading.get(url);
+    if (inflight) return inflight;
+    if (!this.ctx) return Promise.resolve(null);
+    const ctx = this.ctx;
+    const p = fetch(url)
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
+      .then((buf) => {
+        if (buf) this.haloMusicBuffers.set(url, buf);
+        this.haloMusicLoading.delete(url);
+        return buf;
+      })
+      .catch(() => {
+        this.haloMusicLoading.delete(url);
+        return null;
+      });
+    this.haloMusicLoading.set(url, p);
+    return p;
+  }
+
+  // Warm both stems for a variation so the first 4x trigger plays without
+  // fetch+decode latency. Safe to call multiple times — cached entries are
+  // deduped.
+  preloadHaloMusic(variation: HaloMusicVariation): void {
+    if (variation === "none") return;
+    this.ensureContext();
+    void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient"));
+    void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic"));
+  }
+
+  // Start (or hot-restart) the pre-rendered halo music for a variation. If a
+  // node is already playing for the same variation, we just toggle the
+  // melodic layer; otherwise we tear down the old one and load the new.
+  // melodicActive: should the melodic layer be audible from the start?
+  // (Used when combo jumps straight to ≥ 6 without stopping at 4.)
+  //
+  // measureAlignDelay: optional seconds to delay the buffer .start() so the
+  // music's downbeat lands on a bass-measure boundary. Computed by the
+  // caller from game.beatTime modulo BASS_MEASURE_LENGTH. If negative or
+  // not provided, start immediately. Phase-correct alignment matters more
+  // for 32-second loops with internal chord changes than for the round-1
+  // 8-second loops, where any seam landed within one bar of the bass clock
+  // anyway.
+  async startHaloMusic(variation: HaloMusicVariation, melodicActive: boolean,
+                       measureAlignDelay: number = 0): Promise<void> {
+    if (variation === "none") return;
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    // Same variation already running — just sync the melodic layer.
+    if (this.haloMusic && this.haloMusic.variation === variation) {
+      this.setHaloMusicMelodicLayer(melodicActive);
+      return;
+    }
+    // Different variation playing — fade out the old node before swapping.
+    if (this.haloMusic) this.stopHaloMusic();
+
+    const [ambientBuf, melodicBuf] = await Promise.all([
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient")),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic")),
+    ]);
+    if (!this.ctx || !this.master) return;
+    if (!ambientBuf || !melodicBuf) return;
+    if (this.haloMusic) return;  // raced with another start
+
+    const t = this.ctx.currentTime;
+    const startAt = t + Math.max(0, measureAlignDelay);
+    const ambientSrc = this.ctx.createBufferSource();
+    const melodicSrc = this.ctx.createBufferSource();
+    ambientSrc.buffer = ambientBuf;
+    melodicSrc.buffer = melodicBuf;
+    ambientSrc.loop = true;
+    melodicSrc.loop = true;
+
+    // Per-variation playback peak gain. See haloMusicGain — round-2 stems
+    // (-12 dBFS peak) need lower gain than round-1 (-6 dBFS peak) to sit
+    // under the bass field.
+    const peakGain = this.haloMusicGain(variation);
+
+    // Fade-in starts at the *aligned* start time, not now, so the music
+    // doesn't bleed in during the wait-for-downbeat window.
+    const ambientGain = this.ctx.createGain();
+    ambientGain.gain.setValueAtTime(0.0001, startAt);
+    ambientGain.gain.exponentialRampToValueAtTime(peakGain, startAt + 1.5);
+
+    const melodicGain = this.ctx.createGain();
+    melodicGain.gain.setValueAtTime(0.0001, startAt);
+    if (melodicActive) {
+      melodicGain.gain.exponentialRampToValueAtTime(peakGain, startAt + 0.5);
+    }
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.value = 1.0;
+
+    ambientSrc.connect(ambientGain);
+    melodicSrc.connect(melodicGain);
+    ambientGain.connect(mainGain);
+    melodicGain.connect(mainGain);
+    mainGain.connect(this.master);
+
+    // Both sources start at exactly the same audio time so they remain
+    // phase-locked for the lifetime of the music — switching the melodic
+    // tier is then just a gain ramp, no fresh .start() that would risk
+    // loop-phase drift between the two stems.
+    ambientSrc.start(startAt);
+    melodicSrc.start(startAt);
+
+    this.haloMusic = {
+      ambientSrc, melodicSrc, ambientGain, melodicGain, mainGain,
+      variation, melodicActive,
+    };
+  }
+
+  // Fade the melodic layer in (true) or out (false). 0.5s fade-in matches the
+  // legacy setHaloAmbientTier curve; 0.9s fade-out is slightly slower so a
+  // single mistimed shot doesn't strip the melody abruptly.
+  setHaloMusicMelodicLayer(active: boolean): void {
+    if (!this.ctx || !this.haloMusic) return;
+    if (this.haloMusic.melodicActive === active) return;
+    const t = this.ctx.currentTime;
+    const peakGain = this.haloMusicGain(this.haloMusic.variation);
+    const target = active ? peakGain : 0.0001;
+    const ramp = active ? 0.5 : 0.9;
+    this.haloMusic.melodicGain.gain.cancelScheduledValues(t);
+    this.haloMusic.melodicGain.gain.setValueAtTime(this.haloMusic.melodicGain.gain.value, t);
+    this.haloMusic.melodicGain.gain.exponentialRampToValueAtTime(target, t + ramp);
+    this.haloMusic.melodicActive = active;
+  }
+
+  // Long fade-out + teardown. ~1.2s matches stopHaloAmbient so swapping
+  // between the legacy pad and the pre-rendered music feels consistent on
+  // combo break.
+  stopHaloMusic(): void {
+    if (!this.ctx || !this.haloMusic) return;
+    const t = this.ctx.currentTime;
+    const node = this.haloMusic;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+    const stopAt = t + 1.3;
+    node.ambientSrc.stop(stopAt);
+    node.melodicSrc.stop(stopAt);
+    this.haloMusic = null;
   }
 
   // Comet-on-screen toggle. Slides the third voice between E4 (no comet) and

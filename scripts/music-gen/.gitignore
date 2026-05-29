@@ -1,0 +1,19 @@
+# Local Python venv — recreate via `python3 -m venv venv && venv/bin/pip install
+# librosa soundfile pyrubberband pydub numpy scipy requests`
+venv/
+
+# 32 MB SoundFont — download via the URL in README.md (mrbumpy409/GeneralUser-GS)
+soundfonts/*.sf2
+
+# Raw intermediates — only the post-processed stems in sounds/halo-music/
+# need to be committed
+raw/
+processed/
+
+# Mix-audit scratch wavs — regenerable via `ingame_mix.py render-bed` +
+# `ingame_mix.py analyze-mix`. Not source-of-truth.
+mixaudit/
+
+# Python bytecode
+__pycache__/
+*.pyc

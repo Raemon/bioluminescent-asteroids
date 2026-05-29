@@ -120,17 +120,52 @@ const transitionToGameOver = (game: Game) => {
   showScoreEntry(game);
 };
 
-// Why: yellow-halo (combo ≥ 4) opens the ambient pad; white-bullet tier (≥ 8) thickens it
-//   with an octave-up sparkle layer. Comet presence slides the colour-third from E→Eb so
-//   the pad stays consonant with the comet's phrygian shimmer instead of fighting it.
+import { HALO_MUSIC_POOL, pickHaloMusicVariation } from "./haloMusicConfig";
+import { BASS_MEASURE_LENGTH } from "../Asteroid";
+
+// Why: yellow-halo (combo ≥ 4) opens the ambient pad; combo ≥ 6 adds the
+//   melodic layer; white-bullet tier (≥ 8) thickens the legacy synth pad
+//   with an octave-up sparkle layer. Comet presence slides the colour-third
+//   from E→Eb so the pad stays consonant with the comet's phrygian shimmer
+//   instead of fighting it.
+//
+//   Music variation: each time combo crosses 4 from below, we pick a fresh
+//   random variation from HALO_MUSIC_POOL — so successive combo runs in the
+//   same wave don't always sound the same. The chosen variation persists on
+//   game.sound.haloMusic.variation, so the 6x melodic-layer toggle uses the
+//   same variation's stem (no half-EL/half-self-built mash-ups).
 const syncHaloAmbient = (game: Game) => {
   const hasYellowHalo = game.beatCombo >= 4;
+  const hasMelodic = game.beatCombo >= 6;
   const hasWhiteBullets = game.beatCombo >= 8;
-  if (hasYellowHalo) {
-    if (!game.sound.haloAmbient) game.sound.startHaloAmbient(hasWhiteBullets ? 2 : 1);
-    else game.sound.setHaloAmbientTier(hasWhiteBullets ? 2 : 1);
-  } else if (game.sound.haloAmbient) {
-    game.sound.stopHaloAmbient();
+
+  if (HALO_MUSIC_POOL.length > 0) {
+    // Pre-rendered music path. Two layers: ambient (4x) + melodic (6x).
+    if (hasYellowHalo) {
+      if (!game.sound.haloMusic) {
+        const variation = pickHaloMusicVariation();
+        // Schedule the music's downbeat on the next bass-measure boundary
+        // so the loop's chord changes align with the bass field's measure
+        // clock. Worst-case wait is BASS_MEASURE_LENGTH (2 s); typical is
+        // ~1 s. The 4x-combo halo "ignites" on the next downbeat rather
+        // than mid-bar.
+        const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
+        const measureAlignDelay = nextDownbeat - game.beatTime;
+        void game.sound.startHaloMusic(variation, hasMelodic, measureAlignDelay);
+      } else {
+        game.sound.setHaloMusicMelodicLayer(hasMelodic);
+      }
+    } else if (game.sound.haloMusic) {
+      game.sound.stopHaloMusic();
+    }
+  } else {
+    // Legacy synthesized pad. 4x opens, 8x adds octave-up sparkle.
+    if (hasYellowHalo) {
+      if (!game.sound.haloAmbient) game.sound.startHaloAmbient(hasWhiteBullets ? 2 : 1);
+      else game.sound.setHaloAmbientTier(hasWhiteBullets ? 2 : 1);
+    } else if (game.sound.haloAmbient) {
+      game.sound.stopHaloAmbient();
+    }
   }
   game.sound.setHaloAmbientCometMode(game.comets.length > 0);
 };
