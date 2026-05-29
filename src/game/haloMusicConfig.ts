@@ -1,9 +1,10 @@
-// Halo music selection. Stems live in /sounds/halo-music/{variation}-{ambient,melodic}.mp3.
+// Halo music selection. Stems live in /sounds/halo-music/{variation}-{ambient,melodic,sparkle}.mp3.
 //
 // Each time the player crosses combo ≥ 4 from below, syncHaloAmbient picks
 // a random variation from HALO_MUSIC_POOL. The chosen variation persists
-// for the lifetime of that halo (so 6x melodic uses the same variation's
-// stem); a new pick happens on the next 4x trigger after combo breaks.
+// for the lifetime of that halo (so 6x melodic and 12x sparkle use the
+// same variation's stems); a new pick happens on the next 4x trigger after
+// combo breaks.
 //
 // To disable music entirely and fall back to the legacy synthesized pad,
 // set HALO_MUSIC_POOL to []. To force a specific variation for an A/B test,

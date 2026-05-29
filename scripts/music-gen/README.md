@@ -1,6 +1,6 @@
 # Halo combo music generation pipeline
 
-Two variations of the 4x/6x combo halo music, each with two stems (ambient + melodic). Loop length: 32 seconds = 4 phrases × 4 bars at 120 BPM. The bass holds a C+G open-fifth pedal throughout; the upper voices drift across the four phrases (maj third → min third → Cmaj7 → min third settle).
+Two variations of the 4x/6x/12x combo halo music, each with three stems (ambient + melodic + sparkle). Loop length: 32 seconds = 4 phrases × 4 bars at 120 BPM. The bass holds a C+G open-fifth pedal throughout; the upper voices drift across the four phrases (maj third → min third → Cmaj7 → min third settle).
 
 Stems are picked at random from `HALO_MUSIC_POOL` in `src/game/haloMusicConfig.ts` each time combo crosses 4 from below.
 
@@ -8,10 +8,18 @@ Stems are picked at random from `HALO_MUSIC_POOL` in `src/game/haloMusicConfig.t
 
 | name | source | aesthetic | playback gain |
 |------|--------|-----------|---------------|
-| `r2-el` | ElevenLabs Music | cinematic strings + felt piano, dark (~600 Hz centroid) | 0.25 |
-| `r2-sb` | numpy sine pad with harmonic upper voices + FluidSynth felt piano + sox reverb | warmer, drier (~280 Hz centroid) | 0.30 |
+| `r2-el` | ElevenLabs Music (ambient+melodic) / FluidSynth celesta+halo-pad wash (sparkle) | cinematic strings + felt piano, dark (~600 Hz centroid); celesta sparkle ~2.4 kHz centroid | 0.25 / sparkle 0.35 |
+| `r2-sb` | numpy sine pad with harmonic upper voices + FluidSynth felt piano + sox reverb (ambient+melodic); FluidSynth glockenspiel + sox big-hall reverb (sparkle) | warmer, drier (~280 Hz centroid); glock sparkle ~3.2 kHz centroid | 0.30 / sparkle 0.55 |
 
-Final files live in `public/sounds/halo-music/{variation}-{ambient,melodic}.mp3`.
+Final files live in `public/sounds/halo-music/{variation}-{ambient,melodic,sparkle}.mp3`.
+
+## Layered playback
+
+- `ambient` plays whenever combo ≥ 4 (yellow halo)
+- `melodic` ducks in at combo ≥ 6 (one fade ramp, no fresh `.start()` — keeps phase lock with ambient)
+- `sparkle` ducks in at combo ≥ 12 (chime layer, bloom-in over 0.7s)
+
+All three sources are started simultaneously at the same `ctx.currentTime`, then layer gains are ramped. This guarantees sample-accurate phase alignment for the lifetime of the music.
 
 ## Layout
 

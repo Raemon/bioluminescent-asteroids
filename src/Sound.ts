@@ -117,21 +117,26 @@ export type HaloMusicVariation =
   | "none";   // Legacy synthesized pad (the original startHaloAmbient)
 
 type HaloMusicNode = {
-  // Two looping AudioBufferSourceNodes — ambient runs whenever music is
-  // active; melodic runs continuously but its gain is ducked to 0 until the
-  // melodic tier is requested (combo ≥ 6). Starting the melodic node only
-  // when 6x first hits would risk a phase-misalignment with the ambient loop,
-  // so we keep it always-playing-but-silent for sample-accurate phase lock.
+  // Three looping AudioBufferSourceNodes — ambient runs whenever music is
+  // active; melodic + sparkle run continuously but their gains are ducked to
+  // 0 until their respective tiers are requested (melodic at combo ≥ 6,
+  // sparkle at combo ≥ 12). Starting a layer only when its tier first hits
+  // would risk a phase-misalignment with the ambient loop, so we keep all
+  // three always-playing-but-silent for sample-accurate phase lock.
   ambientSrc: AudioBufferSourceNode;
   melodicSrc: AudioBufferSourceNode;
+  sparkleSrc: AudioBufferSourceNode;
   ambientGain: GainNode;
   melodicGain: GainNode;
+  sparkleGain: GainNode;
   mainGain: GainNode;
   // Variation that's currently loaded — preserved so a 6x→4x→6x tier flick
   // doesn't trigger a reload.
   variation: HaloMusicVariation;
   // Whether the melodic layer is currently ducked-up (combo ≥ 6) or down.
   melodicActive: boolean;
+  // Whether the sparkle layer is currently ducked-up (combo ≥ 12) or down.
+  sparkleActive: boolean;
 };
 
 // Optional pan + distance-falloff splice. When a sound (one-shot or drone)
@@ -183,6 +188,30 @@ export type SoundName =
   | "canisterAppear"
   | "canisterDestroyed"
   | "comboLost";
+
+// Combo-x6 unlock vocal pool. Each entry is a pre-rendered ElevenLabs take of
+// the same Pilot's Log line — picking randomly per fire keeps repeat plays
+// from feeling canned. All takes share the same scratchy-radio post (bandpass
+// + bitcrush + hiss) so they mix interchangeably through bakedOut.
+const PILOT_LOG_1_TAKES: readonly string[] = [
+  "design-1.mp3",
+  "design-bastion-full.mp3",
+  "emilio-drama.mp3",
+  "frank-wise.mp3",
+  "matthew-mountain.mp3",
+  "paul-midwest.mp3",
+  "ralf-deep.mp3",
+  "russel-cowboy.mp3",
+  "rusty-malone.mp3",
+  "wyatt-cowboy.mp3",
+];
+
+// Resolve the URLs for a given pilot-log index. Index 1 = the 6x take pool;
+// any other index falls back to the legacy single-file naming.
+const pilotLogUrlsForIndex = (index: number): string[] => {
+  if (index === 1) return PILOT_LOG_1_TAKES.map((f) => `/sounds/vocals/6x-takes/${f}`);
+  return [`/sounds/vocals/pilot-log-${index}.mp3`];
+};
 
 export class Sound {
   ctx: AudioContext | null = null;
@@ -244,9 +273,12 @@ export class Sound {
   // mixed dry to bakedOut so the comp/limiter/reverb master chain doesn't
   // smear the spoken word. pilotLogPlaying is a soft mutex so a repeated
   // trigger doesn't stack a second voice on top of the first.
-  pilotLogBuffers: Map<number, AudioBuffer> = new Map();
+  //
+  // Cache is keyed by URL (not just index) because index 1 (combo-x6 unlock)
+  // picks a random take from a pool each fire — see PILOT_LOG_1_TAKES.
+  pilotLogBuffers: Map<string, AudioBuffer> = new Map();
   pilotLogPlaying = false;
-  private pilotLogLoading: Map<number, Promise<AudioBuffer | null>> = new Map();
+  private pilotLogLoading: Map<string, Promise<AudioBuffer | null>> = new Map();
 
   // Listener position (ship). Pan + distance falloff are computed relative
   // to this. Half-width/half-height scale the screen so pan saturates at the
@@ -1871,7 +1903,7 @@ export class Sound {
   // Routed via this.master (not bakedOut) so the music sits inside the same
   // reverb/compressor bus as live voices. The pre-rendered stems are already
   // loop-faded so the master bus's reverb tail at the seam won't click.
-  private haloMusicUrl(variation: HaloMusicVariation, layer: "ambient" | "melodic"): string {
+  private haloMusicUrl(variation: HaloMusicVariation, layer: "ambient" | "melodic" | "sparkle"): string {
     return `/sounds/halo-music/${variation}-${layer}.mp3`;
   }
 
@@ -1884,6 +1916,19 @@ export class Sound {
       case "r2-el": return 0.25;
       case "r2-sb": return 0.30;
       default:      return 0.30;
+    }
+  }
+
+  // Sparkle-layer playback gain (combo ≥ 12). Higher than the ambient/melodic
+  // gain because the sparkle stems live above 1 kHz, well clear of the bass
+  // danger zone — the audit shows bass dominance >50 dB even at gain 0.6.
+  // Glockenspiel (SB) reads quieter than the celesta+wash (EL) at the same
+  // gain due to its sparser onset density, so SB gets the higher number.
+  private haloMusicSparkleGain(variation: HaloMusicVariation): number {
+    switch (variation) {
+      case "r2-el": return 0.35;
+      case "r2-sb": return 0.55;
+      default:      return 0.40;
     }
   }
 
@@ -1918,6 +1963,7 @@ export class Sound {
     this.ensureContext();
     void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient"));
     void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic"));
+    void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "sparkle"));
   }
 
   // Start (or hot-restart) the pre-rendered halo music for a variation. If a
@@ -1934,40 +1980,48 @@ export class Sound {
   // 8-second loops, where any seam landed within one bar of the bass clock
   // anyway.
   async startHaloMusic(variation: HaloMusicVariation, melodicActive: boolean,
-                       measureAlignDelay: number = 0): Promise<void> {
+                       measureAlignDelay: number = 0,
+                       sparkleActive: boolean = false): Promise<void> {
     if (variation === "none") return;
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
-    // Same variation already running — just sync the melodic layer.
+    // Same variation already running — just sync the layered tiers.
     if (this.haloMusic && this.haloMusic.variation === variation) {
       this.setHaloMusicMelodicLayer(melodicActive);
+      this.setHaloMusicSparkleLayer(sparkleActive);
       return;
     }
     // Different variation playing — fade out the old node before swapping.
     if (this.haloMusic) this.stopHaloMusic();
 
-    const [ambientBuf, melodicBuf] = await Promise.all([
+    const [ambientBuf, melodicBuf, sparkleBuf] = await Promise.all([
       this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient")),
       this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic")),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "sparkle")),
     ]);
     if (!this.ctx || !this.master) return;
-    if (!ambientBuf || !melodicBuf) return;
+    if (!ambientBuf || !melodicBuf || !sparkleBuf) return;
     if (this.haloMusic) return;  // raced with another start
 
     const t = this.ctx.currentTime;
     const startAt = t + Math.max(0, measureAlignDelay);
     const ambientSrc = this.ctx.createBufferSource();
     const melodicSrc = this.ctx.createBufferSource();
+    const sparkleSrc = this.ctx.createBufferSource();
     ambientSrc.buffer = ambientBuf;
     melodicSrc.buffer = melodicBuf;
+    sparkleSrc.buffer = sparkleBuf;
     ambientSrc.loop = true;
     melodicSrc.loop = true;
+    sparkleSrc.loop = true;
 
     // Per-variation playback peak gain. See haloMusicGain — round-2 stems
     // (-12 dBFS peak) need lower gain than round-1 (-6 dBFS peak) to sit
-    // under the bass field.
+    // under the bass field. Sparkle layer has its own gain since it lives
+    // above 1 kHz and tolerates a louder mix without fighting the bass.
     const peakGain = this.haloMusicGain(variation);
+    const sparklePeak = this.haloMusicSparkleGain(variation);
 
     // Fade-in starts at the *aligned* start time, not now, so the music
     // doesn't bleed in during the wait-for-downbeat window.
@@ -1981,25 +2035,35 @@ export class Sound {
       melodicGain.gain.exponentialRampToValueAtTime(peakGain, startAt + 0.5);
     }
 
+    const sparkleGain = this.ctx.createGain();
+    sparkleGain.gain.setValueAtTime(0.0001, startAt);
+    if (sparkleActive) {
+      sparkleGain.gain.exponentialRampToValueAtTime(sparklePeak, startAt + 0.5);
+    }
+
     const mainGain = this.ctx.createGain();
     mainGain.gain.value = 1.0;
 
     ambientSrc.connect(ambientGain);
     melodicSrc.connect(melodicGain);
+    sparkleSrc.connect(sparkleGain);
     ambientGain.connect(mainGain);
     melodicGain.connect(mainGain);
+    sparkleGain.connect(mainGain);
     mainGain.connect(this.master);
 
-    // Both sources start at exactly the same audio time so they remain
+    // All three sources start at exactly the same audio time so they remain
     // phase-locked for the lifetime of the music — switching the melodic
-    // tier is then just a gain ramp, no fresh .start() that would risk
-    // loop-phase drift between the two stems.
+    // or sparkle tier is then just a gain ramp, no fresh .start() that
+    // would risk loop-phase drift between the stems.
     ambientSrc.start(startAt);
     melodicSrc.start(startAt);
+    sparkleSrc.start(startAt);
 
     this.haloMusic = {
-      ambientSrc, melodicSrc, ambientGain, melodicGain, mainGain,
-      variation, melodicActive,
+      ambientSrc, melodicSrc, sparkleSrc,
+      ambientGain, melodicGain, sparkleGain, mainGain,
+      variation, melodicActive, sparkleActive,
     };
   }
 
@@ -2019,6 +2083,24 @@ export class Sound {
     this.haloMusic.melodicActive = active;
   }
 
+  // Fade the sparkle layer in (true) or out (false). Slightly slower fade-in
+  // than melodic (0.7s vs 0.5s) so the 12x reward blooms in rather than
+  // snapping — the sparkle is meant to feel like a halo expanding, not a
+  // new instrument punching in. 1.1s fade-out cushions a combo break so the
+  // chimes ring down instead of cutting.
+  setHaloMusicSparkleLayer(active: boolean): void {
+    if (!this.ctx || !this.haloMusic) return;
+    if (this.haloMusic.sparkleActive === active) return;
+    const t = this.ctx.currentTime;
+    const peakGain = this.haloMusicSparkleGain(this.haloMusic.variation);
+    const target = active ? peakGain : 0.0001;
+    const ramp = active ? 0.7 : 1.1;
+    this.haloMusic.sparkleGain.gain.cancelScheduledValues(t);
+    this.haloMusic.sparkleGain.gain.setValueAtTime(this.haloMusic.sparkleGain.gain.value, t);
+    this.haloMusic.sparkleGain.gain.exponentialRampToValueAtTime(target, t + ramp);
+    this.haloMusic.sparkleActive = active;
+  }
+
   // Long fade-out + teardown. ~1.2s matches stopHaloAmbient so swapping
   // between the legacy pad and the pre-rendered music feels consistent on
   // combo break.
@@ -2032,6 +2114,7 @@ export class Sound {
     const stopAt = t + 1.3;
     node.ambientSrc.stop(stopAt);
     node.melodicSrc.stop(stopAt);
+    node.sparkleSrc.stop(stopAt);
     this.haloMusic = null;
   }
 
@@ -2066,30 +2149,29 @@ export class Sound {
     this.haloAmbientTier = 0;
   }
 
-  // Pilot's Log vocal loader. Files live at /sounds/vocals/pilot-log-N.mp3 —
-  // pre-rendered ElevenLabs takes with bandpass + bitcrush + hiss applied so
-  // they already sound like a scratchy astronaut radio. Decoded once and
-  // cached; subsequent plays are buffer-source cheap.
-  private loadPilotLogBuffer(index: number): Promise<AudioBuffer | null> {
-    const existing = this.pilotLogLoading.get(index);
+  // Pilot's Log vocal loader. Files live at /sounds/vocals/... — pre-rendered
+  // ElevenLabs takes with bandpass + bitcrush + hiss applied so they already
+  // sound like a scratchy astronaut radio. Decoded once per URL and cached;
+  // subsequent plays are buffer-source cheap.
+  private loadPilotLogBuffer(url: string): Promise<AudioBuffer | null> {
+    const existing = this.pilotLogLoading.get(url);
     if (existing) return existing;
-    if (this.pilotLogBuffers.has(index)) return Promise.resolve(this.pilotLogBuffers.get(index)!);
+    if (this.pilotLogBuffers.has(url)) return Promise.resolve(this.pilotLogBuffers.get(url)!);
     if (!this.ctx) return Promise.resolve(null);
-    const url = `/sounds/vocals/pilot-log-${index}.mp3`;
     const ctx = this.ctx;
     const p = fetch(url)
       .then((r) => (r.ok ? r.arrayBuffer() : null))
       .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
       .then((buf) => {
-        if (buf) this.pilotLogBuffers.set(index, buf);
-        this.pilotLogLoading.delete(index);
+        if (buf) this.pilotLogBuffers.set(url, buf);
+        this.pilotLogLoading.delete(url);
         return buf;
       })
       .catch(() => {
-        this.pilotLogLoading.delete(index);
+        this.pilotLogLoading.delete(url);
         return null;
       });
-    this.pilotLogLoading.set(index, p);
+    this.pilotLogLoading.set(url, p);
     return p;
   }
 
@@ -2097,28 +2179,32 @@ export class Sound {
   // latency at trigger time. Why: the caller's delaySec is computed from the
   // music clock *before* awaiting the load — if the buffer isn't cached, the
   // load can stretch hundreds of ms and the vocal lands well past the intended
-  // downbeat. How to apply: call at run start for any log index that may fire
-  // during play.
+  // downbeat. For index 1 this warms every take in the pool so whichever one
+  // gets randomly picked at fire time is already decoded.
   preloadPilotLog(index: number): void {
     this.ensureContext();
-    void this.loadPilotLogBuffer(index);
+    for (const url of pilotLogUrlsForIndex(index)) void this.loadPilotLogBuffer(url);
   }
 
   // Fire a Pilot's Log vocal cue. `delaySec` lets the caller align the start
   // to the next musical phrase boundary. Routes straight to bakedOut so the
   // master comp/reverb doesn't smear the spoken word — the bandpass/static is
   // already baked into the file. Returns the buffer duration once loaded so
-  // callers can clear their "playing" flag at the right moment.
+  // callers can clear their "playing" flag at the right moment. Index 1 picks
+  // a random take from the 6x-takes pool each fire so repeat plays don't
+  // sound canned.
   async playPilotLog(index: number, delaySec = 0, gain = 1.0): Promise<number> {
     if (!this.enabled) return 0;
     this.ensureContext();
     if (!this.ctx || !this.bakedOut) return 0;
+    const urls = pilotLogUrlsForIndex(index);
+    const url = urls[Math.floor(Math.random() * urls.length)];
     // Anchor the scheduled start to ctx.currentTime *before* the await — if
     // the buffer isn't cached yet, fetch+decode can chew through the delay
     // budget and src.start(now + delaySec) would land long after the intended
     // downbeat. Past target falls back to "play immediately" via Math.max.
     const targetStartTime = this.ctx.currentTime + Math.max(0, delaySec);
-    const buf = await this.loadPilotLogBuffer(index);
+    const buf = await this.loadPilotLogBuffer(url);
     if (!buf || !this.ctx || !this.bakedOut) return 0;
     const src = this.ctx.createBufferSource();
     src.buffer = buf;

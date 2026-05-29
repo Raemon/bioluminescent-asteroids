@@ -143,6 +143,11 @@ const computeFadeAlpha = (lastInConeAt: number, beatTime: number): number => {
   return t01 * t01;
 };
 
+// Why: when the on-beat hit is unreachable (target running away too fast, or too close for any
+// shot to land on the beat) we recolor the on-rhythm reticule red so the player gets the cue
+// directly on the lock element they're already watching, instead of tinting the whole sprite.
+const ON_RHYTHM_UNREACHABLE_HSL = "0, 90%, 60%";
+
 // Why: dashed crosshair sticking out beyond the on-rhythm aim-spot circle in the 4 cardinal
 // directions — reads as "targeting sight". Drawn under the caller's current strokeStyle/lineWidth.
 const paintOnRhythmCrosshair = (ctx: CanvasRenderingContext2D, px: number, py: number) => {
@@ -164,15 +169,16 @@ const paintOnRhythmCrosshair = (ctx: CanvasRenderingContext2D, px: number, py: n
 // entry-flash state can modulate brightness without changing the geometry.
 const paintOnRhythmReticule = (
   ctx: CanvasRenderingContext2D, px: number, py: number,
-  alpha: number, lineWidth: number, glow01: number,
+  alpha: number, lineWidth: number, glow01: number, unreachable: boolean,
 ) => {
+  const hsl = unreachable ? ON_RHYTHM_UNREACHABLE_HSL : RETICULE_DASH_HSL;
   const prevShadowBlur = ctx.shadowBlur;
   const prevShadowColor = ctx.shadowColor;
   if (glow01 > 0) {
     ctx.shadowBlur = TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR * glow01;
-    ctx.shadowColor = `hsla(${RETICULE_DASH_HSL}, ${TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA * glow01})`;
+    ctx.shadowColor = `hsla(${hsl}, ${TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA * glow01})`;
   }
-  ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${alpha})`;
+  ctx.strokeStyle = `hsla(${hsl}, ${alpha})`;
   ctx.lineWidth = lineWidth;
   ctx.setLineDash(TRAJECTORY_ON_RHYTHM_SPOT_DASH);
   ctx.lineDashOffset = 0;
@@ -342,12 +348,13 @@ const computeDirectFlashPulse = (beatTime: number): number => {
 // geometry works out for an on-beat hit); dim otherwise.
 const paintOnRhythmSpot = (
   ctx: CanvasRenderingContext2D, px: number, py: number,
-  willHitOnBeat: boolean, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
+  willHitOnBeat: boolean, reachable: boolean,
+  entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
 ) => {
   const baseAlpha = willHitOnBeat ? TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_REACHABLE : TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_UNREACHABLE;
   const alpha = Math.min(1, baseAlpha * entryFlashBoost * beatPulseBoost * focusBoost);
   const entryGlow01 = Math.max(0, Math.min(1, (entryFlashBoost - 1) / (TRAJECTORY_ENTRY_FLASH_PEAK_BOOST - 1)));
-  paintOnRhythmReticule(ctx, px, py, alpha, TRAJECTORY_ON_RHYTHM_SPOT_LINE_WIDTH + (entryFlashBoost - 1), entryGlow01);
+  paintOnRhythmReticule(ctx, px, py, alpha, TRAJECTORY_ON_RHYTHM_SPOT_LINE_WIDTH + (entryFlashBoost - 1), entryGlow01, !reachable);
 };
 
 // Why: the aim circle is the locus of bullet endpoints at t=beatGrid over all headings —
@@ -461,7 +468,7 @@ const paintTrajectoryFromSnapshot = (
       cx, cy, snap.velX, snap.velY, r,
       aimCenterX, aimCenterY, ctx.aimCircleRadius, ctx.beatGrid, retX, retY,
     );
-    paintOnRhythmSpot(ctx.ctx, aim.x, aim.y, aim.willHitOnBeat, entryFlashBoost, beatPulseBoost, focusBoost);
+    paintOnRhythmSpot(ctx.ctx, aim.x, aim.y, aim.willHitOnBeat, aim.reachable, entryFlashBoost, beatPulseBoost, focusBoost);
   }
   ctx.ctx.restore();
   return result.overlapsReticule;
