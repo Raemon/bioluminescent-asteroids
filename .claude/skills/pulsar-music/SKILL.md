@@ -7,6 +7,22 @@ description: Generate or edit looping background music for the Pulsar game's com
 
 You have ears via tools, not directly. **Every aesthetic claim you make must be backed by an analysis script run — never assert "this sounds dreamy" without data.** The single biggest failure mode is generating something, writing prose about how it'll feel, and never verifying.
 
+## Do not playtest the game to verify music
+
+The game is slow to start up, requires browser interaction (clicking to grant audio context, then earning 4x/6x/12x combo), and routes through dozens of unrelated systems. **Do not launch a dev server, open a browser, or use Playwright on the game to verify a stem.** That includes:
+
+- Don't start `npm run dev` / `vite` to "hear" the music
+- Don't use `mcp__playwright__browser_*` to load the game
+- Don't ask the user to run the game and report back unless you've already exhausted the analysis path
+
+Instead, when you need to verify behavior beyond what the existing scripts cover, **write a disposable test script** that exercises just the audio path. Examples:
+
+- To verify a stem loops cleanly: write a numpy/sox script that concatenates the stem with itself N times and saves a wav for the user to listen to once — no game.
+- To verify two layers stack without clipping or beating: load both with librosa, sum them, write a wav, run the same analyze.py/deepinspect.py against the sum.
+- To verify the 6x→12x transition feels smooth: write a python script that crossfades the stems on the same schedule Sound.ts uses (0.5s fade-in to peak) and writes the audio result. Compare to the analysis numbers.
+
+The user trusts the analysis numbers + their own listen. They don't need (and don't want) you booting the game to confirm anything. If you genuinely can't determine something from analysis, **say so in the report** and let the user listen — don't try to listen on their behalf by driving the game.
+
 ## Read these first
 
 Always read before generating:

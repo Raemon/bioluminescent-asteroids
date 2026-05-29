@@ -114,6 +114,8 @@ type HaloAmbientNode = {
 export type HaloMusicVariation =
   | "r2-el"   // ElevenLabs 32-second C-pedal cinematic bed + sustained-tone piano
   | "r2-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
+  | "r3-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + crystalline arp sparkle
+  | "r4-sb"   // Self-built 32-second C-pedal flagship — pulsing arp + syncopated saw lead + celesta counter-melody (rhythmic, interlocked)
   | "none";   // Legacy synthesized pad (the original startHaloAmbient)
 
 type HaloMusicNode = {
@@ -1915,6 +1917,16 @@ export class Sound {
     switch (variation) {
       case "r2-el": return 0.25;
       case "r2-sb": return 0.30;
+      // r3-el is an EL-generated analog synth pad with 42% energy in 60-200
+      // and 44% in 200-500. At gain 0.22 the melodic layer's lo-mid sits
+      // +6.8 dB above the ≥4 dB pass threshold. Going higher risks the
+      // analog pad fighting the bass field.
+      case "r3-el": return 0.22;
+      // r4-sb is the rhythmic flagship — pulsing arp + syncopated saw lead.
+      // Audit at gain 0.25 keeps lo-mid clean by ≥13 dB across all three
+      // layers. Same gain applied to all layers since rhythmic interlock
+      // needs even relative loudness between hook + counter-melody.
+      case "r4-sb": return 0.25;
       default:      return 0.30;
     }
   }
@@ -1928,6 +1940,16 @@ export class Sound {
     switch (variation) {
       case "r2-el": return 0.35;
       case "r2-sb": return 0.55;
+      // r3-el sparkle is EL-generated arpeggiated bells (176 onsets — more
+      // active than the sparse chimes the r2 variations use). Centroid
+      // 2.1 kHz, above the bass danger zone. Audit at gain 0.30 keeps the
+      // lo-mid 13 dB clean.
+      case "r3-el": return 0.30;
+      // r4-sb sparkle is a celesta counter-melody (8th-note cascades).
+      // Same gain as ambient+melodic (0.25) so the three rhythmic layers
+      // interlock at even volume — sparkle is meant to *fill* the gaps in
+      // the hook, not to spotlight over it.
+      case "r4-sb": return 0.25;
       default:      return 0.40;
     }
   }
