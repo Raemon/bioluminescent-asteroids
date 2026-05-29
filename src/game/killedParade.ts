@@ -1,9 +1,25 @@
 import type { Game } from "../Game";
 import { KilledSnapshot } from "./killSnapshot";
 import { BEAT_GRID } from "./rhythmConstants";
+import { SoundName } from "../Sound";
 
 // Why: high enough scroll speed that sprites move visibly between beats — reads as marching past.
 const PARADE_PX_PER_BEAT = 140;
+
+// Why: perceptual onset of a sound lands at the peak of its envelope, not at trigger time.
+//   The bass voices sweep their pitch over 40–80ms before the body crystallises, so triggering
+//   them exactly when the sprite reaches centre makes the audible "hit" arrive late. Lead the
+//   trigger by the sweep duration so the perceived peak lands on the visual beat instead.
+//   Values are seconds and were tuned from each voice's pitchDecay / filterEnvelope settings
+//   in Sound.ts: bassKick 0.04s, bassPluck 0.04s (filter sweep dominates), bassBoom 0.08s,
+//   bassSnap is short-transient (~0.005s) so it sits effectively on-beat.
+const SOUND_PRE_ROLL_SECONDS: Partial<Record<SoundName, number>> = {
+  bassKick: 0.04,
+  bassPluck: 0.04,
+  bassBoom: 0.08,
+  bassSnap: 0.0,
+  bgBeat: 0.04,
+};
 
 // Why: canvas height grows to fit the tallest snap (+padding) so a boss-large with its
 //   additive glow halo isn't clipped at the top/bottom of the row.
@@ -148,7 +164,10 @@ const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number,
   for (const e of game.paradeEntries) {
     const x = centreX + (e.beatOffset - t) * PARADE_PX_PER_BEAT;
     const halfW = e.snap.full.width / 2;
-    if (!e.played && x <= centreX) {
+    // Why: lead bass/percussive triggers by their perceptual-onset delay so the audible "hit"
+    //   lands on centre, not after the sprite has already passed it. See SOUND_PRE_ROLL_SECONDS.
+    const preRollBeats = (SOUND_PRE_ROLL_SECONDS[e.snap.killSound] ?? 0) / BEAT_GRID;
+    if (!e.played && t >= e.beatOffset - preRollBeats) {
       e.played = true;
       e.playedAtBeat = t;
       game.sound.play(e.snap.killSound);
