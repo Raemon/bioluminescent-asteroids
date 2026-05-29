@@ -113,6 +113,12 @@ const renderLeaderboardRows = (game: Game, rows: HighscoreRow[]) => {
     if (comboDiff !== 0) return comboDiff;
     return b.score - a.score;
   });
+  const header = `<li class="lb-header">
+    <span class="lb-rank"></span>
+    <span class="lb-name">Pilot</span>
+    <span class="lb-score">Score</span>
+    <span class="lb-combo">Peak Combo</span>
+  </li>`;
   const items = sorted
     .map((row, idx) => {
       const rank = idx + 1;
@@ -122,15 +128,14 @@ const renderLeaderboardRows = (game: Game, rows: HighscoreRow[]) => {
       return `<li>
         <span class="lb-rank">${rank}</span>
         <span class="lb-name">${safeName}</span>
+        <span class="lb-score">${row.score.toLocaleString()}</span>
         <span class="lb-combo lb-combo-${comboTier}">
           <span class="lb-combo-value">${combo}<span class="lb-combo-x">×</span></span>
-          <span class="lb-combo-label">best combo</span>
         </span>
-        <span class="lb-score">${row.score.toLocaleString()}</span>
       </li>`;
     })
     .join("");
-  game.leaderboardListEl.innerHTML = items;
+  game.leaderboardListEl.innerHTML = header + items;
 };
 
 const escapeHtml = (s: string): string =>

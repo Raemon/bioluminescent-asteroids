@@ -434,7 +434,7 @@ html, body {
 
 #leaderboard-list li {
   display: grid;
-  grid-template-columns: 28px 1fr auto auto;
+  grid-template-columns: 28px 1fr 120px 120px;
   gap: 14px;
   align-items: center;
   padding: 8px 12px;
@@ -447,7 +447,39 @@ html, body {
   border-radius: 4px;
 }
 
-#leaderboard-list li:first-child {
+#leaderboard-list .lb-score,
+#leaderboard-list .lb-combo {
+  justify-self: end;
+  text-align: right;
+}
+
+#leaderboard-list li.lb-header {
+  background: transparent;
+  border-color: transparent;
+  padding-top: 0;
+  padding-bottom: 4px;
+  font-size: 10px;
+  color: #6ad7ff;
+  opacity: 0.55;
+  letter-spacing: 0.22em;
+}
+
+#leaderboard-list li.lb-header .lb-name,
+#leaderboard-list li.lb-header .lb-score,
+#leaderboard-list li.lb-header .lb-combo {
+  color: inherit;
+  text-shadow: none;
+  font-family: inherit;
+  font-weight: 500;
+}
+
+#leaderboard-list li.lb-header .lb-combo {
+  display: inline-block;
+  min-width: 0;
+  padding: 0;
+}
+
+#leaderboard-list li.lb-header + li {
   border-color: rgba(255, 216, 106, 0.5);
   background: rgba(40, 32, 10, 0.4);
 }
@@ -476,9 +508,6 @@ html, body {
   justify-content: center;
   min-width: 64px;
   padding: 4px 10px;
-  border-radius: 6px;
-  border: 1px solid currentColor;
-  background: rgba(0, 0, 0, 0.25);
   line-height: 1;
 }
 
@@ -503,16 +532,16 @@ html, body {
   margin-top: 3px;
 }
 
-.lb-combo-dim   { color: #6ad7ff; opacity: 0.55; border-color: rgba(106, 215, 255, 0.2); }
-.lb-combo-cyan  { color: #6ad7ff; border-color: rgba(106, 215, 255, 0.55); }
-.lb-combo-gold  { color: #ffd86a; border-color: rgba(255, 216, 106, 0.7); }
+.lb-combo-dim   { color: #6ad7ff; opacity: 0.55; }
+.lb-combo-cyan  { color: #6ad7ff; }
+.lb-combo-gold  { color: #ffd86a; }
 .lb-combo-white {
   color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.85);
-  box-shadow: 0 0 16px rgba(255, 255, 255, 0.25), inset 0 0 8px rgba(255, 255, 255, 0.08);
+  text-shadow: 0 0 12px rgba(255, 255, 255, 0.45);
 }
 
 .lb-score {
+  font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
   font-weight: 500;
   color: #ffd86a;
   text-shadow: 0 0 10px rgba(255, 200, 80, 0.45);
