@@ -1,11 +1,9 @@
 import type { Game } from "../Game";
 import {
   fetchHighscores,
-  formatKillSummary,
   getRecentName,
   saveRecentName,
   submitHighscore,
-  totalKills,
   type HighscoreRow,
 } from "./highscores";
 
@@ -108,16 +106,18 @@ const renderLeaderboardRows = (game: Game, rows: HighscoreRow[]) => {
       '<li class="leaderboard-status">No scores yet — be the first pilot on the board.</li>';
     return;
   }
-  const items = rows
+  // Why: pilots are ranked by max combo first (the headline streak stat), with score
+  //   as a tiebreaker — so the board rewards rhythm play over raw point grinding.
+  const sorted = [...rows].sort((a, b) => {
+    const comboDiff = (b.max_combo ?? 0) - (a.max_combo ?? 0);
+    if (comboDiff !== 0) return comboDiff;
+    return b.score - a.score;
+  });
+  const items = sorted
     .map((row, idx) => {
       const rank = idx + 1;
-      const kills = row.kill_count || totalKills(row.kill_summary ?? {});
-      const summary = formatKillSummary(row.kill_summary ?? {});
-      const meta = summary ? `W${row.wave} · ${kills}k · ${summary}` : `W${row.wave} · ${kills}k`;
       const safeName = escapeHtml(row.name);
       const combo = row.max_combo ?? 0;
-      // Why: max combo is the headline stat — render it as a chip with its own label so
-      //   pilots can see at a glance whose streak game is strongest, not just whose score.
       const comboTier = combo >= 8 ? "white" : combo >= 4 ? "gold" : combo >= 2 ? "cyan" : "dim";
       return `<li>
         <span class="lb-rank">${rank}</span>
@@ -127,7 +127,6 @@ const renderLeaderboardRows = (game: Game, rows: HighscoreRow[]) => {
           <span class="lb-combo-label">best combo</span>
         </span>
         <span class="lb-score">${row.score.toLocaleString()}</span>
-        <span class="lb-meta">${escapeHtml(meta)}</span>
       </li>`;
     })
     .join("");

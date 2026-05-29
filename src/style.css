@@ -434,7 +434,7 @@ html, body {
 
 #leaderboard-list li {
   display: grid;
-  grid-template-columns: 28px 1fr auto auto auto;
+  grid-template-columns: 28px 1fr auto auto;
   gap: 14px;
   align-items: center;
   padding: 8px 12px;
@@ -465,6 +465,8 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+  justify-self: start;
 }
 
 .lb-combo {
@@ -515,13 +517,6 @@ html, body {
   color: #ffd86a;
   text-shadow: 0 0 10px rgba(255, 200, 80, 0.45);
   letter-spacing: 0.1em;
-}
-
-.lb-meta {
-  font-size: 10px;
-  color: #6ad7ff;
-  opacity: 0.65;
-  letter-spacing: 0.18em;
 }
 
 .leaderboard-status {

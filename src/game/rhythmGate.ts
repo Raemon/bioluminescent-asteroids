@@ -64,7 +64,7 @@ export const spawnBeatDebugPopup = (game: Game, pos: Vec, time: number, prefix: 
 };
 
 // Why: only meaningful losses (combo ≥2 → 0) fire wrrr + red halo; primed-only loss is too noisy.
-//   sourcePos anchors the "COMBO LOST" popup at whatever caused the break (ship fire / target hit).
+//   sourcePos anchors the "RHYTHM LOST" popup at whatever caused the break (ship fire / target hit).
 export const loseCombo = (game: Game, sourcePos?: Vec) => {
   if (game.beatCombo === 0) return;
   const wasMeaningful = game.beatCombo >= 2;

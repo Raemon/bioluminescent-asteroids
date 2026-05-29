@@ -56,7 +56,7 @@ export const popupComboLost = (pos: Vec): Popup => ({
   vel: { x: rand(-10, 10), y: -55 },
   life: 1.1,
   maxLife: 1.1,
-  text: "COMBO LOST",
+  text: "RHYTHM LOST",
   font: "700 16px 'Space Grotesk', system-ui, sans-serif",
   fill: "#ff6a6a",
   shadowColor: "rgba(255, 90, 90, 0.85)",

@@ -42,7 +42,7 @@ export const hitSoundFor = (
 };
 
 // Why: same combo-update rule for every kill type — one helper means callers don't reimplement.
-//   hitPos anchors the "COMBO LOST" popup at the target the off-beat shot landed on.
+//   hitPos anchors the "RHYTHM LOST" popup at the target the off-beat shot landed on.
 export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) => {
   if (isOnBeatHit && game.beatCombo >= 1) {
     game.beatCombo += 1;
