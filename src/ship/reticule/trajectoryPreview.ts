@@ -322,16 +322,41 @@ const refreshTrack = (
   return existing;
 };
 
+// Why: the trajectory ray itself overlaps the cone when its forward path (from just ahead of the
+// target, in the velocity direction) clips to a non-empty segment inside the wedge — keeps the
+// preview "live" even after the asteroid leaves the cone, so long as its path still crosses it.
+const trajectoryRayOverlapsCone = (
+  dx: number, dy: number, t: ReticuleTarget, frame: ConeFrame,
+): boolean => {
+  const speed = Math.hypot(t.vel.x, t.vel.y);
+  if (speed < 1) return false;
+  const ux = t.vel.x / speed;
+  const uy = t.vel.y / speed;
+  const r = t.radius ?? 0;
+  const edgePad = 6;
+  const rsx = dx + ux * (r + edgePad);
+  const rsy = dy + uy * (r + edgePad);
+  const clip = clipRayToCone(rsx, rsy, ux, uy, frame);
+  return clip.sMax > clip.sMin;
+};
+
 // Why: per-target live render — checks cone membership, updates track, and draws with flash boost.
+// Treat the trajectory as "in cone" if EITHER the target overlaps the cone OR its forward path
+// crosses the cone; the player can still aim the radar at the trajectory line itself.
 const previewLiveTarget = (
   ctx: TrajectoryContext, t: ReticuleTarget, flashPulse: number, rendered: Set<object>,
 ): boolean => {
   const [dx, dy] = toroidalDelta(t.pos.x - ctx.apex.x, t.pos.y - ctx.apex.y, ctx.w, ctx.h);
   const tr = t.radius ?? 0;
-  if (!targetIsInsideCone(dx, dy, tr, ctx.frame)) return false;
+  const targetInCone = targetIsInsideCone(dx, dy, tr, ctx.frame);
+  const rayInCone = !targetInCone && trajectoryRayOverlapsCone(dx, dy, t, ctx.frame);
+  if (!targetInCone && !rayInCone) return false;
   const track = refreshTrack(ctx.trajectoryTracks, t, ctx.beatTime);
   rendered.add(t as unknown as object);
-  return paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, 1, flashPulse, true);
+  // Why: when only the ray (not the target itself) is in the cone, disable cone clipping so the
+  // visible dots span the full forward path — clipping would chop the line back inside the wedge
+  // and could omit the section the radar is actually overlapping.
+  return paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, 1, flashPulse, targetInCone);
 };
 
 // Why: drain expired fade entries and render fading-out trajectories for targets that left the cone or
