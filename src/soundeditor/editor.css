@@ -1,351 +1,187 @@
-/* /soundeditor — tuning workbench. Pulsar palette: deep space + neon. */
+/* Sound editor — checkbox tracks that play together on a shared beat clock.
+   Each row pairs the in-game visual with a custom checkbox; checking it adds
+   that sound to the live mix. */
 
 .soundeditor-body {
-  overflow: auto;
-  cursor: default;
-  background: radial-gradient(ellipse at 50% 0%, #0a1230 0%, #02030a 60%, #000005 100%);
+  background: #04060a;
+  color: #d6ecff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin: 0;
   min-height: 100vh;
+  height: auto;
+  overflow-y: auto;
 }
 
-.soundeditor-body #stage,
-.soundeditor-body #hud,
-.soundeditor-body #overlay,
-.soundeditor-body #engine-toast {
-  display: none !important;
+html:has(.soundeditor-body) {
+  height: auto;
+  overflow-y: auto;
 }
 
 .se-header {
-  position: sticky;
-  top: 0;
-  z-index: 20;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   padding: 18px 28px;
-  background: linear-gradient(to bottom, rgba(2, 3, 10, 0.95), rgba(2, 3, 10, 0.7));
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid rgba(106, 215, 255, 0.12);
+  border-bottom: 1px solid rgba(106, 215, 255, 0.18);
+  background: linear-gradient(180deg, rgba(106, 215, 255, 0.06), transparent);
 }
 
 .se-title {
   display: flex;
   align-items: baseline;
   gap: 10px;
+}
+
+.se-logo {
+  font-size: 22px;
+  font-weight: 600;
   letter-spacing: 0.18em;
-  text-transform: uppercase;
-  font-weight: 500;
-  font-size: 13px;
-}
-.se-logo { color: #e0f7ff; text-shadow: 0 0 14px rgba(140, 220, 255, 0.7); }
-.se-sep { color: rgba(106, 215, 255, 0.4); }
-.se-sub { color: #6ad7ff; opacity: 0.85; }
-
-.se-header-actions {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.se-header-actions button,
-.se-header-actions .se-back {
-  background: rgba(106, 215, 255, 0.08);
   color: #6ad7ff;
-  border: 1px solid rgba(106, 215, 255, 0.3);
-  padding: 7px 14px;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  cursor: pointer;
-  border-radius: 2px;
-  text-decoration: none;
-  transition: background 0.12s, color 0.12s;
-}
-.se-header-actions button:hover,
-.se-header-actions .se-back:hover {
-  background: rgba(106, 215, 255, 0.18);
-  color: #e0f7ff;
+  text-shadow: 0 0 12px rgba(106, 215, 255, 0.55);
 }
 
-/* ── layout ─────────────────────────────────────────── */
+.se-sep { color: rgba(214, 236, 255, 0.35); }
+
+.se-sub {
+  font-size: 13px;
+  color: rgba(214, 236, 255, 0.7);
+  letter-spacing: 0.08em;
+}
+
+.se-header-right {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.se-bpm {
+  font-size: 11px;
+  color: rgba(214, 236, 255, 0.45);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.se-bpm strong {
+  color: #ffd86a;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.se-back {
+  color: rgba(214, 236, 255, 0.7);
+  text-decoration: none;
+  font-size: 13px;
+  padding: 6px 12px;
+  border: 1px solid rgba(106, 215, 255, 0.25);
+  border-radius: 3px;
+}
+
+.se-back:hover {
+  color: #6ad7ff;
+  border-color: rgba(106, 215, 255, 0.55);
+}
 
 .se-main {
-  display: grid;
-  grid-template-columns: 240px 1fr;
-  gap: 24px;
-  padding: 24px 28px 60px;
-  max-width: 1600px;
+  padding: 40px 32px 80px;
+  max-width: 720px;
   margin: 0 auto;
 }
-
-.se-globals {
-  position: sticky;
-  top: 80px;
-  align-self: start;
-  background: rgba(10, 18, 48, 0.4);
-  border: 1px solid rgba(106, 215, 255, 0.12);
-  border-radius: 4px;
-  padding: 18px 16px;
-}
-
-.se-aside-title {
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: rgba(106, 215, 255, 0.6);
-  font-weight: 500;
-  margin-bottom: 14px;
-}
-
-.se-aside-hint {
-  font-size: 10.5px;
-  line-height: 1.5;
-  color: rgba(216, 243, 255, 0.4);
-  margin-top: 18px;
-  font-weight: 300;
-}
-
-/* ── list & rows ────────────────────────────────────── */
 
 .se-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.se-group-header {
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: rgba(106, 215, 255, 0.5);
-  padding: 22px 4px 6px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.se-group-header::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(to right, rgba(106, 215, 255, 0.2), transparent);
+  gap: 8px;
 }
 
 .se-row {
   display: grid;
-  grid-template-columns: 200px 480px 1fr;
-  gap: 18px;
-  align-items: stretch;
-  padding: 14px 16px;
-  background: rgba(10, 18, 48, 0.32);
+  grid-template-columns: 220px 1fr auto;
+  align-items: center;
+  gap: 28px;
+  padding: 22px 24px;
   border: 1px solid rgba(106, 215, 255, 0.08);
-  border-radius: 4px;
+  border-radius: 6px;
+  background: rgba(106, 215, 255, 0.015);
   transition: border-color 0.15s, background 0.15s;
 }
-.se-row:hover {
-  border-color: rgba(106, 215, 255, 0.22);
-  background: rgba(10, 18, 48, 0.5);
-}
-.se-row.playing {
-  border-color: rgba(255, 216, 106, 0.5);
-  background: rgba(40, 30, 10, 0.4);
+
+.se-row.checked {
+  border-color: rgba(106, 215, 255, 0.32);
+  background: rgba(106, 215, 255, 0.04);
 }
 
-.se-row.rendering {
-  border-color: rgba(106, 215, 255, 0.35);
+.se-vis canvas {
+  display: block;
+  width: 200px;
+  height: 100px;
+  background: #02040a;
+  border: 1px solid rgba(106, 215, 255, 0.12);
+  border-radius: 4px;
 }
-.se-row.rendering .se-row-vis::after {
-  content: "rendering…";
-  position: absolute;
-  inset: 0;
+
+.se-meta {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  color: rgba(106, 215, 255, 0.65);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  pointer-events: none;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
 }
 
-.se-row-meta { display: flex; flex-direction: column; gap: 8px; }
+.se-label {
+  font-size: 16px;
+  color: #e0f7ff;
+}
 
-.se-row-name {
-  font-size: 14px;
+.se-sublabel {
+  font-size: 11px;
+  color: rgba(214, 236, 255, 0.45);
   letter-spacing: 0.05em;
-  font-weight: 500;
-  color: #e0f7ff;
 }
-.se-row-group {
-  font-size: 9.5px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: rgba(216, 243, 255, 0.42);
-  font-weight: 300;
-}
-.se-row-blurb {
-  font-size: 11px;
-  line-height: 1.45;
-  color: rgba(216, 243, 255, 0.5);
-  font-weight: 300;
-  margin-top: 4px;
-}
-.se-row-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-.se-row-actions button {
-  background: rgba(106, 215, 255, 0.08);
-  color: #6ad7ff;
-  border: 1px solid rgba(106, 215, 255, 0.22);
-  padding: 5px 11px;
-  font: inherit;
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  cursor: pointer;
-  border-radius: 2px;
-}
-.se-row-actions button.primary {
-  background: rgba(255, 216, 106, 0.12);
-  color: #ffd86a;
-  border-color: rgba(255, 216, 106, 0.4);
-}
-.se-row-actions button:hover { filter: brightness(1.4); }
 
-.se-row-vis {
-  background: #050811;
-  border: 1px solid rgba(106, 215, 255, 0.08);
-  border-radius: 3px;
-  overflow: hidden;
+/* Custom checkbox — circular, glows when checked. */
+.se-check {
   position: relative;
-  min-height: 120px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  user-select: none;
 }
 
-.se-row-vis canvas { display: block; }
-
-.se-row-vis.empty::after {
-  content: "no capture yet — press play";
+.se-check input {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: rgba(216, 243, 255, 0.28);
-  pointer-events: none;
-}
-
-.se-row-knobs {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px 4px;
-}
-
-/* ── knob ──────────────────────────────────────────── */
-
-.se-knob-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.se-knob {
-  display: grid;
-  grid-template-columns: 80px 1fr 56px;
-  gap: 8px;
-  align-items: center;
-  font-size: 10.5px;
-}
-
-.se-knob.semantic { padding-left: 8px; border-left: 1px solid rgba(255, 216, 106, 0.18); }
-
-.se-knob-label {
-  letter-spacing: 0.08em;
-  color: rgba(216, 243, 255, 0.65);
-  text-transform: lowercase;
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.se-knob-input {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 4px;
-  background: rgba(106, 215, 255, 0.15);
-  border-radius: 2px;
-  outline: none;
+  margin: 0;
+  opacity: 0;
   cursor: pointer;
 }
-.se-knob-input::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
+
+.se-check-mark {
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid rgba(106, 215, 255, 0.35);
+  border-radius: 50%;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+
+.se-check:hover .se-check-mark {
+  border-color: rgba(106, 215, 255, 0.7);
+}
+
+.se-check input:checked + .se-check-mark {
+  border-color: #6ad7ff;
+  background: rgba(106, 215, 255, 0.18);
+  box-shadow: 0 0 14px rgba(106, 215, 255, 0.45);
+}
+
+.se-check input:checked + .se-check-mark::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
   background: #6ad7ff;
   border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 0 8px rgba(106, 215, 255, 0.6);
-}
-.se-knob-input::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  background: #6ad7ff;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 0 8px rgba(106, 215, 255, 0.6);
-}
-.se-knob.semantic .se-knob-input { background: rgba(255, 216, 106, 0.18); }
-.se-knob.semantic .se-knob-input::-webkit-slider-thumb {
-  background: #ffd86a;
-  box-shadow: 0 0 8px rgba(255, 216, 106, 0.6);
-}
-.se-knob.semantic .se-knob-input::-moz-range-thumb {
-  background: #ffd86a;
-  box-shadow: 0 0 8px rgba(255, 216, 106, 0.6);
+  box-shadow: 0 0 8px #6ad7ff;
 }
 
-.se-knob-value {
-  font-variant-numeric: tabular-nums;
-  color: #e0f7ff;
-  font-weight: 500;
-  text-align: right;
-  font-size: 10.5px;
+/* Brief flash on the row when its sound fires on this beat. */
+.se-row.firing .se-vis canvas {
+  box-shadow: 0 0 18px rgba(255, 216, 106, 0.35);
 }
-.se-knob.dirty .se-knob-value { color: #ffd86a; }
-
-.se-knob.reset {
-  font-size: 9px;
-  cursor: pointer;
-  color: rgba(216, 243, 255, 0.35);
-}
-
-.se-knob-reset-btn {
-  background: none;
-  border: none;
-  color: rgba(255, 216, 106, 0.55);
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
-  padding: 1px 4px;
-  letter-spacing: 0.1em;
-}
-.se-knob-reset-btn:hover { color: #ffd86a; }
-
-.se-save-status {
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: rgba(216, 243, 255, 0.4);
-  margin-left: auto;
-}
-.se-save-status.saved { color: #7cffb0; }
-.se-save-status.error { color: #ff7a5c; }

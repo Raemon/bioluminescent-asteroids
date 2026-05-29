@@ -14,26 +14,14 @@
         <span class="se-sep">/</span>
         <span class="se-sub">sound editor</span>
       </div>
-      <div class="se-header-actions">
-        <button id="se-recapture-all" type="button">re-capture all</button>
+      <div class="se-header-right">
+        <div class="se-bpm">cycle <strong>0.5s</strong> · 120 bpm</div>
         <a class="se-back" href="/">← game</a>
       </div>
     </header>
 
     <main class="se-main">
-      <aside class="se-globals">
-        <h2 class="se-aside-title">global</h2>
-        <div class="se-knob-group" id="se-globals-knobs"></div>
-        <p class="se-aside-hint">
-          knobs apply to the next playback. master volume and brightness are
-          live taps on the editor's capture bus — they don't mutate the game's
-          Sound class.
-        </p>
-      </aside>
-
-      <section class="se-list" id="se-list">
-        <!-- rows injected by editor.ts -->
-      </section>
+      <div class="se-list" id="se-list"></div>
     </main>
 
     <script type="module" src="/src/soundeditor/editor.ts"></script>
