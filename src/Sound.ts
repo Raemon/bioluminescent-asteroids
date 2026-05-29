@@ -1874,6 +1874,17 @@ export class Sound {
     return p;
   }
 
+  // Warm the buffer cache so the first playPilotLog doesn't pay fetch+decode
+  // latency at trigger time. Why: the caller's delaySec is computed from the
+  // music clock *before* awaiting the load — if the buffer isn't cached, the
+  // load can stretch hundreds of ms and the vocal lands well past the intended
+  // downbeat. How to apply: call at run start for any log index that may fire
+  // during play.
+  preloadPilotLog(index: number): void {
+    this.ensureContext();
+    void this.loadPilotLogBuffer(index);
+  }
+
   // Fire a Pilot's Log vocal cue. `delaySec` lets the caller align the start
   // to the next musical phrase boundary. Routes straight to bakedOut so the
   // master comp/reverb doesn't smear the spoken word — the bandpass/static is
@@ -1883,6 +1894,11 @@ export class Sound {
     if (!this.enabled) return 0;
     this.ensureContext();
     if (!this.ctx || !this.bakedOut) return 0;
+    // Anchor the scheduled start to ctx.currentTime *before* the await — if
+    // the buffer isn't cached yet, fetch+decode can chew through the delay
+    // budget and src.start(now + delaySec) would land long after the intended
+    // downbeat. Past target falls back to "play immediately" via Math.max.
+    const targetStartTime = this.ctx.currentTime + Math.max(0, delaySec);
     const buf = await this.loadPilotLogBuffer(index);
     if (!buf || !this.ctx || !this.bakedOut) return 0;
     const src = this.ctx.createBufferSource();
@@ -1891,7 +1907,7 @@ export class Sound {
     g.gain.value = gain;
     src.connect(g);
     g.connect(this.bakedOut);
-    src.start(this.ctx.currentTime + Math.max(0, delaySec));
+    src.start(Math.max(this.ctx.currentTime, targetStartTime));
     return buf.duration;
   }
 

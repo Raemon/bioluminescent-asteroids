@@ -78,13 +78,13 @@ export const BOSS_HUE = 12;
 export const SIZE_SPAWN_SPEED: Record<AsteroidSize, [number, number]> = {
   large: [40, 90],
   medium: [55, 105],
-  small: [75, 125],
+  small: [60, 110],
 };
 
 const splitChildSpeed = (parentVel: Vec, childSize: AsteroidSize): number => {
   const parentSpeed = Math.hypot(parentVel.x, parentVel.y);
   if (childSize === "medium") return parentSpeed * rand(1.2, 1.7) + 40;
-  return parentSpeed * rand(1.35, 1.9) + 55;
+  return parentSpeed * rand(1.15, 1.65) + 40;
 };
 
 const SIZE_SCORE: Record<AsteroidSize, number> = {

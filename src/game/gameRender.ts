@@ -4,7 +4,8 @@ import { currentBeatPulse } from "./rhythmGate";
 import { renderTrails } from "./trailsRender";
 import { renderPopups } from "./popups";
 import { computeConeFrame } from "../ship/reticule/coneGeometry";
-import { pickCenterMostTargetForFocus, FOCUSED_TARGET_BRIGHTNESS, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
+import { pickCenterMostTargetForFocus, FOCUSED_TARGET_BRIGHTNESS, ReticuleTarget, isOnBeatHitReachable } from "../ship/reticule/trajectoryPreview";
+import { computeAimCircle } from "../ship/reticule/reticuleRender";
 
 // Why: shake is purely cosmetic; isolate its math so render() reads top-down.
 const applyScreenShake = (game: Game): { shakeX: number; shakeY: number } => {
@@ -30,29 +31,39 @@ const paintBackgroundLayers = (game: Game) => {
   game.pulsar.render(game.ctx);
 };
 
-// Why: ctx.filter is the cleanest way to brighten a single entity's existing sprite without
-// touching every render() signature — wrap the call, paint, restore. Restoring to "none" works
-// across browsers; saving the prior value first lets callers nest filters if they ever need to.
-const withFocusBrightness = (
-  ctx: CanvasRenderingContext2D, focused: boolean, paint: () => void,
+// Why: ctx.filter is the cleanest way to recolor/brighten a single entity's existing sprite
+// without touching every render() signature — wrap the call, paint, restore. Restoring to the
+// previous filter value (rather than "none") lets callers nest filters safely.
+//   focused      → focused-target brightness boost.
+//   unreachable  → "you can't hit this on-beat from here" cue: hue-rotate to red plus saturate.
+//                  Combines with brightness when both apply.
+const withFocusFilter = (
+  ctx: CanvasRenderingContext2D, focused: boolean, unreachable: boolean, paint: () => void,
 ) => {
-  if (!focused) { paint(); return; }
+  if (!focused && !unreachable) { paint(); return; }
   const prev = ctx.filter;
-  ctx.filter = `brightness(${FOCUSED_TARGET_BRIGHTNESS})`;
+  const parts: string[] = [];
+  if (focused) parts.push(`brightness(${FOCUSED_TARGET_BRIGHTNESS})`);
+  if (unreachable) parts.push("hue-rotate(-90deg) saturate(2)");
+  ctx.filter = parts.join(" ");
   paint();
   ctx.filter = prev;
 };
 
 // Why: bodies must sit ON their own trails, so trails pass before any per-entity render call.
-const paintEntityLayers = (game: Game, focusedTarget: ReticuleTarget | null) => {
+const paintEntityLayers = (
+  game: Game, focusedTarget: ReticuleTarget | null, focusedUnreachable: boolean,
+) => {
   const { ctx } = game;
   renderTrails(game, ctx);
-  for (const c of game.comets) withFocusBrightness(ctx, c === focusedTarget, () => c.render(ctx));
+  const paintOne = (t: ReticuleTarget, draw: () => void) =>
+    withFocusFilter(ctx, t === focusedTarget, t === focusedTarget && focusedUnreachable, draw);
+  for (const c of game.comets) paintOne(c, () => c.render(ctx));
   for (const s of game.shards) s.render(ctx);
-  for (const a of game.asteroids) withFocusBrightness(ctx, a === focusedTarget, () => a.render(ctx, game.time));
-  for (const c of game.canisters) withFocusBrightness(ctx, c === focusedTarget, () => c.render(ctx, game.time));
-  for (const al of game.aliens) withFocusBrightness(ctx, al === focusedTarget, () => al.render(ctx, game.time));
-  for (const ab of game.alienBullets) withFocusBrightness(ctx, ab === focusedTarget, () => ab.render(ctx));
+  for (const a of game.asteroids) paintOne(a, () => a.render(ctx, game.time));
+  for (const c of game.canisters) paintOne(c, () => c.render(ctx, game.time));
+  for (const al of game.aliens) paintOne(al, () => al.render(ctx, game.time));
+  for (const ab of game.alienBullets) paintOne(ab, () => ab.render(ctx));
   for (const b of game.bullets) b.render(ctx);
   game.particles.render(ctx);
 };
@@ -83,12 +94,18 @@ export const renderGame = (game: Game) => {
   ctx.translate(shakeX, shakeY);
   paintBackgroundLayers(game);
   // Why: pick the same focused target the reticule will draw the on-rhythm spot on, so the
-  // brightness boost on the sprite and the reticule overlay agree.
+  // brightness boost on the sprite and the reticule overlay agree. If that focused target is
+  // not reachable on-beat (running away too fast, or so close every shot lands early), tint it
+  // red so the player gets a visual cue without having to interpret the reticule alone.
   const targets = targetsForReticule(game);
   const focusedTarget = pickCenterMostTargetForFocus(
     game.ship.pos, computeConeFrame(game.ship), game.w, game.h, targets,
   );
-  paintEntityLayers(game, focusedTarget);
+  const aim = computeAimCircle(game.ship, BEAT_GRID);
+  const focusedUnreachable = focusedTarget !== null && !isOnBeatHitReachable(
+    game.ship.pos, game.w, game.h, focusedTarget, aim.center, aim.radius, BEAT_GRID,
+  );
+  paintEntityLayers(game, focusedTarget, focusedUnreachable);
   paintForeground(game);
   // Why: bass-drop white flash has to sit above every other layer to actually wash the screen.
   game.pulsar.renderShockwaveOverlay(ctx);

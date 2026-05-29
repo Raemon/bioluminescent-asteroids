@@ -79,6 +79,7 @@ export const showTitle = (game: Game) => {
 // Why: per-run randomised bass intro order means the wave-2/3 picks vary between runs.
 export const startGame = (game: Game) => {
   game.sound.resume();
+  game.sound.preloadPilotLog(1);
   game.betaMode = false;
   game.state = "playing";
   game.score = 0;

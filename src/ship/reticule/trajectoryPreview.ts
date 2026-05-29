@@ -54,7 +54,9 @@ const TRAJECTORY_ON_RHYTHM_SPOT_RADIUS = 8;
 const TRAJECTORY_ON_RHYTHM_SPOT_LINE_WIDTH = 1;
 const TRAJECTORY_ON_RHYTHM_SPOT_DASH: number[] = [2, 2];
 const TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_REACHABLE = TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA;
-const TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_UNREACHABLE = TRAJECTORY_FIRST_BEAT_DOT_ALPHA;
+// Why: dim state needs to read as "you're not aimed at the on-beat hit yet" — significantly
+// fainter than the bright state so the brightness jump is unmistakeable when you line it up.
+const TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_UNREACHABLE = 0.22;
 // Why: dashed crosshair tick that sticks out past the lock circle — reads as "this is a sight".
 const TRAJECTORY_LOCK_CROSSHAIR_GAP = 3;
 const TRAJECTORY_LOCK_CROSSHAIR_LENGTH = 7;
@@ -335,44 +337,63 @@ const computeDirectFlashPulse = (beatTime: number): number => {
 };
 
 // Why: on-rhythm aim spot uses the same lock-circle + crosshair visual as the first-beat dot so the
-// player reads them as the same kind of cue ("targeting reticule"). Brighter when an on-beat hit
-// is geometrically reachable right now, dimmed when it isn't.
+// player reads them as the same kind of cue ("targeting reticule"). Brightens ONLY when firing
+// now would actually hit the target on the next beat (player's reticule is on the spot AND the
+// geometry works out for an on-beat hit); dim otherwise.
 const paintOnRhythmSpot = (
   ctx: CanvasRenderingContext2D, px: number, py: number,
-  reachable: boolean, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
+  willHitOnBeat: boolean, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
 ) => {
-  const baseAlpha = reachable ? TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_REACHABLE : TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_UNREACHABLE;
+  const baseAlpha = willHitOnBeat ? TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_REACHABLE : TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_UNREACHABLE;
   const alpha = Math.min(1, baseAlpha * entryFlashBoost * beatPulseBoost * focusBoost);
   const entryGlow01 = Math.max(0, Math.min(1, (entryFlashBoost - 1) / (TRAJECTORY_ENTRY_FLASH_PEAK_BOOST - 1)));
   paintOnRhythmReticule(ctx, px, py, alpha, TRAJECTORY_ON_RHYTHM_SPOT_LINE_WIDTH + (entryFlashBoost - 1), entryGlow01);
 };
 
-// Why: the aim circle is the locus of bullet positions on the next beat — any point inside it is
-// reachable by some firing direction right now. The best on-beat aim point for a moving target is
-// the closest point on/in the aim circle to the target's predicted on-beat position; project that
-// back into the target's current frame by subtracting one beat of target travel.
-type OnRhythmSpot = { x: number; y: number; reachable: boolean };
-const computeOnRhythmSpot = (
+// Why: the aim circle is the locus of bullet endpoints at t=beatGrid over all headings —
+// radius = bulletSpeed*beat, center accounts for inherited ship velocity. For an on-beat hit
+// the bullet endpoint at t=beatGrid must land EXACTLY on the target's future body surface:
+// land outside the body and you miss; land inside and the bullet collided BEFORE the beat
+// (early/off-beat hit) since it passed through the body en route. So the aim point is the
+// intersection of the aim circle with the target's predicted body circle on the player's side.
+//
+// Reachability ladder (D = aimCenter→C_future, |D| = dist between centers):
+//   |D| > aimRadius + r : target running away — bullet can't reach it at all.
+//   |D| < aimRadius - r : target too close/slow — every heading overshoots → only early hits.
+//   ||D| - aimRadius| ≤ r : the two circles cross → on-beat hit reachable on the near surface.
+//
+// When reachable, the aim point is C_future - r·D̂ (near surface). When NOT reachable, we still
+// place the spot at the target's predicted center so the player sees where the lead would be,
+// but `reachable` is false so the renderer can tint the target red.
+type OnBeatAim = { x: number; y: number; reachable: boolean; willHitOnBeat: boolean };
+const computeOnBeatAim = (
   cx: number, cy: number, velX: number, velY: number, radius: number,
   aimCenterX: number, aimCenterY: number, aimRadius: number, beatGrid: number,
-): OnRhythmSpot => {
+  retX: number, retY: number,
+): OnBeatAim => {
   const futureX = cx + velX * beatGrid;
   const futureY = cy + velY * beatGrid;
   const dx = futureX - aimCenterX;
   const dy = futureY - aimCenterY;
   const dist = Math.hypot(dx, dy);
-  let bestX: number;
-  let bestY: number;
-  if (dist <= aimRadius || dist < 1e-6) {
-    bestX = futureX;
-    bestY = futureY;
+  const reachable = dist >= Math.max(0, aimRadius - radius) && dist <= aimRadius + radius;
+  let spotX: number;
+  let spotY: number;
+  if (reachable && dist > 1e-6) {
+    spotX = futureX - (dx / dist) * radius;
+    spotY = futureY - (dy / dist) * radius;
   } else {
-    bestX = aimCenterX + (dx / dist) * aimRadius;
-    bestY = aimCenterY + (dy / dist) * aimRadius;
+    spotX = futureX;
+    spotY = futureY;
   }
-  const missDist = Math.max(0, dist - aimRadius);
-  const reachable = missDist <= radius + BULLET_HIT_RADIUS_ON_BEAT;
-  return { x: bestX - velX * beatGrid, y: bestY - velY * beatGrid, reachable };
+  // Why: hit detection compares the aim disc (bullet at t=beatGrid) to the target's future
+  // CENTER with combined radii — same logic the actual collision test uses — not to the spot,
+  // since the spot sits on the body surface and would under-detect by the target's radius.
+  const hitTol = radius + BULLET_HIT_RADIUS_ON_BEAT;
+  const retDx = retX - futureX;
+  const retDy = retY - futureY;
+  const willHitOnBeat = reachable && retDx * retDx + retDy * retDy <= hitTol * hitTol;
+  return { x: spotX, y: spotY, reachable, willHitOnBeat };
 };
 
 // Why: core trajectory renderer — operates on a position/velocity snapshot, with optional cone clipping.
@@ -436,11 +457,11 @@ const paintTrajectoryFromSnapshot = (
     sMin, sMax, dotStep, dotOffset, flashPulse, entryFlashBoost, beatPulseBoost, focusBoost,
   );
   if (SHOW_ON_RHYTHM_RETICULE && showOnRhythmSpot) {
-    const spot = computeOnRhythmSpot(
+    const aim = computeOnBeatAim(
       cx, cy, snap.velX, snap.velY, r,
-      aimCenterX, aimCenterY, ctx.aimCircleRadius, ctx.beatGrid,
+      aimCenterX, aimCenterY, ctx.aimCircleRadius, ctx.beatGrid, retX, retY,
     );
-    paintOnRhythmSpot(ctx.ctx, spot.x, spot.y, spot.reachable, entryFlashBoost, beatPulseBoost, focusBoost);
+    paintOnRhythmSpot(ctx.ctx, aim.x, aim.y, aim.willHitOnBeat, entryFlashBoost, beatPulseBoost, focusBoost);
   }
   ctx.ctx.restore();
   return result.overlapsReticule;
@@ -549,6 +570,29 @@ const pickCenterMostTarget = (
   ctx: TrajectoryContext, targets: ReadonlyArray<ReticuleTarget>,
 ): ReticuleTarget | null =>
   pickCenterMostTargetForFocus(ctx.apex, ctx.frame, ctx.w, ctx.h, targets);
+
+// Why: the renderer tints a target red when no on-beat hit is possible from the current ship
+// state — either it's running away faster than the bullet can catch (|D| > aimRadius + r) or
+// it's so close every shot lands early (|D| < aimRadius - r). Mirrors the aim-circle math in
+// computeOnBeatAim so the visual cue and the on-rhythm spot's bright/dim state stay in sync.
+export const isOnBeatHitReachable = (
+  apex: Vec, w: number, h: number,
+  target: ReticuleTarget, aimCircleCenter: Vec, aimCircleRadius: number, beatGrid: number,
+): boolean => {
+  const [dx, dy] = toroidalDelta(target.pos.x - apex.x, target.pos.y - apex.y, w, h);
+  const cx = apex.x + dx;
+  const cy = apex.y + dy;
+  const [acDx, acDy] = toroidalDelta(aimCircleCenter.x - apex.x, aimCircleCenter.y - apex.y, w, h);
+  const aimCenterX = apex.x + acDx;
+  const aimCenterY = apex.y + acDy;
+  const futureX = cx + target.vel.x * beatGrid;
+  const futureY = cy + target.vel.y * beatGrid;
+  const r = target.radius ?? 0;
+  const ddx = futureX - aimCenterX;
+  const ddy = futureY - aimCenterY;
+  const dist = Math.hypot(ddx, ddy);
+  return dist >= Math.max(0, aimCircleRadius - r) && dist <= aimCircleRadius + r;
+};
 
 // Why: walks every visible target and accumulates whether any of their lock dots touched the aim disc.
 export const paintTrajectoryPreviews = (

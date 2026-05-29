@@ -24,6 +24,13 @@ const RAPID_HALF_BEAT_FRACTION = 0.5;
 // Why: bind ship state to per-target memo so trajectory previews can track entry-flash and fade across frames.
 type ReticuleState = { trajectoryTracks: TrajectoryTrackMap };
 
+// Why: the aim circle = locus of bullet endpoints at t=beatGrid over all headings. Single source
+// of truth so the reticule painter and the gameRender red-tint check agree on geometry.
+export const computeAimCircle = (ship: Ship, beatGrid: number) => ({
+  center: add(ship.pos, mul(ship.vel, 0.4 * beatGrid)),
+  radius: ship.radius + 4 + ship.bulletSpeed * beatGrid,
+});
+
 // Why: position where a shot fired with the given heading offset lands after `beatFraction` of a beat.
 const computeReticulePosition = (
   ship: Ship, beatGrid: number, w: number, h: number,
@@ -66,8 +73,7 @@ export const renderShipReticules = (
   const reticulePositions = computeReticulePositions(ship, beatGrid, w, h);
   const primaryReticule = reticulePositions[reticulePositions.length - 1];
   const apex = ship.pos;
-  const aimCircleCenter = add(apex, mul(ship.vel, 0.4 * beatGrid));
-  const aimCircleRadius = ship.radius + 4 + ship.bulletSpeed * beatGrid;
+  const { center: aimCircleCenter, radius: aimCircleRadius } = computeAimCircle(ship, beatGrid);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   const hitboxPulse = cosineEnvelope(beatTime, RETICULE_HITBOX_PULSE_PERIOD_SEC, RETICULE_HITBOX_PULSE_MIN, RETICULE_HITBOX_PULSE_MAX);
