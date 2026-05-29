@@ -192,20 +192,18 @@ export type SoundName =
   | "comboLost";
 
 // Combo-x6 unlock vocal pool. Each entry is a pre-rendered ElevenLabs take of
-// the same Pilot's Log line — picking randomly per fire keeps repeat plays
-// from feeling canned. All takes share the same scratchy-radio post (bandpass
-// + bitcrush + hiss) so they mix interchangeably through bakedOut.
+// the captain's voice at the 6x trigger — three takes by the same actor
+// (PL_Ralf_Deep), two of which are Entry 2's lullaby script and one of which
+// is the original Entry 1 "loud" line. Picking randomly per fire keeps repeat
+// plays from feeling canned, while keeping the voice identity consistent so
+// the character stays the same person every time. All takes share the same
+// scratchy-radio post (bandpass + bitcrush + hiss) so they mix interchangeably
+// through bakedOut. The other audition files (design-1, frank-wise, etc.) are
+// kept on disk in the same folder but excluded from the live pool.
 const PILOT_LOG_1_TAKES: readonly string[] = [
-  "design-1.mp3",
-  "design-bastion-full.mp3",
-  "emilio-drama.mp3",
-  "frank-wise.mp3",
-  "matthew-mountain.mp3",
-  "paul-midwest.mp3",
   "ralf-deep.mp3",
-  "russel-cowboy.mp3",
-  "rusty-malone.mp3",
-  "wyatt-cowboy.mp3",
+  "ralf-deep-log2-a.mp3",
+  "ralf-deep-log2-b.mp3",
 ];
 
 // Resolve the URLs for a given pilot-log index. Index 1 = the 6x take pool;

@@ -35,14 +35,14 @@ const paintBackgroundLayers = (game: Game) => {
 // with a single additive radial-gradient disc painted on top of the focused target — every other
 // entity already uses globalCompositeOperation = "lighter", so an extra additive splash reads
 // as "this one is glowing brighter" without touching any sprite pipeline.
-const FOCUS_GLOW_RADIUS_MULT = 2.6;
-const FOCUS_GLOW_ALPHA = 0.45;
-const FOCUS_GLOW_MIN_RADIUS = 14;
+const FOCUS_GLOW_RADIUS_MULT = 1.35;
+const FOCUS_GLOW_ALPHA = 0.22;
+const FOCUS_GLOW_MIN_RADIUS = 8;
 const paintFocusGlow = (ctx: CanvasRenderingContext2D, t: ReticuleTarget) => {
   const r = Math.max(FOCUS_GLOW_MIN_RADIUS, (t.radius ?? FOCUS_GLOW_MIN_RADIUS) * FOCUS_GLOW_RADIUS_MULT);
   const g = ctx.createRadialGradient(t.pos.x, t.pos.y, 0, t.pos.x, t.pos.y, r);
   g.addColorStop(0, `rgba(255, 255, 255, ${FOCUS_GLOW_ALPHA})`);
-  g.addColorStop(0.5, `rgba(255, 255, 255, ${(FOCUS_GLOW_ALPHA * 0.35).toFixed(3)})`);
+  g.addColorStop(0.5, `rgba(255, 255, 255, ${(FOCUS_GLOW_ALPHA * 0.3).toFixed(3)})`);
   g.addColorStop(1, "rgba(255, 255, 255, 0)");
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
