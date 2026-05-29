@@ -22,15 +22,9 @@ export const beatOffsetFor = (game: Game, time: number): number => {
   return time - beatIndex * grid;
 };
 
-// Why: instant attack + slow squared release makes the beat onset pop crisply on the visual pulse.
+// Why: 0 → snap to 1 at the beat → squared release. No ramp-up — the onset is the visual hit.
 const beatPulseEnvelope = (normalized: number): number => {
-  if (normalized < -1 || normalized > 1) return 0;
-  // Why: 10ms / 80ms half-window = 0.125 of normalized space.
-  const ATTACK_FRAC = 0.125;
-  if (normalized <= 0) {
-    const t = (normalized + 1) / ATTACK_FRAC;
-    return t >= 1 ? 1 : t;
-  }
+  if (normalized < 0 || normalized > 1) return 0;
   return (1 - normalized) * (1 - normalized);
 };
 

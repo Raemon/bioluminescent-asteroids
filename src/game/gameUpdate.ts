@@ -150,7 +150,7 @@ const updatePlaying = (game: Game, dt: number) => {
   graceFrameNearAsteroids(game);
   tickWavePhase(game, dt, musicDt);
   tickWorldEntities(game, dt, musicDt);
-  game.particles.update(dt);
+  game.particles.update(musicDt);
   game.popups = updatePopups(game.popups, dt);
   runCollisionPasses(game);
   evaluateClosedBeats(game);
@@ -217,22 +217,23 @@ const tickWavePhase = (game: Game, dt: number, _musicDt: number) => {
   if (game.pulsar.shockJustFired) detonateShockwave(game);
 };
 
-// Why: asteroids use musicDt (slow with music); comets/bullets keep wall-clock to avoid double-slow.
-const tickWorldEntities = (game: Game, dt: number, musicDt: number) => {
-  for (const c of game.comets) c.update(dt, game.w, game.h);
+// Why: slow-mo slows the whole world via musicDt — asteroids, comets, aliens, bullets, shards, canisters.
+//   Ship stays on wall-clock dt (updated earlier) so player reactions feel responsive.
+const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
+  for (const c of game.comets) c.update(musicDt, game.w, game.h);
   pruneDeadComets(game);
   for (const a of game.asteroids) a.update(musicDt, game.w, game.h);
-  for (const al of game.aliens) al.update(dt, game.w, game.h);
+  for (const al of game.aliens) al.update(musicDt, game.w, game.h);
   tickAlienFire(game);
-  for (const b of game.bullets) b.update(dt, game.w, game.h);
+  for (const b of game.bullets) b.update(musicDt, game.w, game.h);
   game.bullets = game.bullets.filter((b) => b.life > 0);
-  for (const ab of game.alienBullets) ab.update(dt, game.w, game.h);
+  for (const ab of game.alienBullets) ab.update(musicDt, game.w, game.h);
   game.alienBullets = game.alienBullets.filter((ab) => ab.life > 0);
-  for (const s of game.shards) s.update(dt);
+  for (const s of game.shards) s.update(musicDt);
   game.shards = game.shards.filter((s) => s.life > 0);
   for (const c of game.canisters) {
     const wasWarping = c.warping;
-    c.update(dt, game.w, game.h);
+    c.update(musicDt, game.w, game.h);
     if (!wasWarping && c.warping) game.sound.play("canisterAppear", 1, c.pos);
   }
   game.canisters = game.canisters.filter((c) => c.alive);

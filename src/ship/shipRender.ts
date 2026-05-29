@@ -14,10 +14,11 @@ const shipHullVertices = (ship: Ship): Vec[] => [
   fromAngle(ship.heading - Math.PI * 0.78, ship.radius * 1.0),
 ];
 
-// Why: cyan glowing hull is the ship's signature — breath pulse makes it feel alive even at rest.
-const paintShipHull = (ctx: CanvasRenderingContext2D, verts: Vec[], invuln: number, t: number) => {
-  const breathPulse = 0.7 + 0.3 * Math.sin(t * 0.005);
-  ctx.strokeStyle = `hsla(195, 100%, 75%, ${0.95 * breathPulse * invuln})`;
+// Why: hull brightness sits at a baseline and snaps to peak on each beat, then fades — matches the
+//   combo halo's snap-and-fade so every ship light shares one rhythm.
+const paintShipHull = (ctx: CanvasRenderingContext2D, verts: Vec[], invuln: number, beatPulse: number) => {
+  const beatBrightness = 0.7 + 0.3 * beatPulse;
+  ctx.strokeStyle = `hsla(195, 100%, 75%, ${0.95 * beatBrightness * invuln})`;
   ctx.lineWidth = 1.5;
   ctx.shadowColor = "hsla(195, 100%, 70%, 1)";
   ctx.shadowBlur = 18;
@@ -73,13 +74,13 @@ const paintRetroFlares = (ctx: CanvasRenderingContext2D, ship: Ship) => {
   }
 };
 
-// Why: shield ring uses the powerup's hue so the player reads which buff is active at a glance.
-const paintShieldRing = (ctx: CanvasRenderingContext2D, ship: Ship, t: number) => {
+// Why: shield ring snaps to peak on the beat and fades — same rhythm as the hull/halo.
+const paintShieldRing = (ctx: CanvasRenderingContext2D, ship: Ship, beatPulse: number) => {
   if (!ship.shieldActive) return;
   const shieldRadius = ship.radius * 1.9;
-  const shieldPulse = 0.6 + 0.4 * Math.sin(t * 0.006);
+  const shieldBrightness = 0.6 + 0.4 * beatPulse;
   const shieldHue = POWERUP_HUE.shield;
-  ctx.strokeStyle = `hsla(${shieldHue}, 100%, 80%, ${0.75 * shieldPulse})`;
+  ctx.strokeStyle = `hsla(${shieldHue}, 100%, 80%, ${0.75 * shieldBrightness})`;
   ctx.lineWidth = 1.4;
   ctx.shadowColor = `hsla(${shieldHue}, 100%, 70%, 1)`;
   ctx.shadowBlur = 16;
@@ -106,9 +107,9 @@ export const renderShipBody = (ctx: CanvasRenderingContext2D, ship: Ship, t: num
   applyBeatScale(ctx, beatPulse);
   ctx.globalCompositeOperation = "lighter";
   renderComboHalo(ctx, ship, beatPulse);
-  paintShipHull(ctx, verts, invuln, t);
+  paintShipHull(ctx, verts, invuln, beatPulse);
   paintThrustFlame(ctx, ship);
   paintRetroFlares(ctx, ship);
-  paintShieldRing(ctx, ship, t);
+  paintShieldRing(ctx, ship, beatPulse);
   ctx.restore();
 };

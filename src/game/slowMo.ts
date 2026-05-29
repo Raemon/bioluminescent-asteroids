@@ -1,7 +1,7 @@
-// Slow-mo affects the music side of the clock only: asteroid motion,
-// beatTime, and bass audio all step at SLOW_MO_FACTOR speed while the
-// player, bullets and fire cooldown keep real-time speed. Reads more as
-// "bullet time" advantage than a global pause.
+// Slow-mo slows the whole world — asteroids, comets, aliens, bullets,
+// beatTime and bass audio all step at SLOW_MO_FACTOR speed. The player
+// ship and the slowMoTimer itself keep wall-clock dt so the player's
+// reactions feel responsive and the effect doesn't extend its own lifespan.
 export const SLOW_MO_DURATION = 24;
 export const SLOW_MO_FACTOR = 0.2;
 

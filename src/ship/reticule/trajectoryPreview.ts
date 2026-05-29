@@ -33,6 +33,12 @@ const TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA = 0.95;
 // Why: how far outside the on-beat hit radius the proximity glow starts ramping up — this is
 // the "near" band where the first-dot already reads as bright before a direct overlap.
 const TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD = 24;
+// Why: faint dashed halo around the first-beat dot — subtle "this is the next-beat lock" cue.
+// Picks up the same beat-pulse boost as the dot itself so it brightens on the beat in sync.
+const TRAJECTORY_FIRST_BEAT_HALO_RADIUS = 6;
+const TRAJECTORY_FIRST_BEAT_HALO_ALPHA = 0.18;
+const TRAJECTORY_FIRST_BEAT_HALO_LINE_WIDTH = 0.75;
+const TRAJECTORY_FIRST_BEAT_HALO_DASH: number[] = [2, 2];
 // Why: 6Hz flicker when directly on a target reads as an unmistakeable "shot will land" cue.
 const TRAJECTORY_DIRECT_FLASH_HZ = 6;
 const TRAJECTORY_DIRECT_FLASH_DEPTH = 0.55;
@@ -200,6 +206,17 @@ const paintFirstBeatDot = (
   ctx.beginPath();
   ctx.arc(px, py, TRAJECTORY_FIRST_BEAT_DOT_RADIUS, 0, TAU);
   ctx.fill();
+  // Why: faint dashed halo around the dot — uses the same alpha-modulation chain (proximity,
+  // direct flash, entry flash, beat pulse, focus boost) so it tracks the dot's brightness.
+  const haloAlpha = Math.min(1, TRAJECTORY_FIRST_BEAT_HALO_ALPHA
+    * (1 + directFlash) * entryFlashBoost * beatPulseBoost * focusBoost);
+  ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${haloAlpha})`;
+  ctx.lineWidth = TRAJECTORY_FIRST_BEAT_HALO_LINE_WIDTH;
+  ctx.setLineDash(TRAJECTORY_FIRST_BEAT_HALO_DASH);
+  ctx.beginPath();
+  ctx.arc(px, py, TRAJECTORY_FIRST_BEAT_HALO_RADIUS, 0, TAU);
+  ctx.stroke();
+  ctx.setLineDash([]);
   ctx.shadowBlur = prevShadowBlur;
   ctx.shadowColor = prevShadowColor;
 };
