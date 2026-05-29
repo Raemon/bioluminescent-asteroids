@@ -479,9 +479,9 @@ html, body {
   padding: 0;
 }
 
-#leaderboard-list li.lb-header + li {
-  border-color: rgba(255, 216, 106, 0.5);
-  background: rgba(40, 32, 10, 0.4);
+#leaderboard-list li.lb-self {
+  border-color: rgba(255, 216, 106, 0.6);
+  background: rgba(40, 32, 10, 0.5);
 }
 
 .lb-rank {

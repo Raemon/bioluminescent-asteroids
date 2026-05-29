@@ -111,6 +111,8 @@ const transitionToGameOver = (game: Game) => {
   game.sound.stopAllCometShimmers();
   game.sound.stopHaloAmbient();
   game.comets = [];
+  game.lastRunScore = game.score;
+  game.lastRunScoreId = null;
   game.overlayTitleEl.textContent = "Game Over";
   game.overlayStartEl.innerHTML = `score <strong>${String(game.score).padStart(6, "0")}</strong> &nbsp;·&nbsp; press <span class="key">enter</span> to restart`;
   game.overlayEl.classList.remove("hidden");

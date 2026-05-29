@@ -16,6 +16,7 @@ import {
 } from "./particleBursts";
 import { snapshotAsteroidKill, snapshotAlienKill, snapshotCometKill } from "./killSnapshot";
 import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet } from "./waveDirector";
+import { BASS_KIND_SOUND } from "./bassClock";
 import type { KillBucket } from "./killBuckets";
 
 // Why: feeds the leaderboard's per-run breakdown; bucket names stay human-readable for display.
@@ -91,8 +92,20 @@ const finishAsteroidKillCore = (
   emitExplosion(game.particles, game.shards, a, isOnBeatHit);
   if (a.isBass()) game.sound.stopBassteroidDrone(a);
   const asteroidHit = hitSoundFor(a);
-  const snap = snapshotAsteroidKill(a, a.isBass() ? "bassEcho" : asteroidHit, scoreEarned);
-  if (snap) game.killedSnapshots.push(snap);
+  // Why: parade replays the bassteroid's *beat* voice (kick/pluck/boom/snap) rather than the
+  //   death-only bassEcho, so the trophy row plays "the sound this rock made", not how it died.
+  const paradeSound = a.isBass()
+    ? BASS_KIND_SOUND[a.kind as "bassA" | "bassB" | "bassC" | "bassD"]
+    : asteroidHit;
+  const snap = snapshotAsteroidKill(a, paradeSound, scoreEarned);
+  if (snap) {
+    // Why: only medium/small bass have drones (large bass relies on its split children), so
+    //   the parade only revives the drone bed for snapshots that had one in play.
+    if (a.isBass() && (a.size === "medium" || a.size === "small")) {
+      snap.bassDrone = { kind: a.kind as "bassA" | "bassB" | "bassC" | "bassD", size: a.size };
+    }
+    game.killedSnapshots.push(snap);
+  }
   bumpKill(game, asteroidBucket(a));
   const children = a.split(killerVel);
   // Why: sibling fragments share one beat-claim set so the two pieces target

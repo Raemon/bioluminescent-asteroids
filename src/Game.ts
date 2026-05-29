@@ -102,6 +102,10 @@ export class Game implements HudElements {
   leaderboardListEl: HTMLOListElement;
   // Why: prevents a double-submit if the player mashes Enter while the POST is in flight.
   scoreSubmitState: "idle" | "submitting" | "submitted" = "idle";
+  // Why: lets the title screen after a game-over show a score-neighborhood (±5) around the
+  //   player's run instead of the global top 10. Cleared when a new run starts.
+  lastRunScore: number | null = null;
+  lastRunScoreId: number | null = null;
 
   // Why: post-run trophy lineup; replayed in the end-of-mission parade with original kill sounds.
   killedSnapshots: KilledSnapshot[] = [];

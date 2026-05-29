@@ -19,11 +19,15 @@ const PARADE_BEAT_SUBDIV = 1.0;
 // Why: `played` latches true so each kill sound replays once when its sprite crosses centre.
 //   `playedAtBeat` snapshots the parade-beat clock at that moment so the "+N" score flash
 //   can fade out a fixed number of beats later, independent of bgm tempo drift.
+//   `droneKey` is the unique handle (this entry object would clash across replays) for the
+//   per-entry bass drone so we can stop it when the sprite exits the canvas or the parade ends.
 export type ParadeEntry = {
   snap: KilledSnapshot;
   beatOffset: number;
   played: boolean;
   playedAtBeat: number;
+  droneKey: object | null;
+  droneActive: boolean;
 };
 
 // Why: maxHp/4 spacing = on-rhythm shots needed — paces the parade by kill difficulty.
@@ -44,7 +48,7 @@ const layOutParade = (game: Game) => {
   const entries: ParadeEntry[] = [];
   let cursor = 0;
   for (const snap of game.killedSnapshots) {
-    entries.push({ snap, beatOffset: cursor, played: false, playedAtBeat: 0 });
+    entries.push({ snap, beatOffset: cursor, played: false, playedAtBeat: 0, droneKey: null, droneActive: false });
     let rest: number;
     if (snap.maxHp <= 1) rest = 0.25;
     else if (snap.maxHp <= 2) rest = 0.5;
@@ -96,10 +100,16 @@ const startParadeLoop = (game: Game) => {
 };
 
 // Why: hard reset on every state transition — never want two parades running together.
+//   Also kills any in-flight bass drones the parade started; otherwise restarting the parade
+//   (e.g. abort → title) would leak the drone bed into the title screen.
 export const stopParade = (game: Game) => {
   if (game.paradeRafId !== null) {
     cancelAnimationFrame(game.paradeRafId);
     game.paradeRafId = null;
+  }
+  for (const e of game.paradeEntries) {
+    if (e.droneActive && e.droneKey) game.sound.stopBassteroidDrone(e.droneKey);
+    e.droneActive = false;
   }
   game.paradeActive = false;
   game.paradeEntries = [];
@@ -130,6 +140,8 @@ const currentParadeBeat = (game: Game, cssW: number): number => {
 const SCORE_FLASH_BEATS = 1.5;
 
 // Why: cull offscreen sprites before drawImage; trigger kill sound when sprite crosses centre.
+//   Bassteroid entries also light up their drone for the duration the sprite is on screen, so
+//   the parade carries the continuous bed as well as the per-beat hit voice.
 const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number, cssW: number, cssH: number) => {
   const centreX = cssW / 2;
   const centreY = cssH / 2;
@@ -140,8 +152,19 @@ const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number,
       e.played = true;
       e.playedAtBeat = t;
       game.sound.play(e.snap.killSound);
+      if (e.snap.bassDrone) {
+        e.droneKey = {};
+        game.sound.startBassteroidDrone(e.droneKey, e.snap.bassDrone.kind, e.snap.bassDrone.size);
+        e.droneActive = true;
+      }
     }
-    if (x - halfW > cssW || x + halfW < 0) continue;
+    const offscreenRight = x - halfW > cssW;
+    const offscreenLeft = x + halfW < 0;
+    if (e.droneActive && offscreenLeft && e.droneKey) {
+      game.sound.stopBassteroidDrone(e.droneKey);
+      e.droneActive = false;
+    }
+    if (offscreenRight || offscreenLeft) continue;
     ctx.drawImage(e.snap.full, x - halfW, centreY - e.snap.full.height / 2);
     if (e.played && e.snap.scoreEarned > 0) {
       const age = t - e.playedAtBeat;

@@ -2,7 +2,7 @@ import type { Ship } from "../../Ship";
 import { Vec, add, mul, fromAngle, wrap, TAU } from "../../vec";
 import { computeConeFrame } from "./coneGeometry";
 import { paintConeBackground, paintRangeArcs } from "./radarCone";
-import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap } from "./trajectoryPreview";
+import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost } from "./trajectoryPreview";
 import {
   reticuleOverlapsAnyTarget, reticuleDirectlyOnTarget,
   computeBaseHitAlpha, paintAimDiscs, computeDirectFlashPulse,
@@ -72,7 +72,8 @@ export const renderShipReticules = (
   ctx.globalCompositeOperation = "lighter";
   const hitboxPulse = cosineEnvelope(beatTime, RETICULE_HITBOX_PULSE_PERIOD_SEC, RETICULE_HITBOX_PULSE_MIN, RETICULE_HITBOX_PULSE_MAX);
   const radarPulse = cosineEnvelope(beatTime, RETICULE_RADAR_PULSE_PERIOD_SEC, RETICULE_RADAR_PULSE_MIN, RETICULE_RADAR_PULSE_MAX);
-  const baseHitAlpha = computeBaseHitAlpha(ship.fireCooldown > 0, hitboxPulse);
+  const beatPulseBoost = computeBeatPulseBoost(beatTime, beatGrid);
+  const baseHitAlpha = computeBaseHitAlpha(ship.fireCooldown > 0, hitboxPulse) * beatPulseBoost;
   paintConeBackground(ctx, ship, apex, beatTime, beatGrid);
   paintRangeArcs(ctx, ship, apex, beatTime, radarPulse);
   const frame = computeConeFrame(ship);

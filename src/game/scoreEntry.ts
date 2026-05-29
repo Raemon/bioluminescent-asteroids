@@ -30,8 +30,10 @@ const handleSubmit = async (game: Game, ev: Event) => {
   game.scoreEntryInputEl.disabled = true;
   setStatus(game, "Transmitting…", "info");
   try {
-    await submitHighscore(rawName, game);
+    const saved = await submitHighscore(rawName, game);
     saveRecentName(rawName);
+    game.lastRunScoreId = saved.id;
+    game.lastRunScore = saved.score;
     game.scoreSubmitState = "submitted";
     setStatus(game, "Score saved. Press enter to continue.", "success");
     game.scoreEntryInputEl.blur();
@@ -100,32 +102,41 @@ export const isScoreEntryBlockingEnter = (game: Game): boolean => {
   return game.scoreSubmitState !== "submitted";
 };
 
-const renderLeaderboardRows = (game: Game, rows: HighscoreRow[]) => {
-  if (rows.length === 0) {
-    game.leaderboardListEl.innerHTML =
-      '<li class="leaderboard-status">No scores yet — be the first pilot on the board.</li>';
-    return;
-  }
-  // Why: pilots are ranked by max combo first (the headline streak stat), with score
-  //   as a tiebreaker — so the board rewards rhythm play over raw point grinding.
-  const sorted = [...rows].sort((a, b) => {
+type RankedRow = { row: HighscoreRow; rank: number };
+
+// Why: max-combo-first sort celebrates the headline streak stat; used for the global top-10 view.
+const sortByComboThenScore = (rows: HighscoreRow[]): HighscoreRow[] =>
+  [...rows].sort((a, b) => {
     const comboDiff = (b.max_combo ?? 0) - (a.max_combo ?? 0);
     if (comboDiff !== 0) return comboDiff;
     return b.score - a.score;
   });
+
+// Why: neighborhood view ranks strictly by score so "5 closest in either direction" is
+//   well-defined; the API already returns rows in this order.
+const sortByScore = (rows: HighscoreRow[]): HighscoreRow[] =>
+  [...rows].sort((a, b) => b.score - a.score);
+
+const renderRows = (game: Game, ranked: RankedRow[], selfId: number | null) => {
+  if (ranked.length === 0) {
+    game.leaderboardListEl.innerHTML =
+      '<li class="leaderboard-status">No scores yet — be the first pilot on the board.</li>';
+    return;
+  }
   const header = `<li class="lb-header">
     <span class="lb-rank"></span>
     <span class="lb-name">Pilot</span>
     <span class="lb-score">Score</span>
     <span class="lb-combo">Peak Combo</span>
   </li>`;
-  const items = sorted
-    .map((row, idx) => {
-      const rank = idx + 1;
+  const items = ranked
+    .map(({ row, rank }) => {
       const safeName = escapeHtml(row.name);
       const combo = row.max_combo ?? 0;
       const comboTier = combo >= 8 ? "white" : combo >= 4 ? "gold" : combo >= 2 ? "cyan" : "dim";
-      return `<li>
+      const isSelf = selfId !== null && row.id === selfId;
+      const cls = isSelf ? ' class="lb-self"' : "";
+      return `<li${cls}>
         <span class="lb-rank">${rank}</span>
         <span class="lb-name">${safeName}</span>
         <span class="lb-score">${row.score.toLocaleString()}</span>
@@ -138,22 +149,60 @@ const renderLeaderboardRows = (game: Game, rows: HighscoreRow[]) => {
   game.leaderboardListEl.innerHTML = header + items;
 };
 
+const renderTopRows = (game: Game, rows: HighscoreRow[]) => {
+  const sorted = sortByComboThenScore(rows);
+  const ranked: RankedRow[] = sorted.map((row, idx) => ({ row, rank: idx + 1 }));
+  renderRows(game, ranked, null);
+};
+
+// Why: pick the 5 score-rank neighbours above and below the player's row so a returning
+//   pilot sees who they need to beat next and who's nipping at their heels.
+const renderNeighborhoodRows = (game: Game, rows: HighscoreRow[], selfId: number) => {
+  const sorted = sortByScore(rows);
+  const selfIdx = sorted.findIndex((r) => r.id === selfId);
+  if (selfIdx < 0) {
+    renderTopRows(game, rows);
+    return;
+  }
+  const RADIUS = 5;
+  const start = Math.max(0, selfIdx - RADIUS);
+  const end = Math.min(sorted.length, selfIdx + RADIUS + 1);
+  const ranked: RankedRow[] = sorted
+    .slice(start, end)
+    .map((row, idx) => ({ row, rank: start + idx + 1 }));
+  renderRows(game, ranked, selfId);
+};
+
 const escapeHtml = (s: string): string =>
   s.replace(/[&<>"']/g, (ch) =>
     ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === '"' ? "&quot;" : "&#39;",
   );
 
+// Why: matches the API's MAX_LIMIT — fetching the full slice means a returning pilot
+//   ranked anywhere in the top tier will be found by id and centered in the view.
+const NEIGHBORHOOD_FETCH_LIMIT = 50;
+
+const setLeaderboardTitle = (game: Game, text: string) => {
+  const titleEl = game.leaderboardEl.querySelector(".leaderboard-title");
+  if (titleEl) titleEl.textContent = text;
+};
+
 export const showLeaderboard = (game: Game) => {
   game.leaderboardEl.classList.remove("hidden");
+  const showNeighborhood = game.lastRunScoreId !== null;
+  setLeaderboardTitle(game, showNeighborhood ? "Your Standing" : "Top Pilots");
   game.leaderboardListEl.innerHTML =
-    '<li class="leaderboard-status">Loading top pilots…</li>';
+    `<li class="leaderboard-status">${showNeighborhood ? "Loading your standing…" : "Loading top pilots…"}</li>`;
   void refreshLeaderboard(game);
 };
 
 export const refreshLeaderboard = async (game: Game) => {
+  const selfId = game.lastRunScoreId;
+  const limit = selfId !== null ? NEIGHBORHOOD_FETCH_LIMIT : 10;
   try {
-    const rows = await fetchHighscores(10);
-    renderLeaderboardRows(game, rows);
+    const rows = await fetchHighscores(limit);
+    if (selfId !== null) renderNeighborhoodRows(game, rows, selfId);
+    else renderTopRows(game, rows);
   } catch {
     game.leaderboardListEl.innerHTML =
       '<li class="leaderboard-status">Leaderboard unavailable.</li>';

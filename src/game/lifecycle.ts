@@ -97,6 +97,8 @@ export const startGame = (game: Game) => {
   game.overlayEl.classList.add("hidden");
   hideScoreEntry(game);
   game.leaderboardEl.classList.add("hidden");
+  game.lastRunScore = null;
+  game.lastRunScoreId = null;
   syncHud(game);
 };
 
@@ -162,6 +164,8 @@ export const abortMission = (game: Game) => {
   game.sound.stopThrust();
   game.sound.stopReverseThrust();
   stopAllPersistentAudio(game);
+  game.lastRunScore = game.score;
+  game.lastRunScoreId = null;
   game.abortEl.classList.add("hidden");
   game.overlayTitleEl.textContent = "Mission Aborted";
   game.overlayStartEl.innerHTML = `score <strong>${String(game.score).padStart(6, "0")}</strong> &nbsp;·&nbsp; press <span class="key">enter</span> to restart`;
