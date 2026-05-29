@@ -63,7 +63,8 @@ const paintEntityLayers = (
 };
 
 // Why: reticule reads every visible target on the field; gather them once not repeatedly.
-const targetsForReticule = (game: Game) => [
+// Exported so the ship-rotation snap (gameUpdate) can use the same target set as the reticule.
+export const targetsForReticule = (game: Game) => [
   ...game.asteroids,
   ...game.comets,
   ...game.aliens,

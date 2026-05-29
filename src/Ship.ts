@@ -12,6 +12,7 @@ import { setComboFromValue } from "./ship/shipComboHalo";
 import { renderShipBody } from "./ship/shipRender";
 import { renderShipReticules } from "./ship/reticule/reticuleRender";
 import { ReticuleTarget, TrajectoryTrackMap } from "./ship/reticule/trajectoryPreview";
+import { HeadingLock } from "./ship/reticule/headingLockOn";
 
 // Why: BEAT_GRID is re-exported from Game.ts for backwards compatibility; Ship code reads it directly here.
 export { BEAT_GRID };
@@ -58,6 +59,9 @@ export class Ship {
   comboLossFlash = 0;
   // Why: per-target trajectory state — drives entry-flash phase, fade-out lingering, and pulse phase.
   private trajectoryTracks: TrajectoryTrackMap = new Map();
+  // Why: when rotating would sweep the reticule across a trajectory line, the heading sticks to
+  // the line until accumulated rotation intent exceeds the escape threshold. null = no active lock.
+  headingLock: HeadingLock | null = null;
 
   constructor(pos: Vec) { this.pos = pos; }
 
@@ -74,11 +78,13 @@ export class Ship {
   tickComboHalo(_dt: number, _beatPulse: number) {}
 
   // Why: orchestrates a single frame of player control, audio, and motion in one delegated call.
+  // `targets` feeds the trajectory-line-lock during rotation — empty array = no lock applied.
   update(
     dt: number, input: Input, particles: ParticleSystem, bullets: Bullet[],
     w: number, h: number, t: number, sound: Sound,
+    targets: ReadonlyArray<ReticuleTarget> = [],
   ) {
-    tickShip(this, dt, input, particles, bullets, w, h, t, sound);
+    tickShip(this, dt, input, particles, bullets, w, h, t, sound, targets);
   }
 
   // Why: trident spreads + on-beat tagging happens in Game; the ship just emits the right bullet count.

@@ -24,6 +24,7 @@ import {
   handleCanisterShots,
 } from "./collisions";
 import { startGame, showTitle, togglePause, respawn } from "./lifecycle";
+import { targetsForReticule } from "./gameRender";
 import { syncHud, syncPowerupHud } from "./hud";
 import { renderKilledRow } from "./killedParade";
 import { updatePopups } from "./popups";
@@ -179,7 +180,7 @@ const updatePlaying = (game: Game, dt: number) => {
   const bulletsBeforeShipUpdate = game.bullets.length;
   game.ship.setCombo(game.beatCombo);
   syncHaloAmbient(game);
-  game.ship.update(dt, game.input, game.particles, game.bullets, game.w, game.h, game.time, game.sound);
+  game.ship.update(dt, game.input, game.particles, game.bullets, game.w, game.h, game.time, game.sound, targetsForReticule(game));
   const musicDt = tickSlowMoTimer(game, dt);
   tickBassBeats(game, musicDt);
   // Why: pulsar runs against freshly-advanced beatTime so its flash lands with the bass voices.
