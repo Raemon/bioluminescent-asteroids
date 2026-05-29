@@ -230,7 +230,11 @@ const tickWorldEntities = (game: Game, dt: number, musicDt: number) => {
   game.alienBullets = game.alienBullets.filter((ab) => ab.life > 0);
   for (const s of game.shards) s.update(dt);
   game.shards = game.shards.filter((s) => s.life > 0);
-  for (const c of game.canisters) c.update(dt, game.w, game.h);
+  for (const c of game.canisters) {
+    const wasWarping = c.warping;
+    c.update(dt, game.w, game.h);
+    if (!wasWarping && c.warping) game.sound.play("canisterAppear", 1, c.pos);
+  }
   game.canisters = game.canisters.filter((c) => c.alive);
   updatePositionalAudio(game);
 };
