@@ -12,10 +12,10 @@ const SHOW_AIM_INTERSECTION_X = false;
 const SHOW_FIRST_BEAT_DOT = true;
 const SHOW_ON_RHYTHM_RETICULE = true;
 
-// Why: the target currently selected by the on-rhythm reticule (the one closest to the cone
-// centerline) gets its whole trajectory preview brightened by this factor — emphasises which
-// target the player's next on-beat shot is aimed at without redrawing anything differently.
-export const FOCUSED_TARGET_BRIGHTNESS = 1.65
+// Why: the on-rhythm reticule overlay for the focused target paints brighter by this factor —
+// the focused-sprite glow itself is drawn additively in gameRender (no ctx.filter), but the
+// reticule dots still use this multiplier to scale alpha when the on-rhythm spot is shown.
+const FOCUSED_TARGET_BRIGHTNESS = 1.65;
 
 const TRAJECTORY_ALPHA = 1;
 const TRAJECTORY_PULSE_PERIOD_BEATS = 4;

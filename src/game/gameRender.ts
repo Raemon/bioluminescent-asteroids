@@ -4,7 +4,7 @@ import { currentBeatPulse } from "./rhythmGate";
 import { renderTrails } from "./trailsRender";
 import { renderPopups } from "./popups";
 import { computeConeFrame } from "../ship/reticule/coneGeometry";
-import { pickCenterMostTargetForFocus, FOCUSED_TARGET_BRIGHTNESS, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
+import { pickCenterMostTargetForFocus, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
 
 // Why: shake is purely cosmetic; isolate its math so render() reads top-down.
 const applyScreenShake = (game: Game): { shakeX: number; shakeY: number } => {
@@ -30,18 +30,27 @@ const paintBackgroundLayers = (game: Game) => {
   game.pulsar.render(game.ctx);
 };
 
-// Why: ctx.filter brightens the focused target's sprite without touching every render() signature
-// — wrap the call, paint, restore. Restoring to the previous filter value (rather than "none")
-// lets callers nest filters safely. The "unreachable" cue is handled by recoloring the on-rhythm
-// reticule itself (see trajectoryPreview), not by tinting the sprite.
-const withFocusFilter = (
-  ctx: CanvasRenderingContext2D, focused: boolean, paint: () => void,
-) => {
-  if (!focused) { paint(); return; }
-  const prev = ctx.filter;
-  ctx.filter = `brightness(${FOCUSED_TARGET_BRIGHTNESS})`;
-  paint();
-  ctx.filter = prev;
+// Why: ctx.filter = brightness(...) is implemented as a full-canvas pixel pass on most browsers
+// and caused noticeable per-frame lag when several focusable bodies were on screen. Replace it
+// with a single additive radial-gradient disc painted on top of the focused target — every other
+// entity already uses globalCompositeOperation = "lighter", so an extra additive splash reads
+// as "this one is glowing brighter" without touching any sprite pipeline.
+const FOCUS_GLOW_RADIUS_MULT = 2.6;
+const FOCUS_GLOW_ALPHA = 0.45;
+const FOCUS_GLOW_MIN_RADIUS = 14;
+const paintFocusGlow = (ctx: CanvasRenderingContext2D, t: ReticuleTarget) => {
+  const r = Math.max(FOCUS_GLOW_MIN_RADIUS, (t.radius ?? FOCUS_GLOW_MIN_RADIUS) * FOCUS_GLOW_RADIUS_MULT);
+  const g = ctx.createRadialGradient(t.pos.x, t.pos.y, 0, t.pos.x, t.pos.y, r);
+  g.addColorStop(0, `rgba(255, 255, 255, ${FOCUS_GLOW_ALPHA})`);
+  g.addColorStop(0.5, `rgba(255, 255, 255, ${(FOCUS_GLOW_ALPHA * 0.35).toFixed(3)})`);
+  g.addColorStop(1, "rgba(255, 255, 255, 0)");
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(t.pos.x, t.pos.y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 };
 
 // Why: bodies must sit ON their own trails, so trails pass before any per-entity render call.
@@ -50,15 +59,14 @@ const paintEntityLayers = (
 ) => {
   const { ctx } = game;
   renderTrails(game, ctx);
-  const paintOne = (t: ReticuleTarget, draw: () => void) =>
-    withFocusFilter(ctx, t === focusedTarget, draw);
-  for (const c of game.comets) paintOne(c, () => c.render(ctx));
+  for (const c of game.comets) c.render(ctx);
   for (const s of game.shards) s.render(ctx);
-  for (const a of game.asteroids) paintOne(a, () => a.render(ctx, game.time));
-  for (const c of game.canisters) paintOne(c, () => c.render(ctx, game.time));
-  for (const al of game.aliens) paintOne(al, () => al.render(ctx, game.time));
-  for (const ab of game.alienBullets) paintOne(ab, () => ab.render(ctx));
+  for (const a of game.asteroids) a.render(ctx, game.time);
+  for (const c of game.canisters) c.render(ctx, game.time);
+  for (const al of game.aliens) al.render(ctx, game.time);
+  for (const ab of game.alienBullets) ab.render(ctx);
   for (const b of game.bullets) b.render(ctx);
+  if (focusedTarget) paintFocusGlow(ctx, focusedTarget);
   game.particles.render(ctx);
 };
 
