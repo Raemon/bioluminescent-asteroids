@@ -82,12 +82,15 @@ const restartChildBassDrones = (game: Game, children: Asteroid[]) => {
 
 // Why: audio-free core lets bullet vs ram paths stage their own kill-sound order independently.
 //   scoreEarned is captured into the snapshot so the parade can flash "+N" beneath each sprite.
+//   impactPos is the bullet position at the moment of the kill (or undefined for ram kills);
+//   it lets split() classify center vs glancing hits for the asymmetric breakup patterns.
 const finishAsteroidKillCore = (
   game: Game,
   a: Asteroid,
   killerVel: Vec,
   isOnBeatHit: boolean,
   scoreEarned: number,
+  impactPos?: Vec,
 ): Asteroid[] => {
   emitExplosion(game.particles, game.shards, a, isOnBeatHit);
   if (a.isBass()) game.sound.stopBassteroidDrone(a);
@@ -107,7 +110,12 @@ const finishAsteroidKillCore = (
     game.killedSnapshots.push(snap);
   }
   bumpKill(game, asteroidBucket(a));
-  const children = a.split(killerVel);
+  const children = a.split({
+    impactDir: killerVel,
+    impactPos,
+    combo: game.beatCombo,
+    onBeat: isOnBeatHit,
+  });
   // Why: sibling fragments share one beat-claim set so the two pieces target
   //   *different* beats — otherwise the player can only combo one of them
   //   before the second drifts past the engagement ring on the same tick.
@@ -127,7 +135,7 @@ export const onAsteroidKilledByBullet = (
   const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit);
   if (a.isBass()) game.sound.play("bassEcho", 1, a.pos);
   game.sound.play(hitSoundFor(a), 1, a.pos);
-  return finishAsteroidKillCore(game, a, b.vel, isOnBeatHit, scoreEarned);
+  return finishAsteroidKillCore(game, a, b.vel, isOnBeatHit, scoreEarned, b.pos);
 };
 
 // Why: asteroidHit → bassEcho (reverse of bullet path) preserves the original ram-branch order.

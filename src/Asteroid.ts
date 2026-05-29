@@ -958,14 +958,26 @@ export class Asteroid {
   }
 
   // `impactDir` is the bullet's velocity direction at the moment of the kill.
-  // When provided, fragments fan out into the forward hemisphere relative to
-  // that direction — i.e., mostly away from where the bullet came from. The
-  // two pieces split off to either side of the bullet's path (like a wedge
-  // cleaving the rock) with a small forward bias, which reads as physically
-  // resonant: the kinetic momentum of the impactor pushes the debris through.
   // Falls back to the parent's velocity direction when no impactDir is given
   // (e.g. shockwave splits).
-  split(impactDir?: Vec): Asteroid[] {
+  //
+  // Bass/boss splits use a heading-based fan (fragments fly out into the
+  // forward hemisphere relative to the impact direction). Regular splits
+  // build fragment velocities as `parent_vel + bullet-push + perp-burst`
+  // with mass-weighted perpendicular kicks summing to zero — see
+  // splitRegular() for the momentum-conservation details.
+  //
+  // For regular (non-bass, non-boss) *large* asteroids, the optional
+  // `impactPos`, `combo`, and `onBeat` inputs steer the breakup pattern:
+  //   - A center hit cleanly splits the rock into 2 mediums; a glancing hit
+  //     spalls 2 small chips off the struck side while one medium continues
+  //     mostly forward along the original trajectory.
+  //   - An on-beat hit while combo ≥ 2 pulverises a large into 4 smalls —
+  //     the skill-and-rhythm reward for staying in the pocket.
+  // Mediums always split into the classic 2-small wedge regardless of hit
+  // context.
+  split(opts?: { impactDir?: Vec; impactPos?: Vec; combo?: number; onBeat?: boolean }): Asteroid[] {
+    const impactDir = opts?.impactDir;
     // Boss: large → 3 medium, medium → 3 small, small → terminal. Children
     // fan outward from the parent's velocity in evenly-spaced cones so the
     // post-split field reads as a clean shatter rather than a dust cloud.
@@ -1040,21 +1052,130 @@ export class Asteroid {
       return fragmentList;
     }
     if (this.size === "small") return [];
-    const nextSize: AsteroidSize = this.size === "large" ? "medium" : "small";
-    const fragmentCount = 2;
+    return this.splitRegular(opts);
+  }
+
+  // Pick a fragment recipe for a non-bass, non-boss kill, with fragment
+  // velocities built to respect momentum conservation.
+  //
+  // Model: each fragment's velocity is
+  //   v_frag = v_parent + bulletKick * d̂_bullet + perpKick * n̂
+  // where n̂ is perpendicular to the bullet's direction. The mass-weighted
+  // sum of perpKicks across fragments is forced to zero so the fragments
+  // don't gain net perpendicular momentum out of nowhere; bulletKick
+  // accounts for the small forward push the (low-mass, high-speed) bullet
+  // imparts to the rubble cloud. Mass lost to dust/vapour just doesn't
+  // appear as a fragment — the dust is modelled as drifting at parent
+  // velocity, which conserves momentum trivially.
+  //
+  // Hit-angle bands for large (driven by perpFrac = |perp|/radius):
+  //   < 0.35  → "center"   — clean 2-medium split
+  //   > 0.7   → "glancing" — 1 medium continues + 2 small chips off struck side
+  //   else    → "normal"   — 2-medium wedge
+  // Large combo+rhythm bonus (combo ≥ 2 AND onBeat): 4 small full pulverise.
+  // Medium always → 2-small wedge.
+  private splitRegular(opts?: { impactDir?: Vec; impactPos?: Vec; combo?: number; onBeat?: boolean }): Asteroid[] {
+    const impactDir = opts?.impactDir;
+    // Unit bullet-direction d̂ and perpendicular n̂ (rotated +90°, so "left of
+    // bullet"). Fall back to parent-velocity direction if no impact info.
+    let dx: number, dy: number;
+    if (impactDir && (impactDir.x !== 0 || impactDir.y !== 0)) {
+      const L = Math.hypot(impactDir.x, impactDir.y);
+      dx = impactDir.x / L; dy = impactDir.y / L;
+    } else {
+      const L = Math.hypot(this.vel.x, this.vel.y) || 1;
+      dx = this.vel.x / L; dy = this.vel.y / L;
+    }
+    const nx = -dy, ny = dx;
+
+    let hitClass: "center" | "normal" | "glancing" = "normal";
+    let perpSign = Math.random() < 0.5 ? -1 : 1;
+    if (impactDir && opts?.impactPos) {
+      const ox = this.pos.x - opts.impactPos.x;
+      const oy = this.pos.y - opts.impactPos.y;
+      const perp = ox * nx + oy * ny;
+      const perpFrac = Math.abs(perp) / Math.max(1, this.radius);
+      if (perpFrac < 0.35) hitClass = "center";
+      else if (perpFrac > 0.7) hitClass = "glancing";
+      perpSign = perp >= 0 ? 1 : -1;
+    }
+
+    const comboBonus = (opts?.combo ?? 0) >= 2 && opts?.onBeat === true;
+
+    // Mass units (small = 1, medium = 8, large = 64). Used only for the
+    // momentum-balance arithmetic below, not for any other game system.
+    const massOf = (s: AsteroidSize): number => (s === "small" ? 1 : s === "medium" ? 8 : 64);
+
+    // Each fragment carries a perpendicular kick (signed, in px/s along n̂)
+    // and a forward bullet-kick (in px/s along d̂). The fragment's final
+    // velocity is parent_vel + bulletKick * d̂ + perpKick * n̂.
+    type FragSpec = { size: AsteroidSize; perpKick: number; bulletKick: number };
+
+    // Speed scale for the perpendicular spray. Calibrated so the visible
+    // outward velocity feels like the original heading-fan version, which
+    // sat at parentSpeed * ~1.4 at ±0.9 rad. sin(0.9) ≈ 0.78 → perp ≈ 110.
+    // We use a fixed budget (not parent-speed-scaled) so a slow rock still
+    // visibly bursts when hit and a fast one doesn't catapult absurdly.
+    const PERP_BURST = 110;
+
+    // Bullet's forward push on the rubble. Small but non-zero — the rubble
+    // cloud's centre-of-mass picks up a touch of the bullet's momentum.
+    const BULLET_PUSH = 50;
+
+    let specs: FragSpec[];
+    if (this.size === "large") {
+      if (comboBonus) {
+        // 4 small: symmetric ±k, ±3k pattern (mass-weighted perp sums to 0).
+        specs = [
+          { size: "small", perpKick: -PERP_BURST * 1.6, bulletKick: BULLET_PUSH },
+          { size: "small", perpKick: -PERP_BURST * 0.55, bulletKick: BULLET_PUSH },
+          { size: "small", perpKick: PERP_BURST * 0.55, bulletKick: BULLET_PUSH },
+          { size: "small", perpKick: PERP_BURST * 1.6, bulletKick: BULLET_PUSH },
+        ];
+      } else if (hitClass === "glancing") {
+        // Two small chips fly off the struck side (the centre lies perpSign-ward
+        // of the bullet path, so the bullet hits the -perpSign edge). The
+        // medium must counter-recoil to the perpSign side to conserve
+        // perpendicular momentum.
+        //   Σ m_i * perpKick_i = 0
+        //   8 * v_med + 1 * v_c1 + 1 * v_c2 = 0
+        // With v_c1 = -perpSign * 1.3 * PERP and v_c2 = -perpSign * 0.85 * PERP
+        // (both chips off the struck side, the bullet-direction chip kicked
+        // harder), v_med = perpSign * (1.3 + 0.85) / 8 * PERP ≈ 0.27 * PERP.
+        const chipSign = -perpSign;
+        const c1 = chipSign * 1.3 * PERP_BURST;
+        const c2 = chipSign * 0.85 * PERP_BURST;
+        const vMed = -(c1 + c2) / massOf("medium");
+        specs = [
+          { size: "medium", perpKick: vMed, bulletKick: BULLET_PUSH * 0.4 },
+          { size: "small",  perpKick: c1,   bulletKick: BULLET_PUSH * 1.2 },
+          { size: "small",  perpKick: c2,   bulletKick: BULLET_PUSH * 1.1 },
+        ];
+      } else {
+        // Center / normal: symmetric 2-medium wedge, equal opposite perp kicks.
+        specs = [
+          { size: "medium", perpKick: -PERP_BURST, bulletKick: BULLET_PUSH },
+          { size: "medium", perpKick:  PERP_BURST, bulletKick: BULLET_PUSH },
+        ];
+      }
+    } else {
+      // Medium → 2 small symmetric wedge.
+      specs = [
+        { size: "small", perpKick: -PERP_BURST, bulletKick: BULLET_PUSH },
+        { size: "small", perpKick:  PERP_BURST, bulletKick: BULLET_PUSH },
+      ];
+    }
+
     const fragmentList: Asteroid[] = [];
-    const baseAngle = impactDir
-      ? Math.atan2(impactDir.y, impactDir.x)
-      : Math.atan2(this.vel.y, this.vel.x);
-    for (let i = 0; i < fragmentCount; i++) {
-      // Two pieces flank the bullet's path, forward of the impact. Each
-      // child's heading is bullet-direction ±~0.9 rad with jitter, so the
-      // debris fans away from where the bullet came from rather than
-      // streaming back through it.
-      const sideOffset = (i === 0 ? -1 : 1) * (0.9 + rand(-0.2, 0.2));
-      const a = baseAngle + sideOffset + rand(-0.25, 0.25);
-      const speedMag = splitChildSpeed(this.vel, nextSize);
-      fragmentList.push(new Asteroid({ ...this.pos }, fromAngle(a, speedMag), nextSize, this.hue, this.kind));
+    for (const spec of specs) {
+      // Apply jitter to perp kick only (forward kick is small enough that
+      // jitter on it is just noise). Keep jitter small relative to PERP_BURST
+      // so the conservation arithmetic above isn't drowned out.
+      const perpJ = spec.perpKick + rand(-12, 12);
+      const fk = spec.bulletKick;
+      const vx = this.vel.x + fk * dx + perpJ * nx;
+      const vy = this.vel.y + fk * dy + perpJ * ny;
+      fragmentList.push(new Asteroid({ ...this.pos }, { x: vx, y: vy }, spec.size, this.hue, this.kind));
     }
     return fragmentList;
   }
