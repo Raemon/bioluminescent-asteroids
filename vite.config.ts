@@ -30,7 +30,7 @@ const cleanUrls = () => ({
 // these writes (the editor still works in prod-preview, but changes only
 // live in localStorage if you ever expose it there).
 const soundConfigWriter = () => {
-  const target = resolve(__dirname, "sounds/config.json");
+  const target = resolve(__dirname, "public/sounds/config.json");
   return {
     name: "sound-config-writer",
     configureServer(server: {

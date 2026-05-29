@@ -11,7 +11,7 @@ Stems are picked at random from `HALO_MUSIC_POOL` in `src/game/haloMusicConfig.t
 | `r2-el` | ElevenLabs Music | cinematic strings + felt piano, dark (~600 Hz centroid) | 0.25 |
 | `r2-sb` | numpy sine pad with harmonic upper voices + FluidSynth felt piano + sox reverb | warmer, drier (~280 Hz centroid) | 0.30 |
 
-Final files live in `sounds/halo-music/{variation}-{ambient,melodic}.mp3`.
+Final files live in `public/sounds/halo-music/{variation}-{ambient,melodic}.mp3`.
 
 ## Layout
 
@@ -84,7 +84,7 @@ venv/bin/python analyze.py inspect processed/r2-el-ambient.mp3
 venv/bin/python deepinspect.py processed/r2-el-ambient.mp3
 
 # copy finals into the game's assets dir
-cp processed/r2-{el,sb}-{ambient,melodic}.mp3 ../../sounds/halo-music/
+cp processed/r2-{el,sb}-{ambient,melodic}.mp3 ../../public/sounds/halo-music/
 ```
 
 ## Pipeline invariants
