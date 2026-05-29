@@ -201,7 +201,7 @@ export type SoundName =
 // through bakedOut. The other audition files (design-1, frank-wise, etc.) are
 // kept on disk in the same folder but excluded from the live pool.
 const PILOT_LOG_1_TAKES: readonly string[] = [
-  "ralf-deep.mp3",
+  // "ralf-deep.mp3",
   "ralf-deep-log2-a.mp3",
   "ralf-deep-log2-b.mp3",
 ];
