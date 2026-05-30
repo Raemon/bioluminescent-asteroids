@@ -174,6 +174,7 @@ export type SoundName =
   | "comboTick"
   | "comboSparkle"
   | "tink"
+  | "scoreBlip"
   | "powerup"
   | "shieldPop"
   | "pulsarHum"
@@ -2348,6 +2349,7 @@ export class Sound {
       case "comboTick": this.playComboTick(); break;
       case "comboSparkle": this.playComboSparkle(); break;
       case "tink": this.playTink(); break;
+      case "scoreBlip": this.playScoreBlip(effectivePitch); break;
       case "powerup": this.playPowerup(); break;
       case "shieldPop": this.playShieldPop(); break;
       case "pulsarHum": this.playPulsarHum(); break;
@@ -3522,6 +3524,32 @@ export class Sound {
       gain.connect(this.master);
       osc.start(t);
       osc.stop(t + decay + 0.02);
+    }
+  }
+
+  // Quiet sub-beat blip that fires four-per-beat while the wave-clear bonus
+  // drains into the score. Soft pure sine fifth, short envelope, well under
+  // the on-beat row chimes so the cascade reads as a single rhythmic shape.
+  // Pitch ratio walks up subtly across the run so a long drain feels like it
+  // is climbing instead of looping.
+  private playScoreBlip(pitchRatio = 1) {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const baseFreq = 1320; // E6 — sits between tink (1760) and comboSparkle (880)
+    const partials = [baseFreq * pitchRatio, baseFreq * pitchRatio * 1.5];
+    for (let i = 0; i < partials.length; i++) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = partials[i];
+      const peak = 0.05 / (i + 1);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      osc.stop(t + 0.1);
     }
   }
 

@@ -1,16 +1,35 @@
 import type { Game } from "../Game";
 import { syncHud } from "./hud";
+import { BEAT_GRID } from "./rhythmConstants";
 
-// Why: end-of-wave summary panel — staggers five rows in, then drains the
-//   bonus into the score 50 points at a time. Non-blocking: the next wave
-//   spawns immediately while this fades over the playfield.
+// Why: end-of-wave summary text — one row appears per beat with a paired
+//   sound, then the bonus drains into the score at four ticks per beat (also
+//   with a sound per tick). After the drain ends, the final score holds for
+//   2 beats while the rest of the text fades over those same 2 beats, then
+//   the score itself fades over 1 beat. Non-blocking: the next wave spawns
+//   immediately while this plays out over the playfield.
 
 const PANEL_ID = "wave-summary";
 const TICK_AMOUNT = 50;
-const TICK_TARGET_MS = 1400; // total duration the tickdown should target
-const MIN_TICK_MS = 18;
-const HOLD_AFTER_TICK_MS = 700;
-const FADE_OUT_MS = 600;
+
+// Why: BEAT_GRID is in seconds; everything in this file is in milliseconds.
+const BEAT_MS = BEAT_GRID * 1000; // 500ms at 120 BPM
+const TICKS_PER_BEAT = 4;
+const TICK_MS = BEAT_MS / TICKS_PER_BEAT; // 125ms
+
+// Why: small lead-in before the first row so the entrance doesn't collide
+//   with the wave-clear chord that fires the same frame.
+const FIRST_ROW_DELAY_MS = BEAT_MS;
+
+// Why: short pause after the last row lands before the drain begins, so the
+//   ear gets one clean beat to register the bonus number before it starts
+//   moving.
+const PAUSE_BEFORE_DRAIN_MS = BEAT_MS;
+
+// Why: per the spec — drain ends → hold 2 beats while rest fades → score
+//   fades over 1 beat. The CSS transitions match these durations.
+const HOLD_AND_REST_FADE_MS = BEAT_MS * 2;
+const SCORE_FADE_MS = BEAT_MS;
 
 type SummaryEls = {
   root: HTMLElement;
@@ -62,6 +81,18 @@ const pulseScore = (el: HTMLElement) => {
   el.classList.add("ws-pulse");
 };
 
+// Why: the title row gets the "chime" — it's the loudest, longest-tailed of
+//   the row sounds, marking the start of the report. The four data rows use
+//   "tink" with a slow upward pitch climb so the ear hears each line land
+//   one step higher, like a ledger being filled in.
+const ROW_SOUNDS: Array<{ name: "chime" | "tink"; pitch: number }> = [
+  { name: "chime", pitch: 1 },
+  { name: "tink", pitch: 1.0 },
+  { name: "tink", pitch: 1.122 }, // ~whole step up
+  { name: "tink", pitch: 1.26 },  // ~major third up
+  { name: "tink", pitch: 1.498 }, // ~perfect fifth up
+];
+
 export const showWaveSummary = (
   game: Game,
   completedWave: number,
@@ -79,26 +110,28 @@ export const showWaveSummary = (
   setRow(root, "score", String(game.score));
 
   // Reset visual state and force reflow so the entrance animation re-plays.
-  root.classList.remove("show", "fade-out");
+  root.classList.remove("fade-rest", "fade-score");
   for (const row of rows) row.classList.remove("in");
   void root.offsetWidth;
-  root.classList.add("show");
 
-  // Stagger each row in.
+  // One row per beat, each with a paired sound.
   rows.forEach((row, i) => {
-    const id = window.setTimeout(() => row.classList.add("in"), 80 + i * 130);
+    const delay = FIRST_ROW_DELAY_MS + i * BEAT_MS;
+    const id = window.setTimeout(() => {
+      row.classList.add("in");
+      const cue = ROW_SOUNDS[i];
+      if (cue) game.sound.play(cue.name, cue.pitch);
+    }, delay);
     activeTimers.push(id);
   });
 
   // After the rows have all landed, drain the bonus into the score.
-  const drainStartMs = 80 + rows.length * 130 + 250;
+  const drainStartMs = FIRST_ROW_DELAY_MS + rows.length * BEAT_MS + PAUSE_BEFORE_DRAIN_MS;
   const startDrain = window.setTimeout(() => {
     if (bonus <= 0) {
       scheduleFadeOut(root);
       return;
     }
-    const ticks = Math.ceil(bonus / TICK_AMOUNT);
-    const intervalMs = Math.max(MIN_TICK_MS, Math.floor(TICK_TARGET_MS / ticks));
     let remaining = bonus;
     let displayedScore = game.score;
     bonusValueEl.classList.add("ws-draining");
@@ -111,11 +144,16 @@ export const showWaveSummary = (
       bonusValueEl.textContent = String(remaining);
       scoreValueEl.textContent = String(displayedScore);
       pulseScore(scoreValueEl);
-      // Keep the HUD score readout in sync as we drain, so the player can
-      // see the total climb in the corner too.
       syncHud(game);
+
+      // Why: tick pitch walks up slightly across the drain so a long bonus
+      //   run feels like it's climbing instead of repeating a single note.
+      //   Capped so very large bonuses don't shriek.
+      const climb = Math.min(0.6, (bonus - remaining) / Math.max(bonus, 1) * 0.5);
+      game.sound.play("scoreBlip", 1 + climb);
+
       if (remaining > 0) {
-        const id = window.setTimeout(step, intervalMs);
+        const id = window.setTimeout(step, TICK_MS);
         activeTimers.push(id);
       } else {
         bonusValueEl.classList.remove("ws-draining");
@@ -127,19 +165,28 @@ export const showWaveSummary = (
   activeTimers.push(startDrain);
 };
 
+// Two-phase fade-out:
+//   1) Final score holds in place for 2 beats while every other row fades
+//      out over those same 2 beats.
+//   2) The score row then fades over 1 beat.
 const scheduleFadeOut = (root: HTMLElement) => {
+  root.classList.add("fade-rest");
   const id = window.setTimeout(() => {
-    root.classList.add("fade-out");
+    root.classList.add("fade-score");
     const off = window.setTimeout(() => {
-      root.classList.remove("show", "fade-out");
-    }, FADE_OUT_MS);
+      root.classList.remove("fade-rest", "fade-score");
+    }, SCORE_FADE_MS);
     activeTimers.push(off);
-  }, HOLD_AFTER_TICK_MS);
+  }, HOLD_AND_REST_FADE_MS);
   activeTimers.push(id);
 };
 
 export const hideWaveSummary = () => {
   cancelActiveTimers();
   const root = document.getElementById(PANEL_ID);
-  if (root) root.classList.remove("show", "fade-out");
+  if (root) {
+    root.classList.remove("fade-rest", "fade-score");
+    const rows = root.querySelectorAll<HTMLElement>(".ws-row");
+    for (const row of rows) row.classList.remove("in");
+  }
 };

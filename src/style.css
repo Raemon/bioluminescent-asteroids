@@ -801,9 +801,10 @@ html, body {
   opacity: 1;
 }
 
-/* Wave-clear summary — non-blocking panel that fades over the playfield
-   while the next wave spawns. Five rows stagger in, then the bonus drains
-   into the score 50 points at a time. */
+/* Wave-clear summary — non-blocking text over the playfield while the next
+   wave spawns. Each row appears on a beat with a paired sound; the bonus
+   drains four ticks per beat; final score holds for 2 beats while the rest
+   fades, then the score itself fades over 1 beat. No backdrop — just text. */
 #wave-summary {
   position: fixed;
   top: 38%;
@@ -814,29 +815,11 @@ html, body {
   text-align: left;
   pointer-events: none;
   z-index: 55;
-  opacity: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 18px 28px;
   min-width: 280px;
-  border: 1px solid rgba(120, 190, 255, 0.18);
-  border-radius: 6px;
-  background: radial-gradient(
-      ellipse at center,
-      rgba(20, 40, 70, 0.55) 0%,
-      rgba(10, 20, 40, 0.25) 70%,
-      rgba(0, 0, 0, 0) 100%
-    );
-  box-shadow:
-    0 0 24px rgba(76, 182, 255, 0.18),
-    inset 0 0 18px rgba(76, 182, 255, 0.08);
-  backdrop-filter: blur(2px);
-  transition: opacity 0.45s ease-out;
 }
-
-#wave-summary.show { opacity: 1; }
-#wave-summary.fade-out { opacity: 0; transition: opacity 0.6s ease-in; }
 
 #wave-summary .ws-row {
   display: flex;
@@ -857,6 +840,20 @@ html, body {
   transform: translateY(0);
 }
 
+/* Rest-of-text fade: triggered after the drain holds for 2 beats. The score
+   row is excluded so it stays solid through this phase. Placed after .in so
+   it wins the cascade tie on visible rows. */
+#wave-summary.fade-rest .ws-row.in:not(.ws-score) {
+  opacity: 0;
+  transition: opacity 1s ease-in;
+}
+
+/* Final score fade: triggered after the rest has faded. */
+#wave-summary.fade-score .ws-row.ws-score.in {
+  opacity: 0;
+  transition: opacity 0.5s ease-in;
+}
+
 #wave-summary .ws-label {
   opacity: 0.7;
 }
@@ -872,7 +869,6 @@ html, body {
   letter-spacing: 0.22em;
   padding-bottom: 6px;
   margin-bottom: 4px;
-  border-bottom: 1px solid rgba(120, 190, 255, 0.18);
 }
 
 #wave-summary .ws-title .ws-value {
