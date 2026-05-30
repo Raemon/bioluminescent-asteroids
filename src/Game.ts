@@ -75,6 +75,11 @@ export class Game implements HudElements {
   // Why: beta-test mode disables the random wave director — the run only contains the elements
   //   the player selected in the beta panel; when they're all gone the wave doesn't auto-spawn.
   betaMode = false;
+  // Why: latched while the end-of-wave summary is playing (drain + hold + fade)
+  //   so the empty-asteroids check in the update loop doesn't keep re-triggering
+  //   advanceWave each frame. Cleared when the summary finishes and the next
+  //   wave's spawn fires.
+  waveTransitioning = false;
 
   canisters: Canister[] = [];
   goldCrystals: GoldCrystal[] = [];

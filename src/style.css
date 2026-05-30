@@ -272,7 +272,10 @@ html, body {
 }
 
 #soundeditor-link { right: 28px; }
-#tutorial-link { right: 158px; }
+#tutorial-link { right: 188px; }
+/* When the sound editor link is hidden (production builds), the tutorial
+   button slides into the corner instead of leaving an awkward gap. */
+#overlay:not(:has(#soundeditor-link:not(.hidden))) #tutorial-link { right: 28px; }
 
 #soundeditor-link.hidden { display: none; }
 
@@ -939,10 +942,19 @@ html, body {
   transform: translateY(0);
 }
 
-/* Single-phase panel fade: after the drain finishes and a 1s hold elapses,
-   the whole panel (rows + score) fades together over 2s. */
+/* Single-phase panel fade: after the drain finishes and a hold elapses, the
+   whole panel (rows + score) fades together over 2s. Animation (with
+   forwards fill mode) is more robust than a transition here — a transition
+   can be interrupted/reverted if any unrelated style touches the panel
+   mid-fade, but an animation locks the end state until the class is
+   removed. */
 #wave-summary.fade-out {
-  opacity: 0;
+  animation: ws-panel-fade 2s ease-out forwards;
+}
+
+@keyframes ws-panel-fade {
+  from { opacity: 1; }
+  to   { opacity: 0; }
 }
 
 #wave-summary .ws-label {
@@ -998,4 +1010,3 @@ html, body {
   45%  { transform: scale(1.18); }
   100% { transform: scale(1);    }
 }
-

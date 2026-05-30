@@ -133,6 +133,7 @@ export const showWaveSummary = (
   completedWave: number,
   maxRhythm: number,
   finalRhythm: number,
+  onFadeComplete?: () => void,
 ) => {
   cancelActiveTimers();
   const bonus = (maxRhythm + finalRhythm) * 100;
@@ -166,7 +167,7 @@ export const showWaveSummary = (
   const drainStartMs = FIRST_ROW_DELAY_MS + rows.length * BEAT_MS + PAUSE_BEFORE_DRAIN_MS;
   const startDrain = window.setTimeout(() => {
     if (bonus <= 0) {
-      scheduleFadeOut(root);
+      scheduleFadeOut(root, onFadeComplete);
       return;
     }
     let remaining = bonus;
@@ -204,7 +205,7 @@ export const showWaveSummary = (
         // Why: a soft chime caps the drain — closes the musical phrase so
         //   the silence that follows reads as an ending, not a dropout.
         game.sound.play("chime", 1.26);
-        scheduleFadeOut(root);
+        scheduleFadeOut(root, onFadeComplete);
       }
     };
     step();
@@ -214,13 +215,19 @@ export const showWaveSummary = (
 
 // Hold for HOLD_BEFORE_FADE_MS after the drain completes, then fade the
 // entire panel (rows + score) over FADE_OUT_MS. The fade-out class stays on
-// after the transition ends so the panel remains invisible — the next
-// showWaveSummary call clears it as part of its reset.
-const scheduleFadeOut = (root: HTMLElement) => {
-  const id = window.setTimeout(() => {
+// after the animation ends (forwards fill-mode) so the panel remains
+// invisible — the next showWaveSummary call clears it as part of its reset.
+// onFadeComplete fires when the fade fully resolves, so callers can defer
+// the next-wave spawn until the player has finished reading the summary.
+const scheduleFadeOut = (root: HTMLElement, onFadeComplete?: () => void) => {
+  const fadeStart = window.setTimeout(() => {
     root.classList.add("fade-out");
+    if (onFadeComplete) {
+      const done = window.setTimeout(onFadeComplete, FADE_OUT_MS);
+      activeTimers.push(done);
+    }
   }, HOLD_BEFORE_FADE_MS);
-  activeTimers.push(id);
+  activeTimers.push(fadeStart);
 };
 
 export const hideWaveSummary = () => {

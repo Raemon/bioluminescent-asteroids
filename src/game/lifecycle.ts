@@ -78,6 +78,7 @@ export const showTitle = (game: Game) => {
   hideScoreEntry(game);
   showLeaderboard(game);
   hideWaveSummary();
+  game.waveTransitioning = false;
 };
 
 // Why: per-run randomised bass intro order means the wave-2/3 picks vary between runs.
@@ -97,6 +98,7 @@ export const startGame = (game: Game) => {
   game.score = 0;
   game.wave = 1;
   game.lives = 3;
+  game.waveTransitioning = false;
   resetRunTimers(game);
   resetRunCollections(game);
   game.bassOrder = shuffled(BASS_KINDS);

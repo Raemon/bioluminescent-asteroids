@@ -202,7 +202,7 @@ const updatePlaying = (game: Game, dt: number) => {
   runCollisionPasses(game);
   evaluateClosedBeats(game);
   syncPowerupHud(game);
-  if (game.asteroids.length === 0 && !game.betaMode) advanceWave(game);
+  if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning) advanceWave(game);
 };
 
 // Why: slow-mo timer ticks in wall-clock so its lifespan isn't extended by its own effect.
@@ -376,22 +376,31 @@ const showWaveAnnounce = (game: Game) => {
   window.setTimeout(() => { el?.classList.remove("show"); }, 2800);
 };
 
-// Why: detect boss wave here so we can lock the planet hidden — a defeated boss must not reappear.
+// Why: the wave-clear cue (sound + pulsar pulse + boss state) fires
+//   immediately on closure, but the next wave's spawn is deferred until the
+//   summary panel has fully faded — the empty-asteroids playfield serves as
+//   the breathing room while the player reads their bonus. waveTransitioning
+//   gates the empty-asteroids check in the update loop so this only fires once.
 const advanceWave = (game: Game) => {
   const wasBossWave = isBossWave(game.wave);
   const completedWave = game.wave;
   const maxRhythm = Math.max(1, game.maxComboThisWave);
   const finalRhythm = Math.max(1, game.beatCombo);
-  game.wave += 1;
-  game.maxComboThisWave = game.beatCombo;
+  const nextWave = completedWave + 1;
   game.sound.play("waveClear");
   game.sound.play("pulsarHum");
   game.pulsar.waveClear();
-  game.pulsar.setWaveLevel(game.wave);
-  updateBgBeatIntensity(game);
   if (wasBossWave) game.pulsar.setBossPlanetState("defeated");
-  spawnWave(game);
-  showWaveAnnounce(game);
-  showWaveSummary(game, completedWave, maxRhythm, finalRhythm);
+  game.waveTransitioning = true;
+  showWaveSummary(game, completedWave, maxRhythm, finalRhythm, () => {
+    game.wave = nextWave;
+    game.maxComboThisWave = game.beatCombo;
+    game.pulsar.setWaveLevel(game.wave);
+    updateBgBeatIntensity(game);
+    spawnWave(game);
+    showWaveAnnounce(game);
+    syncHud(game);
+    game.waveTransitioning = false;
+  });
   syncHud(game);
 };
