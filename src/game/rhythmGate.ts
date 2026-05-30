@@ -4,17 +4,13 @@ import { BEAT_GRID, BEAT_WINDOW, DEBUG_BEAT_TIMING } from "./rhythmConstants";
 import { syncComboHud } from "./hud";
 import { popupBeatDebug, popupComboLost } from "./popups";
 
-// Three grid tiers, all measured as the period between on-beat slots:
-//   combo 0          → half-notes (BEAT_GRID*2): only every other quarter counts, so a
-//                       broken-rhythm player has to land a deliberate hit "on the one" to
-//                       re-prime back to 1.
-//   combo 1–11       → quarter-notes (BEAT_GRID): the default groove.
+// Two grid tiers, measured as the period between on-beat slots:
+//   combo 0–11       → quarter-notes (BEAT_GRID): the default groove.
 //   combo ≥ 12, or   → eighth-notes (BEAT_GRID/2): rapid-fire pulls each land on a beat;
 //   rapid powerup     at the sparkle tier the in-between bg-beat is audible (see
 //                     bassClock.ts), so the player can hear and play the eighths too.
 export const comboGrid = (game: Game): number => {
   if (game.ship.rapidActive || game.beatCombo >= 12) return BEAT_GRID / 2;
-  if (game.beatCombo === 0) return BEAT_GRID * 2;
   return BEAT_GRID;
 };
 
@@ -83,8 +79,8 @@ export const loseCombo = (game: Game, sourcePos?: Vec) => {
     }
     game.hasLostComboEver = true;
   }
-  // grid just widened (eighths→quarters from sparkle, or quarters→half-notes from any combo
-  // → 0); resync nextBeatToEvaluate against the wider grid so the next closure lands cleanly.
+  // grid may have just widened (eighths→quarters from sparkle dropping); resync
+  // nextBeatToEvaluate against the wider grid so the next closure lands cleanly.
   if (!game.ship.rapidActive) rebaseBeatEval(game);
   syncComboHud(game);
 };

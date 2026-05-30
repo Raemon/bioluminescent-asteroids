@@ -176,15 +176,14 @@ export const showWaveSummary = (
       pulseScore(scoreValueEl);
       syncHud(game);
 
-      // play the next note in the ascending melody. Every 4th tick is a
-      //   downbeat — drop a deep bassKick under the blip so the ear hears a
-      //   solid pulse holding the tune together, and add a tink an octave
-      //   above the melody note for sparkle on top.
+      // Play the next note in the ascending melody. Every 4th tick is a
+      //   downbeat — a tight, fixed-pitch summaryDownbeat lands ON the beat
+      //   (no slow MembraneSynth swoop) and grounds the climbing melody
+      //   without competing with its pitch.
       const pitch = DRAIN_PITCHES[tickIndex % DRAIN_PITCHES.length];
       game.sound.play("scoreBlip", pitch);
       if (tickIndex % TICKS_PER_BEAT === 0) {
-        game.sound.play("bassKick", pitch);
-        game.sound.play("tink", pitch * 2);
+        game.sound.play("summaryDownbeat");
       }
       tickIndex++;
 

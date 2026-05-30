@@ -115,17 +115,23 @@ const sortByComboThenScore = (rows: HighscoreRow[]): HighscoreRow[] =>
 const sortByScore = (rows: HighscoreRow[]): HighscoreRow[] =>
   [...rows].sort((a, b) => b.score - a.score);
 
-// 11-row window (5 above + selected + 5 below) matches the original neighborhood view.
-const WINDOW_RADIUS = 5;
-const WINDOW_SIZE = WINDOW_RADIUS * 2 + 1;
+// gameover "Your Standing" view: 11-row window (5 above + selected + 5 below).
+// title screen: 7-row window so the opening reads as a hall of fame but arrows
+//   still scroll through the full top-50.
+const GAMEOVER_WINDOW_SIZE = 11;
+const TITLE_WINDOW_SIZE = 7;
+
+const visibleWindowSize = (game: Game): number =>
+  game.lastRunScoreId !== null ? GAMEOVER_WINDOW_SIZE : TITLE_WINDOW_SIZE;
 
 // Window anchor that keeps the selection centred when possible, but clamps
 //   against the list boundaries so we never show empty slots above the #1 row
 //   or below the last row.
-const windowStart = (selection: number, total: number): number => {
-  if (total <= WINDOW_SIZE) return 0;
-  const ideal = selection - WINDOW_RADIUS;
-  const maxStart = total - WINDOW_SIZE;
+const windowStart = (selection: number, total: number, size: number): number => {
+  if (total <= size) return 0;
+  const radius = (size - 1) >> 1;
+  const ideal = selection - radius;
+  const maxStart = total - size;
   return Math.max(0, Math.min(maxStart, ideal));
 };
 
@@ -136,8 +142,9 @@ const renderLeaderboard = (game: Game) => {
       '<li class="leaderboard-status">No scores yet — be the first pilot on the board.</li>';
     return;
   }
-  const start = windowStart(game.leaderboardSelection, rows.length);
-  const end = Math.min(rows.length, start + WINDOW_SIZE);
+  const windowSize = visibleWindowSize(game);
+  const start = windowStart(game.leaderboardSelection, rows.length, windowSize);
+  const end = Math.min(rows.length, start + windowSize);
   const header = `<li class="lb-header">
     <span class="lb-rank"></span>
     <span class="lb-name">Pilot</span>

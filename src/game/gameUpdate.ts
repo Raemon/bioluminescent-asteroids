@@ -10,7 +10,6 @@ import {
   spawnBeatDebugPopup,
   evaluateClosedBeats,
   currentBeatPulse,
-  rebaseBeatEval,
 } from "./rhythmGate";
 import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } from "./bassClock";
 import { tickWaveEvents } from "./waveEvents";
@@ -246,9 +245,6 @@ const handleOnBeatFire = (game: Game, newBullets: Bullet[]) => {
   if (game.beatCombo === 0) {
     game.beatCombo = 1;
     if (game.maxCombo < 1) game.maxCombo = 1;
-    // grid just halved (half-notes → quarters) leaving combo 0; resync the evaluator so the
-    // freshly-uncovered odd quarters don't all close in a burst on the next frame.
-    if (!game.ship.rapidActive) rebaseBeatEval(game);
     syncHud(game);
   }
 };

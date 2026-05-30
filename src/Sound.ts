@@ -176,6 +176,7 @@ export type SoundName =
   | "comboSparkle"
   | "tink"
   | "scoreBlip"
+  | "summaryDownbeat"
   | "powerup"
   | "shieldPop"
   | "pulsarHum"
@@ -2375,6 +2376,7 @@ export class Sound {
       case "comboSparkle": this.playComboSparkle(); break;
       case "tink": this.playTink(); break;
       case "scoreBlip": this.playScoreBlip(effectivePitch); break;
+      case "summaryDownbeat": this.playSummaryDownbeat(); break;
       case "powerup": this.playPowerup(); break;
       case "shieldPop": this.playShieldPop(); break;
       case "pulsarHum": this.playPulsarHum(); break;
@@ -3692,30 +3694,76 @@ export class Sound {
     }
   }
 
-  // Quiet sub-beat blip that fires four-per-beat while the wave-clear bonus
-  // drains into the score. Soft pure sine fifth, short envelope, well under
-  // the on-beat row chimes so the cascade reads as a single rhythmic shape.
-  // Pitch ratio walks up subtly across the run so a long drain feels like it
-  // is climbing instead of looping.
+  // Marimba-like melody voice for the wave-summary drain. Fires four-per-beat.
+  // Three sine partials in 1:2:3 ratio with a brief inharmonic high-octave
+  // sparkle — closer to a wooden mallet than the previous pure sine fifth, so
+  // the ear gets a defined pitch with body instead of a thin whistle. Decay
+  // stays short so 8 Hz tick rate doesn't smear into a drone.
   private playScoreBlip(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    const baseFreq = 1320; // E6 — sits between tink (1760) and comboSparkle (880)
-    const partials = [baseFreq * pitchRatio, baseFreq * pitchRatio * 1.5];
-    for (let i = 0; i < partials.length; i++) {
+    const root = 660 * pitchRatio; // E5 — drops an octave from the old whistle
+    // Fundamental + octave + twelfth, each quieter and shorter than the last.
+    const layers: Array<{ freq: number; peak: number; decay: number }> = [
+      { freq: root,       peak: 0.075, decay: 0.18 },
+      { freq: root * 2,   peak: 0.030, decay: 0.10 },
+      { freq: root * 3.01, peak: 0.012, decay: 0.05 },
+    ];
+    for (const { freq, peak, decay } of layers) {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = "sine";
-      osc.frequency.value = partials[i];
-      const peak = 0.05 / (i + 1);
+      osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+      gain.gain.exponentialRampToValueAtTime(peak, t + 0.003);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
       osc.connect(gain);
       gain.connect(this.master);
       osc.start(t);
-      osc.stop(t + 0.1);
+      osc.stop(t + decay + 0.02);
     }
+  }
+
+  // Downbeat anchor for the wave-summary drain — fires once per beat (every
+  // 4th tick). Tight kick that lands ON the trigger: 3ms attack, a short
+  // pitch snap (one octave over 12ms, not a swoopy MembraneSynth sweep), and
+  // a fixed-pitch sine body at C2 so every downbeat sounds identical and
+  // grounds the climbing melody rather than competing with it.
+  private playSummaryDownbeat() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    // Body: sine at C2 (~65 Hz) with a tiny initial pitch snap for "thump".
+    const body = this.ctx.createOscillator();
+    const bodyGain = this.ctx.createGain();
+    body.type = "sine";
+    body.frequency.setValueAtTime(130, t);
+    body.frequency.exponentialRampToValueAtTime(65.4, t + 0.012);
+    bodyGain.gain.setValueAtTime(0.0001, t);
+    bodyGain.gain.exponentialRampToValueAtTime(0.42, t + 0.003);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    body.connect(bodyGain);
+    bodyGain.connect(this.master);
+    body.start(t);
+    body.stop(t + 0.2);
+    // Click: short bandpassed noise so the transient locks the beat in time.
+    const noise = this.ctx.createBufferSource();
+    const buf = this.ctx.createBuffer(1, 512, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    noise.buffer = buf;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 1800;
+    bp.Q.value = 1.2;
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.0001, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.07, t + 0.001);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.025);
+    noise.connect(bp);
+    bp.connect(noiseGain);
+    noiseGain.connect(this.master);
+    noise.start(t);
+    noise.stop(t + 0.04);
   }
 
   // Ascending sine arpeggio with a sparkle overlay — the "you got something

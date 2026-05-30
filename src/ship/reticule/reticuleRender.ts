@@ -42,17 +42,30 @@ const computeReticulePosition = (
   return wrap(add(muzzle, mul(bulletVel, beatGrid * beatFraction)), w, h);
 };
 
+// effective bullet lifetime mirrors shipWeapons.launchBullet so reticule range tracks
+// what the actual shot does: pierce and longshot each double flight time.
+const effectiveBulletLife = (ship: Ship): number => {
+  let life = ship.bulletLife;
+  if (ship.pierceActive) life *= 2;
+  if (ship.longshotActive) life *= 2;
+  return life;
+};
+
 // trident fans the aim into three angles; rapid adds a half-beat preview at half distance;
-// longshot adds a 2-beat preview so the player sees both the next-beat and the beat-after landing.
-// Returns { positions, primaryIndex } so the caller can identify the centred 1-beat reticule
-// (the anchor for the trajectory's first-dot overlap check) without a reference-equality dance.
+// integer-k reticules mark every beat-slot the bullet actually crosses (t = beatGrid*k < life),
+// so the count adapts to longshot/pierce range and to the rhythm-gate tempo (eighth-grid at
+// combo ≥ 12 or under rapid). Returns { positions, primaryIndex } so the caller can identify
+// the centred 1-beat reticule (the anchor for the trajectory's first-dot overlap check).
 type ReticulePositions = { positions: Vec[]; primaryIndex: number };
 const computeReticulePositions = (
   ship: Ship, beatGrid: number, w: number, h: number,
 ): ReticulePositions => {
   const angleOffsets = ship.tridentActive ? [-TRIDENT_SPREAD, 0, TRIDENT_SPREAD] : [0];
-  const baseFractions = ship.rapidActive ? [RAPID_HALF_BEAT_FRACTION, 1] : [1];
-  const beatFractions = ship.longshotActive ? [...baseFractions, 2] : baseFractions;
+  const bulletLife = effectiveBulletLife(ship);
+  const slotCount = Math.max(1, Math.floor(bulletLife / beatGrid));
+  const integerFractions: number[] = [];
+  for (let k = 1; k <= slotCount; k++) integerFractions.push(k);
+  const beatFractions = ship.rapidActive ? [RAPID_HALF_BEAT_FRACTION, ...integerFractions] : integerFractions;
   const positions: Vec[] = [];
   let primaryIndex = 0;
   for (const frac of beatFractions) {
