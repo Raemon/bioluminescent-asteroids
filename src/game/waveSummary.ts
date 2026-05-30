@@ -27,9 +27,9 @@ const FIRST_ROW_DELAY_MS = BEAT_MS;
 //   moving.
 const PAUSE_BEFORE_DRAIN_MS = BEAT_MS;
 
-// Why: per the spec — drain ends → hold 1 second → fade entire panel over
+// Why: per the spec — drain ends → hold 3 seconds → fade entire panel over
 //   2 seconds. The CSS transition matches the fade duration.
-const HOLD_BEFORE_FADE_MS = 1000;
+const HOLD_BEFORE_FADE_MS = 3000;
 const FADE_OUT_MS = 2000;
 
 // Why: predict where the ship will be in 1.5s and mirror that point around
@@ -212,15 +212,13 @@ export const showWaveSummary = (
   activeTimers.push(startDrain);
 };
 
-// Hold for 1 second after the drain completes, then fade the entire panel
-// (rows + score) over 2 seconds.
+// Hold for HOLD_BEFORE_FADE_MS after the drain completes, then fade the
+// entire panel (rows + score) over FADE_OUT_MS. The fade-out class stays on
+// after the transition ends so the panel remains invisible — the next
+// showWaveSummary call clears it as part of its reset.
 const scheduleFadeOut = (root: HTMLElement) => {
   const id = window.setTimeout(() => {
     root.classList.add("fade-out");
-    const off = window.setTimeout(() => {
-      root.classList.remove("fade-out");
-    }, FADE_OUT_MS);
-    activeTimers.push(off);
   }, HOLD_BEFORE_FADE_MS);
   activeTimers.push(id);
 };
