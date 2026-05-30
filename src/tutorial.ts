@@ -416,7 +416,7 @@ const renderBasics = (ctx: CanvasRenderingContext2D, s: BasicsState, w: number, 
 // ------------------------------------------------------------------
 
 const BEAT_GRID = 0.7; // seconds per beat in this demo
-const RHYTHM_BULLET_SPEED = 320;
+const RHYTHM_BULLET_SPEED = 220;
 
 type RhythmState = {
   ship: Ship;
@@ -435,16 +435,16 @@ type RhythmState = {
 
 // Asteroid drifts horizontally across the canvas at a known speed.
 // Slow speed makes the trajectory dots clearly readable.
-const RHYTHM_ASTEROID_VX = -38;
+const RHYTHM_ASTEROID_VX = -32;
 // Asteroid + ship geometry are hand-tuned so the ship's natural reticule
 // distance (RHYTHM_BULLET_SPEED * BEAT_GRID) lands on top of the asteroid's
 // first beat-dot when the ship is correctly aimed — gives a clean visual
 // "lock". See the derivation in the comment in initRhythm below.
-const RHYTHM_ASTEROID_SPAWN_X = 480;
-const RHYTHM_ASTEROID_SPAWN_Y = 92;
-const RHYTHM_ASTEROID_RADIUS = 22;
-const RHYTHM_SHIP_X = 216;
-const RHYTHM_SHIP_Y = 170;
+const RHYTHM_ASTEROID_SPAWN_X = 340;
+const RHYTHM_ASTEROID_SPAWN_Y = 75;
+const RHYTHM_ASTEROID_RADIUS = 18;
+const RHYTHM_SHIP_X = 169;
+const RHYTHM_SHIP_Y = 165;
 
 const spawnRhythmAsteroid = (): Asteroid =>
   makeAsteroid(
@@ -767,8 +767,8 @@ export const installTutorialDemos = () => {
   const rhythmCanvas = document.getElementById("tutorial-demo-rhythm") as HTMLCanvasElement | null;
   if (!basicsCanvas || !rhythmCanvas) return;
 
-  const basics = makeDemo(basicsCanvas, 520, 200, initBasics, updateBasics, renderBasics);
-  const rhythm = makeDemo(rhythmCanvas, 520, 220, initRhythm, updateRhythm, renderRhythm);
+  const basics = makeDemo(basicsCanvas, 360, 200, initBasics, updateBasics, renderBasics);
+  const rhythm = makeDemo(rhythmCanvas, 360, 220, initRhythm, updateRhythm, renderRhythm);
 
   window.addEventListener("tutorial-open", () => {
     basics.start();

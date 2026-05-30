@@ -7,8 +7,7 @@ import { BEAT_GRID } from "./rhythmConstants";
 //   a rhythmic melodic pattern (pentatonic loop + downbeat accent). After
 //   the drain ends, the panel holds for 1 second then fades over 2 seconds.
 //   Non-blocking: the next wave spawns immediately while this plays out
-//   over the playfield, anchored to the opposite quadrant from where the
-//   ship is heading so it doesn't sit under the player's hull.
+//   over the playfield, anchored to the center of the screen.
 
 const PANEL_ID = "wave-summary";
 const TICK_AMOUNT = 50;
@@ -31,17 +30,6 @@ const PAUSE_BEFORE_DRAIN_MS = BEAT_MS;
 //   2 seconds. The CSS transition matches the fade duration.
 const HOLD_BEFORE_FADE_MS = 3000;
 const FADE_OUT_MS = 2000;
-
-// Why: predict where the ship will be in 1.5s and mirror that point around
-//   the screen center, so the summary lands in the opposite quadrant from
-//   where the player is heading.
-const POSITION_LOOKAHEAD_S = 1.5;
-
-// Why: keep the panel comfortably inside the viewport even when the ship is
-//   tucked into a corner. Roughly half the panel's footprint at typical
-//   widths/heights — overshoot is fine, it just clamps tighter.
-const EDGE_MARGIN_X = 180;
-const EDGE_MARGIN_Y = 140;
 
 type SummaryEls = {
   root: HTMLElement;
@@ -93,21 +81,6 @@ const pulseScore = (el: HTMLElement) => {
   el.classList.add("ws-pulse");
 };
 
-// Why: anchor the panel at the radial mirror of the ship's predicted
-//   position. Predict 1.5s ahead so a fast-moving ship still has the panel
-//   land out of their path. Clamp inside the viewport so corner-skirting
-//   doesn't push the panel off-screen.
-const positionPanel = (game: Game, root: HTMLElement) => {
-  const futureX = game.ship.pos.x + game.ship.vel.x * POSITION_LOOKAHEAD_S;
-  const futureY = game.ship.pos.y + game.ship.vel.y * POSITION_LOOKAHEAD_S;
-  const mirrorX = game.w - futureX;
-  const mirrorY = game.h - futureY;
-  const left = Math.max(EDGE_MARGIN_X, Math.min(game.w - EDGE_MARGIN_X, mirrorX));
-  const top = Math.max(EDGE_MARGIN_Y, Math.min(game.h - EDGE_MARGIN_Y, mirrorY));
-  root.style.left = `${left}px`;
-  root.style.top = `${top}px`;
-};
-
 // Why: the title row gets the "chime" — it's the loudest, longest-tailed of
 //   the row sounds, marking the start of the report. The four data rows use
 //   "tink" with a slow upward pitch climb so the ear hears each line land
@@ -144,8 +117,6 @@ export const showWaveSummary = (
   setRow(root, "final", `x${finalRhythm}`);
   setRow(root, "bonus", String(bonus));
   setRow(root, "score", String(game.score));
-
-  positionPanel(game, root);
 
   // Reset visual state and force reflow so the entrance animation re-plays.
   root.classList.remove("fade-out");

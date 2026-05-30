@@ -10,7 +10,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "merge:main": "branch=$(git branch --show-current) && git checkout main && git merge \"$branch\" && git checkout \"$branch\""
   },
   "devDependencies": {
     "@vercel/node": "^5.8.5",
