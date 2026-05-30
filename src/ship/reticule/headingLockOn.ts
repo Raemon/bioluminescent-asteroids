@@ -22,6 +22,11 @@ const TRAJECTORY_EDGE_PAD = 6;
 // Why: the primary reticule (the one used for the on-rhythm lock) is computed at beatFraction=1.
 const PRIMARY_BEAT_FRACTION = 1;
 
+// Why: only snap when the reticule was already close to the line both before and after the sweep —
+// otherwise a far-away crossing yanks the heading across the screen, which reads as a glitch. ~10px
+// matches the on-beat hit radius so "close enough to almost hit it" is the gate for snapping.
+const SNAP_PROXIMITY_RADIUS = 10;
+
 export type HeadingLock = {
   // Which target's line we snapped to. Strong reference — released when the target is no longer
   // in the cone or the line no longer passes near the reticule.
@@ -162,6 +167,10 @@ const findCrossing = (
     // boundary — small epsilon avoids snapping when the reticule is already on the line).
     if (d0 === 0 || d1 === 0) continue;
     if ((d0 > 0) === (d1 > 0)) continue;
+    // Only snap if the reticule was already close to the line both before and after the sweep.
+    // A far-away crossing means the player is sweeping through space that happens to contain a
+    // line — snapping there feels like the heading jerks across the screen.
+    if (Math.abs(d0) > SNAP_PROXIMITY_RADIUS && Math.abs(d1) > SNAP_PROXIMITY_RADIUS) continue;
     // Pick the analytic solution whose angular position is between θ0 and θ1 along the rotation
     // direction, and nearest to θ0 (the first crossing the sweep hits).
     const candidates = headingsOnLine(line, leadX, leadY, R);
