@@ -5,7 +5,7 @@ import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
 import { AlienBullet } from "../AlienBullet";
 import { Canister } from "../Canister";
-import { GoldCrystal, GOLD_CRYSTAL_SCORE } from "../GoldCrystal";
+import { GoldCrystal, GOLD_CRYSTAL_SCORE, GOLD_CRYSTAL_SHATTER_SCORE, spawnCanisterFromGoldCrystal } from "../GoldCrystal";
 import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup } from "./rhythmGate";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
@@ -265,15 +265,33 @@ const explodeCanister = (game: Game, c: Canister) => {
   emitCanisterPop(game.particles, c);
 };
 
-// Why: gold-crystal pickup pays a flat 2500 (no combo multiplier — the reward
-// for noticing the embedded crystal is the gem itself, not a rhythm-stacked
-// payout) plus a "+N" popup so the score gain is legible at the kill site.
+// Two ways to resolve a gold gem on the field:
+//   1) Shoot it. Rhythm-gated: an on-beat shot dealing ≥ 4 damage cracks it
+//      open and a fresh powerup canister drifts out. Any weaker / off-beat
+//      shot shatters it for a consolation score with no canister — the
+//      player learns that the gem is a *skill* check, not a free pickup.
+//   2) Fly through it. Slow-and-safe collect path — full GOLD_CRYSTAL_SCORE
+//      with no canister. Reasonable fallback when rhythm isn't available.
+// Shoot pass runs first so a bullet at the gem this frame can't be
+// pre-empted by a same-frame ship overlap.
 export const handleGoldCrystalPickups = (game: Game) => {
-  if (!game.ship.alive) return;
   const remaining: GoldCrystal[] = [];
   for (const g of game.goldCrystals) {
-    if (g.collidesWith(game.ship.pos, game.ship.radius * 0.9)) collectGoldCrystal(game, g);
-    else remaining.push(g);
+    const b = findFirstHittingBullet(game.bullets, g);
+    if (b) {
+      consumeBullet(b);
+      const onBeat = isHitOnBeat(game, b);
+      const dmg = b.damage();
+      applyHitToCombo(game, onBeat, b.pos);
+      if (onBeat && dmg >= 4) crackGoldCrystalForCanister(game, g);
+      else shatterGoldCrystal(game, g);
+      continue;
+    }
+    if (game.ship.alive && g.collidesWith(game.ship.pos, game.ship.radius * 0.9)) {
+      collectGoldCrystal(game, g);
+      continue;
+    }
+    remaining.push(g);
   }
   game.goldCrystals = remaining;
 };
@@ -283,6 +301,32 @@ const collectGoldCrystal = (game: Game, g: GoldCrystal) => {
   game.sound.play("tink", 1, g.pos);
   game.score += GOLD_CRYSTAL_SCORE;
   game.popups.push(popupScore(g.pos, GOLD_CRYSTAL_SCORE));
+  emitGoldCrystalPickup(game.particles, g);
+  syncHud(game);
+};
+
+// Rhythm-cracked: the gem yields its embedded canister. We still play tink
+// (the gem is reacting to the hit) but lead with the canister-appear sound
+// so the player hears "a canister just dropped in".
+const crackGoldCrystalForCanister = (game: Game, g: GoldCrystal) => {
+  const canister = spawnCanisterFromGoldCrystal(g);
+  game.canisters.push(canister);
+  game.sound.play("canisterAppear", 1, g.pos);
+  game.sound.play("tink", 1, g.pos);
+  game.shake = Math.min(game.shake + 0.25, 1.2);
+  emitGoldCrystalPickup(game.particles, g);
+  syncHud(game);
+};
+
+// Off-beat / weak shot: gem shatters into gold dust. The player still gets a
+// small score so the gem wasn't pure punishment, but the bigger prize (the
+// canister) is gone.
+const shatterGoldCrystal = (game: Game, g: GoldCrystal) => {
+  game.sound.play("tink", 1, g.pos);
+  game.sound.play("explosionSmall", 1, g.pos);
+  game.score += GOLD_CRYSTAL_SHATTER_SCORE;
+  game.popups.push(popupScore(g.pos, GOLD_CRYSTAL_SHATTER_SCORE));
+  game.shake = Math.min(game.shake + 0.15, 1.0);
   emitGoldCrystalPickup(game.particles, g);
   syncHud(game);
 };

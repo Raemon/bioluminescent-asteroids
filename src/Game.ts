@@ -70,6 +70,8 @@ export class Game implements HudElements {
   hasLostComboEver = false;
   // Why: combo x6 unlocks the first Pilot's Log vocal — fires once per run, gated by this flag.
   pilotLog1Unlocked = false;
+  // Why: combo x12 unlocks Entry 3 — same once-per-run gate, no HUD toast.
+  pilotLog3Unlocked = false;
   // Why: beta-test mode disables the random wave director — the run only contains the elements
   //   the player selected in the beta panel; when they're all gone the wave doesn't auto-spawn.
   betaMode = false;

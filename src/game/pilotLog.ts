@@ -50,3 +50,21 @@ export const tryUnlockPilotLog1 = (game: Game) => {
     window.setTimeout(() => { game.sound.pilotLogPlaying = false; }, (delay + dur + 0.5) * 1000);
   });
 };
+
+// Combo x12: Pilot's Log Entry 3. Same downbeat-snap as Entry 1, but no HUD
+// toast — the captain just starts talking. pilotLogPlaying mutex prevents
+// stacking on top of Entry 1 if the player blew through 6 -> 12 fast enough
+// that Entry 1 is still mid-playback; in that case the unlock latches and the
+// player has to hit x12 again to hear it. Acceptable: the trigger gates on
+// flag *and* mutex so retrying is allowed until it actually plays.
+export const tryUnlockPilotLog3 = (game: Game) => {
+  if (game.pilotLog3Unlocked) return;
+  if (game.beatCombo < 12) return;
+  if (game.sound.pilotLogPlaying) return;
+  game.pilotLog3Unlocked = true;
+  game.sound.pilotLogPlaying = true;
+  const delay = nextDownbeatDelay(game.beatTime);
+  game.sound.playPilotLog(3, delay, 1.0).then((dur) => {
+    window.setTimeout(() => { game.sound.pilotLogPlaying = false; }, (delay + dur + 0.5) * 1000);
+  });
+};

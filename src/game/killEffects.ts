@@ -7,7 +7,7 @@ import { Vec } from "../vec";
 import { spawnGoldCrystalAt } from "../GoldCrystal";
 import { loseCombo } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
-import { tryUnlockPilotLog1 } from "./pilotLog";
+import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
 import { popupCombo, popupScore } from "./popups";
 import {
   emitExplosion,
@@ -53,6 +53,7 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
     if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
     syncComboHud(game);
     tryUnlockPilotLog1(game);
+    tryUnlockPilotLog3(game);
   } else if (!isOnBeatHit && game.beatCombo !== 0) {
     loseCombo(game, hitPos);
   }

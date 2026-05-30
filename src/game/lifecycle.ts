@@ -84,6 +84,7 @@ export const showTitle = (game: Game) => {
 export const startGame = (game: Game) => {
   game.sound.resume();
   game.sound.preloadPilotLog(1);
+  game.sound.preloadPilotLog(3);
   // Warm every halo music stem in the pool so whichever variation gets
   // randomly picked at the first 4x doesn't pay fetch+decode latency.
   // Pool size × 2 stems × ~600 KB ≈ 2.5 MB for the current 2-variation pool —
@@ -126,6 +127,7 @@ const resetRunTimers = (game: Game) => {
   game.slowMoTimer = 0;
   game.hasLostComboEver = false;
   game.pilotLog1Unlocked = false;
+  game.pilotLog3Unlocked = false;
 };
 
 // Why: parade + drones from the previous title screen must be torn down before the new run runs.

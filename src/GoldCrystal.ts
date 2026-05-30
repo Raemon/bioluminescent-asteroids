@@ -1,4 +1,5 @@
-import { Vec, v, add, mul, rand, TAU } from "./vec";
+import { Vec, v, add, mul, rand, pick, TAU } from "./vec";
+import { Canister, POWERUP_KINDS } from "./Canister";
 
 // A standalone collectible left behind by a "goldCrystal" asteroid's death.
 // The asteroid's blurred interior was the visual tease — this is the payoff,
@@ -7,7 +8,15 @@ import { Vec, v, add, mul, rand, TAU } from "./vec";
 // asteroid's velocity so the gem reads as "ejected from the explosion", not
 // "teleported in". After a long lifetime it dims and warps out.
 
+// Score for collecting the gem by flying through it (the "easy" interaction —
+// no rhythm skill required, just spotting the embedded crystal).
 export const GOLD_CRYSTAL_SCORE = 2500;
+
+// Score for shattering the gem with a sub-threshold or off-beat shot. The
+// player still gets *something* so an accidental clip doesn't feel like a
+// pure punishment, but it's deliberately weaker than collecting + much
+// weaker than the rhythm-cracked canister payoff.
+export const GOLD_CRYSTAL_SHATTER_SCORE = 500;
 
 // Why: gem hangs around long enough that a player can reasonably swing back
 // for it after handling the surrounding rubble cloud, but not so long that an
@@ -183,4 +192,20 @@ export const spawnGoldCrystalAt = (pos: Vec, parentVel: Vec): GoldCrystal => {
   // small so the gem stays predictably near the kill site.
   const drift = v(parentVel.x * 0.25 + rand(-18, 18), parentVel.y * 0.25 + rand(-18, 18));
   return new GoldCrystal({ ...pos }, drift);
+};
+
+// Drop a fresh powerup canister where the gem was, inheriting its drift so
+// the canister appears to be "ejected" from the cracked gem rather than
+// teleported in. Used when the player cracks the gem with a sufficiently
+// powerful on-rhythm shot.
+export const spawnCanisterFromGoldCrystal = (g: GoldCrystal): Canister => {
+  const kind = pick(POWERUP_KINDS);
+  // Why: short drift path so the freed canister settles near the crack site
+  // — the player just earned this and shouldn't have to chase it across the
+  // whole screen.
+  const pathLength = 320;
+  // Inherit gem drift + a small outward jitter so the canister visibly
+  // emerges instead of freezing in place.
+  const vel = v(g.vel.x + rand(-30, 30), g.vel.y + rand(-30, 30));
+  return new Canister({ ...g.pos }, vel, kind, pathLength);
 };
