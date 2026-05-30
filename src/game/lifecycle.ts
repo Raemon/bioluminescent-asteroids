@@ -13,6 +13,7 @@ import { renderKilledRow } from "./killedParade";
 import { emitShipDebris } from "./particleBursts";
 import { hideScoreEntry, showLeaderboard, showScoreEntry } from "./scoreEntry";
 import { HALO_MUSIC_POOL } from "./haloMusicConfig";
+import { hideWaveSummary } from "./waveSummary";
 
 // Why: Fisher-Yates over Array.sort — sort's randomness is biased and varies across engines.
 const shuffled = <T,>(arr: ReadonlyArray<T>): T[] => {
@@ -59,6 +60,7 @@ export const showTitle = (game: Game) => {
   clearComboSilently(game);
   game.asteroids = [];
   game.canisters = [];
+  game.goldCrystals = [];
   stopAllPersistentAudio(game);
   game.aliens = [];
   game.alienBullets = [];
@@ -75,6 +77,7 @@ export const showTitle = (game: Game) => {
   syncPowerupHud(game);
   hideScoreEntry(game);
   showLeaderboard(game);
+  hideWaveSummary();
 };
 
 // Why: per-run randomised bass intro order means the wave-2/3 picks vary between runs.
@@ -118,6 +121,7 @@ const resetRunTimers = (game: Game) => {
   game.nextBeatToEvaluate = 0;
   game.beatCombo = 0;
   game.maxCombo = 0;
+  game.maxComboThisWave = 0;
   game.firedOffBeatSinceLastBeat = false;
   game.slowMoTimer = 0;
   game.hasLostComboEver = false;
@@ -130,6 +134,7 @@ const resetRunCollections = (game: Game) => {
   game.popups = [];
   game.shards = [];
   game.canisters = [];
+  game.goldCrystals = [];
   game.killedSnapshots = [];
   game.killTally = {};
   stopParade(game);

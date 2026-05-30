@@ -8,6 +8,7 @@ import { Pulsar } from "./Pulsar";
 import { Input } from "./Input";
 import { Sound } from "./Sound";
 import { Canister } from "./Canister";
+import { GoldCrystal } from "./GoldCrystal";
 import { Comet } from "./Comet";
 import { Alien, AlienSize } from "./Alien";
 import { AlienBullet } from "./AlienBullet";
@@ -60,6 +61,9 @@ export class Game implements HudElements {
   // Why: high-water mark of beatCombo during a run — submitted with the score so the leaderboard
   //   can showcase a pilot's best streak, separately from the final score.
   maxCombo = 0;
+  // Why: per-wave high-water mark of beatCombo, surfaced in the wave-clear summary panel.
+  //   Reset to the current beatCombo at the start of each new wave.
+  maxComboThisWave = 0;
   // Why: latched on off-beat fire so the punishment can land at the next beat closure (not retroactive).
   firedOffBeatSinceLastBeat = false;
   // Why: first-ever meaningful combo loss in a run gets a labeled popup so the player learns the mechanic.
@@ -71,6 +75,7 @@ export class Game implements HudElements {
   betaMode = false;
 
   canisters: Canister[] = [];
+  goldCrystals: GoldCrystal[] = [];
   comets: Comet[] = [];
   aliens: Alien[] = [];
   alienBullets: AlienBullet[] = [];

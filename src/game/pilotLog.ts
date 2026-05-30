@@ -16,21 +16,24 @@ const nextDownbeatDelay = (beatTime: number): number => {
   return phase === 0 ? 0 : DOWNBEAT_SECONDS - phase;
 };
 
-// Show the "Pilot's Log #N Unlocked" toast. Stays visible for ~3.5s then
-// fades. The element is created on first use so index.html doesn't need to
-// know about it ahead of time.
+// Fade the chapter title in over the canvas. Inner <span> carries the
+// scaleX squeeze (matches the main-menu title); outer element does the
+// fade so the two transforms don't compose into a moving target.
 const showUnlockToast = (label: string) => {
   let el = document.getElementById("pilot-log-toast");
   if (!el) {
     el = document.createElement("div");
     el.id = "pilot-log-toast";
+    const inner = document.createElement("span");
+    el.appendChild(inner);
     document.body.appendChild(el);
   }
-  el.textContent = label;
+  const inner = el.firstElementChild as HTMLSpanElement;
+  inner.textContent = label;
   el.classList.remove("show");
   void el.offsetWidth;
   el.classList.add("show");
-  window.setTimeout(() => { el?.classList.remove("show"); }, 4200);
+  window.setTimeout(() => { el?.classList.remove("show"); }, 5000);
 };
 
 // Fire the combo-x6 unlock: HUD toast immediately, vocal cue on the next
@@ -40,7 +43,7 @@ export const tryUnlockPilotLog1 = (game: Game) => {
   if (game.pilotLog1Unlocked) return;
   if (game.beatCombo < 6) return;
   game.pilotLog1Unlocked = true;
-  showUnlockToast("Pilot's Log #1 Unlocked");
+  showUnlockToast("Chapter 1: The Outer Rim");
   game.sound.pilotLogPlaying = true;
   const delay = nextDownbeatDelay(game.beatTime);
   game.sound.playPilotLog(1, delay, 1.0).then((dur) => {

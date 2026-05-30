@@ -15,6 +15,7 @@ import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } 
 import { tickWaveEvents } from "./waveEvents";
 import { detonateShockwave } from "./shockwave";
 import { spawnWave, isBossWave, updateBgBeatIntensity } from "./waveDirector";
+import { showWaveSummary } from "./waveSummary";
 import {
   handleCollisions,
   handleAlienHits,
@@ -22,6 +23,7 @@ import {
   handleCometHits,
   handleCanisterPickups,
   handleCanisterShots,
+  handleGoldCrystalPickups,
 } from "./collisions";
 import { startGame, showTitle, togglePause, respawn } from "./lifecycle";
 import { targetsForReticule } from "./gameRender";
@@ -282,6 +284,8 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
     if (!wasWarping && c.warping) game.sound.play("canisterAppear", 1, c.pos);
   }
   game.canisters = game.canisters.filter((c) => c.alive);
+  for (const g of game.goldCrystals) g.update(musicDt, game.w, game.h);
+  game.goldCrystals = game.goldCrystals.filter((g) => g.alive);
   updatePositionalAudio(game);
 };
 
@@ -337,12 +341,49 @@ const runCollisionPasses = (game: Game) => {
   handleCometHits(game);
   handleCanisterPickups(game);
   handleCanisterShots(game);
+  handleGoldCrystalPickups(game);
+};
+
+// Pick the screen quadrant the ship is NOT in, so the wave label fades in
+// without sitting under the player's hull. Returns viewport-space CSS coords.
+const waveLabelAnchor = (game: Game): { left: number; top: number } => {
+  const onRight = game.ship.pos.x > game.w / 2;
+  const onBottom = game.ship.pos.y > game.h / 2;
+  return {
+    left: onRight ? game.w * 0.25 : game.w * 0.75,
+    top: onBottom ? game.h * 0.28 : game.h * 0.72,
+  };
+};
+
+// Fade "Wave N" into the quadrant near (but not under) the ship.
+const showWaveAnnounce = (game: Game) => {
+  let el = document.getElementById("wave-announce");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "wave-announce";
+    const inner = document.createElement("span");
+    el.appendChild(inner);
+    document.body.appendChild(el);
+  }
+  const anchor = waveLabelAnchor(game);
+  el.style.left = `${anchor.left}px`;
+  el.style.top = `${anchor.top}px`;
+  const inner = el.firstElementChild as HTMLSpanElement;
+  inner.textContent = `Wave ${game.wave}`;
+  el.classList.remove("show");
+  void el.offsetWidth;
+  el.classList.add("show");
+  window.setTimeout(() => { el?.classList.remove("show"); }, 2800);
 };
 
 // Why: detect boss wave here so we can lock the planet hidden — a defeated boss must not reappear.
 const advanceWave = (game: Game) => {
   const wasBossWave = isBossWave(game.wave);
+  const completedWave = game.wave;
+  const maxRhythm = Math.max(1, game.maxComboThisWave);
+  const finalRhythm = Math.max(1, game.beatCombo);
   game.wave += 1;
+  game.maxComboThisWave = game.beatCombo;
   game.sound.play("waveClear");
   game.sound.play("pulsarHum");
   game.pulsar.waveClear();
@@ -350,5 +391,7 @@ const advanceWave = (game: Game) => {
   updateBgBeatIntensity(game);
   if (wasBossWave) game.pulsar.setBossPlanetState("defeated");
   spawnWave(game);
+  showWaveAnnounce(game);
+  showWaveSummary(game, completedWave, maxRhythm, finalRhythm);
   syncHud(game);
 };

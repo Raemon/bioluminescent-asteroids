@@ -4,6 +4,7 @@ import { Asteroid } from "../Asteroid";
 import { Comet } from "../Comet";
 import { Alien } from "../Alien";
 import { Canister } from "../Canister";
+import { GoldCrystal } from "../GoldCrystal";
 import { Shard, shatterAsteroid } from "../Shard";
 
 // Why: every burst in the game shares this shape; differences live in tuning, not code structure.
@@ -149,6 +150,21 @@ export const emitCanisterPickup = (particles: ParticleSystem, c: Canister) => {
     sizeRange: [1.4, 2.6],
     hue: c.hue, hueSpread: [-10, 20],
     drag: 1.6,
+    angleMode: "random", angleJitter: 0,
+  });
+};
+
+// Bigger, slower-fading gold burst for the crystal pickup — reads as a richer
+// reward than the standard canister pickup since the player had to spot the
+// embedded crystal in the first place.
+export const emitGoldCrystalPickup = (particles: ParticleSystem, g: GoldCrystal) => {
+  emitBurst(particles, {
+    pos: g.pos, count: 56,
+    speedRange: [120, 340],
+    lifeRange: [0.7, 1.4], maxLife: 1.4,
+    sizeRange: [1.6, 3.0],
+    hue: g.hue, hueSpread: [-6, 14],
+    drag: 1.4,
     angleMode: "random", angleJitter: 0,
   });
 };

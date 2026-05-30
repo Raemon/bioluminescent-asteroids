@@ -18,6 +18,11 @@ const SHIP_TRAJECTORY_BEAT_COUNT = 6;
 const SHIP_TRAJECTORY_MIN_SPEED = 30;
 // Why: ramp the preview in as the ship accelerates from the min-speed threshold — avoids a hard pop.
 const SHIP_TRAJECTORY_FADE_IN_SPEED = 80;
+// Why: trajectory line is most useful while actively maneuvering — once the player has been
+// coasting for a while their heading is set and the preview becomes visual noise. Hold full
+// alpha for HOLD seconds after the last thrust frame, then fade to invisible over FADE seconds.
+const SHIP_TRAJECTORY_POST_THRUST_HOLD_SEC = 1;
+const SHIP_TRAJECTORY_POST_THRUST_FADE_SEC = 1;
 
 export const renderShipTrajectoryPreview = (
   ctx: CanvasRenderingContext2D, ship: Ship, beatGrid: number, beatTime: number, w: number, h: number,
@@ -27,6 +32,12 @@ export const renderShipTrajectoryPreview = (
   const speed = Math.hypot(ship.vel.x, ship.vel.y);
   if (speed < SHIP_TRAJECTORY_MIN_SPEED) return;
   const speedFade = Math.min(1, (speed - SHIP_TRAJECTORY_MIN_SPEED) / (SHIP_TRAJECTORY_FADE_IN_SPEED - SHIP_TRAJECTORY_MIN_SPEED));
+  // Why: drop the preview after the hold window so a coasting player isn't staring at a stale line.
+  const sinceThrust = beatTime - ship.lastThrustActiveAt;
+  if (sinceThrust >= SHIP_TRAJECTORY_POST_THRUST_HOLD_SEC + SHIP_TRAJECTORY_POST_THRUST_FADE_SEC) return;
+  const postThrustFade = sinceThrust <= SHIP_TRAJECTORY_POST_THRUST_HOLD_SEC
+    ? 1
+    : 1 - (sinceThrust - SHIP_TRAJECTORY_POST_THRUST_HOLD_SEC) / SHIP_TRAJECTORY_POST_THRUST_FADE_SEC;
   const beatPulseBoost = computeBeatPulseBoost(beatTime, beatGrid);
 
   ctx.save();
@@ -43,7 +54,7 @@ export const renderShipTrajectoryPreview = (
     // Floors at 0.4 so the last dot is still clearly visible, not nearly transparent.
     const distanceFade = 1 - 0.6 * (k - 1) / SHIP_TRAJECTORY_BEAT_COUNT;
     const pulse = isFirst ? beatPulseBoost : 1;
-    const alpha = Math.min(1, baseAlpha * distanceFade * speedFade * pulse);
+    const alpha = Math.min(1, baseAlpha * distanceFade * speedFade * pulse * postThrustFade);
     ctx.fillStyle = `hsla(${SHIP_TRAJECTORY_HSL}, ${alpha})`;
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, isFirst ? SHIP_TRAJECTORY_FIRST_DOT_RADIUS : SHIP_TRAJECTORY_DOT_RADIUS, 0, TAU);

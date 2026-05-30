@@ -64,6 +64,7 @@ const paintEntityLayers = (
   for (const s of game.shards) s.render(ctx);
   for (const a of game.asteroids) a.render(ctx, game.time);
   for (const c of game.canisters) c.render(ctx, game.time);
+  for (const g of game.goldCrystals) g.render(ctx, game.time);
   for (const al of game.aliens) al.render(ctx, game.time);
   for (const ab of game.alienBullets) ab.render(ctx);
   for (const b of game.bullets) b.render(ctx);

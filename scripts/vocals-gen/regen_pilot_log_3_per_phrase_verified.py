@@ -1,14 +1,16 @@
-"""Generate Pilot's Log Entry Three — both variants — with ElevenLabs (PL_Ralf_Deep).
+"""Regenerate pilot-log-3 with per-phrase Whisper verification.
 
-Entry 3 fires at combo x12. Script lives at public/sounds/vocals/scripts/pilot-log-3.md.
-The texture for this entry is internal rhyme — rhymes inside lines, irregular,
-never at line-ends. Slot layout is shorter and silenter than Entry 2 (the
-"fraying" curve from the design brief).
+Discovered failure mode: Ralf+v3 occasionally returns audio that *passes* the
+duration check (e.g. 1.0s of speech for a 6-word phrase) but actually contains
+only the first 2-3 words. The duration heuristic in the earlier scripts
+doesn't catch it.
 
-Pipeline matches generate_pilot_log_2.py — same voice, same FX chain, same
-2.0s downbeat grid. Outputs to public/sounds/vocals/pilot-log-3-takes/.
+This script verifies each phrase with Whisper-tiny right after synthesis,
+regenerating if more than 25% of the phrase's content words are missing.
+Slower (Whisper adds ~3-5s per phrase) but reliable.
 """
 
+import re
 import shlex
 import subprocess
 import tempfile
@@ -16,45 +18,45 @@ from pathlib import Path
 
 import requests
 
-VOICE_ID = "A9evEp8yGjv4c3WsIKuY"  # PL_Ralf_Deep
+VOICE_ID = "A9evEp8yGjv4c3WsIKuY"
 MODEL = "eleven_v3"
 SLOT_SECONDS = 2.0
 SQUELCH_IN = 0.22
 SQUELCH_OUT = 0.32
 PITCH_SEMITONES = -1.0
 SAMPLE_RATE = 44100
+MAX_ATTEMPTS = 6
+COVERAGE_THRESHOLD = 0.75  # per-phrase
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENV_PATH = REPO_ROOT / ".env"
 OUT_DIR = REPO_ROOT / "public" / "sounds" / "vocals" / "pilot-log-3-takes"
 
-TAGS_OPEN = "[low voice][gravelly][slowly][weary][murmuring]"
+TAGS_STANDARD = "[low voice][gravelly][slowly][weary][murmuring]"
+TAGS_NO_MURMUR = "[low voice][gravelly][slowly][weary]"
+TAGS_PLAIN = "[low voice][gravelly]"
 
-# Variant A — subtler internal rhyme. Slot map from pilot-log-3.md cadence table.
-# Slot 0 is the squelch-in pre-roll.
 VARIANT_A = [
     (1, "Hey, kid."),
     (2, "Long one tonight."),
-    (3, "Hands went cold around hour four —"),
-    (4, "you know that knuckle that locks up? Locked."),
+    (3, "Hands went cold around hour four."),
+    (4, "You know that knuckle that locks up? Locked."),
     (6, "Bent it loose against the console."),
-    (7, "Hurts in a way I'd forgotten about."),
+    (7, "Hurts in a way I had forgotten about."),
     (9, "Coffee's been gone since Tuesday."),
     (10, "I miscounted the packets."),
     (11, "Tell your mother that one. She'll laugh."),
     (13, "...You should be asleep. I'm fine out here. Go on."),
 ]
 
-# Variant B — more deliberate internal rhyme. Same slot scaffold; phrases pack
-# more rhyme into single lines.
 VARIANT_B = [
     (1, "Hey, kid."),
     (2, "Long shift."),
     (3, "Cold start, slow heart, knuckle locked around hour four."),
     (5, "Bent it loose on the console."),
-    (6, "Stings now in a way I half forgot."),
+    (6, "Stings now in a way I half-forgot."),
     (8, "Coffee's been gone since Tuesday."),
-    (9, "Miscounted the packets — pack of fool, this old man."),
+    (9, "Miscounted the packets. Pack of fool, this old man."),
     (11, "Tell your mother. She'll laugh and she'll know."),
     (13, "...You should be down. I'm fine up here."),
     (14, "Go on, now. Go on."),
@@ -70,15 +72,14 @@ def load_api_key() -> str:
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
-    print("$", " ".join(shlex.quote(c) for c in cmd))
     return subprocess.run(cmd, check=True, **kwargs)
 
 
-def synth_phrase(api_key: str, text: str, out_path: Path) -> None:
+def synth_phrase(api_key: str, tagged_text: str, out_path: Path) -> None:
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
     headers = {"xi-api-key": api_key, "accept": "audio/mpeg", "content-type": "application/json"}
     body = {
-        "text": f"{TAGS_OPEN} {text}",
+        "text": tagged_text,
         "model_id": MODEL,
         "voice_settings": {
             "stability": 0.55,
@@ -133,6 +134,76 @@ def trim_silence(src: Path, dst: Path) -> None:
     ])
 
 
+# Lazy-init Whisper so the first phrase pays the model-load cost once.
+_whisper_model = None
+
+
+def whisper_transcribe(audio_path: Path) -> str:
+    global _whisper_model
+    if _whisper_model is None:
+        import whisper
+        _whisper_model = whisper.load_model("tiny")
+    result = _whisper_model.transcribe(str(audio_path), language="en", fp16=False)
+    return result["text"].strip()
+
+
+def normalize_words(s: str) -> set[str]:
+    s = s.lower()
+    s = re.sub(r"\[[^\]]*\]", " ", s)
+    s = s.replace("'", "")
+    s = re.sub(r"[^a-z0-9 ]+", " ", s)
+    return {t for t in s.split() if t}
+
+
+def phrase_coverage(expected: str, transcript: str) -> tuple[float, list[str]]:
+    e = normalize_words(expected)
+    t = normalize_words(transcript)
+    if not e:
+        return 1.0, []
+    missing = [w for w in e if w not in t]
+    return (len(e) - len(missing)) / len(e), missing
+
+
+def synth_with_verification(api_key: str, text: str, workdir: Path, idx: int) -> Path:
+    """Synthesize a phrase and verify Whisper hears most of the content words.
+    Falls back through degraded prompts on failure."""
+    prompts = [
+        f"{TAGS_STANDARD} {text}",
+        f"{TAGS_NO_MURMUR} {text}",
+        f"{TAGS_STANDARD} {text}",  # retry standard once
+        f"{TAGS_NO_MURMUR} Uh. {text}",
+        f"{TAGS_PLAIN} {text}",
+        f"{TAGS_PLAIN} ... {text}",
+    ]
+
+    best_wav: Path | None = None
+    best_cov = -1.0
+    best_dur = 0.0
+
+    for attempt in range(MAX_ATTEMPTS):
+        prompt = prompts[min(attempt, len(prompts) - 1)]
+        raw_mp3 = workdir / f"phrase_{idx:02d}_a{attempt}_raw.mp3"
+        shifted_wav = workdir / f"phrase_{idx:02d}_a{attempt}_shift.wav"
+        trimmed_wav = workdir / f"phrase_{idx:02d}_a{attempt}_trim.wav"
+        synth_phrase(api_key, prompt, raw_mp3)
+        to_wav(raw_mp3, shifted_wav, pitch_semitones=PITCH_SEMITONES)
+        trim_silence(shifted_wav, trimmed_wav)
+        dur = probe_duration(trimmed_wav)
+        transcript = whisper_transcribe(trimmed_wav)
+        cov, missing = phrase_coverage(text, transcript)
+        print(f"    attempt {attempt+1}: dur={dur:.2f}s, cov={cov:.2f}, heard={transcript!r}, missing={missing}")
+        if cov > best_cov:
+            best_cov = cov
+            best_wav = trimmed_wav
+            best_dur = dur
+        if cov >= COVERAGE_THRESHOLD:
+            return trimmed_wav
+
+    print(f"    WARN: best={best_cov:.2f} after {MAX_ATTEMPTS} attempts; using best ({best_dur:.2f}s)")
+    assert best_wav is not None
+    return best_wav
+
+
 def build_voice_track(phrases_with_slots: list[tuple[int, Path]], total_slots: int, out_path: Path) -> float:
     total_seconds = total_slots * SLOT_SECONDS + 1.0
     inputs: list[str] = []
@@ -184,7 +255,7 @@ def make_hiss(out_path: Path, duration: float) -> None:
     ])
 
 
-def make_crackle(out_path: Path, duration: float) -> None:
+def make_null(out_path: Path, duration: float) -> None:
     run([
         "ffmpeg", "-y", "-loglevel", "error",
         "-f", "lavfi", "-i", f"anullsrc=duration={duration}:sample_rate={SAMPLE_RATE}",
@@ -236,28 +307,9 @@ def build_variant(api_key: str, name: str, script: list[tuple[int, str]], workdi
     workdir.mkdir(parents=True, exist_ok=True)
     placed_phrase_wavs: list[tuple[int, Path]] = []
     for i, (slot_idx, text) in enumerate(script):
-        raw_mp3 = workdir / f"phrase_{i:02d}_raw.mp3"
-        shifted_wav = workdir / f"phrase_{i:02d}_shift.wav"
-        trimmed_wav = workdir / f"phrase_{i:02d}_trim.wav"
         print(f"  [{i:02d}] slot={slot_idx:>2}  text={text!r}")
-
-        # Up to two retries on a swallowed-line return (Ralf + v3 + short tagged
-        # phrases occasionally come back as ~0.1s of nothing). Threshold: if a
-        # phrase with 3+ words comes back under 0.5s, regenerate.
-        word_count = len(text.split())
-        for attempt in range(3):
-            synth_phrase(api_key, text, raw_mp3)
-            to_wav(raw_mp3, shifted_wav, pitch_semitones=PITCH_SEMITONES)
-            trim_silence(shifted_wav, trimmed_wav)
-            dur = probe_duration(trimmed_wav)
-            if word_count >= 3 and dur < 0.5:
-                print(f"        attempt {attempt+1}: only {dur:.2f}s — likely swallowed, retrying")
-                continue
-            break
-        print(f"        -> {dur:.2f}s (slot capacity {SLOT_SECONDS}s)")
-        if dur > SLOT_SECONDS * 1.8:
-            print(f"        WARN: phrase exceeds 1.8 slots; will overlap next slot")
-        placed_phrase_wavs.append((slot_idx, trimmed_wav))
+        wav = synth_with_verification(api_key, text, workdir, i)
+        placed_phrase_wavs.append((slot_idx, wav))
 
     last_slot = max(s for s, _ in script)
     last_phrase_dur = probe_duration(placed_phrase_wavs[-1][1])
@@ -276,7 +328,7 @@ def build_variant(api_key: str, name: str, script: list[tuple[int, str]], workdi
     squelch_in = workdir / "squelch_in.wav"
     squelch_out = workdir / "squelch_out.wav"
     make_hiss(hiss, total_seconds)
-    make_crackle(crackle, total_seconds)
+    make_null(crackle, total_seconds)
     make_squelch(squelch_in, SQUELCH_IN)
     make_squelch(squelch_out, SQUELCH_OUT)
 
@@ -293,7 +345,7 @@ def build_variant(api_key: str, name: str, script: list[tuple[int, str]], workdi
 def main() -> None:
     api_key = load_api_key()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="pilot-log-3-") as td:
+    with tempfile.TemporaryDirectory(prefix="pilot-log-3-verified-") as td:
         td_path = Path(td)
         a = build_variant(api_key, "variant-a", VARIANT_A, td_path / "variant-a")
         b = build_variant(api_key, "variant-b", VARIANT_B, td_path / "variant-b")

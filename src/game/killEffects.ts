@@ -4,6 +4,7 @@ import { Alien } from "../Alien";
 import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
 import { Vec } from "../vec";
+import { spawnGoldCrystalAt } from "../GoldCrystal";
 import { loseCombo } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
 import { tryUnlockPilotLog1 } from "./pilotLog";
@@ -28,6 +29,7 @@ const asteroidBucket = (a: Asteroid): KillBucket => {
   if (a.kind === "boss") return "boss";
   if (a.isBass()) return "bassteroid";
   if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble" || a.kind === "tink") return a.kind;
+  if (a.kind === "goldCrystal") return "goldCrystal";
   return `asteroid_${a.size}`;
 };
 
@@ -48,6 +50,7 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
   if (isOnBeatHit && game.beatCombo >= 1) {
     game.beatCombo += 1;
     if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
+    if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
     syncComboHud(game);
     tryUnlockPilotLog1(game);
   } else if (!isOnBeatHit && game.beatCombo !== 0) {
@@ -110,6 +113,12 @@ const finishAsteroidKillCore = (
     game.killedSnapshots.push(snap);
   }
   bumpKill(game, asteroidBucket(a));
+  if (a.kind === "goldCrystal") {
+    // Eject the embedded crystal at the dead rock's position; the fragment
+    // recipe (handled inside split() below) takes care of the rubble cloud
+    // flying in other directions.
+    game.goldCrystals.push(spawnGoldCrystalAt(a.pos, a.vel));
+  }
   const children = a.split({
     impactDir: killerVel,
     impactPos,

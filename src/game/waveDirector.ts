@@ -96,6 +96,15 @@ const ALIEN_SPAWN_WINDOW: [number, number] = [5, 22];
 const TINK_FIRST_WAVE = 3;
 const TINK_CHANCE_PER_WAVE = 1 / 3;
 
+// Gold-crystal asteroid: a "normal" rock with a faintly visible embedded
+// gold gem. Killing it drops a collectible GoldCrystal pickup plus a small
+// rubble cloud. Wave 5 is the introductory wave — exactly one gem rock
+// guaranteed so the player sees the mechanic. Wave 6+, each spawned normal
+// rock has a flat 25% chance to be a gem rock; lets the density scale with
+// wave count without further tuning.
+const GOLD_CRYSTAL_FIRST_WAVE = 5;
+const GOLD_CRYSTAL_PER_SPAWN_CHANCE = 0.25;
+
 // Why: foreshadow wave swells the looming planet; boss wave hides it and spawns the boss instead.
 const BOSS_WAVES = [10] as const;
 const BOSS_FORESHADOW_WAVES = [9] as const;
@@ -234,6 +243,7 @@ export const spawnComet = (game: Game) => {
 export const spawnWave = (game: Game) => {
   game.asteroids = [];
   game.canisters = [];
+  game.goldCrystals = [];
   game.waveEvents = newWaveEventSchedule();
   game.waveElapsed = 0;
 
@@ -288,9 +298,22 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet) => {
   const activeSpecials = activeSpecialsForWave(game, game.wave);
   const normalCount = Math.max(0, totalCount - activeSpecials.length);
 
-  const newAsteroidIndices = Array.from({ length: normalCount }, (_, i) => i);
-  for (const _ of newAsteroidIndices) {
-    game.asteroids.push(spawnAsteroidAway(game, 200, undefined, undefined, claimed));
+  // Pre-roll the kind for each normal slot. On the introductory wave
+  // (GOLD_CRYSTAL_FIRST_WAVE) we force exactly one slot to be a gem rock so
+  // the player sees the mechanic; on later waves each slot rolls
+  // independently at GOLD_CRYSTAL_PER_SPAWN_CHANCE.
+  const slotKinds: AsteroidKind[] = [];
+  for (let i = 0; i < normalCount; i++) {
+    const isGem = game.wave > GOLD_CRYSTAL_FIRST_WAVE && Math.random() < GOLD_CRYSTAL_PER_SPAWN_CHANCE;
+    slotKinds.push(isGem ? "goldCrystal" : "normal");
+  }
+  if (game.wave === GOLD_CRYSTAL_FIRST_WAVE && normalCount > 0 && !slotKinds.includes("goldCrystal")) {
+    slotKinds[Math.floor(Math.random() * normalCount)] = "goldCrystal";
+  }
+
+  for (const kind of slotKinds) {
+    const k = kind === "goldCrystal" ? "goldCrystal" : undefined;
+    game.asteroids.push(spawnAsteroidAway(game, 200, k, "large", claimed));
   }
   for (const kind of activeSpecials) {
     game.asteroids.push(spawnSpecial(game, kind, claimed));

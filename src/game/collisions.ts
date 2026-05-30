@@ -5,11 +5,12 @@ import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
 import { AlienBullet } from "../AlienBullet";
 import { Canister } from "../Canister";
+import { GoldCrystal, GOLD_CRYSTAL_SCORE } from "../GoldCrystal";
 import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup } from "./rhythmGate";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
-import { emitShieldPop, emitCanisterPickup, emitCanisterPop } from "./particleBursts";
-import { popupPickup } from "./popups";
+import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup } from "./particleBursts";
+import { popupPickup, popupScore } from "./popups";
 import {
   applyHitToCombo,
   onAsteroidKilledByBullet,
@@ -262,6 +263,28 @@ const explodeCanister = (game: Game, c: Canister) => {
   game.sound.play("canisterDestroyed", 1, c.pos);
   game.shake = Math.min(game.shake + 0.25, 1.2);
   emitCanisterPop(game.particles, c);
+};
+
+// Why: gold-crystal pickup pays a flat 2500 (no combo multiplier — the reward
+// for noticing the embedded crystal is the gem itself, not a rhythm-stacked
+// payout) plus a "+N" popup so the score gain is legible at the kill site.
+export const handleGoldCrystalPickups = (game: Game) => {
+  if (!game.ship.alive) return;
+  const remaining: GoldCrystal[] = [];
+  for (const g of game.goldCrystals) {
+    if (g.collidesWith(game.ship.pos, game.ship.radius * 0.9)) collectGoldCrystal(game, g);
+    else remaining.push(g);
+  }
+  game.goldCrystals = remaining;
+};
+
+const collectGoldCrystal = (game: Game, g: GoldCrystal) => {
+  game.sound.play("powerup", 1, g.pos);
+  game.sound.play("tink", 1, g.pos);
+  game.score += GOLD_CRYSTAL_SCORE;
+  game.popups.push(popupScore(g.pos, GOLD_CRYSTAL_SCORE));
+  emitGoldCrystalPickup(game.particles, g);
+  syncHud(game);
 };
 
 // Why: deflection burst differs from kill bursts so the player feels the shield saved them.

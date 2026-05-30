@@ -38,6 +38,7 @@ const updateForwardThrust = (ship: Ship, input: Input, particles: ParticleSystem
   if (ship.thrustOn) {
     ship.vel = add(ship.vel, mul(fromAngle(ship.heading, ship.thrustPower), dt));
     emitThrust(ship, particles, t);
+    ship.lastThrustActiveAt = t / 1000;
     if (!wasThrusting) sound.play("thrust");
   } else if (wasThrusting) sound.stopThrust();
 };
@@ -49,6 +50,7 @@ const updateReverseThrust = (ship: Ship, input: Input, particles: ParticleSystem
   if (ship.reverseThrustOn) {
     ship.vel = add(ship.vel, mul(fromAngle(ship.heading + Math.PI, ship.thrustPower), dt));
     emitReverseThrust(ship, particles, t);
+    ship.lastThrustActiveAt = t / 1000;
     if (!wasReversing) sound.play("reverseThrust");
   } else if (wasReversing) sound.stopReverseThrust();
 };

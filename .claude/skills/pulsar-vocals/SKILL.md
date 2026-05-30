@@ -35,14 +35,24 @@ Always read before recording:
 
 **Phrase length.** Keep each scripted phrase at ≤ 1.8 slots of natural delivery so it doesn't bleed into the next slot. Ralf is fast and deep — most short phrases come back at 0.5–1.2s, leaving deliberate space. Long lines (>10 words) can run over a slot; either accept the bleed (if the next slot is short or empty) or split the line across two slots.
 
+**Synthesis strategy: one-shot, not per-phrase.** Entries 2 and 3 first attempted per-phrase synthesis (one ElevenLabs call per scripted line, with directorial tags repeated each time, then slot-quantized in post). This failed badly — Ralf+v3 + tags + short fragments triggers the swallowed-line failure mode on most calls, and even when phrases came back at plausible duration they were often garbled or only contained the first 2-3 words. Per-phrase coverage routinely scored 0.00–0.50 against the script. **The fix is to send the entire script as one ElevenLabs call**, with the directorial tag block at the top once. v3 then conditions each line on the previous one, the captain's natural pauses are organic, and coverage scores match Entry 1 (~0.92). Slot alignment is recovered in post by silence-detect + phrase quantization (see `generate_pilot_log_3_oneshot.py` for the reference pipeline). The trade-off — losing precise control over which downbeat a specific word lands on — is worth it because the *words actually come out*.
+
 **Radio FX (voice).** Bandpass 380–2700Hz, +3.5dB at 160Hz (chest resonance), +2.0dB at 2200Hz (presence), `acompressor=threshold=-20dB:ratio=4`, bitcrush to 64 levels. This is the radio character. Keep it on every take so the pool mixes interchangeably.
 
-**Static layers (the noise bed).** *Brief stacking, not a continuous wash.* The user's standing direction: "there should only be very brief bits of stacking, mostly it should be clear." The current pipeline has:
-- Squelch-in (0.22s) and squelch-out (0.32s) bookends — keep these, they define the transmission as a discrete moment
-- Pink hiss only ramps in/out around the bookends; silent through the body
-- Crackle layer is *off* (the `make_crackle` function returns `anullsrc`)
+**Static layers (the noise bed).** *No static. None.* The user's standing direction has tightened over time, and the current rule is **no static of any kind**:
+- **No squelch-in.** Earlier pipelines opened with a 0.22s "kssht" white-noise burst. Remove it. The transmission starts with the captain's voice, dry.
+- **No squelch-out tail.** Same reason.
+- **No hiss bed during the body.** No pink noise, no continuous wash, no fade-in/fade-out halo.
+- **No crackle layer.** Leave `make_crackle` returning `anullsrc` or remove the call entirely.
 
-Do not re-add a continuous hiss or crackle bed without explicit user request. If a take feels "too dry," the fix is usually a faint room-tone bump on the *bookends*, not a layer over the speech.
+If a take feels "too dry," the fix is *not* adding noise. Either ship it dry or adjust the radio EQ (bandpass + chest boost + presence) on the voice. The radio character comes from the EQ + compression + bitcrush — not from layered noise. Reintroducing any noise layer is a regression.
+
+**No clipping. Ever.** The user has been burned by takes where phrases clipped — the early-mid words audible but the final words cut off or distorted because the assembly assumed a phrase fit a slot and it didn't. The fixes that must be in place every time:
+
+- **Per-phrase Whisper verification during synth.** Duration alone does not catch the dominant failure mode (Ralf+v3 returning audio that *sounds* full-length but only speaks the first 2-3 words of the line). After every TTS call: trim silence, run Whisper-tiny on the trimmed wav, require ≥ 0.75 word-coverage against the scripted phrase. Below that → regenerate. This is the single most important quality gate; without it the verifier at the end catches it but you've already wasted both takes.
+- **Slot layout must accommodate the *actual* phrase duration.** When a phrase comes back at 2.4s for a 2.0s slot, either give it two slots, or move the next phrase one slot later. The fade-in/fade-out from `adelay` + `amix` will not clip — what clips is the *next* phrase starting on top of the previous one's tail. Watch for slot collisions before assembly.
+- **No tail-cutting silenceremove on long phrases.** The `silenceremove` stop_threshold at -50dB can clip a softly-fading word ending. For phrases ending in -s/-th/-f (fricatives that fade gently), raise the stop_threshold to -58dB or skip the tail trim entirely.
+- **`loudnorm` is not a clip-fix.** `loudnorm=I=-20:TP=-3:LRA=11` mastering is fine as a final pass, but it will not save a take whose voice track already lost words. Verify content before mastering.
 
 **Pitch.** Down 1 semitone, formant-preserved, via `rubberband -q --formant -p -1.0`. Ralf is already deep — more than 1 semitone makes him cartoonish.
 
@@ -61,22 +71,20 @@ public/sounds/vocals/
 └── pilot-log-N-takes/          Auditioning material for entry N (kept on disk).
 ```
 
-### Per-phrase synthesis (the loop)
+### One-shot synthesis (the loop)
 
-For each phrase in the script:
-
-1. POST to `https://api.elevenlabs.io/v1/text-to-speech/A9evEp8yGjv4c3WsIKuY` with `model_id=eleven_v3`, text = `[low voice][gravelly][slowly][weary][murmuring] <phrase>`, voice settings `stability=0.55, similarity_boost=0.75, style=0.35, use_speaker_boost=true`. Returns mp3.
+1. POST to `https://api.elevenlabs.io/v1/text-to-speech/A9evEp8yGjv4c3WsIKuY` with `model_id=eleven_v3`, text = `[low voice][gravelly][slowly][weary][murmuring]\n\n<full_script>`, voice settings `stability=0.55, similarity_boost=0.75, style=0.35, use_speaker_boost=true`. The tag block appears **once** at the top; the rest of the body is the unannotated script. Returns one mp3 for the whole take.
 2. Decode mp3 → mono 44.1k wav via ffmpeg.
 3. Pitch shift -1 semitone via rubberband (formant-preserved).
-4. Silence-trim head/tail at -50dB threshold via ffmpeg `silenceremove`.
-5. Probe duration. If > 1.8 × slot_seconds, warn. If < 0.3s for a phrase that should be longer, treat as a silent-return and **regenerate** that phrase before moving on.
+4. Run Whisper-tiny on the pitched wav, compute word coverage against the full script. If < 0.85, retry the whole one-shot synth (up to 3 attempts). Save every attempt's raw mp3 to `pilot-log-N-takes/raw/<variant>/oneshot_attempt<N>_cov<C>.mp3` so the user can audition.
 
-### Assembly
+### Slot-quantize assembly
 
-1. Place each trimmed phrase wav at its 2.0s slot via `adelay` + `amix`.
-2. Apply radio FX (`apply_radio_fx`) to the combined voice track.
-3. Generate squelch-in, squelch-out, faded hiss halo (silent through body), null crackle.
-4. Mix voice + hiss + crackle, with squelch-out delayed to land just after the last spoken phrase, into final mp3.
+1. `ffmpeg silencedetect` on the chosen pitched wav with `noise=-38dB:d=0.30` to find phrase boundaries.
+2. Slice the wav into per-phrase wavs along those boundaries (pad ends ~50ms so trailing consonants don't clip).
+3. Place each phrase at the next free 2.0s downbeat slot. If a phrase's duration would exceed one slot, give it the slots it needs and start the next phrase one slot after this one ends.
+4. Apply radio FX (`apply_radio_fx`) to the combined voice track — bandpass 380–2700, chest EQ at 160Hz, presence boost at 2.2kHz, comp, bitcrush. **No noise layers mixed in.**
+5. Master with `loudnorm=I=-18:TP=-2:LRA=11` and encode to mp3. The output is voice-only — no squelch, no hiss, no crackle.
 
 ### Verification — REQUIRED
 
@@ -124,6 +132,9 @@ If the take is a new entry (entry 2, entry 3, etc.):
 ## Things that have burned us before
 
 - **v3 swallowing short lines.** "Yeah. Me too." came back as 0.08s of audio with Ralf + murmuring tags. The verifier caught it (coverage 0.29). Without the verifier this would have shipped. Always verify.
+- **v3 partially swallowing longer lines.** Worse failure than full swallow: Ralf returns ~1.0s of audio for a 6-word phrase, passes the duration heuristic, but only speaks the first 2-3 words. Discovered on pilot-log-3: "Hands went cold around hour four" came back at 1.02s and final coverage was 34%. Duration checks alone do *not* catch this. Per-phrase Whisper verification is the mandatory gate.
+- **Static creep.** The original pipeline shipped with a squelch-in pre-roll, squelch-out tail, continuous pink hiss, and brown-noise crackle. The user has progressively removed all of these: first the crackle, then the hiss bed, then the squelch-out, then the squelch-in. The current rule is **no static at all** — the take starts with the captain's voice, dry, and ends with it. The radio character must come entirely from the voice's EQ + compression + bitcrush chain. Reintroducing any noise layer is a regression even if the spec docs or older scripts reference them.
+- **Phrases clipping into the next slot.** When a 2.4s phrase lands in a 2.0s slot, its tail bleeds under the next phrase's start. The user calls this "clipping." Either route the long phrase across two slots, or move the next phrase one slot later. Don't trust the slot grid blindly.
 - **Static piled up.** Continuous pink hiss + brown crackle + squelch bookends all stacked = too much noise. The user's standard: brief stacking only, body of the take stays clear. The current pipeline reflects this; don't regress it.
 - **Trimming the wrong end.** `silenceremove` at -50dB can clip the trailing breath off a phrase that fades into nothing. If a trimmed phrase ends abruptly, raise the threshold (-55dB) for that phrase.
 - **Voice identity drift.** The original 6x pool had 10 different voices — felt random and broke the captain's character. The pool was narrowed to 3 Ralf takes for a reason. Don't reintroduce other voices without explicit user buy-in.

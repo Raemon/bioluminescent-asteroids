@@ -46,7 +46,13 @@ export type AsteroidSize = "large" | "medium" | "small";
 // (so it can't split) and emits the sharp glassy "tink" sound on destruction.
 // Treat it as a "sometimes-found" treat — if you start seeing tink asteroids
 // every wave, lower the per-wave spawn chance in Game.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "tink" | "boss";
+//
+// "goldCrystal" looks like a normal large asteroid except a faintly visible
+// gold crystal is embedded inside it (blurred, low-contrast — the player has
+// to *notice* it). Killing it drops a collectible GoldCrystal where the rock
+// was, plus an off-balanced fragment recipe (3 small OR 1 small + 1 medium).
+// Always spawned at large size; doesn't survive past a single kill.
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "tink" | "boss" | "goldCrystal";
 
 export const BASS_KINDS: ReadonlyArray<"bassA" | "bassB" | "bassC" | "bassD"> = ["bassA", "bassB", "bassC", "bassD"];
 
@@ -678,8 +684,9 @@ export class Asteroid {
     const baseHue = this.hue;
     // Normal asteroids are essentially monochrome rock — drop saturation
     // hard so the special kinds (chime/bell/warble/tink/bass) are the only
-    // things drawing the eye with colour.
-    const isPlain = this.kind === "normal";
+    // things drawing the eye with colour. goldCrystal mimics a normal rock
+    // (the crystal hint is painted in separately below) so it stays plain.
+    const isPlain = this.kind === "normal" || this.kind === "goldCrystal";
     const sHi = isPlain ? 8 : 100;
     const sMid = isPlain ? 6 : 80;
     const sLo = isPlain ? 5 : 70;
@@ -754,7 +761,100 @@ export class Asteroid {
       ctx.fill();
     }
 
+    if (this.kind === "goldCrystal") this.paintEmbeddedGoldCrystal(ctx);
+
     return canvas;
+  }
+
+  // Paint a faintly visible, blurred gold crystal inside the asteroid body —
+  // the player has to *look* to spot it. Drawn at sprite-build time so it
+  // pans/rotates with the rock for free. We clip to the asteroid outline so
+  // the glow can't bleed past the silhouette and give away the secret. Note
+  // the ctx.filter blur is applied inside a save/restore so it doesn't leak
+  // to other passes.
+  private paintEmbeddedGoldCrystal(ctx: CanvasRenderingContext2D) {
+    const GOLD_HUE = 46;
+    ctx.save();
+    // Clip to the asteroid silhouette so any blurred bleed stays inside.
+    ctx.beginPath();
+    for (let i = 0; i < this.outlineSamples; i++) {
+      const angle = (i / this.outlineSamples) * TAU;
+      const r = this.outline[i];
+      const x = Math.cos(angle) * r;
+      const y = Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.clip();
+
+    // Soft gold halo behind the crystal — sells the "something is glowing
+    // through the rock" read even when the facet polygon is too small to
+    // pick out by itself. Drawn first so the facets overprint it.
+    ctx.globalCompositeOperation = "lighter";
+    ctx.filter = "blur(6px)";
+    const haloR = this.radius * 0.7;
+    const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, haloR);
+    halo.addColorStop(0, `hsla(${GOLD_HUE}, 85%, 60%, 0.32)`);
+    halo.addColorStop(0.55, `hsla(${GOLD_HUE - 6}, 80%, 50%, 0.16)`);
+    halo.addColorStop(1, `hsla(${GOLD_HUE}, 80%, 50%, 0)`);
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(0, 0, haloR, 0, TAU);
+    ctx.fill();
+
+    // Multi-faceted gem polygon — 6 vertices around a tilted hex with mild
+    // per-vertex jitter so it reads as "hand-cut crystal" rather than a
+    // perfect hexagon. Sized to ~35% of asteroid radius. Heavily blurred so
+    // the silhouette is suggestive, not crisp.
+    const facetCount = 6;
+    const baseR = this.radius * 0.34;
+    const tilt = rand(0, TAU);
+    const verts: { x: number; y: number }[] = [];
+    for (let i = 0; i < facetCount; i++) {
+      const a = tilt + (i / facetCount) * TAU;
+      const rj = baseR * rand(0.78, 1.08);
+      verts.push({ x: Math.cos(a) * rj, y: Math.sin(a) * rj });
+    }
+    ctx.filter = "blur(3.5px)";
+    // Fill — soft gold body.
+    ctx.beginPath();
+    for (let i = 0; i < verts.length; i++) {
+      if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
+      else ctx.lineTo(verts[i].x, verts[i].y);
+    }
+    ctx.closePath();
+    const body = ctx.createRadialGradient(0, 0, 0, 0, 0, baseR);
+    body.addColorStop(0, `hsla(${GOLD_HUE + 6}, 95%, 72%, 0.55)`);
+    body.addColorStop(0.6, `hsla(${GOLD_HUE}, 90%, 55%, 0.4)`);
+    body.addColorStop(1, `hsla(${GOLD_HUE - 8}, 85%, 40%, 0.18)`);
+    ctx.fillStyle = body;
+    ctx.fill();
+
+    // Faint facet lines from centre to each vertex — gives the gem its
+    // internal cut. Low alpha so they read as "hint of structure", not as
+    // a vector diagram.
+    ctx.lineWidth = 0.9;
+    ctx.strokeStyle = `hsla(${GOLD_HUE + 18}, 100%, 85%, 0.35)`;
+    for (const vtx of verts) {
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(vtx.x, vtx.y);
+      ctx.stroke();
+    }
+
+    // Tiny bright centre highlight so the eye lands on something specific
+    // through the blur.
+    ctx.filter = "blur(2px)";
+    const corePulse = ctx.createRadialGradient(0, 0, 0, 0, 0, baseR * 0.35);
+    corePulse.addColorStop(0, `hsla(${GOLD_HUE + 18}, 100%, 92%, 0.55)`);
+    corePulse.addColorStop(1, `hsla(${GOLD_HUE + 6}, 95%, 70%, 0)`);
+    ctx.fillStyle = corePulse;
+    ctx.beginPath();
+    ctx.arc(0, 0, baseR * 0.35, 0, TAU);
+    ctx.fill();
+
+    ctx.restore();
   }
 
   // Pre-rendered modular bassteroid body. Hard-edged panels with bright
@@ -1131,7 +1231,38 @@ export class Asteroid {
     const BULLET_PUSH = 50;
 
     let specs: FragSpec[];
-    if (this.size === "large") {
+    if (this.size === "large" && this.kind === "goldCrystal") {
+      // Gold-crystal large drops the embedded crystal pickup as its primary
+      // payload (handled by killEffects), and only spits out a small handful
+      // of fragments instead of the usual 2-medium / 4-small patterns. The
+      // recipe is rolled 50/50:
+      //   "trio" → 3 smalls fanning out (Σ perp = 0 by symmetry).
+      //   "pair" → 1 small + 1 medium (mass-weighted Σ perp = 0; medium
+      //            counter-recoils at 1/8 of the small's perp kick).
+      // Both conserve momentum within the perpendicular axis and apply the
+      // usual forward bullet push to the cloud's centre of mass.
+      const trio = Math.random() < 0.5;
+      if (trio) {
+        // 3 smalls: symmetric around the bullet axis. One straight forward
+        // (perp = 0), two flanking at ±PERP. Forward push spread so the
+        // forward chip doesn't stack on top of the flanks.
+        specs = [
+          { size: "small", perpKick: -PERP_BURST, bulletKick: BULLET_PUSH * 0.9 },
+          { size: "small", perpKick: 0,           bulletKick: BULLET_PUSH * 1.4 },
+          { size: "small", perpKick: PERP_BURST,  bulletKick: BULLET_PUSH * 0.9 },
+        ];
+      } else {
+        // 1 small + 1 medium: small kicks hard sideways, medium counter-
+        // recoils at 1/8 of the small's perp magnitude (8 = mass ratio).
+        const smallSign = Math.random() < 0.5 ? -1 : 1;
+        const smallPerp = smallSign * PERP_BURST * 1.25;
+        const medPerp = -smallPerp / massOf("medium");
+        specs = [
+          { size: "small",  perpKick: smallPerp, bulletKick: BULLET_PUSH * 1.1 },
+          { size: "medium", perpKick: medPerp,   bulletKick: BULLET_PUSH * 0.7 },
+        ];
+      }
+    } else if (this.size === "large") {
       if (pulverise && pulveriseCross) {
         // 4 small in a cross: four equal-mass fragments at 90° apart around the
         // bullet axis. The four perp/forward kicks sum to zero in the burst
@@ -1192,6 +1323,10 @@ export class Asteroid {
     }
 
     const fragmentList: Asteroid[] = [];
+    // Gold-crystal fragments are just plain rock chunks — the embedded
+    // crystal was the payload, and it's been ejected as a pickup elsewhere.
+    // Don't propagate the "goldCrystal" kind to children or we'd cascade.
+    const childKind: AsteroidKind = this.kind === "goldCrystal" ? "normal" : this.kind;
     for (const spec of specs) {
       // Apply jitter to perp kick only (forward kick is small enough that
       // jitter on it is just noise). Keep jitter small relative to PERP_BURST
@@ -1200,7 +1335,7 @@ export class Asteroid {
       const fk = spec.bulletKick;
       const vx = this.vel.x + fk * dx + perpJ * nx;
       const vy = this.vel.y + fk * dy + perpJ * ny;
-      fragmentList.push(new Asteroid({ ...this.pos }, { x: vx, y: vy }, spec.size, this.hue, this.kind));
+      fragmentList.push(new Asteroid({ ...this.pos }, { x: vx, y: vy }, spec.size, this.hue, childKind));
     }
     return fragmentList;
   }
@@ -1228,7 +1363,7 @@ export class Asteroid {
       ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
     }
 
-    const isPlain = this.kind === "normal";
+    const isPlain = this.kind === "normal" || this.kind === "goldCrystal";
     const nSat = isPlain ? 6 : 100;
     const nucleusList = this.nuclei;
     for (const n of nucleusList) {

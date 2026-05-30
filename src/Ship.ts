@@ -40,6 +40,10 @@ export class Ship {
   invuln = 2.0;
   thrustOn = false;
   reverseThrustOn = false;
+  // Why: timestamp (in seconds, same clock as Game.beatTime) of the most recent frame the player
+  // was thrusting. Drives the trajectory-preview fade — line stays solid for 2s after thrust ends,
+  // then fades over 1s. -Infinity means "never thrusted" → preview hidden.
+  lastThrustActiveAt = -Infinity;
   fireCooldown = 0;
   // Why: one shot per beat by default; reticule previews where it lands at the next beat boundary.
   fireRate = BEAT_GRID;
