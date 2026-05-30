@@ -292,8 +292,7 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 14px;
+  justify-content: flex-start;
   padding: 40px 24px;
   pointer-events: auto;
   background: radial-gradient(ellipse at 50% 50%, rgba(0, 8, 24, 0.85) 0%, rgba(0, 0, 5, 0.96) 70%);
@@ -302,6 +301,33 @@ html, body {
 }
 
 #tutorial-panel.hidden { display: none; }
+
+#tutorial-scroll {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  max-width: 640px;
+  margin: auto 0;
+  padding-bottom: 24px;
+}
+
+.tutorial-demo {
+  display: block;
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  aspect-ratio: 520 / 200;
+  margin: 14px auto 0;
+  border: 1px solid rgba(106, 215, 255, 0.2);
+  border-radius: 4px;
+  background: #00040e;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.4) inset,
+    0 0 24px rgba(76, 182, 255, 0.08);
+}
+
+#tutorial-demo-rhythm { aspect-ratio: 520 / 220; }
 
 #tutorial-panel h2 {
   font-weight: 700;

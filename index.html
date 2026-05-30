@@ -88,43 +88,40 @@
       <button id="abort-mission" type="button" class="hidden">Abort Mission</button>
       <div id="tutorial-panel" class="hidden" role="dialog" aria-labelledby="tutorial-heading" aria-modal="true">
         <button id="tutorial-close" type="button" aria-label="Close tutorial">×</button>
-        <h2 id="tutorial-heading">Pilot Briefing</h2>
-        <section class="tutorial-section">
-          <h3>Controls</h3>
-          <p>
-            <span class="key">←</span> <span class="key">→</span> rotate &nbsp;·&nbsp;
-            <span class="key">↑</span> <span class="key">↓</span> thrust &nbsp;·&nbsp;
-            <span class="key">space</span> fire &nbsp;·&nbsp;
-            <span class="key">esc</span> pause
-          </p>
-        </section>
-        <section class="tutorial-section">
-          <h3>The Pulsar</h3>
-          <p>
-            A neutron star spins at the centre of the system. Its beam keeps a
-            steady beat — that beat is also the rhythm of the soundtrack.
-            Match your fire to the pulse and the field will reward you.
-          </p>
-        </section>
-        <section class="tutorial-section">
-          <h3>Combo &amp; Halo</h3>
-          <p>
-            Consecutive on-beat hits build your combo. As the combo climbs the
-            halo music layers in, the score multiplier rises, and pilot's-log
-            entries unlock. A missed beat or a hit taken collapses the chain.
-          </p>
-        </section>
-        <section class="tutorial-section">
-          <h3>Canisters &amp; Crystals</h3>
-          <p>
-            Asteroids sometimes drop canisters — fly over them to claim a
-            powerup: <em>trident</em> spreads three shots, <em>pierce</em>
-            cuts through, <em>shield</em> absorbs one hit, <em>slow-mo</em>
-            dilates time, <em>radar</em> widens your firing arc. Gold
-            crystals reward a clean rhythm hit with a fresh canister.
-          </p>
-        </section>
-        <p id="tutorial-dismiss">press <span class="key">esc</span> or click outside to close</p>
+        <div id="tutorial-scroll">
+          <h2 id="tutorial-heading">Pilot Briefing</h2>
+          <section class="tutorial-section">
+            <h3>Controls</h3>
+            <p>
+              <span class="key">←</span> <span class="key">→</span> rotate &nbsp;·&nbsp;
+              <span class="key">↑</span> <span class="key">↓</span> thrust &nbsp;·&nbsp;
+              <span class="key">space</span> fire &nbsp;·&nbsp;
+              <span class="key">esc</span> pause
+            </p>
+          </section>
+          <section class="tutorial-section">
+            <h3>Fly &amp; Fire</h3>
+            <p>
+              Rotate, thrust, and shoot asteroids before they hit you.
+              Momentum carries — there's no drag, so a small thrust will
+              drift you across the field. Larger rocks break into smaller
+              ones; clear the field to advance.
+            </p>
+            <canvas class="tutorial-demo" id="tutorial-demo-basics" width="520" height="200"></canvas>
+          </section>
+          <section class="tutorial-section">
+            <h3>Rhythm</h3>
+            <p>
+              The world keeps a steady beat. Dotted lines trace where each
+              asteroid will be on the upcoming beats — line up your reticule
+              over a dot and fire <em>on the beat</em> to score a rhythm hit.
+              Consecutive rhythm hits stack a multiplier and unlock rhythm
+              bonuses. A missed beat or a hit taken breaks the streak.
+            </p>
+            <canvas class="tutorial-demo" id="tutorial-demo-rhythm" width="520" height="220"></canvas>
+          </section>
+          <p id="tutorial-dismiss">press <span class="key">esc</span> or click outside to close</p>
+        </div>
       </div>
     </div>
     <script>
@@ -133,14 +130,22 @@
         document.getElementById("soundeditor-link")?.classList.remove("hidden");
       }
       // Tutorial panel toggle. Lives outside the game loop so it works even
-      // before main.ts has finished booting the Game.
+      // before main.ts has finished booting the Game. The demos themselves
+      // are started/stopped by src/tutorial.ts, which listens for the
+      // `tutorial-open` / `tutorial-close` custom events dispatched here.
       (() => {
         const btn = document.getElementById("tutorial-link");
         const panel = document.getElementById("tutorial-panel");
         const closeBtn = document.getElementById("tutorial-close");
         if (!btn || !panel || !closeBtn) return;
-        const open = () => panel.classList.remove("hidden");
-        const close = () => panel.classList.add("hidden");
+        const open = () => {
+          panel.classList.remove("hidden");
+          window.dispatchEvent(new CustomEvent("tutorial-open"));
+        };
+        const close = () => {
+          panel.classList.add("hidden");
+          window.dispatchEvent(new CustomEvent("tutorial-close"));
+        };
         btn.addEventListener("click", (e) => { e.stopPropagation(); open(); });
         closeBtn.addEventListener("click", close);
         panel.addEventListener("click", (e) => { if (e.target === panel) close(); });

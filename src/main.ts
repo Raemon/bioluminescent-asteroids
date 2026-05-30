@@ -1,6 +1,7 @@
 import { Game } from "./Game";
 import { loadSoundConfig } from "./soundConfig";
 import { installBetaTest } from "./game/betaTest";
+import { installTutorialDemos } from "./tutorial";
 
 const canvas = document.getElementById("stage") as HTMLCanvasElement | null;
 if (!canvas) throw new Error("Canvas #stage not found");
@@ -13,6 +14,7 @@ loadSoundConfig();
 const game = new Game(canvas);
 (window as any).__game = game;
 installBetaTest(game);
+installTutorialDemos();
 
 let last = performance.now();
 const tick = (now: number) => {
