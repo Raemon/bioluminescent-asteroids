@@ -199,11 +199,12 @@ export const onAlienCracked = (game: Game, isOnBeatHit: boolean, pos: Vec) => {
   if (isOnBeatHit) game.sound.play("comboSparkle", 1, pos);
 };
 
-// comets pay a flat 5000 base; combo multiplier and a "+N" readout match the rest of the
-// scoring system so the player sees the payout and any rhythm bonus at the kill site.
+// Off-rhythm kills pay a flat 500 — present but unsatisfying. An on-beat kill pays
+// 1000 × beatCombo, so the comet rewards rhythm hard (a 6× halo lands 6000+).
+// Off-rhythm hits also get a sadder explosion variant so the audio tells the
+// player they wasted the celestial visitor.
 export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: boolean) => {
-  const baseScore = 5000;
-  const scoreEarned = isOnBeatHit ? Math.round(baseScore * game.beatCombo) : baseScore;
+  const scoreEarned = isOnBeatHit ? Math.round(1000 * game.beatCombo) : 500;
   game.score += scoreEarned;
   flashScoreGain(game, scoreEarned);
   game.popups.push(popupScore(b.pos, scoreEarned));
@@ -212,10 +213,11 @@ export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: bool
     if (game.beatCombo >= 2) game.popups.push(popupCombo(b.pos, game.beatCombo));
   }
   game.shake = Math.min(game.shake + 0.6, 1.6);
-  game.sound.play("cometDestroyed", 1, c.pos);
+  const deathSound = isOnBeatHit ? "cometDestroyed" : "cometDestroyedSad";
+  game.sound.play(deathSound, 1, c.pos);
   game.sound.stopCometShimmer(c);
   emitCometExplosion(game.particles, c);
-  const snap = snapshotCometKill(c, "cometDestroyed", scoreEarned);
+  const snap = snapshotCometKill(c, deathSound, scoreEarned);
   if (snap) game.killedSnapshots.push(snap);
   bumpKill(game, "comet");
   syncHud(game);

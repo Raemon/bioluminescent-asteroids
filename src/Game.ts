@@ -126,6 +126,9 @@ export class Game implements HudElements {
   leaderboardRows: HighscoreRow[] = [];
   leaderboardSelection = 0;
   leaderboardActive = false;
+  // clickable column headers re-sort; rhythm is the default with score as
+  //   the tiebreaker so the headline streak stat leads the board.
+  leaderboardSort: "rhythm" | "score" | "wave" | "name" = "rhythm";
 
   // post-run trophy lineup; replayed in the end-of-mission parade with original kill sounds.
   killedSnapshots: KilledSnapshot[] = [];

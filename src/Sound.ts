@@ -190,6 +190,7 @@ export type SoundName =
   | "alienExplode"
   | "cometNote"
   | "cometDestroyed"
+  | "cometDestroyedSad"
   | "canisterAppear"
   | "canisterDestroyed"
   | "comboLost";
@@ -1648,6 +1649,124 @@ export class Sound {
     droneOct.stop(t + TAIL + 0.2);
   }
 
+  // Sadder sibling of playCometDestroyed for off-rhythm comet kills. Same
+  // overall shape (crack → sub thump → noise tail → low drone) but smaller,
+  // duller, and with a descending pitched sigh layered on top. The drone
+  // sits a minor-6th lower (Eb1 vs G1) for a darker root, the tail collapses
+  // in ~6s instead of 15s, and the sub thump ends on a falling minor-third
+  // sine sigh — the literal "aww" of wasting the comet's moment.
+  playCometDestroyedSad() {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const TAIL = 6.0;
+
+    // Softer crack — duller, quicker decay so it reads as a fizzle.
+    const crackBuf = this.makeNoiseBuffer(0.3);
+    if (crackBuf) {
+      const crack = this.ctx.createBufferSource();
+      crack.buffer = crackBuf;
+      const crackFilter = this.ctx.createBiquadFilter();
+      crackFilter.type = "lowpass";
+      crackFilter.Q.value = 0.9;
+      crackFilter.frequency.setValueAtTime(4500, t);
+      crackFilter.frequency.exponentialRampToValueAtTime(900, t + 0.18);
+      const crackGain = this.ctx.createGain();
+      crackGain.gain.setValueAtTime(0.55, t);
+      crackGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+      crack.connect(crackFilter);
+      crackFilter.connect(crackGain);
+      crackGain.connect(this.master);
+      crack.start(t);
+      crack.stop(t + 0.32);
+    }
+
+    // Sub thump — softer than the celebratory variant and lower start pitch.
+    const sub = this.ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(110, t);
+    sub.frequency.exponentialRampToValueAtTime(28, t + 1.0);
+    const subGain = this.ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.38, t + 0.015);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.3);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + 1.4);
+
+    // Descending sigh — soft sine falling a minor third (G4 → E4 → C4-ish),
+    // the audible "aww" that tells the player they missed the rhythm window.
+    const sigh = this.ctx.createOscillator();
+    sigh.type = "sine";
+    sigh.frequency.setValueAtTime(392, t + 0.05); // G4
+    sigh.frequency.exponentialRampToValueAtTime(311, t + 0.55); // Eb4
+    sigh.frequency.exponentialRampToValueAtTime(220, t + 1.5); // A3 — settles below
+    const sighGain = this.ctx.createGain();
+    sighGain.gain.setValueAtTime(0.0001, t + 0.05);
+    sighGain.gain.exponentialRampToValueAtTime(0.12, t + 0.15);
+    sighGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
+    sigh.connect(sighGain);
+    sighGain.connect(this.master);
+    sigh.start(t + 0.05);
+    sigh.stop(t + 1.85);
+
+    // Short noise tail — bandpass collapses quickly so the wreckage clears
+    // in ~6s instead of lingering for 15. The comet didn't get to sing.
+    const tailBuf = this.makeNoiseBuffer(3);
+    if (tailBuf) {
+      const tail = this.ctx.createBufferSource();
+      tail.buffer = tailBuf;
+      tail.loop = true;
+
+      const tailFilter = this.ctx.createBiquadFilter();
+      tailFilter.type = "bandpass";
+      tailFilter.Q.value = 1.8;
+      tailFilter.frequency.setValueAtTime(1400, t);
+      tailFilter.frequency.exponentialRampToValueAtTime(500, t + 0.6);
+      tailFilter.frequency.exponentialRampToValueAtTime(60, t + TAIL);
+
+      const tailGain = this.ctx.createGain();
+      tailGain.gain.setValueAtTime(0.0001, t);
+      tailGain.gain.exponentialRampToValueAtTime(0.22, t + 0.05);
+      tailGain.gain.exponentialRampToValueAtTime(0.08, t + 1.2);
+      tailGain.gain.exponentialRampToValueAtTime(0.0001, t + TAIL);
+
+      tail.connect(tailFilter);
+      tailFilter.connect(tailGain);
+      tailGain.connect(this.master);
+      tail.start(t);
+      tail.stop(t + TAIL + 0.2);
+    }
+
+    // Low drone — tuned to Eb1 (~38.9Hz), a minor-6th below the celebratory
+    // G1, so the harmonic root reads as "minor key" instead of open root.
+    const droneRoot = this.ctx.createOscillator();
+    const droneOct = this.ctx.createOscillator();
+    droneRoot.type = "sawtooth";
+    droneOct.type = "sawtooth";
+    droneRoot.frequency.value = 38.9; // Eb1
+    droneOct.frequency.value = 38.9 * 1.011;
+    const droneLp = this.ctx.createBiquadFilter();
+    droneLp.type = "lowpass";
+    droneLp.Q.value = 0.8;
+    droneLp.frequency.setValueAtTime(500, t);
+    droneLp.frequency.exponentialRampToValueAtTime(100, t + TAIL);
+    const droneGain = this.ctx.createGain();
+    droneGain.gain.setValueAtTime(0.0001, t);
+    droneGain.gain.exponentialRampToValueAtTime(0.16, t + 0.4);
+    droneGain.gain.exponentialRampToValueAtTime(0.0001, t + TAIL);
+    droneRoot.connect(droneLp);
+    droneOct.connect(droneLp);
+    droneLp.connect(droneGain);
+    droneGain.connect(this.master);
+    droneRoot.start(t);
+    droneOct.start(t);
+    droneRoot.stop(t + TAIL + 0.2);
+    droneOct.stop(t + TAIL + 0.2);
+  }
+
   stopAllCometShimmers() {
     for (const key of Array.from(this.cometShimmers.keys())) this.stopCometShimmer(key);
     if (this.toneEngine) {
@@ -2390,6 +2509,7 @@ export class Sound {
       case "alienExplode": this.playAlienExplode(); break;
       case "cometNote": this.playCometNote(Math.round(effectivePitch)); break;
       case "cometDestroyed": this.playCometDestroyed(); break;
+      case "cometDestroyedSad": this.playCometDestroyedSad(); break;
       case "canisterAppear": this.playCanisterAppear(); break;
       case "canisterDestroyed": this.playCanisterDestroyed(); break;
       case "comboLost": this.playComboLost(); break;

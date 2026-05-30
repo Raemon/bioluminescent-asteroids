@@ -212,10 +212,11 @@ export const spawnAlien = (game: Game, size: AlienSize) => {
 //   and ensures the sung-in pitch coincides with a downbeat hit instead of an interior tick. Each
 //   subsequent note steps by 2 BEAT_GRID (=1s) per COMET_MELODY's slower phrase pulse.
 //
-// Comets are worth 5000 × combo on a kill — the single biggest combo payout
-// in the game. Aligning the traversal speed so the comet crosses the
-// engagement ring on a beat means an on-rhythm player can land the big
-// payout on-beat without having to guess the comet's individual phase.
+// Comets pay 1000 × beatCombo on an on-beat kill (the single biggest combo
+// payout in the game) and a flat 500 off-beat. Aligning the traversal speed
+// so the comet crosses the engagement ring on a beat means an on-rhythm
+// player can land the big payout on-beat without having to guess the comet's
+// individual phase.
 // ±15 % is enough wiggle room to absorb the small phase mismatch without
 // noticeably altering the comet's "slow celestial visitor" cadence.
 export const spawnComet = (game: Game) => {

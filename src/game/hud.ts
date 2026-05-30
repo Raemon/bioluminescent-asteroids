@@ -67,7 +67,7 @@ const setSlotActive = (kind: string, active: boolean) => {
 };
 
 // Linear scale/glow from points earned. Anchors: a 50-point baseline kill
-// reads at 1.0× scale; a 5000-point comet kill reads at 2.5×. Clamps keep
+// reads at 1.0× scale; a 500-point hit reads at 2.5×. Clamps keep
 // tiny chips visible and very-big combo'd kills from blowing out the HUD.
 const SCORE_FLASH_BASELINE_POINTS = 50;
 const SCORE_FLASH_PEAK_POINTS = 5000;

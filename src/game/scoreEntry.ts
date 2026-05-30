@@ -102,7 +102,7 @@ export const isScoreEntryBlockingEnter = (game: Game): boolean => {
   return game.scoreSubmitState !== "submitted";
 };
 
-// max-combo-first sort celebrates the headline streak stat; used for the title-screen view.
+// default sort: rhythm first (headline streak stat), score as tiebreaker.
 const sortByComboThenScore = (rows: HighscoreRow[]): HighscoreRow[] =>
   [...rows].sort((a, b) => {
     const comboDiff = (b.max_combo ?? 0) - (a.max_combo ?? 0);
@@ -110,10 +110,36 @@ const sortByComboThenScore = (rows: HighscoreRow[]): HighscoreRow[] =>
     return b.score - a.score;
   });
 
-// gameover ranks strictly by score so "5 closest in either direction" around the
-//   player's run is well-defined.
 const sortByScore = (rows: HighscoreRow[]): HighscoreRow[] =>
-  [...rows].sort((a, b) => b.score - a.score);
+  [...rows].sort((a, b) => {
+    const scoreDiff = b.score - a.score;
+    if (scoreDiff !== 0) return scoreDiff;
+    return (b.max_combo ?? 0) - (a.max_combo ?? 0);
+  });
+
+const sortByWave = (rows: HighscoreRow[]): HighscoreRow[] =>
+  [...rows].sort((a, b) => {
+    const waveDiff = (b.wave ?? 0) - (a.wave ?? 0);
+    if (waveDiff !== 0) return waveDiff;
+    return b.score - a.score;
+  });
+
+const sortByName = (rows: HighscoreRow[]): HighscoreRow[] =>
+  [...rows].sort((a, b) => {
+    const nameDiff = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    if (nameDiff !== 0) return nameDiff;
+    return b.score - a.score;
+  });
+
+const sortRows = (rows: HighscoreRow[], key: Game["leaderboardSort"]): HighscoreRow[] => {
+  switch (key) {
+    case "score": return sortByScore(rows);
+    case "wave": return sortByWave(rows);
+    case "name": return sortByName(rows);
+    case "rhythm":
+    default: return sortByComboThenScore(rows);
+  }
+};
 
 // gameover "Your Standing" view: 11-row window (5 above + selected + 5 below).
 // title screen: 7-row window so the opening reads as a hall of fame but arrows
@@ -145,12 +171,14 @@ const renderLeaderboard = (game: Game) => {
   const windowSize = visibleWindowSize(game);
   const start = windowStart(game.leaderboardSelection, rows.length, windowSize);
   const end = Math.min(rows.length, start + windowSize);
+  const sortKey = game.leaderboardSort;
+  const sortCls = (k: Game["leaderboardSort"]) => (sortKey === k ? " lb-sort-active" : "");
   const header = `<li class="lb-header">
     <span class="lb-rank"></span>
-    <span class="lb-name">Pilot</span>
-    <span class="lb-score">Score</span>
-    <span class="lb-combo">Rhythm</span>
-    <span class="lb-wave">Wave</span>
+    <span class="lb-name lb-sortable${sortCls("name")}" data-sort="name">Pilot</span>
+    <span class="lb-score lb-sortable${sortCls("score")}" data-sort="score">Score</span>
+    <span class="lb-combo lb-sortable${sortCls("rhythm")}" data-sort="rhythm">Rhythm</span>
+    <span class="lb-wave lb-sortable${sortCls("wave")}" data-sort="wave">Wave</span>
   </li>`;
   const items: string[] = [];
   for (let i = start; i < end; i++) {
@@ -183,20 +211,16 @@ const escapeHtml = (s: string): string =>
 //   enough pilots to scroll through.
 const LEADERBOARD_FETCH_LIMIT = 50;
 
-const setLeaderboardTitle = (game: Game, text: string) => {
-  const titleEl = game.leaderboardEl.querySelector(".leaderboard-title");
-  if (titleEl) titleEl.textContent = text;
-};
-
 export const showLeaderboard = (game: Game) => {
+  bindLeaderboardClicks(game);
   game.leaderboardEl.classList.remove("hidden");
   const showNeighborhood = game.lastRunScoreId !== null;
-  setLeaderboardTitle(game, showNeighborhood ? "Your Standing" : "Top Pilots");
   game.leaderboardListEl.innerHTML =
     `<li class="leaderboard-status">${showNeighborhood ? "Loading your standing…" : "Loading top pilots…"}</li>`;
   game.leaderboardRows = [];
   game.leaderboardSelection = 0;
   game.leaderboardActive = false;
+  game.leaderboardSort = "rhythm";
   void refreshLeaderboard(game);
 };
 
@@ -204,21 +228,39 @@ export const refreshLeaderboard = async (game: Game) => {
   const selfId = game.lastRunScoreId;
   try {
     const rows = await fetchHighscores(LEADERBOARD_FETCH_LIMIT);
-    const sorted = selfId !== null ? sortByScore(rows) : sortByComboThenScore(rows);
-    game.leaderboardRows = sorted;
-    if (selfId !== null) {
-      const selfIdx = sorted.findIndex((r) => r.id === selfId);
-      game.leaderboardSelection = selfIdx >= 0 ? selfIdx : 0;
-    } else {
-      game.leaderboardSelection = 0;
-    }
-    game.leaderboardActive = sorted.length > 0;
-    renderLeaderboard(game);
+    applySort(game, rows, selfId);
   } catch {
     game.leaderboardListEl.innerHTML =
       '<li class="leaderboard-status">Leaderboard unavailable.</li>';
     game.leaderboardActive = false;
   }
+};
+
+const applySort = (game: Game, rows: HighscoreRow[], selfId: number | null) => {
+  const sorted = sortRows(rows, game.leaderboardSort);
+  game.leaderboardRows = sorted;
+  if (selfId !== null) {
+    const selfIdx = sorted.findIndex((r) => r.id === selfId);
+    game.leaderboardSelection = selfIdx >= 0 ? selfIdx : 0;
+  } else {
+    game.leaderboardSelection = 0;
+  }
+  game.leaderboardActive = sorted.length > 0;
+  renderLeaderboard(game);
+};
+
+let leaderboardClicksBound = false;
+const bindLeaderboardClicks = (game: Game) => {
+  if (leaderboardClicksBound) return;
+  leaderboardClicksBound = true;
+  game.leaderboardListEl.addEventListener("click", (ev) => {
+    const target = (ev.target as HTMLElement | null)?.closest<HTMLElement>("[data-sort]");
+    if (!target) return;
+    const key = target.dataset.sort as Game["leaderboardSort"] | undefined;
+    if (!key || key === game.leaderboardSort) return;
+    game.leaderboardSort = key;
+    applySort(game, game.leaderboardRows, game.lastRunScoreId);
+  });
 };
 
 // up/down on title + gameover slide the yellow selector toward the centre of
