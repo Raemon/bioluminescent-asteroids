@@ -53,13 +53,134 @@ const SIZE_HUE: Record<AlienSize, number> = {
   small: 320,
 };
 
-// Per-size firing cadence in BEAT_GRID units. Game multiplies by BEAT_GRID
-// to get seconds and aligns to the global beat clock so alien shots fall
+// Per-size firing pattern: gaps (in BEAT_GRID units) between consecutive
+// shots, cycled forever. Each entry is the wait BEFORE the next shot. Game
+// multiplies by BEAT_GRID and aligns to the global beat clock so shots fall
 // exactly on the rhythm grid the player is already listening to.
-export const ALIEN_FIRE_PERIOD_BEATS: Record<AlienSize, number> = {
-  big: 2,
-  medium: 1,
-  small: 1,
+//   small  : shot, shot, shot, REST → 3 hits then 1-beat breather (4-beat cycle)
+//   medium : shot, shot, REST, REST → 2 hits then 2-beat breather (4-beat cycle)
+//   big    : every beat, no rest    → relentless 1-beat cadence
+// The "rest" is encoded as a longer gap before the next shot in the cycle.
+export const ALIEN_FIRE_PATTERN_BEATS: Record<AlienSize, number[]> = {
+  small: [1, 1, 2],
+  medium: [1, 3],
+  big: [1],
+};
+
+// Hand-built panel for the alien hull. Same idea as bassteroid modules —
+// hard-edged plates with bright outlines — but oriented along +X (nose
+// forward) so the ship reads as facing the direction it's flying.
+type AlienPanel = { vertices: Vec[] };
+
+// Running-light hard-point. Glowing dot painted on top of panels so each size
+// has a memorable silhouette even after damage.
+type AlienLight = { pos: Vec; size: number };
+
+// Engine nozzle position. Renderer paints a back-facing thrust plume that
+// pulses with weave/fire flash so the ship feels alive between shots.
+type AlienEngine = { pos: Vec; size: number };
+
+type AlienShip = { panels: AlienPanel[]; lights: AlienLight[]; engines: AlienEngine[] };
+
+const rect = (x1: number, y1: number, x2: number, y2: number): AlienPanel => ({
+  vertices: [v(x1, y1), v(x2, y1), v(x2, y2), v(x1, y2)],
+});
+
+// All coords in radius-units (renderer scales by this.radius). +X = nose
+// forward, +Y = "down" relative to the hull. Each size has its own silhouette
+// tuned so the three sizes are distinct at a glance.
+//   small : interceptor — narrow nose, tight body, twin micro-engines
+//   medium: fighter      — pointed nose, swept wings, twin engines
+//   big   : gunship      — blunt cockpit, broad hull, side cannon pods, twin big engines
+const buildAlienShape = (size: AlienSize): AlienShip => {
+  if (size === "small") {
+    return {
+      panels: [
+        // nose spike
+        { vertices: [v(0.95, 0), v(0.25, -0.22), v(0.25, 0.22)] },
+        // main hull plate
+        rect(-0.55, -0.26, 0.25, 0.26),
+        // dorsal cockpit blister
+        { vertices: [v(-0.05, -0.18), v(0.2, -0.32), v(0.2, 0.32), v(-0.05, 0.18)] },
+        // engine block at the back
+        rect(-0.78, -0.22, -0.55, 0.22),
+      ],
+      lights: [
+        { pos: v(0.55, 0), size: 0.07 },
+        { pos: v(0.1, 0), size: 0.06 },
+        { pos: v(-0.45, -0.18), size: 0.05 },
+        { pos: v(-0.45, 0.18), size: 0.05 },
+      ],
+      engines: [
+        { pos: v(-0.78, -0.12), size: 0.13 },
+        { pos: v(-0.78, 0.12), size: 0.13 },
+      ],
+    };
+  }
+  if (size === "medium") {
+    return {
+      panels: [
+        // pointed nose
+        { vertices: [v(1.0, 0), v(0.35, -0.28), v(0.35, 0.28)] },
+        // forward hull
+        rect(-0.2, -0.32, 0.35, 0.32),
+        // cockpit hex
+        { vertices: [v(0.05, -0.18), v(0.3, -0.1), v(0.3, 0.1), v(0.05, 0.18), v(-0.1, 0.1), v(-0.1, -0.1)] },
+        // swept wings — top and bottom
+        { vertices: [v(-0.05, -0.32), v(-0.55, -0.85), v(-0.7, -0.6), v(-0.35, -0.32)] },
+        { vertices: [v(-0.05, 0.32), v(-0.55, 0.85), v(-0.7, 0.6), v(-0.35, 0.32)] },
+        // rear engine block
+        rect(-0.75, -0.28, -0.2, 0.28),
+      ],
+      lights: [
+        { pos: v(0.7, 0), size: 0.07 },
+        { pos: v(0.12, 0), size: 0.06 },
+        { pos: v(-0.55, -0.72), size: 0.06 },
+        { pos: v(-0.55, 0.72), size: 0.06 },
+        { pos: v(-0.45, 0), size: 0.05 },
+      ],
+      engines: [
+        { pos: v(-0.75, -0.16), size: 0.16 },
+        { pos: v(-0.75, 0.16), size: 0.16 },
+      ],
+    };
+  }
+  // big — heavy gunship: blunt nose, broad mid-hull, side cannon pods, twin big engines
+  return {
+    panels: [
+      // blunt nose — short triangle/trapezoid
+      { vertices: [v(0.92, -0.18), v(0.92, 0.18), v(0.55, 0.4), v(0.25, 0.4), v(0.25, -0.4), v(0.55, -0.4)] },
+      // broad main hull
+      rect(-0.45, -0.5, 0.4, 0.5),
+      // cockpit dome (front-top)
+      { vertices: [v(0.18, -0.14), v(0.5, -0.22), v(0.5, 0.22), v(0.18, 0.14)] },
+      // side cannon pods (top & bottom)
+      rect(-0.25, -0.85, 0.2, -0.5),
+      rect(-0.25, 0.5, 0.2, 0.85),
+      // cannon barrels sticking forward from the pods
+      rect(0.18, -0.78, 0.55, -0.58),
+      rect(0.18, 0.58, 0.55, 0.78),
+      // rear engine block
+      rect(-0.78, -0.42, -0.45, 0.42),
+      // wing-tip stabilizers
+      { vertices: [v(-0.45, -0.5), v(-0.78, -0.62), v(-0.78, -0.42)] },
+      { vertices: [v(-0.45, 0.5), v(-0.78, 0.62), v(-0.78, 0.42)] },
+    ],
+    lights: [
+      { pos: v(0.7, 0), size: 0.07 },
+      { pos: v(0.5, -0.7), size: 0.06 },
+      { pos: v(0.5, 0.7), size: 0.06 },
+      { pos: v(-0.05, 0), size: 0.07 },
+      { pos: v(-0.6, -0.3), size: 0.05 },
+      { pos: v(-0.6, 0.3), size: 0.05 },
+      { pos: v(-0.3, -0.7), size: 0.05 },
+      { pos: v(-0.3, 0.7), size: 0.05 },
+    ],
+    engines: [
+      { pos: v(-0.78, -0.25), size: 0.2 },
+      { pos: v(-0.78, 0.25), size: 0.2 },
+    ],
+  };
 };
 
 type AlienCrack = {
@@ -106,8 +227,11 @@ export class Alien {
   maxHp: number;
   cracks: AlienCrack[];
   // Game-time at which to fire the next bullet. Set on spawn (aligned to the
-  // global beat grid) and advanced by the per-size period after each shot.
+  // global beat grid) and advanced after each shot by the next gap in the
+  // size's fire pattern.
   nextFireAt = 0;
+  // Index into ALIEN_FIRE_PATTERN_BEATS[size] — advances each shot, wraps.
+  firePatternIndex = 0;
   // Pulsing tells the player a beat is coming. Set to 1.0 each fire, decays.
   fireFlash = 0;
   flashAmount = 0;
@@ -115,10 +239,12 @@ export class Alien {
   // rather than a straight line.
   weavePhase: number;
   weaveSpeed: number;
-  // Slowly rotates the ship-body relative to its travel direction. Purely
-  // cosmetic so the silhouette doesn't read as static.
+  // Rotation follows the heading (so the nose points along velocity), with
+  // a small sway added in render() for life.
   rotation: number;
-  rotSpeed: number;
+  // Hand-built ship silhouette (panels + lights + engines). Built once at
+  // spawn and reused for both the body draw and the damage-crack clip mask.
+  ship: AlienShip;
   // Score awarded on kill.
   scoreValue: number;
   alive = true;
@@ -137,8 +263,8 @@ export class Alien {
     this.cracks = rollAlienCracks(this.maxHp);
     this.weavePhase = rand(0, TAU);
     this.weaveSpeed = rand(0.6, 1.1);
-    this.rotation = rand(0, TAU);
-    this.rotSpeed = rand(-0.4, 0.4);
+    this.rotation = Math.atan2(vel.y, vel.x);
+    this.ship = buildAlienShape(size);
     this.scoreValue = SIZE_SCORE[size];
     // Trail tuned per size — bigger aliens have a thicker, slower-pulsing
     // wake; small ones flicker faster, matching their tighter firing rate.
@@ -149,7 +275,6 @@ export class Alien {
 
   update(dt: number, w: number, h: number) {
     this.weavePhase += dt * this.weaveSpeed;
-    this.rotation += this.rotSpeed * dt;
     // Sideways weave perpendicular to current heading — gives the alien a
     // saucer-like sway without making it impossible to predict where it's
     // going to be in a couple of seconds.
@@ -158,6 +283,9 @@ export class Alien {
     const swayMag = Math.sin(this.weavePhase) * 18;
     const drift = mul(perp, swayMag);
     this.pos = wrap(add(add(this.pos, mul(this.vel, dt)), mul(drift, dt)), w, h);
+    // Nose follows the direction of travel, with a tiny weave-driven sway so
+    // the silhouette breathes instead of locking rigidly to the velocity.
+    this.rotation = heading + Math.sin(this.weavePhase) * 0.12;
     this.trail.update(dt, this.pos.x, this.pos.y);
     if (this.flashAmount > 0) this.flashAmount = Math.max(0, this.flashAmount - dt * 4);
     if (this.fireFlash > 0) this.fireFlash = Math.max(0, this.fireFlash - dt * 2.4);
@@ -205,101 +333,135 @@ export class Alien {
   render(ctx: CanvasRenderingContext2D, t: number) {
     const baseHue = this.hue;
     const r = this.radius;
+    const ship = this.ship;
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
     ctx.rotate(this.rotation);
     ctx.globalCompositeOperation = "lighter";
 
-    // Soft halo grows with fire-flash so the player can read "this thing is
-    // about to fire / just fired" from a distance.
-    const haloAlpha = 0.18 + 0.35 * this.fireFlash;
-    const haloRadius = r * (2.2 + 0.4 * this.fireFlash);
+    // Soft halo grows with fire-flash so "about to fire / just fired" reads
+    // from a distance.
+    const haloAlpha = 0.16 + 0.32 * this.fireFlash;
+    const haloRadius = r * (2.0 + 0.4 * this.fireFlash);
     const halo = ctx.createRadialGradient(0, 0, r * 0.4, 0, 0, haloRadius);
-    halo.addColorStop(0, `hsla(${baseHue}, 100%, 70%, ${haloAlpha})`);
-    halo.addColorStop(0.6, `hsla(${baseHue + 10}, 100%, 60%, ${haloAlpha * 0.3})`);
+    halo.addColorStop(0, `hsla(${baseHue}, 100%, 65%, ${haloAlpha})`);
+    halo.addColorStop(0.6, `hsla(${baseHue + 12}, 100%, 55%, ${haloAlpha * 0.3})`);
     halo.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
     ctx.fillStyle = halo;
     ctx.beginPath();
     ctx.arc(0, 0, haloRadius, 0, TAU);
     ctx.fill();
 
-    // Saucer silhouette: a flattened ellipse hull (the "disc") with a
-    // domed cockpit on top. Reads as a classic flying saucer at a glance,
-    // distinct from both the lumpy asteroids and the modular bassteroid ships.
+    // Engine plumes — back-facing thrust glow at each nozzle. Pulses with the
+    // weave so the ship feels alive between shots.
+    const plumePulse = 0.7 + 0.3 * Math.sin(this.weavePhase * 3.5);
+    for (const eng of ship.engines) {
+      const ex = eng.pos.x * r;
+      const ey = eng.pos.y * r;
+      const plumeLen = r * (0.55 + 0.18 * plumePulse);
+      const plumeRad = eng.size * r * 1.6;
+      const pg = ctx.createRadialGradient(ex - plumeLen * 0.3, ey, 0, ex - plumeLen * 0.3, ey, plumeLen);
+      pg.addColorStop(0, `hsla(${baseHue + 30}, 100%, 80%, ${0.7 * plumePulse})`);
+      pg.addColorStop(0.5, `hsla(${baseHue + 10}, 100%, 60%, ${0.3 * plumePulse})`);
+      pg.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
+      ctx.fillStyle = pg;
+      ctx.beginPath();
+      ctx.ellipse(ex - plumeLen * 0.4, ey, plumeLen, plumeRad, 0, 0, TAU);
+      ctx.fill();
+    }
+
+    const tracePanel = (panel: AlienPanel) => {
+      ctx.beginPath();
+      for (let i = 0; i < panel.vertices.length; i++) {
+        const x = panel.vertices[i].x * r;
+        const y = panel.vertices[i].y * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+    };
+
+    // Panelled hull — hard edges with a bright outline, like bassteroid plates.
     ctx.shadowColor = `hsla(${baseHue + 10}, 100%, 70%, 1)`;
-    ctx.shadowBlur = 12;
+    for (const panel of ship.panels) {
+      tracePanel(panel);
+      const fill = ctx.createLinearGradient(-r, -r, r, r);
+      fill.addColorStop(0, `hsla(${baseHue}, 70%, 22%, 0.9)`);
+      fill.addColorStop(0.5, `hsla(${baseHue + 8}, 65%, 32%, 0.9)`);
+      fill.addColorStop(1, `hsla(${baseHue - 5}, 75%, 14%, 0.9)`);
+      ctx.fillStyle = fill;
+      ctx.shadowBlur = 0;
+      ctx.fill();
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = `hsla(${baseHue + 14}, 100%, 80%, 0.95)`;
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
 
-    // Disc body
-    ctx.beginPath();
-    ctx.ellipse(0, 0.18 * r, r, r * 0.42, 0, 0, TAU);
-    const discFill = ctx.createLinearGradient(0, -0.2 * r, 0, 0.6 * r);
-    discFill.addColorStop(0, `hsla(${baseHue + 20}, 85%, 50%, 0.9)`);
-    discFill.addColorStop(0.5, `hsla(${baseHue}, 80%, 28%, 0.95)`);
-    discFill.addColorStop(1, `hsla(${baseHue - 10}, 80%, 12%, 0.95)`);
-    ctx.fillStyle = discFill;
-    ctx.fill();
-    ctx.lineWidth = 1.6;
-    ctx.strokeStyle = `hsla(${baseHue + 20}, 100%, 80%, 0.95)`;
-    ctx.stroke();
-
-    // Dome (cockpit) on top
-    ctx.beginPath();
-    ctx.ellipse(0, -0.1 * r, r * 0.46, r * 0.4, 0, Math.PI, 0);
-    const domeFill = ctx.createLinearGradient(0, -0.4 * r, 0, 0.1 * r);
-    domeFill.addColorStop(0, `hsla(${baseHue + 30}, 100%, 78%, 0.9)`);
-    domeFill.addColorStop(0.6, `hsla(${baseHue + 10}, 90%, 45%, 0.7)`);
-    domeFill.addColorStop(1, `hsla(${baseHue}, 80%, 30%, 0.3)`);
-    ctx.fillStyle = domeFill;
-    ctx.fill();
-    ctx.lineWidth = 1.2;
-    ctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 88%, 0.95)`;
-    ctx.stroke();
-
-    // Belly stripe across the disc — a thin highlight line that reads as
-    // a panel seam.
-    ctx.beginPath();
-    ctx.moveTo(-r * 0.85, 0.18 * r);
-    ctx.lineTo(r * 0.85, 0.18 * r);
-    ctx.strokeStyle = `hsla(${baseHue + 40}, 100%, 85%, 0.5)`;
+    // Thin centre-stripe inside each panel — plated-metal seam, same trick
+    // as the bassteroid renderer uses.
     ctx.lineWidth = 0.8;
-    ctx.stroke();
+    ctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 85%, 0.45)`;
+    for (const panel of ship.panels) {
+      ctx.save();
+      tracePanel(panel);
+      ctx.clip();
+      let cx = 0;
+      let cy = 0;
+      for (const p of panel.vertices) {
+        cx += p.x;
+        cy += p.y;
+      }
+      cx = (cx / panel.vertices.length) * r;
+      cy = (cy / panel.vertices.length) * r;
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.3, cy);
+      ctx.lineTo(cx + r * 0.3, cy);
+      ctx.stroke();
+      ctx.restore();
+    }
 
-    // Running lights along the rim — count varies with size so big aliens
-    // read as more elaborate.
-    const lightCount = this.size === "big" ? 7 : this.size === "medium" ? 5 : 4;
+    // Running lights — each blinks on its own phase. Fire-flash boosts every
+    // light so the moment of firing reads as a coordinated pulse.
     const blinkPhase = t * 0.004 + this.weavePhase;
-    for (let i = 0; i < lightCount; i++) {
-      const u = i / (lightCount - 1);
-      const lx = (u - 0.5) * 2 * r * 0.92;
-      const ly = 0.32 * r;
-      const blink = 0.5 + 0.5 * Math.sin(blinkPhase + i * 0.9);
-      const lr = 0.07 * r;
+    for (let i = 0; i < ship.lights.length; i++) {
+      const light = ship.lights[i];
+      const lx = light.pos.x * r;
+      const ly = light.pos.y * r;
+      const blink = 0.45 + 0.4 * Math.sin(blinkPhase + i * 0.9) + 0.4 * this.fireFlash;
+      const lr = light.size * r * 1.2;
       const lg = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr * 3);
-      lg.addColorStop(0, `hsla(${baseHue + 40}, 100%, 96%, ${0.9 * blink})`);
-      lg.addColorStop(0.4, `hsla(${baseHue + 10}, 100%, 70%, ${0.5 * blink})`);
+      lg.addColorStop(0, `hsla(${baseHue + 40}, 100%, 96%, ${Math.min(1, 0.9 * blink)})`);
+      lg.addColorStop(0.35, `hsla(${baseHue + 10}, 100%, 72%, ${Math.min(1, 0.55 * blink)})`);
       lg.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
       ctx.fillStyle = lg;
       ctx.beginPath();
       ctx.arc(lx, ly, lr * 3, 0, TAU);
       ctx.fill();
-      ctx.fillStyle = `hsla(${baseHue + 50}, 100%, 98%, ${blink})`;
+      ctx.fillStyle = `hsla(${baseHue + 50}, 100%, 98%, ${Math.min(1, blink)})`;
       ctx.beginPath();
       ctx.arc(lx, ly, lr * 0.55, 0, TAU);
       ctx.fill();
     }
-    ctx.shadowBlur = 0;
 
-    // Damage cracks — one per HP lost. Drawn over the body as faint white
-    // fracture lines, clipped to the saucer silhouette so they never spill
-    // off the disc/dome.
+    // Damage cracks — one per HP lost. Clipped to the union of panels so
+    // they only show where there's actual hull underneath.
     const cracksToDraw = this.maxHp - this.hp;
     if (cracksToDraw > 0) {
       ctx.save();
       ctx.beginPath();
-      ctx.ellipse(0, 0.18 * r, r, r * 0.42, 0, 0, TAU);
-      ctx.ellipse(0, -0.1 * r, r * 0.46, r * 0.4, 0, 0, TAU);
+      for (const panel of ship.panels) {
+        for (let i = 0; i < panel.vertices.length; i++) {
+          const x = panel.vertices[i].x * r;
+          const y = panel.vertices[i].y * r;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+      }
       ctx.clip();
-      const crackScale = 0.65;
+      const crackScale = 0.6;
       for (let i = 0; i < cracksToDraw; i++) {
         const crack = this.cracks[i];
         const dx = crack.pos.x * r;
@@ -341,11 +503,13 @@ export class Alien {
       ctx.restore();
     }
 
+    // Hit-flash — pale overlay across all panels.
     if (this.flashAmount > 0) {
       ctx.fillStyle = `hsla(${baseHue + 40}, 100%, 95%, ${this.flashAmount * 0.32})`;
-      ctx.beginPath();
-      ctx.ellipse(0, 0.18 * r, r * 1.08, r * 0.5, 0, 0, TAU);
-      ctx.fill();
+      for (const panel of ship.panels) {
+        tracePanel(panel);
+        ctx.fill();
+      }
     }
 
     ctx.restore();

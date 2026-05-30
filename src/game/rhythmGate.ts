@@ -4,10 +4,19 @@ import { BEAT_GRID, BEAT_WINDOW, DEBUG_BEAT_TIMING } from "./rhythmConstants";
 import { syncComboHud } from "./hud";
 import { popupBeatDebug, popupComboLost } from "./popups";
 
-// rapid powerup flips the grid to 8ths so rapid-fire trigger pulls each land on a beat.
-// combo ≥ 12 also doubles the grid — at that tier the in-between bg-beat is audible (see
-// bassClock.ts), so the player can hear and play to the halfbeats too.
-export const comboGrid = (game: Game): number => (game.ship.rapidActive || game.beatCombo >= 12) ? BEAT_GRID / 2 : BEAT_GRID;
+// Three grid tiers, all measured as the period between on-beat slots:
+//   combo 0          → half-notes (BEAT_GRID*2): only every other quarter counts, so a
+//                       broken-rhythm player has to land a deliberate hit "on the one" to
+//                       re-prime back to 1.
+//   combo 1–11       → quarter-notes (BEAT_GRID): the default groove.
+//   combo ≥ 12, or   → eighth-notes (BEAT_GRID/2): rapid-fire pulls each land on a beat;
+//   rapid powerup     at the sparkle tier the in-between bg-beat is audible (see
+//                     bassClock.ts), so the player can hear and play the eighths too.
+export const comboGrid = (game: Game): number => {
+  if (game.ship.rapidActive || game.beatCombo >= 12) return BEAT_GRID / 2;
+  if (game.beatCombo === 0) return BEAT_GRID * 2;
+  return BEAT_GRID;
+};
 
 // pure predicate — classifies fire / hit as on-beat without side effects on combo state.
 export const isInBeatWindow = (game: Game, time: number): boolean => {
@@ -64,7 +73,6 @@ export const spawnBeatDebugPopup = (game: Game, pos: Vec, time: number, prefix: 
 export const loseCombo = (game: Game, sourcePos?: Vec) => {
   if (game.beatCombo === 0) return;
   const wasMeaningful = game.beatCombo >= 2;
-  const wasOnFineGrid = game.beatCombo >= 12;
   const haloActive = game.ship.comboHaloTier >= 2;
   game.beatCombo = 0;
   if (wasMeaningful) {
@@ -75,9 +83,9 @@ export const loseCombo = (game: Game, sourcePos?: Vec) => {
     }
     game.hasLostComboEver = true;
   }
-  // grid just doubled (eighths→quarters) when combo dropped out of the sparkle tier; resync
-  // nextBeatToEvaluate against the wider grid so the next closure lands on the next quarter.
-  if (wasOnFineGrid && !game.ship.rapidActive) rebaseBeatEval(game);
+  // grid just widened (eighths→quarters from sparkle, or quarters→half-notes from any combo
+  // → 0); resync nextBeatToEvaluate against the wider grid so the next closure lands cleanly.
+  if (!game.ship.rapidActive) rebaseBeatEval(game);
   syncComboHud(game);
 };
 

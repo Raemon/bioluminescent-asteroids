@@ -454,7 +454,7 @@ html, body {
 }
 
 #overlay-start {
-  margin-top: 30px;
+  margin-top: 50px;
   animation: pulse 2s ease-in-out infinite;
 }
 
@@ -615,8 +615,9 @@ html, body {
 
 #leaderboard-list li {
   display: grid;
-  grid-template-columns: 28px 1fr 120px 120px;
+  grid-template-columns: 28px 1fr 60px 120px 56px;
   gap: 14px;
+  column-gap: 28px;
   align-items: center;
   padding: 8px 12px;
   font-size: 12px;
@@ -628,10 +629,20 @@ html, body {
   border-radius: 4px;
 }
 
-#leaderboard-list .lb-score,
-#leaderboard-list .lb-combo {
+#leaderboard-list .lb-score {
   justify-self: end;
   text-align: right;
+}
+
+#leaderboard-list .lb-wave,
+#leaderboard-list .lb-combo {
+  justify-self: center;
+  text-align: center;
+}
+
+#leaderboard-list li.lb-header .lb-score {
+  justify-self: center;
+  text-align: center;
 }
 
 #leaderboard-list li.lb-header {
@@ -647,6 +658,7 @@ html, body {
 
 #leaderboard-list li.lb-header .lb-name,
 #leaderboard-list li.lb-header .lb-score,
+#leaderboard-list li.lb-header .lb-wave,
 #leaderboard-list li.lb-header .lb-combo {
   color: inherit;
   text-shadow: none;
@@ -727,6 +739,14 @@ html, body {
   color: #ffd86a;
   text-shadow: 0 0 10px rgba(255, 200, 80, 0.45);
   letter-spacing: 0.1em;
+}
+
+.lb-wave {
+  font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-weight: 500;
+  color: #d8f3ff;
+  letter-spacing: 0.1em;
+  opacity: 0.85;
 }
 
 .leaderboard-status {

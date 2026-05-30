@@ -2565,27 +2565,99 @@ export class Sound {
     ping.stop(t + 0.15);
   }
 
-  // Alien destruction — descending arpeggio "dying robot" warble plus a
-  // medium explosion so the hit reads as a kill, not a deflect.
+  // Alien destruction — a small requiem: a brief breath of hit-noise, a
+  // mournful Eb temple-bell (b3 of C, the minor colour the halo lives in),
+  // a sine sigh falling G4→Eb4→C4→Bb3 with the lowpass closing down like a
+  // voice trailing off, and a faint C2 sub that swells in late and lingers
+  // as the absence. No explosion thud — the kill should land as loss.
   private playAlienExplode() {
     if (!this.ctx || !this.master) return;
-    this.playExplosion(0.55, 230, 0.42);
     const t = this.ctx.currentTime;
-    const notes = [880, 698.5, 523.25, 392, 261.6]; // A5 → F5 → C5 → G4 → C4
-    for (let i = 0; i < notes.length; i++) {
-      const start = t + i * 0.07;
+
+    // Gasp — bandpassed noise puff, short and high so it reads as a breath
+    // catching rather than a body bursting.
+    const gaspBuf = this.makeNoiseBuffer(0.18);
+    if (gaspBuf) {
+      const gasp = this.ctx.createBufferSource();
+      gasp.buffer = gaspBuf;
+      const gFilter = this.ctx.createBiquadFilter();
+      gFilter.type = "bandpass";
+      gFilter.frequency.setValueAtTime(1800, t);
+      gFilter.frequency.exponentialRampToValueAtTime(700, t + 0.18);
+      gFilter.Q.value = 2.2;
+      const gGain = this.ctx.createGain();
+      gGain.gain.setValueAtTime(0.0001, t);
+      gGain.gain.exponentialRampToValueAtTime(0.12, t + 0.012);
+      gGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+      gasp.connect(gFilter);
+      gFilter.connect(gGain);
+      gGain.connect(this.master);
+      gasp.start(t);
+      gasp.stop(t + 0.22);
+    }
+
+    // Eb temple bell with inharmonic partials. Same DNA as playBell — ratios
+    // 2.76 / 5.4 / 8.93 give the tolled-bell timbre — but tuned to Eb4 and
+    // given a much longer decay so the note hangs and mourns.
+    const bellFund = 311.13; // Eb4 — b3 of C minor, the mode's grief pitch
+    const bellRatios = [1, 2.76, 5.4, 8.93];
+    const bellPeak = 0.18;
+    const bellDecay = 2.6;
+    for (let i = 0; i < bellRatios.length; i++) {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
-      osc.type = "sawtooth";
-      osc.frequency.value = notes[i];
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(0.14, start + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
+      osc.type = "sine";
+      osc.frequency.value = bellFund * bellRatios[i];
+      const peak = bellPeak / (i + 1.4);
+      const decay = Math.max(0.4, bellDecay - i * 0.35);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(peak, t + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
       osc.connect(gain);
       gain.connect(this.master);
-      osc.start(start);
-      osc.stop(start + 0.2);
+      osc.start(t);
+      osc.stop(t + decay + 0.05);
     }
+
+    // The sigh — sine glissando G4 → Eb4 → C4 → Bb3 over ~0.9s, a voice
+    // settling downward through the C-minor scale and out. Lowpass closes
+    // as it falls so the timbre darkens with the pitch.
+    const sigh = this.ctx.createOscillator();
+    sigh.type = "sine";
+    sigh.frequency.setValueAtTime(392.00, t + 0.04);        // G4
+    sigh.frequency.exponentialRampToValueAtTime(311.13, t + 0.32); // Eb4
+    sigh.frequency.exponentialRampToValueAtTime(261.63, t + 0.62); // C4
+    sigh.frequency.exponentialRampToValueAtTime(233.08, t + 0.95); // Bb3
+    const sighFilter = this.ctx.createBiquadFilter();
+    sighFilter.type = "lowpass";
+    sighFilter.Q.value = 0.9;
+    sighFilter.frequency.setValueAtTime(1800, t);
+    sighFilter.frequency.exponentialRampToValueAtTime(420, t + 1.0);
+    const sighGain = this.ctx.createGain();
+    sighGain.gain.setValueAtTime(0.0001, t);
+    sighGain.gain.exponentialRampToValueAtTime(0.14, t + 0.08);
+    sighGain.gain.setTargetAtTime(0.08, t + 0.4, 0.25);
+    sighGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.05);
+    sigh.connect(sighFilter);
+    sighFilter.connect(sighGain);
+    sighGain.connect(this.master);
+    sigh.start(t + 0.04);
+    sigh.stop(t + 1.1);
+
+    // The absence — a C2 sub that fades in late, after the sigh is gone,
+    // and lingers as the chest-pressure of "something is missing now".
+    const sub = this.ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.value = 65.41; // C2
+    const subGain = this.ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    subGain.gain.exponentialRampToValueAtTime(0.18, t + 1.1);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 2.6);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + 2.7);
   }
 
   // Long tension-building windup played while the pulsar vibrates and spins

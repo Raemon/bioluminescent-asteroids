@@ -1,7 +1,7 @@
 import type { Game } from "../Game";
 import { dist } from "../vec";
 import { Asteroid } from "../Asteroid";
-import { Alien, ALIEN_FIRE_PERIOD_BEATS } from "../Alien";
+import { Alien, ALIEN_FIRE_PATTERN_BEATS } from "../Alien";
 import { Bullet } from "../Bullet";
 import { BEAT_GRID } from "./rhythmConstants";
 import {
@@ -10,6 +10,7 @@ import {
   spawnBeatDebugPopup,
   evaluateClosedBeats,
   currentBeatPulse,
+  rebaseBeatEval,
 } from "./rhythmGate";
 import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } from "./bassClock";
 import { tickWaveEvents } from "./waveEvents";
@@ -239,6 +240,9 @@ const handleOnBeatFire = (game: Game, newBullets: Bullet[]) => {
   if (game.beatCombo === 0) {
     game.beatCombo = 1;
     if (game.maxCombo < 1) game.maxCombo = 1;
+    // grid just halved (half-notes → quarters) leaving combo 0; resync the evaluator so the
+    // freshly-uncovered odd quarters don't all close in a burst on the next frame.
+    if (!game.ship.rapidActive) rebaseBeatEval(game);
     syncHud(game);
   }
 };
@@ -330,7 +334,10 @@ const fireOneAlienShot = (game: Game, a: Alien) => {
   } else {
     a.fireFlash = 1;
   }
-  a.nextFireAt += ALIEN_FIRE_PERIOD_BEATS[a.size] * BEAT_GRID;
+  const pattern = ALIEN_FIRE_PATTERN_BEATS[a.size];
+  const gap = pattern[a.firePatternIndex % pattern.length];
+  a.firePatternIndex = (a.firePatternIndex + 1) % pattern.length;
+  a.nextFireAt += gap * BEAT_GRID;
 };
 
 // collisions run before evaluateClosedBeats so trailing-edge closures see this frame's kills.

@@ -1,7 +1,7 @@
 import type { Game } from "../Game";
 import { Asteroid, AsteroidKind, BASS_MEASURE_LENGTH, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
 import { spawnComet as spawnCometAtEdge } from "../Comet";
-import { AlienSize, ALIEN_FIRE_PERIOD_BEATS, spawnAlienAtEdge } from "../Alien";
+import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
 import { rand } from "../vec";
 import { BEAT_GRID } from "./rhythmConstants";
@@ -117,7 +117,7 @@ const COMET_LIFETIME: [number, number] = [22, 30];
 
 // gated to wave 3+ so early-game stays focused on core mechanics before the field reshapes.
 const SHOCKWAVE_FIRST_WAVE = 3;
-const SHOCKWAVE_CHANCE_PER_WAVE = 1 / 5;
+const SHOCKWAVE_CHANCE_PER_WAVE = 1 / 10;
 const SHOCKWAVE_SPAWN_WINDOW: [number, number] = [6, 22];
 
 // predicates let the wave director read declaratively, not as inline boolean expressions.
@@ -196,11 +196,13 @@ const spawnSpecial = (game: Game, kind: AsteroidKind, claimed?: BeatClaimSet): A
 const spawnTink = (game: Game, claimed?: BeatClaimSet): Asteroid =>
   spawnAsteroidAway(game, 200, "tink", "small", claimed);
 
-// pre-align first fire to the global beat so saucer shots sync to the rhythm immediately.
+// pre-align first fire to the next BEAT_GRID slot so saucer shots lock into
+// the rhythm immediately. From there the alien advances through its own
+// fire pattern (see ALIEN_FIRE_PATTERN_BEATS in Alien.ts).
 export const spawnAlien = (game: Game, size: AlienSize) => {
   const a = spawnAwayFromShip(() => spawnAlienAtEdge(game.w, game.h, size), game.ship.pos, 260, 6);
-  const period = ALIEN_FIRE_PERIOD_BEATS[size] * BEAT_GRID;
-  a.nextFireAt = Math.ceil((game.beatTime + 0.5) / period) * period;
+  a.nextFireAt = Math.ceil((game.beatTime + 0.5) / BEAT_GRID) * BEAT_GRID;
+  a.firePatternIndex = 0;
   game.aliens.push(a);
   game.sound.startAlienDrone(a, size, a.pos);
 };

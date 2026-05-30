@@ -127,13 +127,15 @@ const renderRows = (game: Game, ranked: RankedRow[], selfId: number | null) => {
     <span class="lb-rank"></span>
     <span class="lb-name">Pilot</span>
     <span class="lb-score">Score</span>
-    <span class="lb-combo">Peak Rhythm</span>
+    <span class="lb-combo">Rhythm</span>
+    <span class="lb-wave">Wave</span>
   </li>`;
   const items = ranked
     .map(({ row, rank }) => {
       const safeName = escapeHtml(row.name);
       const combo = row.max_combo ?? 0;
       const comboTier = combo >= 8 ? "white" : combo >= 4 ? "gold" : combo >= 2 ? "cyan" : "dim";
+      const wave = row.wave ?? 1;
       const isSelf = selfId !== null && row.id === selfId;
       const cls = isSelf ? ' class="lb-self"' : "";
       return `<li${cls}>
@@ -143,6 +145,7 @@ const renderRows = (game: Game, ranked: RankedRow[], selfId: number | null) => {
         <span class="lb-combo lb-combo-${comboTier}">
           <span class="lb-combo-value">${combo}<span class="lb-combo-x">×</span></span>
         </span>
+        <span class="lb-wave">${wave}</span>
       </li>`;
     })
     .join("");

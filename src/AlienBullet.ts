@@ -6,12 +6,20 @@ import { BEAT_GRID } from "./game/rhythmConstants";
 // Bullets shot BY aliens. The player can be hit by them (handled in Game).
 // Distinct hue from player bullets (cyan/gold) — these run hot pink/violet/
 // green per source so the player can read "incoming, not mine" at a glance.
+// Per-size visible radius. Small bullets read as a faster, tighter pinprick;
+// medium/big stay chunky so their threat is legible at distance.
+const SIZE_BULLET_RADIUS: Record<AlienSize, number> = {
+  big: 3.8,
+  medium: 3.4,
+  small: 2.2,
+};
+
 export class AlienBullet {
   pos: Vec;
   vel: Vec;
   life: number;
   maxLife: number;
-  radius = 3.4;
+  radius: number;
   hue: number;
   size: AlienSize;
   trail: Vec[] = [];
@@ -21,7 +29,9 @@ export class AlienBullet {
     this.vel = vel;
     this.size = size;
     this.hue = hue;
-    this.maxLife = BEAT_GRID * 2;
+    this.radius = SIZE_BULLET_RADIUS[size];
+    // 3 beats of life vs the old 2 — same speed, so total range scales 1.5×.
+    this.maxLife = BEAT_GRID * 3;
     this.life = this.maxLife;
   }
 
