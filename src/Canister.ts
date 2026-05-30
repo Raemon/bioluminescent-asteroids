@@ -26,7 +26,7 @@ const POWERUP_GLYPH: Record<PowerupKind, string> = {
   radar: "X",
 };
 
-export const POWERUP_KINDS: PowerupKind[] = ["trident", "rapid", "pierce", "shield", "slow", "radar"];
+export const POWERUP_KINDS: PowerupKind[] = ["trident", "shield", "slow", "radar"];
 
 // Why: warp-out plays a brief vortex flash before the canister vanishes so the player
 //   sees a deliberate departure (not just a soft offscreen fade) when they let a pod drift past.

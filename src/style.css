@@ -745,7 +745,7 @@ html, body {
   transform: translateX(-50%);
   font-family: "Space Grotesk", system-ui, sans-serif;
   font-weight: 700;
-  font-size: clamp(32px, 6vw, 72px);
+  font-size: clamp(24px, 4.5vw, 54px);
   letter-spacing: 0.3em;
   text-transform: uppercase;
   color: #c8efff;
@@ -757,7 +757,7 @@ html, body {
   opacity: 0;
   pointer-events: none;
   z-index: 50;
-  transition: opacity 1.2s ease-out;
+  transition: opacity 0.7s ease-out;
 }
 
 #pilot-log-toast > span {
@@ -767,7 +767,7 @@ html, body {
 }
 
 #pilot-log-toast.show {
-  opacity: 1;
+  opacity: 0.7;
 }
 
 /* Wave announce — same family/treatment as the chapter title but ~half the
@@ -802,9 +802,11 @@ html, body {
 }
 
 /* Wave-clear summary — non-blocking text over the playfield while the next
-   wave spawns. Each row appears on a beat with a paired sound; the bonus
-   drains four ticks per beat; final score holds for 2 beats while the rest
-   fades, then the score itself fades over 1 beat. No backdrop — just text. */
+   wave spawns. Anchored in the opposite quadrant from where the ship is
+   heading (inline left/top), centered on that anchor via translate(-50%, -50%).
+   Each row appears on a beat with a paired sound; the bonus drains four
+   ticks per beat with a rhythmic pentatonic pattern; after the drain the
+   panel holds 1s then fades over 2s. No backdrop — just text. */
 #wave-summary {
   position: fixed;
   top: 38%;
@@ -819,6 +821,8 @@ html, body {
   flex-direction: column;
   gap: 6px;
   min-width: 280px;
+  transition: opacity 2s ease-in;
+  opacity: 1;
 }
 
 #wave-summary .ws-row {
@@ -840,18 +844,10 @@ html, body {
   transform: translateY(0);
 }
 
-/* Rest-of-text fade: triggered after the drain holds for 2 beats. The score
-   row is excluded so it stays solid through this phase. Placed after .in so
-   it wins the cascade tie on visible rows. */
-#wave-summary.fade-rest .ws-row.in:not(.ws-score) {
+/* Single-phase panel fade: after the drain finishes and a 1s hold elapses,
+   the whole panel (rows + score) fades together over 2s. */
+#wave-summary.fade-out {
   opacity: 0;
-  transition: opacity 1s ease-in;
-}
-
-/* Final score fade: triggered after the rest has faded. */
-#wave-summary.fade-score .ws-row.ws-score.in {
-  opacity: 0;
-  transition: opacity 0.5s ease-in;
 }
 
 #wave-summary .ws-label {
