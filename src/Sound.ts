@@ -1932,17 +1932,24 @@ export class Sound {
 
   // Sparkle-layer playback gain (combo ≥ 12). Higher than the ambient/melodic
   // gain because the sparkle stems live above 1 kHz, well clear of the bass
-  // danger zone — the audit shows bass dominance >50 dB even at gain 0.6.
-  // Glockenspiel (SB) reads quieter than the celesta+wash (EL) at the same
-  // gain due to its sparser onset density, so SB gets the higher number.
+  // danger zone — the audit shows bass dominance >15 dB in lo-mid at every
+  // shipped gain.
+  // r2-{el,sb} were reworked from sparse chimes (4 onsets/phrase) to 16th-note
+  // ostinatos (~192 onsets/loop) so 12x reads as a tempo lift, not a louder
+  // 6x — the beat grid halves to 8ths at the same moment and the sparkle
+  // matches the new bullet cadence.
   private haloMusicSparkleGain(variation: HaloMusicVariation): number {
     switch (variation) {
+      // 16th-note synth arp on a New Age pad + halo-pad wash. Continuous
+      // ostinato, so 0.35 (down from sparse-chime levels would have been).
       case "r2-el": return 0.35;
-      case "r2-sb": return 0.55;
-      // r3-el sparkle is EL-generated arpeggiated bells (176 onsets — more
-      // active than the sparse chimes the r2 variations use). Centroid
-      // 2.1 kHz, above the bass danger zone. Audit at gain 0.30 keeps the
-      // lo-mid 13 dB clean.
+      // 16th-note steel-string fast-pluck (mandolin-tremolo character).
+      // Dropped to 0.40 from the original sparse-glockenspiel 0.55 — the
+      // continuous pluck doesn't need the headroom that rare chime rings did.
+      case "r2-sb": return 0.40;
+      // r3-el sparkle is EL-generated arpeggiated bells (176 onsets — already
+      // close to 16th-note density). Centroid 2.1 kHz, above the bass danger
+      // zone. Audit at gain 0.30 keeps the lo-mid 13 dB clean.
       case "r3-el": return 0.30;
       // r4-sb sparkle is a celesta counter-melody (8th-note cascades).
       // Same gain as ambient+melodic (0.25) so the three rhythmic layers

@@ -12,11 +12,16 @@
 //
 // Round 2/3 pool (32-second C-pedal loops, 4 phrases ×4 bars, calibrated
 // against the in-game-mix audit, beat-clock-aligned start):
-//   r2-el  ElevenLabs cinematic bed + felt piano + (self-built) celesta
-//          chimes sparkle. Centroid ~600 Hz, sits dark and wide. Plays gain 0.25.
-//   r2-sb  Procedural sine pad + FluidSynth felt piano + glockenspiel
-//          sparkle, all with sox reverb. Centroid ~280 Hz, warmer / drier.
-//          Plays gain 0.30.
+//   r2-el  ElevenLabs cinematic bed + felt piano + (self-built) 16th-note
+//          New Age synth-arp sparkle with halo-pad wash. Sparkle reworked
+//          from sparse celesta chimes to match the 12x doubletime grid —
+//          197 onsets/loop, centroid ~3.5 kHz. Ambient/melodic centroid
+//          ~600 Hz, sits dark and wide. Plays gain 0.25 / sparkle 0.35.
+//   r2-sb  Procedural sine pad + FluidSynth felt piano + 16th-note steel-
+//          string fast-pluck (mandolin-tremolo) sparkle. Sparkle reworked
+//          from sparse glockenspiel chimes to a continuous 16th ostinato —
+//          186 onsets/loop, centroid ~2.85 kHz. Ambient/melodic centroid
+//          ~280 Hz, warmer / drier. Plays gain 0.30 / sparkle 0.40.
 //   r3-el  ElevenLabs end-to-end analog-synthwave: Juno-style pad + soft
 //          lead + crystalline arpeggiated sparkle. All three layers from EL.
 //          Centroid ~425 Hz ambient/melodic, ~2.1 kHz sparkle. Bass-heavy

@@ -30,7 +30,10 @@ export class Ship {
   maxSpeed = 460;
   radius = 14;
   // outer halo sits past the hull and IS the collision silhouette (matches what the player sees).
-  haloOffset = 8;
+  baseHaloOffset = 8;
+  // shield expands the halo (and therefore the hitbox + visible outline) by this much.
+  shieldHaloBonus = 6;
+  get haloOffset() { return this.baseHaloOffset + (this.shieldActive ? this.shieldHaloBonus : 0); }
   // small uniform pad + forward bonus makes head-on collisions slightly more generous than rear hits.
   hitPad = 4;
   hitFrontBonus = 6;

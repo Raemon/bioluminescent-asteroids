@@ -2,6 +2,7 @@ import type { Ship } from "../Ship";
 import { Vec, add, fromAngle, TAU } from "../vec";
 import { POWERUP_HUE } from "../Canister";
 import { renderComboHalo } from "./shipComboHalo";
+import { haloVertices } from "./shipHitbox";
 
 // per-frame jitter when invuln makes the ship visually telegraph that it can't be hit yet.
 const invulnFlicker = (ship: Ship, t: number): number =>
@@ -74,18 +75,42 @@ const paintRetroFlares = (ctx: CanvasRenderingContext2D, ship: Ship) => {
   }
 };
 
-// shield ring snaps to peak on the beat and fades — same rhythm as the hull/halo.
+// rounded-corner triangle path tracing the halo polygon; cornerRadius is in local pixels.
+const traceRoundedTriangle = (
+  ctx: CanvasRenderingContext2D,
+  verts: Array<[number, number]>,
+  cornerRadius: number,
+) => {
+  ctx.beginPath();
+  for (let i = 0; i < 3; i++) {
+    const prev = verts[(i + 2) % 3];
+    const curr = verts[i];
+    const next = verts[(i + 1) % 3];
+    const inX = curr[0] - prev[0], inY = curr[1] - prev[1];
+    const outX = next[0] - curr[0], outY = next[1] - curr[1];
+    const inLen = Math.hypot(inX, inY) || 1;
+    const outLen = Math.hypot(outX, outY) || 1;
+    const r = Math.min(cornerRadius, inLen * 0.5, outLen * 0.5);
+    const enter: [number, number] = [curr[0] - (inX / inLen) * r, curr[1] - (inY / inLen) * r];
+    const exit: [number, number] = [curr[0] + (outX / outLen) * r, curr[1] + (outY / outLen) * r];
+    if (i === 0) ctx.moveTo(enter[0], enter[1]);
+    else ctx.lineTo(enter[0], enter[1]);
+    ctx.quadraticCurveTo(curr[0], curr[1], exit[0], exit[1]);
+  }
+  ctx.closePath();
+};
+
+// shield draws a rounded-corner triangle tracing the (expanded) halo polygon — same shape as the hitbox.
 const paintShieldRing = (ctx: CanvasRenderingContext2D, ship: Ship, beatPulse: number) => {
   if (!ship.shieldActive) return;
-  const shieldRadius = ship.radius * 1.9;
   const shieldBrightness = 0.6 + 0.4 * beatPulse;
   const shieldHue = POWERUP_HUE.shield;
+  const halo = haloVertices(ship);
   ctx.strokeStyle = `hsla(${shieldHue}, 100%, 80%, ${0.75 * shieldBrightness})`;
   ctx.lineWidth = 1.4;
   ctx.shadowColor = `hsla(${shieldHue}, 100%, 70%, 1)`;
   ctx.shadowBlur = 16;
-  ctx.beginPath();
-  ctx.arc(0, 0, shieldRadius, 0, TAU);
+  traceRoundedTriangle(ctx, halo, 6);
   ctx.stroke();
   ctx.shadowBlur = 0;
 };
