@@ -243,9 +243,9 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
+  justify-content: space-evenly;
   gap: 20px;
-  padding: 8vh 0 6vh;
+  padding: 0;
   text-align: center;
   pointer-events: none;
   z-index: 10;
@@ -616,7 +616,7 @@ html, body {
 
 #leaderboard-list li {
   display: grid;
-  grid-template-columns: 28px 1fr 60px 120px 56px;
+  grid-template-columns: 28px 1fr 60px 64px 56px;
   gap: 14px;
   column-gap: 28px;
   align-items: center;

@@ -158,6 +158,7 @@ export type SoundName =
   | "explosionLarge"
   | "explosionMedium"
   | "explosionSmall"
+  | "asteroidBoomBeat"
   | "thrust"
   | "reverseThrust"
   | "sideThrust"
@@ -2477,6 +2478,7 @@ export class Sound {
       case "explosionLarge": this.playExplosion(cfgN("explosionLarge", "volume", 0.7), cfgN("explosionLarge", "lowpassStart", 160), cfgN("explosionLarge", "duration", 0.55)); break;
       case "explosionMedium": this.playExplosion(cfgN("explosionMedium", "volume", 0.55), cfgN("explosionMedium", "lowpassStart", 230), cfgN("explosionMedium", "duration", 0.42)); break;
       case "explosionSmall": this.playExplosion(cfgN("explosionSmall", "volume", 0.4), cfgN("explosionSmall", "lowpassStart", 340), cfgN("explosionSmall", "duration", 0.3)); break;
+      case "asteroidBoomBeat": this.playAsteroidBoomBeat(); break;
       case "thrust": this.startThrust(); break;
       case "reverseThrust": this.startReverseThrust(); break;
       case "sideThrust": this.startSideThrust(); break;
@@ -3227,6 +3229,80 @@ export class Sound {
     subGain.connect(this.master);
     sub.start(t);
     sub.stop(t + duration);
+  }
+
+  // Taiko-style C-pitched boom that layers on top of explosionSmall/Medium/Large
+  // when a plain asteroid is destroyed on-beat. Built to *cut through* the
+  // explosion's broadband noise rather than be masked by it:
+  //   - Saw+sine body (C3→C2) for harmonic-rich punch a pure sine can't give.
+  //   - Sub sine at C1, sustained past the explosion's noise tail so the
+  //     rumble keeps ringing after the crash has dropped off.
+  //   - Pitched-down noise transient with a midband resonance for a hard
+  //     mallet *thwack* attack that reads distinct from the explosion crack.
+  //   - Slight pre-delay (12 ms) so the attack lands just after the explosion
+  //     transient — same beat psycho-acoustically, but unmasks the boom.
+  private playAsteroidBoomBeat() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime + 0.012;
+    const duration = 0.7;
+
+    const bodySine = this.ctx.createOscillator();
+    bodySine.type = "sine";
+    bodySine.frequency.setValueAtTime(196, t);
+    bodySine.frequency.exponentialRampToValueAtTime(65.4, t + 0.11);
+    const bodySaw = this.ctx.createOscillator();
+    bodySaw.type = "sawtooth";
+    bodySaw.frequency.setValueAtTime(130.8, t);
+    bodySaw.frequency.exponentialRampToValueAtTime(65.4, t + 0.13);
+    const bodyFilter = this.ctx.createBiquadFilter();
+    bodyFilter.type = "lowpass";
+    bodyFilter.Q.value = 6;
+    bodyFilter.frequency.setValueAtTime(1400, t);
+    bodyFilter.frequency.exponentialRampToValueAtTime(160, t + duration);
+    const bodyGain = this.ctx.createGain();
+    bodyGain.gain.setValueAtTime(0.0001, t);
+    bodyGain.gain.exponentialRampToValueAtTime(1.1, t + 0.006);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    bodySine.connect(bodyFilter);
+    bodySaw.connect(bodyFilter);
+    bodyFilter.connect(bodyGain);
+    bodyGain.connect(this.master);
+    bodySine.start(t);
+    bodySaw.start(t);
+    bodySine.stop(t + duration);
+    bodySaw.stop(t + duration);
+
+    const sub = this.ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(65.4, t);
+    sub.frequency.exponentialRampToValueAtTime(32.7, t + 0.22);
+    const subGain = this.ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.95, t + 0.015);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + duration + 0.15);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + duration + 0.15);
+
+    const noiseBuf = this.makeNoiseBuffer(0.14);
+    if (!noiseBuf) return;
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = "bandpass";
+    noiseFilter.Q.value = 3;
+    noiseFilter.frequency.setValueAtTime(420, t);
+    noiseFilter.frequency.exponentialRampToValueAtTime(140, t + 0.1);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.0001, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.85, t + 0.003);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.master);
+    noise.start(t);
+    noise.stop(t + 0.14);
   }
 
   private startThrust() {
