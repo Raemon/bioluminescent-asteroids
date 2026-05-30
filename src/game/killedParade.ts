@@ -3,10 +3,10 @@ import { KilledSnapshot } from "./killSnapshot";
 import { BEAT_GRID } from "./rhythmConstants";
 import { SoundName } from "../Sound";
 
-// Why: high enough scroll speed that sprites move visibly between beats — reads as marching past.
+// high enough scroll speed that sprites move visibly between beats — reads as marching past.
 const PARADE_PX_PER_BEAT = 140;
 
-// Why: perceptual onset of a sound lands at the peak of its envelope, not at trigger time.
+// perceptual onset of a sound lands at the peak of its envelope, not at trigger time.
 //   The bass voices sweep their pitch over 40–80ms before the body crystallises, so triggering
 //   them exactly when the sprite reaches centre makes the audible "hit" arrive late. Lead the
 //   trigger by the sweep duration so the perceived peak lands on the visual beat instead.
@@ -21,18 +21,18 @@ const SOUND_PRE_ROLL_SECONDS: Partial<Record<SoundName, number>> = {
   bgBeat: 0.04,
 };
 
-// Why: canvas height grows to fit the tallest snap (+padding) so a boss-large with its
+// canvas height grows to fit the tallest snap (+padding) so a boss-large with its
 //   additive glow halo isn't clipped at the top/bottom of the row.
 const PARADE_MIN_H = 220;
-// Why: bottom pad must fit the 22px "+N" score flash (drawn 6px under the sprite, top baseline)
+// bottom pad must fit the 22px "+N" score flash (drawn 6px under the sprite, top baseline)
 //   plus its 14px shadow blur — 48px keeps the tallest sprite's flash unclipped.
 const PARADE_VPAD = 48;
 const PARADE_MIN_W = 320;
-// Why: bgBeat fires on every whole BEAT_GRID tick (alternating downbeat/offbeat pitch), so
+// bgBeat fires on every whole BEAT_GRID tick (alternating downbeat/offbeat pitch), so
 //   snapping offsets to integer beats guarantees the kill-sound trigger lands on a bg beat.
 const PARADE_BEAT_SUBDIV = 1.0;
 
-// Why: `played` latches true so each kill sound replays once when its sprite crosses centre.
+// `played` latches true so each kill sound replays once when its sprite crosses centre.
 //   `playedAtBeat` snapshots the parade-beat clock at that moment so the "+N" score flash
 //   can fade out a fixed number of beats later, independent of bgm tempo drift.
 //   `droneKey` is the unique handle (this entry object would clash across replays) for the
@@ -46,7 +46,7 @@ export type ParadeEntry = {
   droneActive: boolean;
 };
 
-// Why: maxHp/4 spacing = on-rhythm shots needed — paces the parade by kill difficulty.
+// maxHp/4 spacing = on-rhythm shots needed — paces the parade by kill difficulty.
 export const renderKilledRow = (game: Game) => {
   stopParade(game);
   if (game.killedSnapshots.length === 0) {
@@ -58,7 +58,7 @@ export const renderKilledRow = (game: Game) => {
   startParadeLoop(game);
 };
 
-// Why: tiny kills get sub-beat rests (1hp → quarter, 2hp → half) so trash-mob trails machine-gun by;
+// tiny kills get sub-beat rests (1hp → quarter, 2hp → half) so trash-mob trails machine-gun by;
 //   anything bigger snaps to the whole-beat grid so the kill-sound still lands on a bg bass tick.
 const layOutParade = (game: Game) => {
   const entries: ParadeEntry[] = [];
@@ -78,8 +78,8 @@ const layOutParade = (game: Game) => {
   game.paradeTotalBeats = cursor;
 };
 
-// Why: DPR-aware backing store needed so the parade looks crisp at high-density display ratios.
-// Why: height is sized to the tallest captured snap (which already includes its glow margin)
+// DPR-aware backing store needed so the parade looks crisp at high-density display ratios.
+// height is sized to the tallest captured snap (which already includes its glow margin)
 //   plus a small vpad — fixed-360 used to crop the boss-large halo.
 const configureParadeCanvas = (game: Game) => {
   const canvas = game.killedRowEl;
@@ -99,8 +99,8 @@ const configureParadeCanvas = (game: Game) => {
   if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 };
 
-// Why: rAF id held so stopParade can cancel cleanly on restart / abort.
-// Why: anchor parade time to game.beatTime (snapped to BEAT_GRID) so the eighth-note kill-sound
+// rAF id held so stopParade can cancel cleanly on restart / abort.
+// anchor parade time to game.beatTime (snapped to BEAT_GRID) so the eighth-note kill-sound
 //   triggers land exactly on the bg bass beat that keeps ticking during gameover.
 const startParadeLoop = (game: Game) => {
   const ctx = game.killedRowEl.getContext("2d");
@@ -115,7 +115,7 @@ const startParadeLoop = (game: Game) => {
   game.paradeRafId = requestAnimationFrame(step);
 };
 
-// Why: hard reset on every state transition — never want two parades running together.
+// hard reset on every state transition — never want two parades running together.
 //   Also kills any in-flight bass drones the parade started; otherwise restarting the parade
 //   (e.g. abort → title) would leak the drone bed into the title screen.
 export const stopParade = (game: Game) => {
@@ -132,7 +132,7 @@ export const stopParade = (game: Game) => {
   game.paradeTotalBeats = 0;
 };
 
-// Why: per-frame composition splits cleanly into "where are we", "draw", "should we stop?".
+// per-frame composition splits cleanly into "where are we", "draw", "should we stop?".
 const tickParade = (game: Game, ctx: CanvasRenderingContext2D) => {
   const cssW = game.paradeCanvasW;
   const cssH = game.paradeCanvasH;
@@ -142,7 +142,7 @@ const tickParade = (game: Game, ctx: CanvasRenderingContext2D) => {
   maybeEndParade(game, t, cssW);
 };
 
-// Why: pre-roll itself is snapped to BEAT_GRID so the first sprite still reaches centre on a beat
+// pre-roll itself is snapped to BEAT_GRID so the first sprite still reaches centre on a beat
 //   even though the canvas-width-derived pre-roll would otherwise land on a fractional beat.
 const currentParadeBeat = (game: Game, cssW: number): number => {
   const elapsedBeats = (game.beatTime - game.paradeStartBeatTime) / BEAT_GRID;
@@ -151,11 +151,11 @@ const currentParadeBeat = (game: Game, cssW: number): number => {
   return elapsedBeats - preRollBeats;
 };
 
-// Why: "+N" flashes for ~1.5 beats after the sprite crosses centre — long enough to read at
+// "+N" flashes for ~1.5 beats after the sprite crosses centre — long enough to read at
 //   any sane bpm, short enough that consecutive close kills don't pile up overlapping numbers.
 const SCORE_FLASH_BEATS = 1.5;
 
-// Why: cull offscreen sprites before drawImage; trigger kill sound when sprite crosses centre.
+// cull offscreen sprites before drawImage; trigger kill sound when sprite crosses centre.
 //   Bassteroid entries also light up their drone for the duration the sprite is on screen, so
 //   the parade carries the continuous bed as well as the per-beat hit voice.
 const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number, cssW: number, cssH: number) => {
@@ -164,7 +164,7 @@ const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number,
   for (const e of game.paradeEntries) {
     const x = centreX + (e.beatOffset - t) * PARADE_PX_PER_BEAT;
     const halfW = e.snap.full.width / 2;
-    // Why: lead bass/percussive triggers by their perceptual-onset delay so the audible "hit"
+    // lead bass/percussive triggers by their perceptual-onset delay so the audible "hit"
     //   lands on centre, not after the sprite has already passed it. See SOUND_PRE_ROLL_SECONDS.
     const preRollBeats = (SOUND_PRE_ROLL_SECONDS[e.snap.killSound] ?? 0) / BEAT_GRID;
     if (!e.played && t >= e.beatOffset - preRollBeats) {
@@ -194,7 +194,7 @@ const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number,
   }
 };
 
-// Why: matches popupScore's in-game look (pale blue, soft glow, brief pop-in) so the parade
+// matches popupScore's in-game look (pale blue, soft glow, brief pop-in) so the parade
 //   feedback reads as a replay of the same "+N" the player saw at the kill site.
 const drawScoreFlash = (ctx: CanvasRenderingContext2D, x: number, y: number, points: number, ageBeats: number) => {
   const t = ageBeats / SCORE_FLASH_BEATS;
@@ -215,7 +215,7 @@ const drawScoreFlash = (ctx: CanvasRenderingContext2D, x: number, y: number, poi
   ctx.restore();
 };
 
-// Why: stop the rAF once the last sprite is offscreen — no point burning frames on blank.
+// stop the rAF once the last sprite is offscreen — no point burning frames on blank.
 const maybeEndParade = (game: Game, t: number, cssW: number) => {
   const last = game.paradeEntries[game.paradeEntries.length - 1];
   if (!last) return;

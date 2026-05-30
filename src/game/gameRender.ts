@@ -7,7 +7,7 @@ import { computeConeFrame } from "../ship/reticule/coneGeometry";
 import { pickCenterMostTargetForFocus, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
 import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
 
-// Why: shake is purely cosmetic; isolate its math so render() reads top-down.
+// shake is purely cosmetic; isolate its math so render() reads top-down.
 const applyScreenShake = (game: Game): { shakeX: number; shakeY: number } => {
   if (game.shake <= 0) return { shakeX: 0, shakeY: 0 };
   game.shakeSeed += 1;
@@ -17,7 +17,7 @@ const applyScreenShake = (game: Game): { shakeX: number; shakeY: number } => {
   };
 };
 
-// Why: deep-space backdrop has to repaint every frame or shake/clearRect leaves trails.
+// deep-space backdrop has to repaint every frame or shake/clearRect leaves trails.
 const paintBackdrop = (game: Game) => {
   const { ctx, w, h } = game;
   ctx.clearRect(0, 0, w, h);
@@ -25,13 +25,13 @@ const paintBackdrop = (game: Game) => {
   ctx.fillRect(0, 0, w, h);
 };
 
-// Why: starfield + pulsar are the "static" layers; everything else sits on top of them.
+// starfield + pulsar are the "static" layers; everything else sits on top of them.
 const paintBackgroundLayers = (game: Game) => {
   game.starfield.render(game.ctx, game.time);
   game.pulsar.render(game.ctx);
 };
 
-// Why: ctx.filter = brightness(...) is implemented as a full-canvas pixel pass on most browsers
+// ctx.filter = brightness(...) is implemented as a full-canvas pixel pass on most browsers
 // and caused noticeable per-frame lag when several focusable bodies were on screen. Replace it
 // with a single additive radial-gradient disc painted on top of the focused target — every other
 // entity already uses globalCompositeOperation = "lighter", so an extra additive splash reads
@@ -54,7 +54,7 @@ const paintFocusGlow = (ctx: CanvasRenderingContext2D, t: ReticuleTarget) => {
   ctx.restore();
 };
 
-// Why: bodies must sit ON their own trails, so trails pass before any per-entity render call.
+// bodies must sit ON their own trails, so trails pass before any per-entity render call.
 const paintEntityLayers = (
   game: Game, focusedTarget: ReticuleTarget | null,
 ) => {
@@ -72,7 +72,7 @@ const paintEntityLayers = (
   game.particles.render(ctx);
 };
 
-// Why: reticule reads every visible target on the field; gather them once not repeatedly.
+// reticule reads every visible target on the field; gather them once not repeatedly.
 // Exported so the ship-rotation snap (gameUpdate) can use the same target set as the reticule.
 export const targetsForReticule = (game: Game) => [
   ...game.asteroids,
@@ -82,7 +82,7 @@ export const targetsForReticule = (game: Game) => [
   ...game.canisters,
 ];
 
-// Why: ship + reticule are the foreground; popups (combo/pickup/debug) sit above everything else.
+// ship + reticule are the foreground; popups (combo/pickup/debug) sit above everything else.
 const paintForeground = (game: Game) => {
   const { ctx } = game;
   game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targetsForReticule(game), game.beatTime);
@@ -91,7 +91,7 @@ const paintForeground = (game: Game) => {
   renderPopups(ctx, game.popups);
 };
 
-// Why: one entry point so main.ts doesn't see the layer ordering, and shake wraps the whole scene.
+// one entry point so main.ts doesn't see the layer ordering, and shake wraps the whole scene.
 export const renderGame = (game: Game) => {
   const { ctx } = game;
   const { shakeX, shakeY } = applyScreenShake(game);
@@ -99,7 +99,7 @@ export const renderGame = (game: Game) => {
   paintBackdrop(game);
   ctx.translate(shakeX, shakeY);
   paintBackgroundLayers(game);
-  // Why: pick the same focused target the reticule will draw the on-rhythm spot on, so the
+  // pick the same focused target the reticule will draw the on-rhythm spot on, so the
   // brightness boost on the sprite and the reticule overlay agree on which target is "the one".
   const targets = targetsForReticule(game);
   const focusedTarget = pickCenterMostTargetForFocus(
@@ -107,7 +107,7 @@ export const renderGame = (game: Game) => {
   );
   paintEntityLayers(game, focusedTarget);
   paintForeground(game);
-  // Why: bass-drop white flash has to sit above every other layer to actually wash the screen.
+  // bass-drop white flash has to sit above every other layer to actually wash the screen.
   game.pulsar.renderShockwaveOverlay(ctx);
   ctx.restore();
 };

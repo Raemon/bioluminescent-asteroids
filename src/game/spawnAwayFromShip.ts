@@ -1,7 +1,7 @@
 import { Vec, dist } from "../vec";
 
-// Why: one retry loop replaces four near-identical "spawn at edge, retry while too close" copies.
-// Why: capped retry mode exists so aliens don't loop forever if the ship sits in the centre.
+// one retry loop replaces four near-identical "spawn at edge, retry while too close" copies.
+// capped retry mode exists so aliens don't loop forever if the ship sits in the centre.
 export const spawnAwayFromShip = <T extends { pos: Vec }>(
   spawn: () => T,
   shipPos: Vec,

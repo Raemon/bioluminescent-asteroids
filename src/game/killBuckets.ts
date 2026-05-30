@@ -1,4 +1,4 @@
-// Why: shared bucket names for kill-tally. killEffects.ts emits these strings into
+// shared bucket names for kill-tally. killEffects.ts emits these strings into
 //   game.killTally, and highscores.ts maps them to human-readable labels for the
 //   leaderboard summary. Keeping the union here means a rename only needs to happen
 //   in one place and TS will catch any drift.

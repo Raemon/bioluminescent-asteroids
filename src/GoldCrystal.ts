@@ -18,7 +18,7 @@ export const GOLD_CRYSTAL_SCORE = 2500;
 // weaker than the rhythm-cracked canister payoff.
 export const GOLD_CRYSTAL_SHATTER_SCORE = 500;
 
-// Why: gem hangs around long enough that a player can reasonably swing back
+// gem hangs around long enough that a player can reasonably swing back
 // for it after handling the surrounding rubble cloud, but not so long that an
 // uncollected gem clutters the field for the rest of the wave.
 const LIFETIME = 18;
@@ -187,7 +187,7 @@ export class GoldCrystal {
 // fraction of its parent velocity so the gem drifts naturally with the burst
 // rather than freezing in space.
 export const spawnGoldCrystalAt = (pos: Vec, parentVel: Vec): GoldCrystal => {
-  // Why: a fraction of parent velocity + small random jitter reads as "the
+  // a fraction of parent velocity + small random jitter reads as "the
   // explosion ejected it" without sending it flying out of reach. Jitter is
   // small so the gem stays predictably near the kill site.
   const drift = v(parentVel.x * 0.25 + rand(-18, 18), parentVel.y * 0.25 + rand(-18, 18));
@@ -200,7 +200,7 @@ export const spawnGoldCrystalAt = (pos: Vec, parentVel: Vec): GoldCrystal => {
 // powerful on-rhythm shot.
 export const spawnCanisterFromGoldCrystal = (g: GoldCrystal): Canister => {
   const kind = pick(POWERUP_KINDS);
-  // Why: short drift path so the freed canister settles near the crack site
+  // short drift path so the freed canister settles near the crack site
   // — the player just earned this and shouldn't have to chase it across the
   // whole screen.
   const pathLength = 320;

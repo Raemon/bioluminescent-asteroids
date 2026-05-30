@@ -1,14 +1,14 @@
 import type { Ship } from "../Ship";
 import { haloVertices } from "./shipHitbox";
 
-// Why: combo tier <2 hides halo entirely; 2–3 shows cyan; ≥4 promotes to gold.
+// combo tier <2 hides halo entirely; 2–3 shows cyan; ≥4 promotes to gold.
 export const setComboFromValue = (ship: Ship, combo: number) => {
   if (combo >= 4) ship.comboHaloTier = 2;
   else if (combo >= 2) ship.comboHaloTier = 1;
   else ship.comboHaloTier = 0;
 };
 
-// Why: shows the player where the hitbox actually sits even when no combo halo is active.
+// shows the player where the hitbox actually sits even when no combo halo is active.
 const paintDullHaloOutline = (ctx: CanvasRenderingContext2D, dullAlpha: number) => {
   if (dullAlpha <= 0.001) return;
   ctx.strokeStyle = `hsla(210, 30%, 70%, ${dullAlpha})`;
@@ -17,7 +17,7 @@ const paintDullHaloOutline = (ctx: CanvasRenderingContext2D, dullAlpha: number) 
   ctx.stroke();
 };
 
-// Why: cyan→gold colour shift signals tier crossover; alpha pulses on beat so the rhythm reads at a glance.
+// cyan→gold colour shift signals tier crossover; alpha pulses on beat so the rhythm reads at a glance.
 const paintActiveHalo = (ctx: CanvasRenderingContext2D, tier1: number, tier2: number, beatPulse: number) => {
   if (tier1 <= 0.001) return;
   const hue = 195 + (45 - 195) * tier2;
@@ -30,7 +30,7 @@ const paintActiveHalo = (ctx: CanvasRenderingContext2D, tier1: number, tier2: nu
   ctx.shadowBlur = 0;
 };
 
-// Why: red wash exactly where the cyan/gold halo just was, so the loss is felt visually as well as audibly.
+// red wash exactly where the cyan/gold halo just was, so the loss is felt visually as well as audibly.
 const paintComboLossFlash = (ctx: CanvasRenderingContext2D, lossFlash: number) => {
   if (lossFlash <= 0.001) return;
   const alpha = 0.85 * lossFlash;
@@ -42,7 +42,7 @@ const paintComboLossFlash = (ctx: CanvasRenderingContext2D, lossFlash: number) =
   ctx.shadowBlur = 0;
 };
 
-// Why: tracing the actual collision silhouette guarantees the halo == hitbox visually and physically.
+// tracing the actual collision silhouette guarantees the halo == hitbox visually and physically.
 const traceHaloPath = (ctx: CanvasRenderingContext2D, ship: Ship) => {
   const halo = haloVertices(ship);
   ctx.beginPath();
@@ -52,7 +52,7 @@ const traceHaloPath = (ctx: CanvasRenderingContext2D, ship: Ship) => {
   ctx.closePath();
 };
 
-// Why: single ship-shaped outline that pulses with the beat and shows combo state in one visual.
+// single ship-shaped outline that pulses with the beat and shows combo state in one visual.
 export const renderComboHalo = (ctx: CanvasRenderingContext2D, ship: Ship, beatPulse: number) => {
   const i = ship.comboHaloIntensity;
   const tier1 = Math.min(1, i);

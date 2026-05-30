@@ -173,7 +173,7 @@ export class Alien {
     return { killed: this.hp <= 0 };
   }
 
-  // Why: same hp-as-momentum proxy as asteroids — a chip hit shoves a small
+  // same hp-as-momentum proxy as asteroids — a chip hit shoves a small
   // alien noticeably, barely budges a big one.
   applyKnockback(dirX: number, dirY: number, amount: number, referenceSpeed: number = 120) {
     const len = Math.hypot(dirX, dirY);

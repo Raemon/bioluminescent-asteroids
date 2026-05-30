@@ -70,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })),
       });
     } catch (err) {
-      // Why: don't leak DB internals to clients — log on the server, return a generic message.
+      // don't leak DB internals to clients — log on the server, return a generic message.
       console.error("[highscores GET] db read failed:", err);
       res.status(500).json({ error: "DB read failed" });
     }
@@ -106,7 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
       });
     } catch (err) {
-      // Why: don't leak DB internals to clients — log on the server, return a generic message.
+      // don't leak DB internals to clients — log on the server, return a generic message.
       console.error("[highscores POST] db write failed:", err);
       res.status(500).json({ error: "DB write failed" });
     }

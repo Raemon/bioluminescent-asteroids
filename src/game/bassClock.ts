@@ -2,7 +2,7 @@ import type { Game } from "../Game";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
 import { BEAT_GRID } from "./rhythmConstants";
 
-// Why: kick (C2), pluck (G2), boom (F2), snap (C3) — I-IV-V-percussion worst case stays musical.
+// kick (C2), pluck (G2), boom (F2), snap (C3) — I-IV-V-percussion worst case stays musical.
 export const BASS_KIND_SOUND: Record<"bassA" | "bassB" | "bassC" | "bassD", "bassKick" | "bassPluck" | "bassBoom" | "bassSnap"> = {
   bassA: "bassKick",
   bassB: "bassPluck",
@@ -10,18 +10,19 @@ export const BASS_KIND_SOUND: Record<"bassA" | "bassB" | "bassC" | "bassD", "bas
   bassD: "bassSnap",
 };
 
-// Why: gen-2 small drops a minor third so terminal pieces sit deeper but stay diatonic.
-// Why: smalls land on A1/E2/D2/A2 → I/vi/V/ii flavour, pairs naturally with the C-F-G groundwork.
+// gen-2 small drops a minor third so terminal pieces sit deeper but stay diatonic.
+// smalls land on A1/E2/D2/A2 → I/vi/V/ii flavour, pairs naturally with the C-F-G groundwork.
 export const BASS_SPLIT_PITCH_RATIO = [1, 1, 0.8409] as const;
 
-// Why: shares beatTime with bassteroids so the pulsar approach beat stays locked under slow-mo.
-// White-bullet tier (combo ≥ 8) doubles the pulse: the existing quarter-note slots still fire
+// shares beatTime with bassteroids so the pulsar approach beat stays locked under slow-mo.
+// Sparkle tier (combo ≥ 12) doubles the pulse: the existing quarter-note slots still fire
 // the heavy beat, with lighter "and" eighth-note hits half-way between them. The in-between
 // eighths use playBgBeatLight, which routes the same kick voice at ~40% velocity (and a
 // semitone up) so the riff reads as "downbeat / and / offbeat / and" rather than four equal
-// kicks.
+// kicks. At combo ≥ 12 the rhythm gate also doubles (comboGrid in rhythmGate.ts), so the
+// player can hear *and* play to the halfbeats — sound and gameplay stay aligned.
 // We walk an eighth-note grid (BEAT_GRID/2). Even eighths = the existing quarter beats;
-// odd eighths = the new in-between "and" hits, only fired while the white tier is active.
+// odd eighths = the new in-between "and" hits, only fired while the sparkle tier is active.
 const tickBgBeats = (game: Game) => {
   const EIGHTH_GRID = BEAT_GRID / 2;
   const eighthIdx = Math.floor(game.beatTime / EIGHTH_GRID);
@@ -34,10 +35,10 @@ const tickBgBeats = (game: Game) => {
     if (isQuarter) {
       const quarterIdx = game.lastBgBeatIndex >> 1;
       const isOffbeat = (quarterIdx & 1) === 1;
-      // Why: 1.122 = whole-step lift (E1→F#1) — distinct from the downbeat, mood intact.
+      // 1.122 = whole-step lift (E1→F#1) — distinct from the downbeat, mood intact.
       const pitchRatio = isOffbeat ? 1.122 : 1;
       game.sound.play("bgBeat", pitchRatio);
-    } else if (game.beatCombo >= 8) {
+    } else if (game.beatCombo >= 12) {
       // Doubletime "and": land on the eighth between quarter beats. The next
       // quarter slot's parity determines pitch — alternating C#/D# so the
       // syncopation oscillates rather than stutters on a single pitch.
@@ -48,7 +49,7 @@ const tickBgBeats = (game: Game) => {
   }
 };
 
-// Why: kind binds the voice; measureOffset varies so split children carry timbre to new beat slots.
+// kind binds the voice; measureOffset varies so split children carry timbre to new beat slots.
 const tickBassAsteroids = (game: Game) => {
   for (const a of game.asteroids) {
     if (!a.isBass()) continue;
@@ -57,14 +58,14 @@ const tickBassAsteroids = (game: Game) => {
       const pitchRatio = BASS_SPLIT_PITCH_RATIO[a.splitLevel] ?? 1;
       game.sound.play(sound, pitchRatio, a.pos);
       a.beatFlash = 1.0;
-      // Why: re-snap to BEAT_GRID so accumulated float error can't drift the voice off the beat.
+      // re-snap to BEAT_GRID so accumulated float error can't drift the voice off the beat.
       a.nextBeatAt = Math.round((a.nextBeatAt + BASS_MEASURE_LENGTH) / BEAT_GRID) * BEAT_GRID;
     }
   }
 };
 
-// Why: shared beat clock makes comet notes land on the same audio frame as coincident bass hits.
-// Why: comet melody pulse is 2 BEAT_GRID per step (1.0 s) — matches the halo ambient melody's
+// shared beat clock makes comet notes land on the same audio frame as coincident bass hits.
+// comet melody pulse is 2 BEAT_GRID per step (1.0 s) — matches the halo ambient melody's
 //   step rate so the two lines hocket cleanly instead of stuttering at different rates.
 const COMET_STEP = BEAT_GRID * 2;
 const tickCometMelodies = (game: Game) => {
@@ -77,7 +78,7 @@ const tickCometMelodies = (game: Game) => {
   }
 };
 
-// Why: one entry advances beatTime + every audio voice so they all slow together under slow-mo.
+// one entry advances beatTime + every audio voice so they all slow together under slow-mo.
 export const tickBassBeats = (game: Game, musicDt: number) => {
   game.beatTime += musicDt;
   tickBgBeats(game);
@@ -85,7 +86,7 @@ export const tickBassBeats = (game: Game, musicDt: number) => {
   tickCometMelodies(game);
 };
 
-// Why: gameover advances beatTime itself and detonates bass rocks on its own schedule, but the
+// gameover advances beatTime itself and detonates bass rocks on its own schedule, but the
 //   bgBeat sub-bass + comet notes still need to fire — this keeps the music ticking under the
 //   post-mortem parade without re-triggering the bass voices that detonation already plays.
 export const tickAuxBeats = (game: Game) => {

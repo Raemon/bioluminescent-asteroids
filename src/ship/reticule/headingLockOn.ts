@@ -6,23 +6,23 @@ import {
 } from "./coneGeometry";
 import { ReticuleTarget } from "./trajectoryPreview";
 
-// Why: when the player sweeps the ship and the reticule would jump from one side of a target's
+// when the player sweeps the ship and the reticule would jump from one side of a target's
 // trajectory line to the other in a single frame, snap the heading so the reticule lands ON the
 // line. Lets the player fine-aim along a moving target's path without overshooting it. The lock is
 // soft — held rotation past ESCAPE_THRESHOLD releases past the line.
 
-// Why: max accumulated intended rotation (radians) before the lock releases. ~10° → roughly 2–3
+// max accumulated intended rotation (radians) before the lock releases. ~10° → roughly 2–3
 // frames of held input at the ship's max turn rate (4.6 rad/s) before breaking free.
 const LOCK_ESCAPE_THRESHOLD = 0.17;
 
-// Why: matches the geometry of `paintTrajectoryFromSnapshot` — the trajectory line is drawn
+// matches the geometry of `paintTrajectoryFromSnapshot` — the trajectory line is drawn
 // starting `(radius + edgePad)` ahead of the target body along its velocity vector.
 const TRAJECTORY_EDGE_PAD = 6;
 
-// Why: the primary reticule (the one used for the on-rhythm lock) is computed at beatFraction=1.
+// the primary reticule (the one used for the on-rhythm lock) is computed at beatFraction=1.
 const PRIMARY_BEAT_FRACTION = 1;
 
-// Why: only snap when the reticule was already close to the line both before and after the sweep —
+// only snap when the reticule was already close to the line both before and after the sweep —
 // otherwise a far-away crossing yanks the heading across the screen, which reads as a glitch. ~10px
 // matches the on-beat hit radius so "close enough to almost hit it" is the gate for snapping.
 const SNAP_PROXIMITY_RADIUS = 10;

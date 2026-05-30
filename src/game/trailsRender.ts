@@ -1,24 +1,24 @@
 import type { Game } from "../Game";
 
-// Why: hard cap keeps worst-case drawImage count bounded; dropped trails are the furthest offscreen.
+// hard cap keeps worst-case drawImage count bounded; dropped trails are the furthest offscreen.
 const MAX_VISIBLE_TRAILS = 40;
 
-// Why: numeric tags over strings keep the distance-sort cache-friendly.
+// numeric tags over strings keep the distance-sort cache-friendly.
 const SECTION_ASTEROID = 0;
 const SECTION_ALIEN = 1;
 const SECTION_COMET = 2;
 
-// Why: scratch buffers at module scope so renderTrails never allocates per frame.
+// scratch buffers at module scope so renderTrails never allocates per frame.
 const idx = new Int32Array(128);
 const sect = new Int8Array(128);
 const sqDist = new Float32Array(128);
 
-// Why: squared distance from screen centre — cheap selection metric for the over-cap fallback.
+// squared distance from screen centre — cheap selection metric for the over-cap fallback.
 const collectTrailCandidates = (game: Game, cx: number, cy: number): number => {
   let n = 0;
   const cap = idx.length;
   for (let i = 0; i < game.asteroids.length && n < cap; i++) {
-    // Why: gen-0 bassteroids wear a Trail, post-split fragments wear a
+    // gen-0 bassteroids wear a Trail, post-split fragments wear a
     // SoundwaveRadiator — either qualifies as a candidate to draw.
     if (!game.asteroids[i].trail && !game.asteroids[i].radiator) continue;
     const dx = game.asteroids[i].pos.x - cx;
@@ -42,7 +42,7 @@ const collectTrailCandidates = (game: Game, cx: number, cy: number): number => {
   return n;
 };
 
-// Why: partial-sort is cheaper than a full sort when only the top-K matters and K is small.
+// partial-sort is cheaper than a full sort when only the top-K matters and K is small.
 const sortNearestToFront = (n: number, maxN: number) => {
   for (let i = 0; i < maxN; i++) {
     let minJ = i;
@@ -58,7 +58,7 @@ const sortNearestToFront = (n: number, maxN: number) => {
   }
 };
 
-// Why: one composite-mode change for the whole batch beats toggling per-entity.
+// one composite-mode change for the whole batch beats toggling per-entity.
 const paintSelectedTrails = (game: Game, ctx: CanvasRenderingContext2D, n: number, tSec: number) => {
   for (let i = 0; i < n; i++) {
     const k = idx[i];
@@ -75,7 +75,7 @@ const paintSelectedTrails = (game: Game, ctx: CanvasRenderingContext2D, n: numbe
   }
 };
 
-// Why: trails drawn before bodies so each entity sits on top of its own trail; one pass for all.
+// trails drawn before bodies so each entity sits on top of its own trail; one pass for all.
 export const renderTrails = (game: Game, ctx: CanvasRenderingContext2D) => {
   const cx = game.w * 0.5;
   const cy = game.h * 0.5;

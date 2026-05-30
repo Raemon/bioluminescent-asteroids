@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaNeon } from "@prisma/adapter-neon";
 
-// Why: serverless functions get reused across invocations — caching the client
+// serverless functions get reused across invocations — caching the client
 // avoids opening a fresh connection on every request.
 declare global {
   // eslint-disable-next-line no-var

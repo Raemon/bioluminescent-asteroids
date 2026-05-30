@@ -23,12 +23,12 @@ import { showTitle, toggleMute, abortMission } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 
-// Why: re-export so existing external imports (Ship.ts) keep working without touching their imports.
+// re-export so existing external imports (Ship.ts) keep working without touching their imports.
 export { BEAT_GRID } from "./game/rhythmConstants";
 
 type GameState = "title" | "playing" | "paused" | "dying" | "gameover";
 
-// Why: Game holds the cross-cutting state every helper in src/game/* reads; behavior lives in modules.
+// Game holds the cross-cutting state every helper in src/game/* reads; behavior lives in modules.
 export class Game implements HudElements {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
@@ -53,29 +53,29 @@ export class Game implements HudElements {
   h = 0;
   dpr = 1;
   time = 0;
-  // Why: shared bass-beat clock — bass voices, on-beat detection and the visual pulsar all read this one source.
+  // shared bass-beat clock — bass voices, on-beat detection and the visual pulsar all read this one source.
   beatTime = 0;
   lastBgBeatIndex = -1;
   nextBeatToEvaluate = 0;
   beatCombo = 0;
-  // Why: high-water mark of beatCombo during a run — submitted with the score so the leaderboard
+  // high-water mark of beatCombo during a run — submitted with the score so the leaderboard
   //   can showcase a pilot's best streak, separately from the final score.
   maxCombo = 0;
-  // Why: per-wave high-water mark of beatCombo, surfaced in the wave-clear summary panel.
+  // per-wave high-water mark of beatCombo, surfaced in the wave-clear summary panel.
   //   Reset to the current beatCombo at the start of each new wave.
   maxComboThisWave = 0;
-  // Why: latched on off-beat fire so the punishment can land at the next beat closure (not retroactive).
+  // latched on off-beat fire so the punishment can land at the next beat closure (not retroactive).
   firedOffBeatSinceLastBeat = false;
-  // Why: first-ever meaningful combo loss in a run gets a labeled popup so the player learns the mechanic.
+  // first-ever meaningful combo loss in a run gets a labeled popup so the player learns the mechanic.
   hasLostComboEver = false;
-  // Why: combo x6 unlocks the first Pilot's Log vocal — fires once per run, gated by this flag.
+  // combo x6 unlocks the first Pilot's Log vocal — fires once per run, gated by this flag.
   pilotLog1Unlocked = false;
-  // Why: combo x12 unlocks Entry 3 — same once-per-run gate, no HUD toast.
+  // combo x12 unlocks Entry 3 — same once-per-run gate, no HUD toast.
   pilotLog3Unlocked = false;
-  // Why: beta-test mode disables the random wave director — the run only contains the elements
+  // beta-test mode disables the random wave director — the run only contains the elements
   //   the player selected in the beta panel; when they're all gone the wave doesn't auto-spawn.
   betaMode = false;
-  // Why: latched while the end-of-wave summary is playing (drain + hold + fade)
+  // latched while the end-of-wave summary is playing (drain + hold + fade)
   //   so the empty-asteroids check in the update loop doesn't keep re-triggering
   //   advanceWave each frame. Cleared when the summary finishes and the next
   //   wave's spawn fires.
@@ -89,9 +89,9 @@ export class Game implements HudElements {
   alienSpawnSize: AlienSize = "small";
   waveElapsed = 0;
   slowMoTimer = 0;
-  // Why: per-game randomised bass-kind intro order so the wave-2/3 picks vary between runs.
+  // per-game randomised bass-kind intro order so the wave-2/3 picks vary between runs.
   bassOrder: AsteroidKind[] = [];
-  // Why: one unified list replaces four parallel `xSpawnAt` fields used to schedule mid-wave events.
+  // one unified list replaces four parallel `xSpawnAt` fields used to schedule mid-wave events.
   waveEvents: WaveEventSchedule = newWaveEventSchedule();
 
   scoreEl: HTMLElement;
@@ -112,19 +112,19 @@ export class Game implements HudElements {
   scoreEntryStatusEl: HTMLElement;
   leaderboardEl: HTMLElement;
   leaderboardListEl: HTMLOListElement;
-  // Why: prevents a double-submit if the player mashes Enter while the POST is in flight.
+  // prevents a double-submit if the player mashes Enter while the POST is in flight.
   scoreSubmitState: "idle" | "submitting" | "submitted" = "idle";
-  // Why: lets the title screen after a game-over show a score-neighborhood (±5) around the
+  // lets the title screen after a game-over show a score-neighborhood (±5) around the
   //   player's run instead of the global top 10. Cleared when a new run starts.
   lastRunScore: number | null = null;
   lastRunScoreId: number | null = null;
 
-  // Why: post-run trophy lineup; replayed in the end-of-mission parade with original kill sounds.
+  // post-run trophy lineup; replayed in the end-of-mission parade with original kill sounds.
   killedSnapshots: KilledSnapshot[] = [];
-  // Why: per-run kill tally by category — submitted alongside the score on game over.
+  // per-run kill tally by category — submitted alongside the score on game over.
   killTally: Partial<Record<KillBucket, number>> = {};
   paradeActive = false;
-  // Why: parade timing reads game.beatTime (which keeps ticking through gameover) so
+  // parade timing reads game.beatTime (which keeps ticking through gameover) so
   //   sprite-crosses-centre events land on the same beat grid as the bg bass beat.
   paradeStartBeatTime = 0;
   paradeRafId: number | null = null;
@@ -173,7 +173,7 @@ export class Game implements HudElements {
     showTitle(this);
   }
 
-  // Why: DPR-aware resize keeps the canvas crisp; the starfield/pulsar need their own resize too.
+  // DPR-aware resize keeps the canvas crisp; the starfield/pulsar need their own resize too.
   resize() {
     this.dpr = window.devicePixelRatio || 1;
     this.w = window.innerWidth;

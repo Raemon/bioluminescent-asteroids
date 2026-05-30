@@ -3,16 +3,16 @@ import { Asteroid } from "../Asteroid";
 import { emitExplosion, emitShockwaveSparks } from "./particleBursts";
 import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet, BeatClaimSet } from "./waveDirector";
 
-// Why: strong enough to redirect, weak enough to avoid an unrecoverable spin.
+// strong enough to redirect, weak enough to avoid an unrecoverable spin.
 const SHOCKWAVE_SHIP_IMPULSE = 320;
 
-// Why: pulsar.shockJustFired flips a frame after this, so we kick off the vibrate sequence here.
+// pulsar.shockJustFired flips a frame after this, so we kick off the vibrate sequence here.
 export const startShockwave = (game: Game) => {
   game.pulsar.triggerShockwave();
   game.sound.play("shockwaveCharge");
 };
 
-// Why: instant-killing the boss via environment would feel cheap; we still nudge it for feedback.
+// instant-killing the boss via environment would feel cheap; we still nudge it for feedback.
 const bossWeathersShockwave = (game: Game, a: Asteroid, surviving: Asteroid[]) => {
   const kick = game.pulsar.shockwaveImpulseAt(a.pos);
   a.vel = { x: a.vel.x + kick.x * 120, y: a.vel.y + kick.y * 120 };
@@ -20,13 +20,13 @@ const bossWeathersShockwave = (game: Game, a: Asteroid, surviving: Asteroid[]) =
   surviving.push(a);
 };
 
-// Why: kicking children outward reads as flung-apart by the wavefront, not spawning in place.
+// kicking children outward reads as flung-apart by the wavefront, not spawning in place.
 const kickChildFromShockwave = (game: Game, child: Asteroid) => {
   const kick = game.pulsar.shockwaveImpulseAt(child.pos);
   child.vel = { x: child.vel.x + kick.x * 220, y: child.vel.y + kick.y * 220 };
 };
 
-// Why: bass children stay grid-aligned + inherit drones so the music keeps marching post-shatter.
+// bass children stay grid-aligned + inherit drones so the music keeps marching post-shatter.
 //   Rhythm trajectory alignment runs *after* the shockwave kick so we're not
 //   immediately undoing the kick's force; instead it tunes the net post-kick
 //   speed so the child's first re-engagement still falls on a beat. All
@@ -48,7 +48,7 @@ const shatterBassRock = (game: Game, a: Asteroid, surviving: Asteroid[], claimed
   }
 };
 
-// Why: non-bass rocks have no drone or beat schedule, so the path stays free of audio bookkeeping.
+// non-bass rocks have no drone or beat schedule, so the path stays free of audio bookkeeping.
 const shatterPlainRock = (game: Game, a: Asteroid, surviving: Asteroid[], claimed: BeatClaimSet) => {
   a.flashAmount = 1;
   emitExplosion(game.particles, game.shards, a, false);
@@ -59,7 +59,7 @@ const shatterPlainRock = (game: Game, a: Asteroid, surviving: Asteroid[], claime
   }
 };
 
-// Why: rebuild via surviving[] so we don't mutate the array we're iterating over.
+// rebuild via surviving[] so we don't mutate the array we're iterating over.
 const shatterAllAsteroids = (game: Game) => {
   const surviving: Asteroid[] = [];
   const claimed = newBeatClaimSet();
@@ -71,7 +71,7 @@ const shatterAllAsteroids = (game: Game) => {
   game.asteroids = surviving;
 };
 
-// Why: clamped distance falloff guarantees the player feels *something* even at the far corner.
+// clamped distance falloff guarantees the player feels *something* even at the far corner.
 const kickShipFromShockwave = (game: Game) => {
   if (!game.ship.alive) return;
   const kick = game.pulsar.shockwaveImpulseAt(game.ship.pos);
@@ -79,11 +79,11 @@ const kickShipFromShockwave = (game: Game) => {
   const falloff = Math.max(0.45, 1 - d / Math.max(game.w, game.h));
   const mag = SHOCKWAVE_SHIP_IMPULSE * falloff;
   game.ship.vel = { x: game.ship.vel.x + kick.x * mag, y: game.ship.vel.y + kick.y * mag };
-  // Why: grace frame avoids punishing the player for being kicked into freshly-shattered debris.
+  // grace frame avoids punishing the player for being kicked into freshly-shattered debris.
   game.ship.invuln = Math.max(game.ship.invuln, 0.6);
 };
 
-// Why: environment event — no score / combo so the ring stays a "free-of-charge" hazard reshape.
+// environment event — no score / combo so the ring stays a "free-of-charge" hazard reshape.
 export const detonateShockwave = (game: Game) => {
   game.sound.play("shockwaveBoom");
   // Bass-drop shake kicks the screen hard so the impact registers in the

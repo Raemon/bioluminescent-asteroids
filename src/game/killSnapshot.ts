@@ -4,7 +4,7 @@ import { Asteroid } from "../Asteroid";
 import { Alien } from "../Alien";
 import { Comet } from "../Comet";
 
-// Why: post-mission parade replays every kill at full size with the original kill sound.
+// post-mission parade replays every kill at full size with the original kill sound.
 //   `bassDrone` is set for bassteroid kills whose voice has a longrunning drone
 //   (medium/small only — large bass doesn't get one), so the parade can layer the
 //   continuous bed under the beat sound just like during play.
@@ -17,7 +17,7 @@ export type KilledSnapshot = {
   bassDrone?: { kind: "bassA" | "bassB" | "bassC" | "bassD"; size: "medium" | "small" };
 };
 
-// Why: one canvas-creation + translate ritual for all three kill flavours; caller owns the freeze.
+// one canvas-creation + translate ritual for all three kill flavours; caller owns the freeze.
 const captureToCanvas = (tileSize: number, paint: (ctx: CanvasRenderingContext2D) => void): HTMLCanvasElement | null => {
   const c = document.createElement("canvas");
   c.width = tileSize;
@@ -29,8 +29,8 @@ const captureToCanvas = (tileSize: number, paint: (ctx: CanvasRenderingContext2D
   return c;
 };
 
-// Why: trophy must be a still pose, not mid-explosion brightness — freeze rotation + flashes.
-// Why: asteroid sprites bake a halo extending to ~2.3×radius + 14px padding (see buildSprite),
+// trophy must be a still pose, not mid-explosion brightness — freeze rotation + flashes.
+// asteroid sprites bake a halo extending to ~2.3×radius + 14px padding (see buildSprite),
 //   plus an extra margin for any live shadowBlur drawn on top — taking the max of the sprite's
 //   own half-size and (radius + margin) ensures the parade tile never crops the halo.
 export const snapshotAsteroidKill = (a: Asteroid, killSound: SoundName, scoreEarned: number): KilledSnapshot | null => {
@@ -47,8 +47,8 @@ export const snapshotAsteroidKill = (a: Asteroid, killSound: SoundName, scoreEar
   return { full: cnv, fullRadius: a.radius, killSound, maxHp: a.maxHp, scoreEarned };
 };
 
-// Why: aliens carry fireFlash on top of flashAmount; both must clear for a still pose.
-// Why: alien halo gradient extends to ~2.2×radius from centre even with fireFlash zeroed (see
+// aliens carry fireFlash on top of flashAmount; both must clear for a still pose.
+// alien halo gradient extends to ~2.2×radius from centre even with fireFlash zeroed (see
 //   Alien.render), and shadowBlur adds ~12px on top — size the tile so neither is clipped.
 export const snapshotAlienKill = (al: Alien, killSound: SoundName, scoreEarned: number): KilledSnapshot | null => {
   const haloExtent = al.radius * 2.2 + 16;
@@ -63,13 +63,13 @@ export const snapshotAlienKill = (al: Alien, killSound: SoundName, scoreEarned: 
   return { full: cnv, fullRadius: al.radius, killSound, maxHp: al.maxHp, scoreEarned };
 };
 
-// Why: comet bloom bleeds far past its radius; tile sizes to fit both the head halo and the
+// comet bloom bleeds far past its radius; tile sizes to fit both the head halo and the
 //   recorded trail (rebased to (0,0)) so the parade replay shows the streak behind the head.
 //   `age` is forced past FADE_IN so the still pose is at full brightness rather than fading in.
 export const snapshotCometKill = (c: Comet, killSound: SoundName, scoreEarned: number): KilledSnapshot | null => {
   const margin = 12;
   const headExtent = c.radius * 2 + margin;
-  // Why: trail entries are world-space; rebase them to the comet head at (0,0) so the snapshot
+  // trail entries are world-space; rebase them to the comet head at (0,0) so the snapshot
   //   can paint the trail relative to the centred head. Clone so we don't mutate the live comet.
   const rebasedTrail = c.trail.map((p) => ({ pos: v(p.pos.x - c.pos.x, p.pos.y - c.pos.y), age: p.age }));
   let trailExtent = 0;
@@ -85,6 +85,6 @@ export const snapshotCometKill = (c: Comet, killSound: SoundName, scoreEarned: n
     c.pos = prevPos; c.trail = prevTrail; c.age = prevAge;
   });
   if (!cnv) return null;
-  // Why: maxHp=4 paces the parade as one beat of breathing room after the comet sprite.
+  // maxHp=4 paces the parade as one beat of breathing room after the comet sprite.
   return { full: cnv, fullRadius: c.radius, killSound, maxHp: 4, scoreEarned };
 };

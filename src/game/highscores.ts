@@ -1,7 +1,7 @@
 import type { Game } from "../Game";
 import type { KillBucket } from "./killBuckets";
 
-// Why: bucket names are emitted by killEffects.ts; this label map keeps the
+// bucket names are emitted by killEffects.ts; this label map keeps the
 // leaderboard summary readable instead of leaking internal asteroid kinds.
 const BUCKET_LABELS: Record<KillBucket, string> = {
   asteroid_large: "lg",
@@ -68,7 +68,7 @@ export const fetchHighscores = async (limit = 10): Promise<HighscoreRow[]> => {
   return body.scores;
 };
 
-// Why: the leaderboard row shows a compressed kill breakdown; pick the top few
+// the leaderboard row shows a compressed kill breakdown; pick the top few
 // buckets so the row stays scannable instead of dumping every category.
 export const formatKillSummary = (summary: Record<string, number>): string => {
   const entries = Object.entries(summary ?? {});

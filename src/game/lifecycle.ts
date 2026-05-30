@@ -15,7 +15,7 @@ import { hideScoreEntry, showLeaderboard, showScoreEntry } from "./scoreEntry";
 import { HALO_MUSIC_POOL } from "./haloMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
 
-// Why: Fisher-Yates over Array.sort — sort's randomness is biased and varies across engines.
+// Fisher-Yates over Array.sort — sort's randomness is biased and varies across engines.
 const shuffled = <T,>(arr: ReadonlyArray<T>): T[] => {
   const out = arr.slice();
   for (let i = out.length - 1; i > 0; i--) {
@@ -25,7 +25,7 @@ const shuffled = <T,>(arr: ReadonlyArray<T>): T[] => {
   return out;
 };
 
-// Why: title screen needs visible motion; decorative rocks don't carry HP or split logic.
+// title screen needs visible motion; decorative rocks don't carry HP or split logic.
 const spawnTitleDecorativeAsteroids = (game: Game) => {
   const decorativeAsteroidIndices = [0, 1, 2, 3, 4];
   for (const _ of decorativeAsteroidIndices) {
@@ -33,7 +33,7 @@ const spawnTitleDecorativeAsteroids = (game: Game) => {
   }
 };
 
-// Why: drone loops can outlive a wave — every state-leaver calls this to avoid stale audio.
+// drone loops can outlive a wave — every state-leaver calls this to avoid stale audio.
 const stopAllPersistentAudio = (game: Game) => {
   game.sound.stopAllAlienDrones();
   game.sound.stopAllBassteroidDrones();
@@ -42,14 +42,14 @@ const stopAllPersistentAudio = (game: Game) => {
   game.comets = [];
 };
 
-// Why: lifecycle transitions have their own cues; the loseCombo wrrr would just clutter them.
+// lifecycle transitions have their own cues; the loseCombo wrrr would just clutter them.
 const clearComboSilently = (game: Game) => {
   game.beatCombo = 0;
   game.firedOffBeatSinceLastBeat = false;
   syncComboHud(game);
 };
 
-// Why: carries the prior run's trophy lineup so a returning player still sees what they took down.
+// carries the prior run's trophy lineup so a returning player still sees what they took down.
 export const showTitle = (game: Game) => {
   game.betaMode = false;
   game.state = "title";
@@ -74,6 +74,7 @@ export const showTitle = (game: Game) => {
   game.ship.pierceActive = false;
   game.ship.shieldActive = false;
   game.ship.radarActive = false;
+  game.ship.longshotActive = false;
   syncPowerupHud(game);
   hideScoreEntry(game);
   showLeaderboard(game);
@@ -81,7 +82,7 @@ export const showTitle = (game: Game) => {
   game.waveTransitioning = false;
 };
 
-// Why: per-run randomised bass intro order means the wave-2/3 picks vary between runs.
+// per-run randomised bass intro order means the wave-2/3 picks vary between runs.
 export const startGame = (game: Game) => {
   game.sound.resume();
   game.sound.preloadPilotLog(1);
@@ -117,7 +118,7 @@ export const startGame = (game: Game) => {
   syncHud(game);
 };
 
-// Why: run-scoped state only; spawnWave handles per-wave timers separately.
+// run-scoped state only; spawnWave handles per-wave timers separately.
 const resetRunTimers = (game: Game) => {
   game.beatTime = 0;
   game.lastBgBeatIndex = -1;
@@ -132,7 +133,7 @@ const resetRunTimers = (game: Game) => {
   game.pilotLog3Unlocked = false;
 };
 
-// Why: parade + drones from the previous title screen must be torn down before the new run runs.
+// parade + drones from the previous title screen must be torn down before the new run runs.
 const resetRunCollections = (game: Game) => {
   game.bullets = [];
   game.popups = [];
@@ -149,7 +150,7 @@ const resetRunCollections = (game: Game) => {
   game.waveEvents = newWaveEventSchedule();
 };
 
-// Why: one esc handler keeps the pause toggle simple; sub-helpers cover the per-state side effects.
+// one esc handler keeps the pause toggle simple; sub-helpers cover the per-state side effects.
 export const togglePause = (game: Game) => {
   if (game.state === "playing") enterPause(game);
   else if (game.state === "paused") leavePause(game);
@@ -173,7 +174,7 @@ const leavePause = (game: Game) => {
   game.abortEl.classList.add("hidden");
 };
 
-// Why: lets a stuck player exit cleanly via the kill-row screen without having to die out.
+// lets a stuck player exit cleanly via the kill-row screen without having to die out.
 export const abortMission = (game: Game) => {
   if (game.state !== "paused") return;
   game.state = "gameover";
@@ -192,7 +193,7 @@ export const abortMission = (game: Game) => {
   showScoreEntry(game);
 };
 
-// Why: combo grid may have flipped (8ths→quarters if previous life had rapid); rebase the eval index.
+// combo grid may have flipped (8ths→quarters if previous life had rapid); rebase the eval index.
 export const respawn = (game: Game) => {
   game.ship = new Ship(v(game.w / 2, game.h / 2));
   game.ship.invuln = 2.2;
@@ -201,7 +202,7 @@ export const respawn = (game: Game) => {
   syncHud(game);
 };
 
-// Why: death pauses beatTime so a leftover streak would pin the HUD until respawn — drop it now.
+// death pauses beatTime so a leftover streak would pin the HUD until respawn — drop it now.
 export const killShip = (game: Game) => {
   game.lives -= 1;
   game.shake = 1.5;
@@ -216,7 +217,7 @@ export const killShip = (game: Game) => {
   game.ship.alive = false;
 };
 
-// Why: label + class must follow sound.enabled so the player can see the mute outcome.
+// label + class must follow sound.enabled so the player can see the mute outcome.
 export const toggleMute = (game: Game) => {
   game.sound.setEnabled(!game.sound.enabled);
   game.muteEl.classList.toggle("muted", !game.sound.enabled);

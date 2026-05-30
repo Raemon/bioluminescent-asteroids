@@ -1,7 +1,7 @@
 import { Vec, rand } from "../vec";
 import { PowerupKind, POWERUP_HUE } from "../Canister";
 
-// Why: one shape powers combo/pickup/debug overlays so all three share the tick + render loop.
+// one shape powers combo/pickup/debug overlays so all three share the tick + render loop.
 export type Popup = {
   pos: Vec;
   vel: Vec;
@@ -32,9 +32,10 @@ const POWERUP_LABEL: Record<PowerupKind, string> = {
   shield: "SHIELD",
   slow: "SLOW-MO",
   radar: "RADAR",
+  longshot: "LONGSHOT",
 };
 
-// Why: anchors the multiplier feedback at the spot the player actually struck, not a corner pulse.
+// anchors the multiplier feedback at the spot the player actually struck, not a corner pulse.
 export const popupCombo = (pos: Vec, multiplier: number): Popup => ({
   pos: { x: pos.x, y: pos.y - 6 },
   vel: { x: rand(-12, 12), y: -70 },
@@ -50,7 +51,7 @@ export const popupCombo = (pos: Vec, multiplier: number): Popup => ({
   holdUntil: 0, fadeGain: 1.4,
 });
 
-// Why: surfaces the streak break at the spot that caused it (ship fire / target hit).
+// surfaces the streak break at the spot that caused it (ship fire / target hit).
 export const popupComboLost = (pos: Vec): Popup => ({
   pos: { x: pos.x, y: pos.y - 6 },
   vel: { x: rand(-10, 10), y: -55 },
@@ -66,7 +67,7 @@ export const popupComboLost = (pos: Vec): Popup => ({
   holdUntil: 0, fadeGain: 1.4,
 });
 
-// Why: "+N" readout at the kill site so the player sees exactly what their hit was worth.
+// "+N" readout at the kill site so the player sees exactly what their hit was worth.
 export const popupScore = (pos: Vec, points: number): Popup => ({
   pos: { x: pos.x, y: pos.y - 22 },
   vel: { x: rand(-10, 10), y: -60 },
@@ -82,7 +83,7 @@ export const popupScore = (pos: Vec, points: number): Popup => ({
   holdUntil: 0, fadeGain: 1.4,
 });
 
-// Why: name-tag lets the player read what they grabbed even after the pickup burst clears.
+// name-tag lets the player read what they grabbed even after the pickup burst clears.
 export const popupPickup = (pos: Vec, kind: PowerupKind): Popup => {
   const hue = POWERUP_HUE[kind];
   return {
@@ -101,7 +102,7 @@ export const popupPickup = (pos: Vec, kind: PowerupKind): Popup => {
   };
 };
 
-// Why: dev-only readout to diagnose drift between the rhythm gate and what the player hears.
+// dev-only readout to diagnose drift between the rhythm gate and what the player hears.
 export const popupBeatDebug = (pos: Vec, prefix: string, onBeat: boolean, offsetMs: string): Popup => ({
   pos: { x: pos.x, y: pos.y - 10 },
   vel: { x: rand(-8, 8), y: -40 },
@@ -117,7 +118,7 @@ export const popupBeatDebug = (pos: Vec, prefix: string, onBeat: boolean, offset
   holdUntil: 0, fadeGain: 1.4,
 });
 
-// Why: returns surviving array so callers can reassign (matches the codebase filter pattern).
+// returns surviving array so callers can reassign (matches the codebase filter pattern).
 export const updatePopups = (popups: Popup[], dt: number): Popup[] => {
   for (const p of popups) {
     p.life -= dt;
@@ -129,13 +130,13 @@ export const updatePopups = (popups: Popup[], dt: number): Popup[] => {
   return popups.filter((p) => p.life > 0);
 };
 
-// Why: pickup holds full alpha then fades; combo/debug fade proportionally — one branch covers both.
+// pickup holds full alpha then fades; combo/debug fade proportionally — one branch covers both.
 const popupAlpha = (p: Popup, t: number): number => {
   if (p.holdUntil > 0) return t < p.holdUntil ? t / p.holdUntil : 1;
   return Math.min(1, t * p.fadeGain);
 };
 
-// Why: birth-time pop-in scale draws the eye to the popup before settling to baseline size.
+// birth-time pop-in scale draws the eye to the popup before settling to baseline size.
 const popupScale = (p: Popup, age: number): number => {
   if (p.popPeak <= 0 || age >= p.popDuration) return 1;
   return 1 + (p.popDuration - age) * (p.popPeak / p.popDuration);

@@ -1,17 +1,17 @@
 import type { Ship } from "../../Ship";
 
-// Why: base wedge geometry; the radar powerup doubles both at runtime via radarHalfAngle/radarLength.
+// base wedge geometry; the radar powerup doubles both at runtime via radarHalfAngle/radarLength.
 const RADAR_HALF_ANGLE_BASE = 0.6;
 const RADAR_LENGTH_BASE = 700;
 const RADAR_BOOST = 2;
 
-// Why: every wedge consumer reads from the ship so the radar powerup widens & extends the cone everywhere at once.
+// every wedge consumer reads from the ship so the radar powerup widens & extends the cone everywhere at once.
 export const radarHalfAngle = (ship: Ship): number =>
   ship.radarActive ? RADAR_HALF_ANGLE_BASE * RADAR_BOOST : RADAR_HALF_ANGLE_BASE;
 export const radarLength = (ship: Ship): number =>
   ship.radarActive ? RADAR_LENGTH_BASE * RADAR_BOOST : RADAR_LENGTH_BASE;
 
-// Why: cone-side outward normals enable signed-distance tests for "inside the cone".
+// cone-side outward normals enable signed-distance tests for "inside the cone".
 // halfAngle/length travel with the frame so downstream clipping uses the same wedge the renderer drew.
 export type ConeFrame = {
   axisX: number;
@@ -24,7 +24,7 @@ export type ConeFrame = {
   length: number;
 };
 
-// Why: precompute the cone's axis + side-edge outward normals once per frame instead of per target.
+// precompute the cone's axis + side-edge outward normals once per frame instead of per target.
 export const computeConeFrame = (ship: Ship): ConeFrame => {
   const half = radarHalfAngle(ship);
   return {
@@ -39,7 +39,7 @@ export const computeConeFrame = (ship: Ship): ConeFrame => {
   };
 };
 
-// Why: screen-wrap means the closest "image" of a target may be on the other side; pick the nearest.
+// screen-wrap means the closest "image" of a target may be on the other side; pick the nearest.
 export const toroidalDelta = (dx: number, dy: number, w: number, h: number): [number, number] => {
   if (dx > w / 2) dx -= w;
   else if (dx < -w / 2) dx += w;
@@ -48,7 +48,7 @@ export const toroidalDelta = (dx: number, dy: number, w: number, h: number): [nu
   return [dx, dy];
 };
 
-// Why: a target's silhouette overlaps the cone if forward and either side-normal sit within tr of the wedge.
+// a target's silhouette overlaps the cone if forward and either side-normal sit within tr of the wedge.
 export const targetIsInsideCone = (
   dx: number, dy: number, tr: number, frame: ConeFrame,
 ): boolean => {
@@ -59,10 +59,10 @@ export const targetIsInsideCone = (
   return !(leftSigned > tr || rightSigned > tr);
 };
 
-// Why: ray is clipped to the cone half-planes so the trajectory preview never spills outside the wedge.
+// ray is clipped to the cone half-planes so the trajectory preview never spills outside the wedge.
 export type RayClip = { sMin: number; sMax: number };
 
-// Why: solving each half-plane gives a 1-sided constraint; intersect all four to get the visible segment.
+// solving each half-plane gives a 1-sided constraint; intersect all four to get the visible segment.
 export const clipRayToCone = (
   rsx: number, rsy: number, ux: number, uy: number, frame: ConeFrame,
 ): RayClip => {
@@ -74,7 +74,7 @@ export const clipRayToCone = (
   return r;
 };
 
-// Why: n·(P-apex) ≤ d. Parallel rays violate "all-or-nothing"; otherwise we shrink sMin or sMax.
+// n·(P-apex) ≤ d. Parallel rays violate "all-or-nothing"; otherwise we shrink sMin or sMax.
 const clipAgainst = (
   r: RayClip, nx: number, ny: number, d: number,
   rsx: number, rsy: number, ux: number, uy: number,

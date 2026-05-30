@@ -37,7 +37,7 @@ export const getGlowSprite = (hue: number): HTMLCanvasElement => {
   return sprite;
 };
 
-// Why: combo ≥ 8 wants a true-white glow — building a desaturated sprite once
+// combo ≥ 8 wants a true-white glow — building a desaturated sprite once
 // is cheaper than baking saturation into every cached hue bucket.
 const getWhiteGlowSprite = (): HTMLCanvasElement => {
   if (!whiteGlowSprite) whiteGlowSprite = buildGlowSprite(0, 0);

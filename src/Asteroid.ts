@@ -1005,7 +1005,7 @@ export class Asteroid {
     return { killed: this.hp <= 0 };
   }
 
-  // Why: a non-killing hit should visibly shove the target — fraction of "kill-worth"
+  // a non-killing hit should visibly shove the target — fraction of "kill-worth"
   // damage maps to a fraction of a reference speed bump along the impact direction.
   // Heavier targets (high maxHp) get pushed proportionally less for the same damage.
   applyKnockback(dirX: number, dirY: number, amount: number, referenceSpeed: number = 120) {

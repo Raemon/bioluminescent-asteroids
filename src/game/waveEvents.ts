@@ -1,6 +1,6 @@
 import { rand } from "../vec";
 
-// Why: one event slot type collapses canister/shockwave/comet/alien into uniform schedule entries.
+// one event slot type collapses canister/shockwave/comet/alien into uniform schedule entries.
 export type WaveEvent = {
   at: number;
   fire: () => void;
@@ -10,15 +10,15 @@ export type WaveEventSchedule = {
   events: WaveEvent[];
 };
 
-// Why: spawnWave needs a clean slate per wave so leftover events from a previous wave can't double-fire.
+// spawnWave needs a clean slate per wave so leftover events from a previous wave can't double-fire.
 export const newWaveEventSchedule = (): WaveEventSchedule => ({ events: [] });
 
-// Why: separate from maybeSchedule so always-firing events (e.g. alien after the size roll) stay readable.
+// separate from maybeSchedule so always-firing events (e.g. alien after the size roll) stay readable.
 export const scheduleAt = (sch: WaveEventSchedule, at: number, fire: () => void) => {
   sch.events.push({ at, fire });
 };
 
-// Why: collapses the chance + random-window roll all four event types repeated by hand into one call.
+// collapses the chance + random-window roll all four event types repeated by hand into one call.
 export const maybeSchedule = (
   sch: WaveEventSchedule,
   chance: number,
@@ -29,7 +29,7 @@ export const maybeSchedule = (
   scheduleAt(sch, rand(window[0], window[1]), fire);
 };
 
-// Why: single per-frame poll replaces four separate `if (xSpawnAt !== null && elapsed >= xSpawnAt)` blocks.
+// single per-frame poll replaces four separate `if (xSpawnAt !== null && elapsed >= xSpawnAt)` blocks.
 export const tickWaveEvents = (sch: WaveEventSchedule, waveElapsed: number) => {
   if (sch.events.length === 0) return;
   const pending: WaveEvent[] = [];

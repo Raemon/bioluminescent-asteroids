@@ -17,13 +17,13 @@ import { spawnAwayFromShip } from "./spawnAwayFromShip";
 import { startShockwave } from "./shockwave";
 import { SLOW_MO_DURATION } from "./slowMo";
 
-// Why: beta panel exposes every spawnable + powerup so a tester can dial in any combination
+// beta panel exposes every spawnable + powerup so a tester can dial in any combination
 //   for a one-off wave, bypassing the normal random wave director.
 type BetaElement = {
   id: string;
   label: string;
   group: "Asteroid" | "Special Rock" | "Hazard" | "Enemy" | "Pickup" | "Powerup";
-  // Why: each element knows how to apply itself; the start handler just iterates selected ones.
+  // each element knows how to apply itself; the start handler just iterates selected ones.
   apply: (game: Game) => void;
 };
 
@@ -46,6 +46,7 @@ const applyPowerup = (game: Game, kind: PowerupKind) => {
   else if (kind === "pierce") game.ship.pierceActive = true;
   else if (kind === "shield") game.ship.shieldActive = true;
   else if (kind === "radar") game.ship.radarActive = true;
+  else if (kind === "longshot") game.ship.longshotActive = true;
   else if (kind === "slow") game.slowMoTimer = SLOW_MO_DURATION;
 };
 
@@ -90,6 +91,7 @@ const ELEMENTS: BetaElement[] = [
   { id: "shield", label: "Shield", group: "Powerup", apply: (g) => applyPowerup(g, "shield") },
   { id: "slow", label: "Slow-Mo", group: "Powerup", apply: (g) => applyPowerup(g, "slow") },
   { id: "radar", label: "Radar", group: "Powerup", apply: (g) => applyPowerup(g, "radar") },
+  { id: "longshot", label: "Longshot", group: "Powerup", apply: (g) => applyPowerup(g, "longshot") },
 ];
 
 const GROUP_ORDER: BetaElement["group"][] = [
@@ -162,7 +164,7 @@ const buildPanel = (game: Game) => {
   return panel;
 };
 
-// Why: lightweight SVG glyphs keep the panel readable without pulling per-element render code.
+// lightweight SVG glyphs keep the panel readable without pulling per-element render code.
 const iconFor = (id: string): string => {
   const c = "currentColor";
   if (id === "normal") {
@@ -188,6 +190,7 @@ const iconFor = (id: string): string => {
   if (id === "shield") return `<svg viewBox="0 0 24 24"><path d="M12 3 L20 6 L20 12 Q20 17 12 21 Q4 17 4 12 L4 6 Z" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   if (id === "slow") return `<svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7" fill="none" stroke="${c}" stroke-width="1.7"/><path d="M12 13 L12 8 M12 13 L16 15 M9 3 L15 3 M12 3 L12 6" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`;
   if (id === "radar") return `<svg viewBox="0 0 24 24"><path d="M12 21 L3 6 L21 6 Z" fill="none" stroke="${c}" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="21" r="1.4" fill="${c}"/></svg>`;
+  if (id === "longshot") return `<svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2" fill="none" stroke="${c}" stroke-width="1.7"/><circle cx="18" cy="12" r="2" fill="none" stroke="${c}" stroke-width="1.7"/><path d="M3 12 L21 12 M18 9 L21 12 L18 15" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   return "";
 };
 

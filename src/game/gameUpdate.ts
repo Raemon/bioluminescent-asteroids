@@ -34,13 +34,13 @@ import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry } from "./scoreEntry";
 
-// Why: single dispatcher means main.ts has one update entry; per-state branches live below.
+// single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
   if (game.input.pressed("escape") || game.input.pressed("esc")) togglePause(game);
   else if (game.state === "paused" && (game.input.pressed("enter") || game.input.pressed("return"))) togglePause(game);
   if (game.state === "paused") { game.input.endFrame(); return; }
   game.time += dt * 1000;
-  // Why: title/gameover/paused freeze beatTime; playing+dying defer pulsar to after tickBassBeats.
+  // title/gameover/paused freeze beatTime; playing+dying defer pulsar to after tickBassBeats.
   if (game.state !== "playing" && game.state !== "dying") game.pulsar.update(dt, game.beatTime, BEAT_GRID);
   routeStateUpdate(game, dt);
   if (game.shake > 0) game.shake = Math.max(0, game.shake - dt * 3);
@@ -54,18 +54,18 @@ const routeStateUpdate = (game: Game, dt: number) => {
   else updatePlaying(game, dt);
 };
 
-// Why: title needs cosmetic motion + enter-to-start; nothing else fires here.
+// title needs cosmetic motion + enter-to-start; nothing else fires here.
 const updateTitle = (game: Game, dt: number) => {
   if (game.input.pressed("enter") || game.input.pressed("return")) startGame(game);
   for (const a of game.asteroids) a.update(dt, game.w, game.h);
   game.particles.update(dt);
 };
 
-// Why: gameover drains the bassteroid field one downbeat at a time — music outlives the player.
-// Why: bgBeat sub-bass + comet notes keep ticking so the parade has a steady pulse to align to,
+// gameover drains the bassteroid field one downbeat at a time — music outlives the player.
+// bgBeat sub-bass + comet notes keep ticking so the parade has a steady pulse to align to,
 //   and the pulsar's beat-driven flash piggybacks on the same beatTime via Pulsar.update().
 const updateGameOver = (game: Game, dt: number) => {
-  // Why: Escape dismisses score entry so the player can skip submission and press Enter to restart.
+  // Escape dismisses score entry so the player can skip submission and press Enter to restart.
   //   Handled here in addition to the input-level listener for the case where the player clicked
   //   outside the input before pressing Escape.
   if (game.input.pressed("escape") || game.input.pressed("esc")) hideScoreEntry(game);
@@ -85,7 +85,7 @@ const updateGameOver = (game: Game, dt: number) => {
   game.particles.update(dt);
 };
 
-// Why: turns the gameover into a slow rhythmic field-clear instead of a static "you died" screen.
+// turns the gameover into a slow rhythmic field-clear instead of a static "you died" screen.
 const detonateScheduledBassRocks = (game: Game) => {
   let anyExploded = false;
   for (const a of game.asteroids) {
@@ -102,7 +102,7 @@ const detonateScheduledBassRocks = (game: Game) => {
   if (anyExploded) game.asteroids = game.asteroids.filter((a: Asteroid) => !(a.isBass() && a.hp <= 0));
 };
 
-// Why: world keeps running while the ship is gone — music, beats, aliens, comets all play on.
+// world keeps running while the ship is gone — music, beats, aliens, comets all play on.
 // The ship's alive=false flag already gates firing, rendering, and collisions.
 const updateDying = (game: Game, dt: number) => {
   game.dyingTimer -= dt;
@@ -131,7 +131,7 @@ const transitionToGameOver = (game: Game) => {
 import { HALO_MUSIC_POOL, pickHaloMusicVariation } from "./haloMusicConfig";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
 
-// Why: yellow-halo (combo ≥ 4) opens the ambient pad; combo ≥ 6 adds the
+// yellow-halo (combo ≥ 4) opens the ambient pad; combo ≥ 6 adds the
 //   melodic layer; combo ≥ 12 adds the sparkle layer (chimes/celesta);
 //   white-bullet tier (≥ 8) thickens the legacy synth pad with an octave-up
 //   sparkle layer. Comet presence slides the colour-third from E→Eb so the
@@ -182,7 +182,7 @@ const syncHaloAmbient = (game: Game) => {
   game.sound.setHaloAmbientCometMode(game.comets.length > 0);
 };
 
-// Why: ordered phases (ship → bass → world → collisions) so cause-and-effect reads top-down.
+// ordered phases (ship → bass → world → collisions) so cause-and-effect reads top-down.
 const updatePlaying = (game: Game, dt: number) => {
   const bulletsBeforeShipUpdate = game.bullets.length;
   game.ship.setCombo(game.beatCombo);
@@ -190,7 +190,7 @@ const updatePlaying = (game: Game, dt: number) => {
   game.ship.update(dt, game.input, game.particles, game.bullets, game.w, game.h, game.time, game.sound, targetsForReticule(game));
   const musicDt = tickSlowMoTimer(game, dt);
   tickBassBeats(game, musicDt);
-  // Why: pulsar runs against freshly-advanced beatTime so its flash lands with the bass voices.
+  // pulsar runs against freshly-advanced beatTime so its flash lands with the bass voices.
   game.pulsar.update(dt, game.beatTime, BEAT_GRID);
   game.ship.tickComboHalo(musicDt, currentBeatPulse(game));
   if (game.bullets.length > bulletsBeforeShipUpdate) classifyNewBullets(game, bulletsBeforeShipUpdate);
@@ -205,13 +205,13 @@ const updatePlaying = (game: Game, dt: number) => {
   if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning) advanceWave(game);
 };
 
-// Why: slow-mo timer ticks in wall-clock so its lifespan isn't extended by its own effect.
+// slow-mo timer ticks in wall-clock so its lifespan isn't extended by its own effect.
 const tickSlowMoTimer = (game: Game, dt: number): number => {
   if (game.slowMoTimer > 0) game.slowMoTimer = Math.max(0, game.slowMoTimer - dt);
   return musicDtForFrame(dt, game.slowMoTimer);
 };
 
-// Why: ≤1 fire event per frame, but trident emits 3 bullets — they all share one beat flag.
+// ≤1 fire event per frame, but trident emits 3 bullets — they all share one beat flag.
 const classifyNewBullets = (game: Game, firstNewIndex: number) => {
   const newBullets = game.bullets.slice(firstNewIndex);
   const firedOnBeat = isInBeatWindow(game, game.beatTime);
@@ -220,15 +220,15 @@ const classifyNewBullets = (game: Game, firstNewIndex: number) => {
   spawnBeatDebugPopup(game, game.ship.pos, game.beatTime, "FIRE");
   if (firedOnBeat) handleOnBeatFire(game, newBullets);
   else handleOffBeatFire(game);
-  // Why: deeper fireBeat pluck reinforces "you nailed the beat"; ship no longer plays its own.
+  // deeper fireBeat pluck reinforces "you nailed the beat"; ship no longer plays its own.
   game.sound.play(firedOnBeat ? "fireBeat" : "fire");
 };
 
-// Why: 0→1 priming step; above 1 only on-beat hits + beat closures bump combo, not consecutive fires.
+// 0→1 priming step; above 1 only on-beat hits + beat closures bump combo, not consecutive fires.
 const handleOnBeatFire = (game: Game, newBullets: Bullet[]) => {
-  // Why: boosted bullets fly while the yellow halo (combo ≥ 4, tier 2) is up.
+  // boosted bullets fly while the yellow halo (combo ≥ 4, tier 2) is up.
   const boosted = game.ship.comboHaloTier >= 2;
-  // Why: combo ≥ 8 promotes to the white "super-boosted" tier — bigger hitbox.
+  // combo ≥ 8 promotes to the white "super-boosted" tier — bigger hitbox.
   const superBoosted = game.beatCombo >= 8;
   for (const newBullet of newBullets) {
     newBullet.onBeat = true;
@@ -243,12 +243,12 @@ const handleOnBeatFire = (game: Game, newBullets: Bullet[]) => {
   }
 };
 
-// Why: latch break till next beat closure so a kill on the same frame still rides the prior streak.
+// latch break till next beat closure so a kill on the same frame still rides the prior streak.
 const handleOffBeatFire = (game: Game) => {
   game.firedOffBeatSinceLastBeat = true;
 };
 
-// Why: cheap respawn-grace — extend invuln if a rock is still inside the safe radius near the end.
+// cheap respawn-grace — extend invuln if a rock is still inside the safe radius near the end.
 const graceFrameNearAsteroids = (game: Game) => {
   if (!(game.ship.invuln > 0 && game.ship.invuln < 0.4)) return;
   const safeRadius = 130;
@@ -257,14 +257,14 @@ const graceFrameNearAsteroids = (game: Game) => {
   }
 };
 
-// Why: shockwave's actual detonation lands one frame later when pulsar.shockJustFired flips.
+// shockwave's actual detonation lands one frame later when pulsar.shockJustFired flips.
 const tickWavePhase = (game: Game, dt: number, _musicDt: number) => {
   game.waveElapsed += dt;
   tickWaveEvents(game.waveEvents, game.waveElapsed);
   if (game.pulsar.shockJustFired) detonateShockwave(game);
 };
 
-// Why: slow-mo slows the whole world via musicDt — asteroids, comets, aliens, bullets, shards, canisters.
+// slow-mo slows the whole world via musicDt — asteroids, comets, aliens, bullets, shards, canisters.
 //   Ship stays on wall-clock dt (updated earlier) so player reactions feel responsive.
 const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   for (const c of game.comets) c.update(musicDt, game.w, game.h);
@@ -304,7 +304,7 @@ const updatePositionalAudio = (game: Game) => {
   for (const c of game.comets) game.sound.updateCometShimmer(c, c.pos);
 };
 
-// Why: pruning is a separate pass so we don't mutate game.comets mid-iteration of the update loop.
+// pruning is a separate pass so we don't mutate game.comets mid-iteration of the update loop.
 const pruneDeadComets = (game: Game) => {
   const survivingComets = [];
   for (const c of game.comets) {
@@ -314,7 +314,7 @@ const pruneDeadComets = (game: Game) => {
   game.comets = survivingComets;
 };
 
-// Why: shots aim at the player's pos at fire-time — dodging works by moving between beats.
+// shots aim at the player's pos at fire-time — dodging works by moving between beats.
 const tickAlienFire = (game: Game) => {
   if (game.aliens.length === 0) return;
   for (const a of game.aliens) {
@@ -333,7 +333,7 @@ const fireOneAlienShot = (game: Game, a: Alien) => {
   a.nextFireAt += ALIEN_FIRE_PERIOD_BEATS[a.size] * BEAT_GRID;
 };
 
-// Why: collisions run before evaluateClosedBeats so trailing-edge closures see this frame's kills.
+// collisions run before evaluateClosedBeats so trailing-edge closures see this frame's kills.
 const runCollisionPasses = (game: Game) => {
   handleCollisions(game);
   handleAlienHits(game);
@@ -376,7 +376,7 @@ const showWaveAnnounce = (game: Game) => {
   window.setTimeout(() => { el?.classList.remove("show"); }, 2800);
 };
 
-// Why: the wave-clear cue (sound + pulsar pulse + boss state) fires
+// the wave-clear cue (sound + pulsar pulse + boss state) fires
 //   immediately on closure, but the next wave's spawn is deferred until the
 //   summary panel has fully faded — the empty-asteroids playfield serves as
 //   the breathing room while the player reads their bonus. waveTransitioning

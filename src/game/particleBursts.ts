@@ -7,7 +7,7 @@ import { Canister } from "../Canister";
 import { GoldCrystal } from "../GoldCrystal";
 import { Shard, shatterAsteroid } from "../Shard";
 
-// Why: every burst in the game shares this shape; differences live in tuning, not code structure.
+// every burst in the game shares this shape; differences live in tuning, not code structure.
 export type BurstSpec = {
   pos: Vec;
   count: number;
@@ -22,7 +22,7 @@ export type BurstSpec = {
   angleJitter: number;
 };
 
-// Why: one emit-loop replaces ~8 duplicated Array.from + emit blocks across kill/pop sites.
+// one emit-loop replaces ~8 duplicated Array.from + emit blocks across kill/pop sites.
 export const emitBurst = (particles: ParticleSystem, s: BurstSpec) => {
   for (let i = 0; i < s.count; i++) {
     const angle = s.angleMode === "uniform"
@@ -42,7 +42,7 @@ export const emitBurst = (particles: ParticleSystem, s: BurstSpec) => {
   }
 };
 
-// Why: gold ring shared by every on-beat impact so the rhythm bonus reads consistently.
+// gold ring shared by every on-beat impact so the rhythm bonus reads consistently.
 const emitOnBeatSparkleRing = (particles: ParticleSystem, pos: Vec, count: number, speedRange: [number, number], lifeMax: number, sizeRange: [number, number], drag: number) => {
   emitBurst(particles, {
     pos, count,
@@ -56,7 +56,7 @@ const emitOnBeatSparkleRing = (particles: ParticleSystem, pos: Vec, count: numbe
   });
 };
 
-// Why: shards carry "rock physically breaks"; particles + sparkle reinforce on-beat rhythm credit.
+// shards carry "rock physically breaks"; particles + sparkle reinforce on-beat rhythm credit.
 export const emitExplosion = (particles: ParticleSystem, shards: Shard[], a: Asteroid, onBeat: boolean) => {
   for (const s of shatterAsteroid(a)) shards.push(s);
   const baseCount = a.size === "large" ? 60 : a.size === "medium" ? 40 : 24;
@@ -75,7 +75,7 @@ export const emitExplosion = (particles: ParticleSystem, shards: Shard[], a: Ast
   }
 };
 
-// Why: heavier dark debris reads "cracked, not killed" — distinguishes a chip from a kill.
+// heavier dark debris reads "cracked, not killed" — distinguishes a chip from a kill.
 export const emitCrackParticles = (particles: ParticleSystem, a: Asteroid, onBeat: boolean) => {
   emitBurst(particles, {
     pos: a.pos,
@@ -92,7 +92,7 @@ export const emitCrackParticles = (particles: ParticleSystem, a: Asteroid, onBea
   }
 };
 
-// Why: sparks + slow dust cloud reads "celestial" — distinguishes comet kill from rock kill.
+// sparks + slow dust cloud reads "celestial" — distinguishes comet kill from rock kill.
 export const emitCometExplosion = (particles: ParticleSystem, c: Comet) => {
   emitBurst(particles, {
     pos: c.pos, count: 90,
@@ -114,7 +114,7 @@ export const emitCometExplosion = (particles: ParticleSystem, c: Comet) => {
   });
 };
 
-// Why: count scales with size so a 4-HP big saucer's death feels meatier than a 1-HP small one's.
+// count scales with size so a 4-HP big saucer's death feels meatier than a 1-HP small one's.
 export const emitAlienExplosion = (particles: ParticleSystem, a: Alien) => {
   const count = a.size === "big" ? 70 : a.size === "medium" ? 48 : 30;
   emitBurst(particles, {
@@ -128,7 +128,7 @@ export const emitAlienExplosion = (particles: ParticleSystem, a: Alien) => {
   });
 };
 
-// Why: white = "wasted pod"; tints the destruction differently from the celebratory pickup burst.
+// white = "wasted pod"; tints the destruction differently from the celebratory pickup burst.
 export const emitCanisterPop = (particles: ParticleSystem, c: Canister) => {
   emitBurst(particles, {
     pos: c.pos, count: 30,
@@ -141,7 +141,7 @@ export const emitCanisterPop = (particles: ParticleSystem, c: Canister) => {
   });
 };
 
-// Why: canister-hue tint makes each pickup kind read visually distinct (vs. white "wasted" burst).
+// canister-hue tint makes each pickup kind read visually distinct (vs. white "wasted" burst).
 export const emitCanisterPickup = (particles: ParticleSystem, c: Canister) => {
   emitBurst(particles, {
     pos: c.pos, count: 36,
@@ -169,7 +169,7 @@ export const emitGoldCrystalPickup = (particles: ParticleSystem, g: GoldCrystal)
   });
 };
 
-// Why: uniformly spaced ring reads as a deflected wavefront, not a chaotic kill explosion.
+// uniformly spaced ring reads as a deflected wavefront, not a chaotic kill explosion.
 export const emitShieldPop = (particles: ParticleSystem, pos: Vec) => {
   emitBurst(particles, {
     pos, count: 28,
@@ -182,7 +182,7 @@ export const emitShieldPop = (particles: ParticleSystem, pos: Vec) => {
   });
 };
 
-// Why: cyan-leaning hue ties debris to the ship's own hull palette so it reads as personal loss.
+// cyan-leaning hue ties debris to the ship's own hull palette so it reads as personal loss.
 export const emitShipDebris = (particles: ParticleSystem, pos: Vec) => {
   emitBurst(particles, {
     pos, count: 70,
@@ -195,7 +195,7 @@ export const emitShipDebris = (particles: ParticleSystem, pos: Vec) => {
   });
 };
 
-// Why: outward-radiating sparks sell the shockwave as physical mass, not a pure light effect.
+// outward-radiating sparks sell the shockwave as physical mass, not a pure light effect.
 export const emitShockwaveSparks = (particles: ParticleSystem, pos: Vec) => {
   emitBurst(particles, {
     pos, count: 64,

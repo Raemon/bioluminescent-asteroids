@@ -8,7 +8,7 @@ import {
   computeBaseHitAlpha, paintAimDiscs, computeDirectFlashPulse,
 } from "./aimDisc";
 
-// Why: hitbox alpha breathes slowly so the disc feels alive even when no target is in range.
+// hitbox alpha breathes slowly so the disc feels alive even when no target is in range.
 const RETICULE_HITBOX_PULSE_MAX = 1.0;
 const RETICULE_HITBOX_PULSE_MIN = 0.75;
 const RETICULE_HITBOX_PULSE_PERIOD_SEC = 2.0;
@@ -16,22 +16,22 @@ const RETICULE_RADAR_PULSE_MAX = 1;
 const RETICULE_RADAR_PULSE_MIN = 0.4;
 const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
 
-// Why: matches TRIDENT_SPREAD in shipWeapons.ts — three bullets fan at ±this angle.
+// matches TRIDENT_SPREAD in shipWeapons.ts — three bullets fan at ±this angle.
 const TRIDENT_SPREAD = 0.21;
-// Why: rapid fires every half-beat, so the off-beat bullet only travels half as far before the next beat.
+// rapid fires every half-beat, so the off-beat bullet only travels half as far before the next beat.
 const RAPID_HALF_BEAT_FRACTION = 0.5;
 
-// Why: bind ship state to per-target memo so trajectory previews can track entry-flash and fade across frames.
+// bind ship state to per-target memo so trajectory previews can track entry-flash and fade across frames.
 type ReticuleState = { trajectoryTracks: TrajectoryTrackMap };
 
-// Why: the aim circle = locus of bullet endpoints at t=beatGrid over all headings. Single source
+// the aim circle = locus of bullet endpoints at t=beatGrid over all headings. Single source
 // of truth so the reticule painter and the gameRender red-tint check agree on geometry.
 export const computeAimCircle = (ship: Ship, beatGrid: number) => ({
   center: add(ship.pos, mul(ship.vel, 0.4 * beatGrid)),
   radius: ship.radius + 4 + ship.bulletSpeed * beatGrid,
 });
 
-// Why: position where a shot fired with the given heading offset lands after `beatFraction` of a beat.
+// position where a shot fired with the given heading offset lands after `beatFraction` of a beat.
 const computeReticulePosition = (
   ship: Ship, beatGrid: number, w: number, h: number,
   headingOffset: number, beatFraction: number,
@@ -42,36 +42,46 @@ const computeReticulePosition = (
   return wrap(add(muzzle, mul(bulletVel, beatGrid * beatFraction)), w, h);
 };
 
-// Why: trident fans the aim into three angles; rapid adds a half-beat preview at half distance.
+// trident fans the aim into three angles; rapid adds a half-beat preview at half distance;
+// longshot adds a 2-beat preview so the player sees both the next-beat and the beat-after landing.
+// Returns { positions, primaryIndex } so the caller can identify the centred 1-beat reticule
+// (the anchor for the trajectory's first-dot overlap check) without a reference-equality dance.
+type ReticulePositions = { positions: Vec[]; primaryIndex: number };
 const computeReticulePositions = (
   ship: Ship, beatGrid: number, w: number, h: number,
-): Vec[] => {
+): ReticulePositions => {
   const angleOffsets = ship.tridentActive ? [-TRIDENT_SPREAD, 0, TRIDENT_SPREAD] : [0];
-  const beatFractions = ship.rapidActive ? [RAPID_HALF_BEAT_FRACTION, 1] : [1];
+  const baseFractions = ship.rapidActive ? [RAPID_HALF_BEAT_FRACTION, 1] : [1];
+  const beatFractions = ship.longshotActive ? [...baseFractions, 2] : baseFractions;
   const positions: Vec[] = [];
+  let primaryIndex = 0;
   for (const frac of beatFractions) {
     for (const off of angleOffsets) {
+      const idx = positions.length;
       positions.push(computeReticulePosition(ship, beatGrid, w, h, off, frac));
+      // primary = centred (off==0) shot landing at exactly 1 beat — the "shoot now to hit next beat"
+      // reticule. With longshot active that's not the last entry, so explicitly capture the index.
+      if (off === 0 && frac === 1) primaryIndex = idx;
     }
   }
-  return positions;
+  return { positions, primaryIndex };
 };
 
-// Why: cosine envelope between min/max produces a smooth, predictable visual pulse over time.
+// cosine envelope between min/max produces a smooth, predictable visual pulse over time.
 const cosineEnvelope = (beatTime: number, period: number, min: number, max: number): number => {
   const v = 0.5 + 0.5 * Math.cos((beatTime / period) * TAU);
   return min + (max - min) * v;
 };
 
-// Why: single entry point — composes background, range arcs, trajectory previews, then aim discs in order.
+// single entry point — composes background, range arcs, trajectory previews, then aim discs in order.
 export const renderShipReticules = (
   ship: Ship, state: ReticuleState,
   ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number,
   targets: ReadonlyArray<ReticuleTarget>, beatTime: number,
 ) => {
   if (!ship.alive) return;
-  const reticulePositions = computeReticulePositions(ship, beatGrid, w, h);
-  const primaryReticule = reticulePositions[reticulePositions.length - 1];
+  const { positions: reticulePositions, primaryIndex } = computeReticulePositions(ship, beatGrid, w, h);
+  const primaryReticule = reticulePositions[primaryIndex];
   const apex = ship.pos;
   const { center: aimCircleCenter, radius: aimCircleRadius } = computeAimCircle(ship, beatGrid);
   ctx.save();
@@ -88,8 +98,9 @@ export const renderShipReticules = (
     trajectoryTracks: state.trajectoryTracks,
   }, targets);
   const flashPulse = computeDirectFlashPulse(beatTime);
-  for (const pos of reticulePositions) {
-    const overlaps = fromTrajectory && pos === primaryReticule
+  for (let i = 0; i < reticulePositions.length; i++) {
+    const pos = reticulePositions[i];
+    const overlaps = fromTrajectory && i === primaryIndex
       ? true
       : reticuleOverlapsAnyTarget(pos, targets, w, h);
     const directlyOn = reticuleDirectlyOnTarget(pos, targets, w, h);

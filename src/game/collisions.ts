@@ -6,7 +6,7 @@ import { Bullet } from "../Bullet";
 import { AlienBullet } from "../AlienBullet";
 import { Canister } from "../Canister";
 import { GoldCrystal, GOLD_CRYSTAL_SCORE, GOLD_CRYSTAL_SHATTER_SCORE, spawnCanisterFromGoldCrystal } from "../GoldCrystal";
-import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup } from "./rhythmGate";
+import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebaseBeatEval } from "./rhythmGate";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup } from "./particleBursts";
@@ -22,9 +22,8 @@ import {
   onCometKilled,
 } from "./killEffects";
 import { killShip } from "./lifecycle";
-import { BEAT_GRID, BEAT_WINDOW } from "./rhythmConstants";
 
-// Why: every bullet-hit handler logs the same fire/impact shape; one helper keeps it uniform.
+// every bullet-hit handler logs the same fire/impact shape; one helper keeps it uniform.
 const logBulletHit = (game: Game, kind: string, b: Bullet) => {
   const fireOffsetMs = (beatOffsetFor(game, b.firedAtBeatTime) * 1000).toFixed(1);
   logBeatEvent(
@@ -36,10 +35,10 @@ const logBulletHit = (game: Game, kind: string, b: Bullet) => {
   spawnBeatDebugPopup(game, b.pos, game.beatTime, "HIT");
 };
 
-// Why: strict on both ends — a bullet drifting out of the window between fire and hit doesn't count.
+// strict on both ends — a bullet drifting out of the window between fire and hit doesn't count.
 const isHitOnBeat = (game: Game, b: Bullet) => isInBeatWindow(game, game.beatTime) && b.onBeat;
 
-// Why: single-hit targets (comets/canisters) share this shape; multi-hit targets bookkeep separately.
+// single-hit targets (comets/canisters) share this shape; multi-hit targets bookkeep separately.
 type CollidableTarget = { collidesWith: (pos: { x: number; y: number }, r: number) => boolean };
 const findFirstHittingBullet = (bullets: Bullet[], target: CollidableTarget): Bullet | null => {
   for (const b of bullets) {
@@ -49,10 +48,10 @@ const findFirstHittingBullet = (bullets: Bullet[], target: CollidableTarget): Bu
   return null;
 };
 
-// Why: pierce keeps the bullet alive so a single shot can punch through a row of targets.
+// pierce keeps the bullet alive so a single shot can punch through a row of targets.
 const consumeBullet = (b: Bullet) => { if (!b.pierce) b.life = 0; };
 
-// Why: walk every rock so multi-hit HP and on-kill splits both resolve in one collision pass.
+// walk every rock so multi-hit HP and on-kill splits both resolve in one collision pass.
 const handleBulletAsteroidHits = (game: Game) => {
   const surviving: Asteroid[] = [];
   for (const a of game.asteroids) {
@@ -63,7 +62,7 @@ const handleBulletAsteroidHits = (game: Game) => {
   game.asteroids = surviving;
 };
 
-// Why: null|children lets the outer loop stay branchless about the survival/kill distinction.
+// null|children lets the outer loop stay branchless about the survival/kill distinction.
 const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
   for (const b of game.bullets) {
     if (b.life <= 0) continue;
@@ -85,7 +84,7 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
   return null;
 };
 
-// Why: ramming kill skips score/combo (not a rhythm hit) but still loses shield/life unless invuln.
+// ramming kill skips score/combo (not a rhythm hit) but still loses shield/life unless invuln.
 const handleShipAsteroidCollisions = (game: Game) => {
   if (!game.ship.alive || game.ship.invuln > 0) return;
   for (let i = 0; i < game.asteroids.length; i++) {
@@ -96,7 +95,7 @@ const handleShipAsteroidCollisions = (game: Game) => {
   }
 };
 
-// Why: polygon-accurate test against the visible halo means the outline IS the hitbox.
+// polygon-accurate test against the visible halo means the outline IS the hitbox.
 export const shipAsteroidHit = (game: Game, a: Asteroid): boolean => {
   const dx = a.pos.x - game.ship.pos.x;
   const dy = a.pos.y - game.ship.pos.y;
@@ -106,7 +105,7 @@ export const shipAsteroidHit = (game: Game, a: Asteroid): boolean => {
   return a.collidesWith(game.ship.pos, shipReach);
 };
 
-// Why: encapsulates the in-place splice when a ram kills, so the outer loop stays a simple sweep.
+// encapsulates the in-place splice when a ram kills, so the outer loop stays a simple sweep.
 const handleSingleShipAsteroidImpact = (game: Game, a: Asteroid, asteroidIdx: number) => {
   const ramDamage = 4;
   const { killed } = a.applyDamage(ramDamage);
@@ -115,7 +114,7 @@ const handleSingleShipAsteroidImpact = (game: Game, a: Asteroid, asteroidIdx: nu
     for (const c of children) game.asteroids.push(c);
     game.asteroids.splice(asteroidIdx, 1);
   } else {
-    // Why: ram knockback uses the ship's own speed as the energy budget so a
+    // ram knockback uses the ship's own speed as the energy budget so a
     // gentle bump barely nudges a rock and a full-speed slam shoves it hard.
     const shipSpeed = Math.hypot(game.ship.vel.x, game.ship.vel.y);
     a.applyKnockback(game.ship.vel.x, game.ship.vel.y, ramDamage, shipSpeed);
@@ -130,7 +129,7 @@ const handleSingleShipAsteroidImpact = (game: Game, a: Asteroid, asteroidIdx: nu
   }
 };
 
-// Why: aliens use the bassteroid multi-hit pattern — chips before the kill shot.
+// aliens use the bassteroid multi-hit pattern — chips before the kill shot.
 export const handleAlienHits = (game: Game) => {
   const surviving: Alien[] = [];
   for (const a of game.aliens) {
@@ -139,7 +138,7 @@ export const handleAlienHits = (game: Game) => {
   game.aliens = surviving;
 };
 
-// Why: returns "should we drop this alien?" so the outer loop stays declarative.
+// returns "should we drop this alien?" so the outer loop stays declarative.
 const tryKillAlienWithBullets = (game: Game, a: Alien): boolean => {
   for (const b of game.bullets) {
     if (b.life <= 0) continue;
@@ -160,7 +159,7 @@ const tryKillAlienWithBullets = (game: Game, a: Alien): boolean => {
   return false;
 };
 
-// Why: only one bullet "lands" per frame; the rest stay alive so they can hit on later frames.
+// only one bullet "lands" per frame; the rest stay alive so they can hit on later frames.
 export const handleAlienBulletHits = (game: Game) => {
   if (!game.ship.alive || game.ship.invuln > 0) return;
   const remaining: AlienBullet[] = [];
@@ -194,7 +193,7 @@ const onShipHitByAlienBullet = (game: Game) => {
   }
 };
 
-// Why: comets are 1-HP — single-hit kill pattern shared with canisters.
+// comets are 1-HP — single-hit kill pattern shared with canisters.
 export const handleCometHits = (game: Game) => {
   const surviving: Comet[] = [];
   for (const c of game.comets) {
@@ -214,7 +213,7 @@ const tryKillCometWithBullets = (game: Game, c: Comet): boolean => {
   return true;
 };
 
-// Why: pickup-popup labels what was grabbed so the player can read it after the burst clears.
+// pickup-popup labels what was grabbed so the player can read it after the burst clears.
 export const handleCanisterPickups = (game: Game) => {
   if (!game.ship.alive) return;
   const remaining: Canister[] = [];
@@ -225,7 +224,7 @@ export const handleCanisterPickups = (game: Game) => {
   game.canisters = remaining;
 };
 
-// Why: white burst differs from the hue-tinted pickup burst so "wasted pod" reads visibly.
+// white burst differs from the hue-tinted pickup burst so "wasted pod" reads visibly.
 export const handleCanisterShots = (game: Game) => {
   const remaining: Canister[] = [];
   for (const c of game.canisters) {
@@ -238,26 +237,23 @@ export const handleCanisterShots = (game: Game) => {
   game.canisters = remaining;
 };
 
-// Why: rapid flips grid 4→8ths; rebase nextBeatToEvaluate so closures keep marching forward.
-const rebaseBeatEvalForRapid = (game: Game) => {
-  const eighth = BEAT_GRID / 2;
-  game.nextBeatToEvaluate = Math.max(0, Math.floor((game.beatTime - BEAT_WINDOW) / eighth) + 1);
-};
-
-// Why: one site handles every pickup so HUD label / timer / powerup-apply stay in lockstep.
+// one site handles every pickup so HUD label / timer / powerup-apply stay in lockstep.
 const collectCanister = (game: Game, c: Canister) => {
   game.sound.play("powerup");
   game.popups.push(popupPickup(c.pos, c.kind));
   if (c.kind === "slow") {
     game.slowMoTimer = SLOW_MO_DURATION;
   } else {
-    if (c.kind === "rapid" && !game.ship.rapidActive) rebaseBeatEvalForRapid(game);
+    // rapid flips grid quarters→eighths; rebase against the new grid so closures keep
+    // marching forward. (skip if combo is already ≥ 12 — grid was already on eighths.)
+    const willChangeGrid = c.kind === "rapid" && !game.ship.rapidActive && game.beatCombo < 12;
     game.ship.applyPowerup(c.kind);
+    if (willChangeGrid) rebaseBeatEval(game);
   }
   emitCanisterPickup(game.particles, c);
 };
 
-// Why: shooting wastes the powerup — neutral sound + white burst contrasts the pickup flavour.
+// shooting wastes the powerup — neutral sound + white burst contrasts the pickup flavour.
 const explodeCanister = (game: Game, c: Canister) => {
   game.sound.play("explosionSmall", 1, c.pos);
   game.sound.play("canisterDestroyed", 1, c.pos);
@@ -331,14 +327,14 @@ const shatterGoldCrystal = (game: Game, g: GoldCrystal) => {
   syncHud(game);
 };
 
-// Why: deflection burst differs from kill bursts so the player feels the shield saved them.
+// deflection burst differs from kill bursts so the player feels the shield saved them.
 export const popShield = (game: Game) => {
   game.sound.play("shieldPop");
   game.shake = Math.min(game.shake + 0.2, 1.2);
   emitShieldPop(game.particles, game.ship.pos);
 };
 
-// Why: rolls bullet-vs-rocks + ship-vs-rocks into one entry; update() reads as one step.
+// rolls bullet-vs-rocks + ship-vs-rocks into one entry; update() reads as one step.
 export const handleCollisions = (game: Game) => {
   handleBulletAsteroidHits(game);
   handleShipAsteroidCollisions(game);

@@ -2197,7 +2197,7 @@ export class Sound {
   }
 
   // Warm the buffer cache so the first playPilotLog doesn't pay fetch+decode
-  // latency at trigger time. Why: the caller's delaySec is computed from the
+  // latency at trigger time. the caller's delaySec is computed from the
   // music clock *before* awaiting the load — if the buffer isn't cached, the
   // load can stretch hundreds of ms and the vocal lands well past the intended
   // downbeat. For index 1 this warms every take in the pool so whichever one

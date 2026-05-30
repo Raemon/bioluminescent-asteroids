@@ -2,7 +2,7 @@ import type { Game } from "../Game";
 import { syncHud } from "./hud";
 import { BEAT_GRID } from "./rhythmConstants";
 
-// Why: end-of-wave summary text — one row appears per beat with a paired
+// end-of-wave summary text — one row appears per beat with a paired
 //   sound, then the bonus drains into the score at four ticks per beat with
 //   a rhythmic melodic pattern (pentatonic loop + downbeat accent). After
 //   the drain ends, the panel holds for 1 second then fades over 2 seconds.
@@ -12,21 +12,21 @@ import { BEAT_GRID } from "./rhythmConstants";
 const PANEL_ID = "wave-summary";
 const TICK_AMOUNT = 50;
 
-// Why: BEAT_GRID is in seconds; everything in this file is in milliseconds.
+// BEAT_GRID is in seconds; everything in this file is in milliseconds.
 const BEAT_MS = BEAT_GRID * 1000; // 500ms at 120 BPM
 const TICKS_PER_BEAT = 4;
 const TICK_MS = BEAT_MS / TICKS_PER_BEAT; // 125ms
 
-// Why: small lead-in before the first row so the entrance doesn't collide
+// small lead-in before the first row so the entrance doesn't collide
 //   with the wave-clear chord that fires the same frame.
 const FIRST_ROW_DELAY_MS = BEAT_MS;
 
-// Why: short pause after the last row lands before the drain begins, so the
+// short pause after the last row lands before the drain begins, so the
 //   ear gets one clean beat to register the bonus number before it starts
 //   moving.
 const PAUSE_BEFORE_DRAIN_MS = BEAT_MS;
 
-// Why: per the spec — drain ends → hold 3 seconds → fade entire panel over
+// per the spec — drain ends → hold 3 seconds → fade entire panel over
 //   2 seconds. The CSS transition matches the fade duration.
 const HOLD_BEFORE_FADE_MS = 3000;
 const FADE_OUT_MS = 2000;
@@ -73,7 +73,7 @@ const setRow = (root: HTMLElement, key: string, text: string) => {
   if (el) el.textContent = text;
 };
 
-// Why: bump the score row briefly each tick so the eye tracks the cascade,
+// bump the score row briefly each tick so the eye tracks the cascade,
 //   without being so loud that it competes with gameplay below.
 const pulseScore = (el: HTMLElement) => {
   el.classList.remove("ws-pulse");
@@ -81,7 +81,7 @@ const pulseScore = (el: HTMLElement) => {
   el.classList.add("ws-pulse");
 };
 
-// Why: the title row gets the "chime" — it's the loudest, longest-tailed of
+// the title row gets the "chime" — it's the loudest, longest-tailed of
 //   the row sounds, marking the start of the report. The four data rows use
 //   "tink" with a slow upward pitch climb so the ear hears each line land
 //   one step higher, like a ledger being filled in.
@@ -93,7 +93,7 @@ const ROW_SOUNDS: Array<{ name: "chime" | "tink"; pitch: number }> = [
   { name: "tink", pitch: 1.498 }, // ~perfect fifth up
 ];
 
-// Why: pentatonic loop for the drain. Pentatonic stays consonant against
+// pentatonic loop for the drain. Pentatonic stays consonant against
 //   any backing chord so the bonus-drain melody doesn't fight whatever
 //   combo halo is currently playing. Cycling a five-note pattern over a
 //   four-tick beat grid means the downbeat lands on a different scale
@@ -156,7 +156,7 @@ export const showWaveSummary = (
       pulseScore(scoreValueEl);
       syncHud(game);
 
-      // Why: cycle through a pentatonic pattern for the drain blips. Every
+      // cycle through a pentatonic pattern for the drain blips. Every
       //   4th tick is a downbeat — accent it with a soft "tink" on top of
       //   the blip so the ear hears a clear pulse instead of an undifferentiated
       //   stream. The blip itself is quiet by design; the tink gives the
@@ -173,7 +173,7 @@ export const showWaveSummary = (
         activeTimers.push(id);
       } else {
         bonusValueEl.classList.remove("ws-draining");
-        // Why: a soft chime caps the drain — closes the musical phrase so
+        // a soft chime caps the drain — closes the musical phrase so
         //   the silence that follows reads as an ending, not a dropout.
         game.sound.play("chime", 1.26);
         scheduleFadeOut(root, onFadeComplete);

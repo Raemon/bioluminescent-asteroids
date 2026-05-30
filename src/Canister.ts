@@ -3,7 +3,7 @@ import { Vec, v, add, mul, sub, len, rand, pick, TAU } from "./vec";
 // Five powerup kinds, each with its own glyph so the player can read the
 // canister at a glance from across the screen. Keeping the list short
 // (rather than 10+ kinds) means each one stays familiar after a few waves.
-export type PowerupKind = "trident" | "rapid" | "pierce" | "shield" | "slow" | "radar";
+export type PowerupKind = "trident" | "rapid" | "pierce" | "shield" | "slow" | "radar" | "longshot";
 
 // Hue is kept for downstream effects (pickup burst tinting) but the canister
 // itself renders pure white so the player reads it as "incoming pod" first
@@ -15,6 +15,7 @@ export const POWERUP_HUE: Record<PowerupKind, number> = {
   shield: 200,
   slow: 130,
   radar: 30,
+  longshot: 270,
 };
 
 const POWERUP_GLYPH: Record<PowerupKind, string> = {
@@ -24,11 +25,12 @@ const POWERUP_GLYPH: Record<PowerupKind, string> = {
   shield: "S",
   slow: "Z",
   radar: "X",
+  longshot: "L",
 };
 
-export const POWERUP_KINDS: PowerupKind[] = ["trident", "shield", "slow", "radar"];
+export const POWERUP_KINDS: PowerupKind[] = ["trident", "shield", "slow", "radar", "longshot"];
 
-// Why: warp-out plays a brief vortex flash before the canister vanishes so the player
+// warp-out plays a brief vortex flash before the canister vanishes so the player
 //   sees a deliberate departure (not just a soft offscreen fade) when they let a pod drift past.
 const WARP_DURATION = 0.45;
 
@@ -40,7 +42,7 @@ export class Canister {
   radius = 16;
   age = 0;
   alive = true;
-  // Why: travel budget from spawn — once exceeded, warp-out triggers instead of waiting for an offscreen test.
+  // travel budget from spawn — once exceeded, warp-out triggers instead of waiting for an offscreen test.
   pathLength: number;
   traveled = 0;
   warpTimer: number | null = null;
@@ -81,7 +83,7 @@ export class Canister {
       this.warpTimer += dt;
       if (this.warpTimer >= WARP_DURATION) this.alive = false;
     }
-    // Why: safety net — if the pod somehow leaves the visible area before the warp triggers,
+    // safety net — if the pod somehow leaves the visible area before the warp triggers,
     //   start the warp anyway so it doesn't blink out without an effect.
     const margin = this.radius * 4;
     const offscreen =
@@ -101,7 +103,7 @@ export class Canister {
   }
 
   collidesWith(point: Vec, pointRadius: number): boolean {
-    // Why: warp-out is a commit — pickups and bullet hits stop registering once
+    // warp-out is a commit — pickups and bullet hits stop registering once
     //   the vortex kicks off so the player can't "save" a pod by clipping it mid-warp.
     if (this.warping) return false;
     const dx = point.x - this.pos.x;
@@ -198,7 +200,7 @@ export class Canister {
     ctx.restore();
   }
 
-  // Why: vortex-warp instead of a soft fade — radial streaks collapse into a bright
+  // vortex-warp instead of a soft fade — radial streaks collapse into a bright
   //   point so the player reads "pod warped out" as a deliberate event.
   private renderWarp(ctx: CanvasRenderingContext2D, t: number) {
     const p = this.warpProgress;
@@ -266,7 +268,7 @@ export class Canister {
   }
 }
 
-// Why: pods enter close to one edge and cross the playfield toward the opposite side so
+// pods enter close to one edge and cross the playfield toward the opposite side so
 //   they read as "incoming traffic" rather than random middle-of-screen drift; path length
 //   randomised so the warp-out point isn't always the same spot near the far edge.
 const EDGE_INSET_MIN = 28;
@@ -286,7 +288,7 @@ const pickSpawnFromEdge = (w: number, h: number): { pos: Vec; side: EdgeSide } =
   return { pos: v(w - inset, rand(80, h - 80)), side };
 };
 
-// Why: aim point on the opposite edge with a wide lateral jitter so the trajectory crosses
+// aim point on the opposite edge with a wide lateral jitter so the trajectory crosses
 //   the play area at varied angles instead of always being purely horizontal/vertical.
 const pickAimPoint = (w: number, h: number, side: EdgeSide): Vec => {
   const inset = rand(EDGE_INSET_MIN, EDGE_INSET_MAX);

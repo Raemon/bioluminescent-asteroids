@@ -10,7 +10,7 @@ import { BEAT_GRID } from "../game/rhythmConstants";
 import { ReticuleTarget } from "./reticule/trajectoryPreview";
 import { resolveHeadingWithLock } from "./reticule/headingLockOn";
 
-// Why: tap-to-nudge feel; rotation ramps in over ~0.35s so a tap turns finely and a hold turns fast.
+// tap-to-nudge feel; rotation ramps in over ~0.35s so a tap turns finely and a hold turns fast.
 // Visible trajectory lines exert a soft snap on the heading — see resolveHeadingWithLock.
 const updateTurning = (
   ship: Ship, input: Input, dt: number, w: number, h: number,
@@ -31,7 +31,7 @@ const updateTurning = (
   ship.headingLock = result.lock;
 };
 
-// Why: thruster has to gate sound start/stop on the edge so the loop doesn't restart every frame.
+// thruster has to gate sound start/stop on the edge so the loop doesn't restart every frame.
 const updateForwardThrust = (ship: Ship, input: Input, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasThrusting = ship.thrustOn;
   ship.thrustOn = input.down("arrowup") || input.down("w");
@@ -43,7 +43,7 @@ const updateForwardThrust = (ship: Ship, input: Input, particles: ParticleSystem
   } else if (wasThrusting) sound.stopThrust();
 };
 
-// Why: retro-thrust mirrors forward thrust with its own audio loop and front-vented jet flames.
+// retro-thrust mirrors forward thrust with its own audio loop and front-vented jet flames.
 const updateReverseThrust = (ship: Ship, input: Input, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasReversing = ship.reverseThrustOn;
   ship.reverseThrustOn = input.down("arrowdown") || input.down("s");
@@ -55,7 +55,7 @@ const updateReverseThrust = (ship: Ship, input: Input, particles: ParticleSystem
   } else if (wasReversing) sound.stopReverseThrust();
 };
 
-// Why: rapid powerup halves the cooldown; both states use the same trigger gate.
+// rapid powerup halves the cooldown; both states use the same trigger gate.
 const updateFireTrigger = (ship: Ship, input: Input, bullets: Bullet[]) => {
   if (!(input.down(" ") || input.down("spacebar"))) return;
   if (ship.fireCooldown > 0) return;
@@ -64,7 +64,7 @@ const updateFireTrigger = (ship: Ship, input: Input, bullets: Bullet[]) => {
   ship.fireCooldown = ship.rapidActive ? ship.fireRate * RAPID_FIRE_RATE_MULTIPLIER : ship.fireRate;
 };
 
-// Why: easing the halo intensity smooths the visual response — snap up on combo gain, slow fade on loss.
+// easing the halo intensity smooths the visual response — snap up on combo gain, slow fade on loss.
 const easeComboHaloIntensity = (ship: Ship, dt: number) => {
   const haloTarget = ship.comboHaloTier;
   const rising = haloTarget > ship.comboHaloIntensity;
@@ -73,7 +73,7 @@ const easeComboHaloIntensity = (ship: Ship, dt: number) => {
   if (ship.comboLossFlash > 0) ship.comboLossFlash = Math.max(0, ship.comboLossFlash - dt / 0.7);
 };
 
-// Why: velocity cap + screen wrap keep the ship in bounds; drag is 0 so Newtonian drift dominates.
+// velocity cap + screen wrap keep the ship in bounds; drag is 0 so Newtonian drift dominates.
 const integrateMotion = (ship: Ship, dt: number, w: number, h: number) => {
   ship.vel = mul(ship.vel, 1 - ship.drag * dt);
   const speed = Math.hypot(ship.vel.x, ship.vel.y);
@@ -81,7 +81,7 @@ const integrateMotion = (ship: Ship, dt: number, w: number, h: number) => {
   ship.pos = wrap(add(ship.pos, mul(ship.vel, dt)), w, h);
 };
 
-// Why: one frame's worth of player control, audio, and motion — keeps Ship.update one-line readable.
+// one frame's worth of player control, audio, and motion — keeps Ship.update one-line readable.
 export const tickShip = (
   ship: Ship, dt: number, input: Input,
   particles: ParticleSystem, bullets: Bullet[],

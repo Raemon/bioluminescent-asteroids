@@ -7,7 +7,7 @@ import {
   type HighscoreRow,
 } from "./highscores";
 
-// Why: one module owns the score-entry form + leaderboard so lifecycle.ts and
+// one module owns the score-entry form + leaderboard so lifecycle.ts and
 // gameUpdate.ts don't have to know about DOM details or network state.
 
 const setStatus = (game: Game, msg: string, kind: "info" | "error" | "success" = "info") => {
@@ -45,7 +45,7 @@ const handleSubmit = async (game: Game, ev: Event) => {
   }
 };
 
-// Why: the Enter key normally restarts the game from the gameover screen, but
+// the Enter key normally restarts the game from the gameover screen, but
 // while the input is focused we want it to submit the form instead. Escape
 // dismisses the form so the player can press Enter to skip submission and
 // restart without typing a name.
@@ -72,7 +72,7 @@ const bindListeners = (game: Game) => {
 
 export const showScoreEntry = (game: Game) => {
   bindListeners(game);
-  // Why: ram-only or otherwise score-less runs shouldn't pester for a name —
+  // ram-only or otherwise score-less runs shouldn't pester for a name —
   // there's nothing meaningful to record.
   if (game.score <= 0) {
     game.scoreEntryFormEl.classList.add("hidden");
@@ -95,7 +95,7 @@ export const hideScoreEntry = (game: Game) => {
   game.scoreEntryInputEl.blur();
 };
 
-// Why: scoreSubmitState gates whether Enter restarts the game — we want the
+// scoreSubmitState gates whether Enter restarts the game — we want the
 // player to confirm the save (or see the error) before bouncing back to title.
 export const isScoreEntryBlockingEnter = (game: Game): boolean => {
   if (game.scoreEntryFormEl.classList.contains("hidden")) return false;
@@ -104,7 +104,7 @@ export const isScoreEntryBlockingEnter = (game: Game): boolean => {
 
 type RankedRow = { row: HighscoreRow; rank: number };
 
-// Why: max-combo-first sort celebrates the headline streak stat; used for the global top-10 view.
+// max-combo-first sort celebrates the headline streak stat; used for the global top-10 view.
 const sortByComboThenScore = (rows: HighscoreRow[]): HighscoreRow[] =>
   [...rows].sort((a, b) => {
     const comboDiff = (b.max_combo ?? 0) - (a.max_combo ?? 0);
@@ -112,7 +112,7 @@ const sortByComboThenScore = (rows: HighscoreRow[]): HighscoreRow[] =>
     return b.score - a.score;
   });
 
-// Why: neighborhood view ranks strictly by score so "5 closest in either direction" is
+// neighborhood view ranks strictly by score so "5 closest in either direction" is
 //   well-defined; the API already returns rows in this order.
 const sortByScore = (rows: HighscoreRow[]): HighscoreRow[] =>
   [...rows].sort((a, b) => b.score - a.score);
@@ -155,7 +155,7 @@ const renderTopRows = (game: Game, rows: HighscoreRow[]) => {
   renderRows(game, ranked, null);
 };
 
-// Why: pick the 5 score-rank neighbours above and below the player's row so a returning
+// pick the 5 score-rank neighbours above and below the player's row so a returning
 //   pilot sees who they need to beat next and who's nipping at their heels.
 const renderNeighborhoodRows = (game: Game, rows: HighscoreRow[], selfId: number) => {
   const sorted = sortByScore(rows);
@@ -178,7 +178,7 @@ const escapeHtml = (s: string): string =>
     ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === '"' ? "&quot;" : "&#39;",
   );
 
-// Why: matches the API's MAX_LIMIT — fetching the full slice means a returning pilot
+// matches the API's MAX_LIMIT — fetching the full slice means a returning pilot
 //   ranked anywhere in the top tier will be found by id and centered in the view.
 const NEIGHBORHOOD_FETCH_LIMIT = 50;
 

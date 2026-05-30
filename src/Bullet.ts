@@ -88,7 +88,7 @@ export class Bullet {
     const headAlpha = this.onBeat ? 1.0 : 0.75;
     const headRadiusMul = this.onBeat ? 10 : 6;
     const coreRadius = this.effectiveRadius();
-    // Why: super-boosted (combo ≥ 8) doubles the hitbox; the visible core and
+    // super-boosted (combo ≥ 8) doubles the hitbox; the visible core and
     // glow scale up too so the bullet reads as the wider sweep it really is.
     const visualScale = this.superBoosted ? 2 : 1;
     for (let i = 0; i < this.trail.length; i++) {

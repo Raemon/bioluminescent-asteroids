@@ -1,7 +1,7 @@
 import type { Game } from "../Game";
 import { SLOW_MO_DURATION } from "./slowMo";
 
-// Why: cache the DOM handles once so per-frame syncs don't repeat document.getElementById calls.
+// cache the DOM handles once so per-frame syncs don't repeat document.getElementById calls.
 export type HudElements = {
   scoreEl: HTMLElement;
   scoreFlashEl: HTMLElement;
@@ -27,7 +27,7 @@ export type HudElements = {
 const powerupSlots: Record<string, HTMLElement> = {};
 let slowProgressEl: HTMLElement | null = null;
 
-// Why: single one-time DOM lookup means a missing element fails loudly at boot, not mid-game.
+// single one-time DOM lookup means a missing element fails loudly at boot, not mid-game.
 export const bindHudElements = (): HudElements => {
   const slots = document.querySelectorAll<HTMLElement>("#powerups .powerup-slot");
   slots.forEach((el) => {
@@ -57,7 +57,7 @@ export const bindHudElements = (): HudElements => {
   };
 };
 
-// Why: toggling the class on every frame would re-fire the pop animation; only flip on change.
+// toggling the class on every frame would re-fire the pop animation; only flip on change.
 const setSlotActive = (kind: string, active: boolean) => {
   const el = powerupSlots[kind];
   if (!el) return;
@@ -103,7 +103,7 @@ export const flashScoreGain = (game: Game, points: number) => {
   el.classList.add("flashing");
 };
 
-// Why: collapses score/wave/lives/combo DOM writes into one call so handlers stay one-liners.
+// collapses score/wave/lives/combo DOM writes into one call so handlers stay one-liners.
 export const syncHud = (game: Game) => {
   game.scoreEl.textContent = String(game.score).padStart(6, "0");
   game.waveEl.textContent = `WAVE ${game.wave}`;
@@ -114,13 +114,14 @@ export const syncHud = (game: Game) => {
   syncPowerupHud(game);
 };
 
-// Why: persistent flags drive on/off; slow-mo also shows a bottom-up timer bar of remaining duration.
+// persistent flags drive on/off; slow-mo also shows a bottom-up timer bar of remaining duration.
 export const syncPowerupHud = (game: Game) => {
   setSlotActive("trident", game.ship.tridentActive);
   setSlotActive("rapid", game.ship.rapidActive);
   setSlotActive("pierce", game.ship.pierceActive);
   setSlotActive("shield", game.ship.shieldActive);
   setSlotActive("radar", game.ship.radarActive);
+  setSlotActive("longshot", game.ship.longshotActive);
   const slowOn = game.slowMoTimer > 0;
   setSlotActive("slow", slowOn);
   if (slowProgressEl) {
@@ -129,7 +130,7 @@ export const syncPowerupHud = (game: Game) => {
   }
 };
 
-// Why: x1 ("primed") doesn't yet multiply anything, so we hide it to avoid misleading the player.
+// x1 ("primed") doesn't yet multiply anything, so we hide it to avoid misleading the player.
 export const syncComboHud = (game: Game) => {
   if (game.beatCombo >= 2) {
     game.comboEl.classList.remove("hidden");

@@ -2,18 +2,18 @@ import { Vec, TAU } from "../../vec";
 import { ConeFrame, clipRayToCone, targetIsInsideCone, toroidalDelta } from "./coneGeometry";
 import { RETICULE_DASH_HSL } from "./radarCone";
 
-// Why: shared bullet-overlap radius constant so trajectory dots and aim discs use the same hit reach.
+// shared bullet-overlap radius constant so trajectory dots and aim discs use the same hit reach.
 export const BULLET_HIT_RADIUS_ON_BEAT = 1.8 * 2.38 * 2.5;
 export const BULLET_HIT_RADIUS_OFF_BEAT = 1.8 * 2.5;
 
-// Why: top-level toggles for individual trajectory-preview overlays — flip to false to hide an
+// top-level toggles for individual trajectory-preview overlays — flip to false to hide an
 // element without ripping out its code. Useful while tuning the visual language.
 const SHOW_AIM_INTERSECTION_X = false;
 const SHOW_FIRST_BEAT_DOT = true;
 const SHOW_ON_RHYTHM_RETICULE = false;
 export const SHOW_SHIP_TRAJECTORY = true;
 
-// Why: the on-rhythm reticule overlay for the focused target paints brighter by this factor —
+// the on-rhythm reticule overlay for the focused target paints brighter by this factor —
 // the focused-sprite glow itself is drawn additively in gameRender (no ctx.filter), but the
 // reticule dots still use this multiplier to scale alpha when the on-rhythm spot is shown.
 const FOCUSED_TARGET_BRIGHTNESS = 1.65;
@@ -23,47 +23,47 @@ const TRAJECTORY_PULSE_PERIOD_BEATS = 4;
 const TRAJECTORY_PULSE_MIN_ALPHA = 1;
 const TRAJECTORY_BEAT_DOT_RADIUS = 1;
 const TRAJECTORY_BEAT_DOT_ALPHA = 0.25;
-// Why: the first beat-dot is the most important — slightly larger and brighter than the rest so
+// the first beat-dot is the most important — slightly larger and brighter than the rest so
 // the player's eye is drawn to "this is where to shoot next beat", but still reads as a member
 // of the same dot series rather than a separate kind of cue.
 const TRAJECTORY_FIRST_BEAT_DOT_RADIUS = 2;
 const TRAJECTORY_FIRST_BEAT_DOT_ALPHA = 0.55;
-// Why: peak alpha matches the disc's RETICULE_OVERLAP_BRIGHTNESS=3 boost (≈0.75) so
+// peak alpha matches the disc's RETICULE_OVERLAP_BRIGHTNESS=3 boost (≈0.75) so
 // the first dot "lights up" to the same intensity as the disc when proximity is reached.
 const TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA = 0.95;
-// Why: how far outside the on-beat hit radius the proximity glow starts ramping up — this is
+// how far outside the on-beat hit radius the proximity glow starts ramping up — this is
 // the "near" band where the first-dot already reads as bright before a direct overlap.
 const TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD = 24;
-// Why: faint dashed halo around the first-beat dot — subtle "this is the next-beat lock" cue.
+// faint dashed halo around the first-beat dot — subtle "this is the next-beat lock" cue.
 // Picks up the same beat-pulse boost as the dot itself so it brightens on the beat in sync.
 const TRAJECTORY_FIRST_BEAT_HALO_RADIUS = 6;
 const TRAJECTORY_FIRST_BEAT_HALO_ALPHA = 0.18;
 const TRAJECTORY_FIRST_BEAT_HALO_LINE_WIDTH = 0.75;
 const TRAJECTORY_FIRST_BEAT_HALO_DASH: number[] = [2, 2];
-// Why: 6Hz flicker when directly on a target reads as an unmistakeable "shot will land" cue.
+// 6Hz flicker when directly on a target reads as an unmistakeable "shot will land" cue.
 const TRAJECTORY_DIRECT_FLASH_HZ = 6;
 const TRAJECTORY_DIRECT_FLASH_DEPTH = 0.55;
-// Why: shadow blur halo so the flash reads as a soft glow rather than just a brightness bump.
+// shadow blur halo so the flash reads as a soft glow rather than just a brightness bump.
 const TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR = 18;
 const TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA = 0.85;
 const TRAJECTORY_AIM_INTERSECTION_X_RADIUS = 5;
 const TRAJECTORY_AIM_INTERSECTION_X_ALPHA = 0.55;
 const TRAJECTORY_AIM_INTERSECTION_X_LINE_WIDTH = 1.5;
-// Why: on-rhythm aim-spot reticule — dashed circle with crosshair, sized for visibility on the
+// on-rhythm aim-spot reticule — dashed circle with crosshair, sized for visibility on the
 // target. Its own constants (no longer tied to the first beat-dot's size).
 const TRAJECTORY_ON_RHYTHM_SPOT_RADIUS = 8;
 const TRAJECTORY_ON_RHYTHM_SPOT_LINE_WIDTH = 1;
 const TRAJECTORY_ON_RHYTHM_SPOT_DASH: number[] = [2, 2];
 const TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_REACHABLE = TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA;
-// Why: dim state needs to read as "you're not aimed at the on-beat hit yet" — significantly
+// dim state needs to read as "you're not aimed at the on-beat hit yet" — significantly
 // fainter than the bright state so the brightness jump is unmistakeable when you line it up.
 const TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_UNREACHABLE = 0.22;
-// Why: dashed crosshair tick that sticks out past the lock circle — reads as "this is a sight".
+// dashed crosshair tick that sticks out past the lock circle — reads as "this is a sight".
 const TRAJECTORY_LOCK_CROSSHAIR_GAP = 3;
 const TRAJECTORY_LOCK_CROSSHAIR_LENGTH = 7;
 const TRAJECTORY_LOCK_CROSSHAIR_DASH: number[] = [2, 2];
 
-// Why: every reticule element brightens on the beat and decays across it, so the player feels the
+// every reticule element brightens on the beat and decays across it, so the player feels the
 // rhythm gate visually. Multiplier is PEAK at beat onset and decays to 1 by the next beat.
 const RETICULE_BEAT_PULSE_PEAK = 2.4;
 export const computeBeatPulseBoost = (beatTime: number, beatGrid: number): number => {
@@ -73,26 +73,26 @@ export const computeBeatPulseBoost = (beatTime: number, beatGrid: number): numbe
   return 1 + (RETICULE_BEAT_PULSE_PEAK - 1) * decay;
 };
 
-// Why: when a target first enters the cone, briefly boost alpha so the appearance reads as a flash.
+// when a target first enters the cone, briefly boost alpha so the appearance reads as a flash.
 const TRAJECTORY_ENTRY_FLASH_DURATION_SEC = 0.35;
 const TRAJECTORY_ENTRY_FLASH_PEAK_BOOST = 2.5;
-// Why: after a target leaves the cone, keep the last-seen trajectory visible for this long, fading out.
+// after a target leaves the cone, keep the last-seen trajectory visible for this long, fading out.
 const TRAJECTORY_FADE_OUT_DURATION_SEC = 2;
 
-// Why: target shape covers everything the reticule might lock onto (asteroids, comets, aliens, canisters).
+// target shape covers everything the reticule might lock onto (asteroids, comets, aliens, canisters).
 export type ReticuleTarget = { pos: Vec; vel: Vec; radius?: number };
 
-// Why: snapshot the last in-cone state so fade-out can keep rendering even if the target dies/leaves.
+// snapshot the last in-cone state so fade-out can keep rendering even if the target dies/leaves.
 type TrajectorySnapshot = { posX: number; posY: number; velX: number; velY: number; radius: number };
 
-// Why: per-target tracking for entry flash phase and post-exit fade lingering.
+// per-target tracking for entry flash phase and post-exit fade lingering.
 export type TrajectoryTrack = {
   firstSeen: number;
   lastInConeAt: number;
   snapshot: TrajectorySnapshot;
 };
 
-// Why: strong Map (not WeakMap) is required because we need to keep rendering a target's fade-out
+// strong Map (not WeakMap) is required because we need to keep rendering a target's fade-out
 //   snapshot even after the target itself is gone (e.g. asteroid destroyed mid-cone). Entries are
 //   cleaned up by renderFadingTrajectories once the 2s fade completes, and the whole map is
 //   discarded when the Ship instance is replaced on respawn/restart, so the leak is bounded.
@@ -112,7 +112,7 @@ export type TrajectoryContext = {
   trajectoryTracks: TrajectoryTrackMap;
 };
 
-// Why: dots pulse from 0→1 the first beat, then sinusoidally — gives a "lock-on" feel as targets enter.
+// dots pulse from 0→1 the first beat, then sinusoidally — gives a "lock-on" feel as targets enter.
 const computeTargetPulse = (firstSeenBeat: number, beatTime: number, beatGrid: number, pulsePeriod: number): number => {
   const firstPeakBeat = Math.ceil((firstSeenBeat + 1e-6) / beatGrid) * beatGrid;
   let pulse01: number;
@@ -126,7 +126,7 @@ const computeTargetPulse = (firstSeenBeat: number, beatTime: number, beatGrid: n
   return floor + (1 - floor) * pulse01;
 };
 
-// Why: alpha multiplier that spikes to PEAK_BOOST when target just entered the cone, decays to 1 over
+// alpha multiplier that spikes to PEAK_BOOST when target just entered the cone, decays to 1 over
 // ENTRY_FLASH_DURATION_SEC — gives an unmistakable "new contact" flash on first appearance.
 const computeEntryFlashBoost = (firstSeen: number, beatTime: number): number => {
   const age = beatTime - firstSeen;
@@ -135,7 +135,7 @@ const computeEntryFlashBoost = (firstSeen: number, beatTime: number): number => 
   return 1 + (TRAJECTORY_ENTRY_FLASH_PEAK_BOOST - 1) * t01 * t01;
 };
 
-// Why: trajectory lingers for FADE_OUT_DURATION_SEC after leaving cone — returns 1→0 fade or 1 if in-cone.
+// trajectory lingers for FADE_OUT_DURATION_SEC after leaving cone — returns 1→0 fade or 1 if in-cone.
 const computeFadeAlpha = (lastInConeAt: number, beatTime: number): number => {
   const since = beatTime - lastInConeAt;
   if (since <= 0) return 1;
@@ -144,12 +144,12 @@ const computeFadeAlpha = (lastInConeAt: number, beatTime: number): number => {
   return t01 * t01;
 };
 
-// Why: when the on-beat hit is unreachable (target running away too fast, or too close for any
+// when the on-beat hit is unreachable (target running away too fast, or too close for any
 // shot to land on the beat) we recolor the on-rhythm reticule red so the player gets the cue
 // directly on the lock element they're already watching, instead of tinting the whole sprite.
 const ON_RHYTHM_UNREACHABLE_HSL = "0, 90%, 60%";
 
-// Why: dashed crosshair sticking out beyond the on-rhythm aim-spot circle in the 4 cardinal
+// dashed crosshair sticking out beyond the on-rhythm aim-spot circle in the 4 cardinal
 // directions — reads as "targeting sight". Drawn under the caller's current strokeStyle/lineWidth.
 const paintOnRhythmCrosshair = (ctx: CanvasRenderingContext2D, px: number, py: number) => {
   const prevDash = ctx.getLineDash();
@@ -165,7 +165,7 @@ const paintOnRhythmCrosshair = (ctx: CanvasRenderingContext2D, px: number, py: n
   ctx.setLineDash(prevDash);
 };
 
-// Why: dashed lock-circle + crosshair for the on-rhythm aim spot — the "where to aim NOW to hit
+// dashed lock-circle + crosshair for the on-rhythm aim spot — the "where to aim NOW to hit
 // on the next beat" reticule. Caller passes alpha/lineWidth/glow so reachable vs. unreachable and
 // entry-flash state can modulate brightness without changing the geometry.
 const paintOnRhythmReticule = (
@@ -192,7 +192,7 @@ const paintOnRhythmReticule = (
   ctx.shadowColor = prevShadowColor;
 };
 
-// Why: first beat-dot is a filled dot like the others — just bigger and brighter so it stands out
+// first beat-dot is a filled dot like the others — just bigger and brighter so it stands out
 // as "shoot here next beat". It still picks up proximity glow, direct-flash flicker, entry-flash,
 // and the per-beat pulse so it reads as part of the same lock-on language.
 const paintFirstBeatDot = (
@@ -215,7 +215,7 @@ const paintFirstBeatDot = (
   ctx.beginPath();
   ctx.arc(px, py, TRAJECTORY_FIRST_BEAT_DOT_RADIUS, 0, TAU);
   ctx.fill();
-  // Why: faint dashed halo around the dot — uses the same alpha-modulation chain (proximity,
+  // faint dashed halo around the dot — uses the same alpha-modulation chain (proximity,
   // direct flash, entry flash, beat pulse, focus boost) so it tracks the dot's brightness.
   const haloAlpha = Math.min(1, TRAJECTORY_FIRST_BEAT_HALO_ALPHA
     * (1 + directFlash) * entryFlashBoost * beatPulseBoost * focusBoost);
@@ -255,7 +255,7 @@ const paintAimIntersectionX = (
   ctx.stroke();
 };
 
-// Why: detect whether the first-beat lock dot overlaps the aim disc, so the disc can brighten.
+// detect whether the first-beat lock dot overlaps the aim disc, so the disc can brighten.
 const firstDotOverlapsReticule = (px: number, py: number, retX: number, retY: number): boolean => {
   const R = BULLET_HIT_RADIUS_ON_BEAT;
   const ddx = px - retX;
@@ -263,7 +263,7 @@ const firstDotOverlapsReticule = (px: number, py: number, retX: number, retY: nu
   return ddx * ddx + ddy * ddy <= (R + TRAJECTORY_FIRST_BEAT_DOT_RADIUS) * (R + TRAJECTORY_FIRST_BEAT_DOT_RADIUS);
 };
 
-// Why: 0 = far away (no glow), 1 = touching the disc (full lit). Smooth ramp through the proximity pad.
+// 0 = far away (no glow), 1 = touching the disc (full lit). Smooth ramp through the proximity pad.
 const firstDotProximity01 = (px: number, py: number, retX: number, retY: number): number => {
   const ddx = px - retX;
   const ddy = py - retY;
@@ -278,13 +278,23 @@ const firstDotProximity01 = (px: number, py: number, retX: number, retY: number)
 
 type DotWalkResult = { overlapsReticule: boolean };
 
-// Why: dots mark target position at successive beats — direct preview of where the player needs to aim.
+// the cone is computed in the apex's "virtual" frame (toroidalDelta-remapped), so dot
+// positions can land outside [0,w)×[0,h). Wrapping back into the canvas before painting makes
+// dots reappear on the opposite edge — matching how the actual target sprite wraps — so the
+// trajectory preview stays visible when the tracked object crosses a screen edge.
+const wrapToCanvas = (x: number, y: number, w: number, h: number): [number, number] => [
+  ((x % w) + w) % w,
+  ((y % h) + h) % h,
+];
+
+// dots mark target position at successive beats — direct preview of where the player needs to aim.
 const drawBeatDotsAlongRay = (
   ctx: CanvasRenderingContext2D,
   rawStartX: number, rawStartY: number, ux: number, uy: number,
   retX: number, retY: number,
   sMin: number, sMax: number, dotStep: number, dotOffset: number,
   flashPulse: number, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
+  w: number, h: number,
 ): DotWalkResult => {
   let overlapsReticule = false;
   let drawnDots = 0;
@@ -294,16 +304,17 @@ const drawBeatDotsAlongRay = (
     if (sK < sMin) continue;
     const px = rawStartX + ux * sK;
     const py = rawStartY + uy * sK;
+    const [drawX, drawY] = wrapToCanvas(px, py, w, h);
     if (drawnDots === 0) {
       const overlap = firstDotOverlapsReticule(px, py, retX, retY);
       if (SHOW_FIRST_BEAT_DOT) {
         const proximity01 = firstDotProximity01(px, py, retX, retY);
         const directFlash = overlap ? flashPulse : 0;
-        paintFirstBeatDot(ctx, px, py, proximity01, directFlash, entryFlashBoost, beatPulseBoost, focusBoost);
+        paintFirstBeatDot(ctx, drawX, drawY, proximity01, directFlash, entryFlashBoost, beatPulseBoost, focusBoost);
       }
       if (overlap) overlapsReticule = true;
     } else {
-      paintBeatDot(ctx, px, py, entryFlashBoost, focusBoost);
+      paintBeatDot(ctx, drawX, drawY, entryFlashBoost, focusBoost);
     }
     drawnDots++;
   }
@@ -315,6 +326,7 @@ const drawAimIntersectionsAlongRay = (
   rawStartX: number, rawStartY: number, ux: number, uy: number,
   centerX: number, centerY: number, radius: number,
   sMin: number, sMax: number, entryFlashBoost: number, focusBoost: number,
+  w: number, h: number,
 ) => {
   const dx = rawStartX - centerX;
   const dy = rawStartY - centerY;
@@ -326,24 +338,25 @@ const drawAimIntersectionsAlongRay = (
   const intersectionDistances = root <= 1e-6 ? [-q] : [-q - root, -q + root];
   for (const s of intersectionDistances) {
     if (s < sMin || s > sMax) continue;
-    paintAimIntersectionX(ctx, rawStartX + ux * s, rawStartY + uy * s, entryFlashBoost, focusBoost);
+    const [drawX, drawY] = wrapToCanvas(rawStartX + ux * s, rawStartY + uy * s, w, h);
+    paintAimIntersectionX(ctx, drawX, drawY, entryFlashBoost, focusBoost);
   }
 };
 
-// Why: reticule pos may live on a different toroidal image of the world; remap before overlap checks.
+// reticule pos may live on a different toroidal image of the world; remap before overlap checks.
 const remapReticuleToTarget = (apex: Vec, reticulePos: Vec, w: number, h: number): [number, number] => {
   const [retDx, retDy] = toroidalDelta(reticulePos.x - apex.x, reticulePos.y - apex.y, w, h);
   return [apex.x + retDx, apex.y + retDy];
 };
 
-// Why: square-wave-ish flicker in [0, DEPTH] driven by beatTime — clearly reads as a flash, not a pulse.
+// square-wave-ish flicker in [0, DEPTH] driven by beatTime — clearly reads as a flash, not a pulse.
 const computeDirectFlashPulse = (beatTime: number): number => {
   const phase = (beatTime * TRAJECTORY_DIRECT_FLASH_HZ) % 1;
   const tri = phase < 0.5 ? phase * 2 : (1 - phase) * 2;
   return TRAJECTORY_DIRECT_FLASH_DEPTH * tri;
 };
 
-// Why: on-rhythm aim spot uses the same lock-circle + crosshair visual as the first-beat dot so the
+// on-rhythm aim spot uses the same lock-circle + crosshair visual as the first-beat dot so the
 // player reads them as the same kind of cue ("targeting reticule"). Brightens ONLY when firing
 // now would actually hit the target on the next beat (player's reticule is on the spot AND the
 // geometry works out for an on-beat hit); dim otherwise.
@@ -358,7 +371,7 @@ const paintOnRhythmSpot = (
   paintOnRhythmReticule(ctx, px, py, alpha, TRAJECTORY_ON_RHYTHM_SPOT_LINE_WIDTH + (entryFlashBoost - 1), entryGlow01, !reachable);
 };
 
-// Why: the aim circle is the locus of bullet endpoints at t=beatGrid over all headings —
+// the aim circle is the locus of bullet endpoints at t=beatGrid over all headings —
 // radius = bulletSpeed*beat, center accounts for inherited ship velocity. For an on-beat hit
 // the bullet endpoint at t=beatGrid must land EXACTLY on the target's future body surface:
 // land outside the body and you miss; land inside and the bullet collided BEFORE the beat
@@ -394,7 +407,7 @@ const computeOnBeatAim = (
     spotX = futureX;
     spotY = futureY;
   }
-  // Why: hit detection compares the aim disc (bullet at t=beatGrid) to the target's future
+  // hit detection compares the aim disc (bullet at t=beatGrid) to the target's future
   // CENTER with combined radii — same logic the actual collision test uses — not to the spot,
   // since the spot sits on the body surface and would under-detect by the target's radius.
   const hitTol = radius + BULLET_HIT_RADIUS_ON_BEAT;
@@ -404,7 +417,7 @@ const computeOnBeatAim = (
   return { x: spotX, y: spotY, reachable, willHitOnBeat };
 };
 
-// Why: core trajectory renderer — operates on a position/velocity snapshot, with optional cone clipping.
+// core trajectory renderer — operates on a position/velocity snapshot, with optional cone clipping.
 // alphaMultiplier folds in entry-flash boost and exit-fade decay; clipToCone is false during fade so the
 // lingering ghost remains visible even after the target has left the radar wedge.
 const paintTrajectoryFromSnapshot = (
@@ -439,11 +452,11 @@ const paintTrajectoryFromSnapshot = (
   const pulse = computeTargetPulse(firstSeen, ctx.beatTime, ctx.beatGrid, pulsePeriod);
   const entryFlashBoost = computeEntryFlashBoost(firstSeen, ctx.beatTime);
   const beatPulseBoost = computeBeatPulseBoost(ctx.beatTime, ctx.beatGrid);
-  // Why: the centermost target (the one with the on-rhythm reticule) gets a uniform alpha boost
+  // the centermost target (the one with the on-rhythm reticule) gets a uniform alpha boost
   // applied to every preview element on its trajectory, so the player can spot which target their
   // next on-beat shot is locked onto at a glance.
   const focusBoost = showOnRhythmSpot ? FOCUSED_TARGET_BRIGHTNESS : 1;
-  // Why: during the entry-flash window, override the pulse ramp so brightness peaks immediately rather
+  // during the entry-flash window, override the pulse ramp so brightness peaks immediately rather
   // than easing in — the flash is the visual cue that the contact JUST appeared.
   const effectivePulse = entryFlashBoost > 1 ? Math.max(pulse, 1) : pulse;
   ctx.ctx.globalAlpha = Math.min(1, TRAJECTORY_ALPHA * effectivePulse * alphaMultiplier);
@@ -457,25 +470,27 @@ const paintTrajectoryFromSnapshot = (
   if (SHOW_AIM_INTERSECTION_X) {
     drawAimIntersectionsAlongRay(
       ctx.ctx, rawStartX, rawStartY, ux, uy, aimCenterX, aimCenterY,
-      ctx.aimCircleRadius, sMin, sMax, entryFlashBoost, focusBoost,
+      ctx.aimCircleRadius, sMin, sMax, entryFlashBoost, focusBoost, ctx.w, ctx.h,
     );
   }
   const result = drawBeatDotsAlongRay(
     ctx.ctx, rawStartX, rawStartY, ux, uy, retX, retY,
     sMin, sMax, dotStep, dotOffset, flashPulse, entryFlashBoost, beatPulseBoost, focusBoost,
+    ctx.w, ctx.h,
   );
   if (SHOW_ON_RHYTHM_RETICULE && showOnRhythmSpot) {
     const aim = computeOnBeatAim(
       cx, cy, snap.velX, snap.velY, r,
       aimCenterX, aimCenterY, ctx.aimCircleRadius, ctx.beatGrid, retX, retY,
     );
-    paintOnRhythmSpot(ctx.ctx, aim.x, aim.y, aim.willHitOnBeat, aim.reachable, entryFlashBoost, beatPulseBoost, focusBoost);
+    const [aimDrawX, aimDrawY] = wrapToCanvas(aim.x, aim.y, ctx.w, ctx.h);
+    paintOnRhythmSpot(ctx.ctx, aimDrawX, aimDrawY, aim.willHitOnBeat, aim.reachable, entryFlashBoost, beatPulseBoost, focusBoost);
   }
   ctx.ctx.restore();
   return result.overlapsReticule;
 };
 
-// Why: refresh the track for an in-cone target — entry flash starts when no track existed, or when the
+// refresh the track for an in-cone target — entry flash starts when no track existed, or when the
 // target had fully faded out and re-enters; otherwise re-arming preserves the existing pulse phase.
 const refreshTrack = (
   tracks: TrajectoryTrackMap, t: ReticuleTarget, beatTime: number,
@@ -496,7 +511,7 @@ const refreshTrack = (
   return existing;
 };
 
-// Why: the trajectory ray itself overlaps the cone when its forward path (from just ahead of the
+// the trajectory ray itself overlaps the cone when its forward path (from just ahead of the
 // target, in the velocity direction) clips to a non-empty segment inside the wedge — keeps the
 // preview "live" even after the asteroid leaves the cone, so long as its path still crosses it.
 const trajectoryRayOverlapsCone = (
@@ -514,7 +529,7 @@ const trajectoryRayOverlapsCone = (
   return clip.sMax > clip.sMin;
 };
 
-// Why: per-target live render — checks cone membership, updates track, and draws with flash boost.
+// per-target live render — checks cone membership, updates track, and draws with flash boost.
 // Treat the trajectory as "in cone" if EITHER the target overlaps the cone OR its forward path
 // crosses the cone; the player can still aim the radar at the trajectory line itself.
 const previewLiveTarget = (
@@ -528,13 +543,13 @@ const previewLiveTarget = (
   if (!targetInCone && !rayInCone) return false;
   const track = refreshTrack(ctx.trajectoryTracks, t, ctx.beatTime);
   rendered.add(t as unknown as object);
-  // Why: when only the ray (not the target itself) is in the cone, disable cone clipping so the
+  // when only the ray (not the target itself) is in the cone, disable cone clipping so the
   // visible dots span the full forward path — clipping would chop the line back inside the wedge
   // and could omit the section the radar is actually overlapping.
   return paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, 1, flashPulse, targetInCone, showSpot);
 };
 
-// Why: drain expired fade entries and render fading-out trajectories for targets that left the cone or
+// drain expired fade entries and render fading-out trajectories for targets that left the cone or
 // were destroyed while in it — keeps a 2s "ghost" of the last-seen path that decays to invisible.
 const renderFadingTrajectories = (
   ctx: TrajectoryContext, rendered: Set<object>, flashPulse: number,
@@ -550,7 +565,7 @@ const renderFadingTrajectories = (
   }
 };
 
-// Why: of all visible targets, pick the one whose center sits nearest the radar axis line — that's
+// of all visible targets, pick the one whose center sits nearest the radar axis line — that's
 // the single target the on-rhythm aim spot will be drawn for. Returns null if no eligible target.
 // Exported so the main render loop can give that same target a brightness boost on its sprite.
 export const pickCenterMostTargetForFocus = (
@@ -579,7 +594,7 @@ const pickCenterMostTarget = (
 ): ReticuleTarget | null =>
   pickCenterMostTargetForFocus(ctx.apex, ctx.frame, ctx.w, ctx.h, targets);
 
-// Why: walks every visible target and accumulates whether any of their lock dots touched the aim disc.
+// walks every visible target and accumulates whether any of their lock dots touched the aim disc.
 export const paintTrajectoryPreviews = (
   ctx: TrajectoryContext, targets: ReadonlyArray<ReticuleTarget>,
 ): boolean => {

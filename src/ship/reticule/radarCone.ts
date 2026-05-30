@@ -2,7 +2,7 @@ import type { Ship } from "../../Ship";
 import { Vec, TAU } from "../../vec";
 import { radarHalfAngle, radarLength } from "./coneGeometry";
 
-// Why: shared HSL string keeps the whole reticule visually unified (single hue family).
+// shared HSL string keeps the whole reticule visually unified (single hue family).
 export const RETICULE_DASH_HSL = "220, 100%, 100%";
 
 const RADAR_FRACTIONS: number[] = [0.33, 0.66, 1.0];
@@ -19,7 +19,7 @@ const RADAR_PULSE_PERIOD_BEATS = 4;
 const RADAR_PULSE_WIDTH = 0.03;
 const RADAR_PULSE_BAND_ALPHA = 0.02;
 
-// Why: the wedge fills the area in front of the ship so range arcs and trajectory previews overlay cleanly.
+// the wedge fills the area in front of the ship so range arcs and trajectory previews overlay cleanly.
 const carveWedgePath = (
   ctx: CanvasRenderingContext2D, ship: Ship, apex: Vec, halfAngle: number, length: number,
 ) => {
@@ -31,7 +31,7 @@ const carveWedgePath = (
   ctx.closePath();
 };
 
-// Why: subtle inner glow → outer fade gives the cone a "sensor field" feel without strong borders.
+// subtle inner glow → outer fade gives the cone a "sensor field" feel without strong borders.
 const paintWedgeBackground = (ctx: CanvasRenderingContext2D, apex: Vec, length: number) => {
   const bg = ctx.createRadialGradient(apex.x, apex.y, 0, apex.x, apex.y, length);
   bg.addColorStop(0, `hsla(${RETICULE_DASH_HSL}, ${RADAR_BG_INNER_ALPHA})`);
@@ -40,7 +40,7 @@ const paintWedgeBackground = (ctx: CanvasRenderingContext2D, apex: Vec, length: 
   ctx.fill();
 };
 
-// Why: travelling pulse band visualises the beat sweeping outward, locking the cone to musical time.
+// travelling pulse band visualises the beat sweeping outward, locking the cone to musical time.
 const paintWedgePulseBand = (
   ctx: CanvasRenderingContext2D, apex: Vec, beatTime: number, beatGrid: number, length: number,
 ) => {
@@ -60,7 +60,7 @@ const paintWedgePulseBand = (
   ctx.fill();
 };
 
-// Why: drawn before everything else so range arcs + trajectories overlay on top of the cone wash.
+// drawn before everything else so range arcs + trajectories overlay on top of the cone wash.
 export const paintConeBackground = (
   ctx: CanvasRenderingContext2D, ship: Ship, apex: Vec, beatTime: number, beatGrid: number,
 ) => {
@@ -75,7 +75,7 @@ export const paintConeBackground = (
   ctx.restore();
 };
 
-// Why: each arc's brightness is phase-shifted so the eye sees a sweep travelling apex→tip without motion.
+// each arc's brightness is phase-shifted so the eye sees a sweep travelling apex→tip without motion.
 const arcAlphaForIndex = (i: number, frac: number, beatTime: number, radarPulse: number): number => {
   const pulseMix = 1 - RADAR_PULSE_AMOUNT + RADAR_PULSE_AMOUNT * radarPulse;
   const distanceFade = 1 - frac;
@@ -84,7 +84,7 @@ const arcAlphaForIndex = (i: number, frac: number, beatTime: number, radarPulse:
   return Math.min(1, RADAR_ALPHA * pulseMix * distanceFade * sweepMul);
 };
 
-// Why: curved strokes read as "sensor HUD" and stay visually distinct from straight trajectory dashes.
+// curved strokes read as "sensor HUD" and stay visually distinct from straight trajectory dashes.
 export const paintRangeArcs = (
   ctx: CanvasRenderingContext2D, ship: Ship, apex: Vec, beatTime: number, radarPulse: number,
 ) => {

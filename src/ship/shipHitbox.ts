@@ -1,6 +1,6 @@
 import type { Ship } from "../Ship";
 
-// Why: collisions test the visible halo outline, not a bounding circle, so the outline IS the hitbox.
+// collisions test the visible halo outline, not a bounding circle, so the outline IS the hitbox.
 export const haloVertices = (ship: Ship): Array<[number, number]> => {
   const hull: Array<[number, number]> = [
     [Math.cos(ship.heading) * ship.radius * 1.4, Math.sin(ship.heading) * ship.radius * 1.4],
@@ -13,7 +13,7 @@ export const haloVertices = (ship: Ship): Array<[number, number]> => {
   return halo;
 };
 
-// Why: hull winding direction varies with heading; we need it to pick the "outward" normal sign.
+// hull winding direction varies with heading; we need it to pick the "outward" normal sign.
 const polygonOutwardSign = (hull: Array<[number, number]>): number => {
   const cross =
     (hull[1][0] - hull[0][0]) * (hull[2][1] - hull[0][1]) -
@@ -21,7 +21,7 @@ const polygonOutwardSign = (hull: Array<[number, number]>): number => {
   return cross < 0 ? 1 : -1;
 };
 
-// Why: pushing each vertex along its bisector keeps the offset edges perpendicular to the hull edges.
+// pushing each vertex along its bisector keeps the offset edges perpendicular to the hull edges.
 const miterVertex = (hull: Array<[number, number]>, k: number, s: number, offset: number): [number, number] => {
   const prev = hull[(k + 2) % 3];
   const curr = hull[k];
@@ -42,19 +42,19 @@ const miterVertex = (hull: Array<[number, number]>, k: number, s: number, offset
   return [curr[0] + bx * miter, curr[1] + by * miter];
 };
 
-// Why: bullets/asteroids need the exact reach so glancing hits register if they touch the visible outline.
+// bullets/asteroids need the exact reach so glancing hits register if they touch the visible outline.
 export const hitDistanceToward = (ship: Ship, theta: number): number => {
   const dx = Math.cos(theta);
   const dy = Math.sin(theta);
   const halo = haloVertices(ship);
   const best = closestHaloRayDistance(halo, dx, dy);
   if (!Number.isFinite(best)) return ship.hitRadius;
-  // Why: collision-only padding (uniform + forward bonus) bulks the hitbox without moving the outline.
+  // collision-only padding (uniform + forward bonus) bulks the hitbox without moving the outline.
   const forward = Math.max(0, Math.cos(theta - ship.heading));
   return best + ship.hitPad + ship.hitFrontBonus * forward;
 };
 
-// Why: ray-vs-segment per halo edge gives the silhouette distance the player sees in that direction.
+// ray-vs-segment per halo edge gives the silhouette distance the player sees in that direction.
 const closestHaloRayDistance = (halo: Array<[number, number]>, dx: number, dy: number): number => {
   let best = Infinity;
   for (let k = 0; k < 3; k++) {
