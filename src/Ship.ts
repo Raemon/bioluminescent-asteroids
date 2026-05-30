@@ -31,9 +31,9 @@ export class Ship {
   radius = 14;
   // outer halo sits past the hull and IS the collision silhouette (matches what the player sees).
   baseHaloOffset = 8;
-  // shield expands the halo (and therefore the hitbox + visible outline) by this much.
-  shieldHaloBonus = 6;
-  get haloOffset() { return this.baseHaloOffset + (this.shieldActive ? this.shieldHaloBonus : 0); }
+  get haloOffset() { return this.baseHaloOffset; }
+  // shield draws an additional ring this far outside the ship's normal perimeter (purely cosmetic).
+  shieldRingOffset = 12;
   // small uniform pad + forward bonus makes head-on collisions slightly more generous than rear hits.
   hitPad = 4;
   hitFrontBonus = 6;
@@ -43,6 +43,9 @@ export class Ship {
   invuln = 2.0;
   thrustOn = false;
   reverseThrustOn = false;
+  // port = Z (accelerate left of heading), starboard = X (accelerate right of heading).
+  portThrustOn = false;
+  starboardThrustOn = false;
   // timestamp (in seconds, same clock as Game.beatTime) of the most recent frame the player
   // was thrusting. Drives the trajectory-preview fade — line stays solid for 2s after thrust ends,
   // then fades over 1s. -Infinity means "never thrusted" → preview hidden.
@@ -59,6 +62,7 @@ export class Ship {
   shieldActive = false;
   radarActive = false;
   longshotActive = false;
+  sideEnginesActive = false;
 
   // discrete halo tier 0/1/2; intensity eases toward this target for a smooth visual response.
   comboHaloTier = 0;

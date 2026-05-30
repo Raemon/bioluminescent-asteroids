@@ -51,9 +51,12 @@ const buildPanel = (): SummaryEls => {
     root = document.createElement("div");
     root.id = PANEL_ID;
     root.innerHTML = `
-      <div class="ws-row ws-title"><span class="ws-label">Completed Wave</span> <span class="ws-value" data-row="wave"></span></div>
-      <div class="ws-row"><span class="ws-label">Max Rhythm</span> <span class="ws-value" data-row="max"></span></div>
-      <div class="ws-row"><span class="ws-label">Final Rhythm</span> <span class="ws-value" data-row="final"></span></div>
+      <div class="ws-row ws-title">
+        <span class="ws-completed">Completed</span>
+        <span class="ws-wave"><span class="ws-wave-inner">Wave <span data-row="wave"></span></span></span>
+      </div>
+      <div class="ws-row ws-rhythm"><span class="ws-label">Max Rhythm</span> <span class="ws-value" data-row="max"></span></div>
+      <div class="ws-row ws-rhythm"><span class="ws-label">Final Rhythm</span> <span class="ws-value" data-row="final"></span></div>
       <div class="ws-row ws-bonus"><span class="ws-label">Bonus</span> <span class="ws-value" data-row="bonus"></span></div>
       <div class="ws-row ws-score"><span class="ws-label">Score</span> <span class="ws-value" data-row="score"></span></div>
     `;
@@ -93,13 +96,30 @@ const ROW_SOUNDS: Array<{ name: "chime" | "tink"; pitch: number }> = [
   { name: "tink", pitch: 1.498 }, // ~perfect fifth up
 ];
 
-// pentatonic loop for the drain. Pentatonic stays consonant against
-//   any backing chord so the bonus-drain melody doesn't fight whatever
-//   combo halo is currently playing. Cycling a five-note pattern over a
-//   four-tick beat grid means the downbeat lands on a different scale
-//   degree each beat, which is what gives the drain its "tune" instead of
-//   "loop" character.
-const DRAIN_PITCHES = [1.0, 1.122, 1.26, 1.498, 1.682];
+// 16-step ascending major-scale melody for the drain — a small song that
+//   arcs from root up two octaves, with the downbeats (positions 0/4/8/12)
+//   landing on chord tones (1, 8, 5, 8) so a bassKick accent there reads as
+//   a real beat under a real tune. Looping the phrase past 16 ticks snaps
+//   back to root, which gives a clear musical "verse" feel on long drains
+//   rather than an endless ascent.
+const DRAIN_PITCHES = [
+  1.0,    // 1   (root, downbeat)
+  1.25,   // 3
+  1.5,    // 5
+  1.667,  // 6
+  2.0,    // 8   (octave, downbeat)
+  1.875,  // 7
+  1.5,    // 5
+  1.667,  // 6
+  1.5,    // 5   (downbeat)
+  1.25,   // 3
+  1.5,    // 5
+  1.667,  // 6
+  2.0,    // 8   (downbeat, climax setup)
+  2.5,    // 10  (high 3rd)
+  3.0,    // 12  (high 5th)
+  3.75,   // 15  (two octaves)
+];
 
 export const showWaveSummary = (
   game: Game,
@@ -156,15 +176,15 @@ export const showWaveSummary = (
       pulseScore(scoreValueEl);
       syncHud(game);
 
-      // cycle through a pentatonic pattern for the drain blips. Every
-      //   4th tick is a downbeat — accent it with a soft "tink" on top of
-      //   the blip so the ear hears a clear pulse instead of an undifferentiated
-      //   stream. The blip itself is quiet by design; the tink gives the
-      //   downbeat a glassy lift without overwhelming gameplay.
+      // play the next note in the ascending melody. Every 4th tick is a
+      //   downbeat — drop a deep bassKick under the blip so the ear hears a
+      //   solid pulse holding the tune together, and add a tink an octave
+      //   above the melody note for sparkle on top.
       const pitch = DRAIN_PITCHES[tickIndex % DRAIN_PITCHES.length];
       game.sound.play("scoreBlip", pitch);
       if (tickIndex % TICKS_PER_BEAT === 0) {
-        game.sound.play("tink", pitch * 2); // octave up for sparkle
+        game.sound.play("bassKick", pitch);
+        game.sound.play("tink", pitch * 2);
       }
       tickIndex++;
 

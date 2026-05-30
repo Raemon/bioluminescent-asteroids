@@ -33,7 +33,7 @@ import { renderKilledRow, stopParade } from "./killedParade";
 import { updatePopups } from "./popups";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
-import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry } from "./scoreEntry";
+import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderboardKeyRepeat } from "./scoreEntry";
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
@@ -58,6 +58,7 @@ const routeStateUpdate = (game: Game, dt: number) => {
 // title needs cosmetic motion + enter-to-start; nothing else fires here.
 const updateTitle = (game: Game, dt: number) => {
   if (game.input.pressed("enter") || game.input.pressed("return")) startGame(game);
+  tickLeaderboardKeyRepeat(game, dt);
   for (const a of game.asteroids) a.update(dt, game.w, game.h);
   game.particles.update(dt);
 };
@@ -76,6 +77,11 @@ const updateGameOver = (game: Game, dt: number) => {
     game.killedRowEl.classList.add("hidden");
     game.killedSnapshots = [];
     showTitle(game);
+  }
+  // Up/down navigate the leaderboard once the callsign input isn't focused —
+  //   otherwise arrow keys would scroll the list while the player is typing.
+  if (document.activeElement !== game.scoreEntryInputEl) {
+    tickLeaderboardKeyRepeat(game, dt);
   }
   for (const a of game.asteroids) a.update(dt, game.w, game.h);
   game.beatTime += dt;
@@ -351,18 +357,8 @@ const runCollisionPasses = (game: Game) => {
   handleGoldCrystalPickups(game);
 };
 
-// Pick the screen quadrant the ship is NOT in, so the wave label fades in
-// without sitting under the player's hull. Returns viewport-space CSS coords.
-const waveLabelAnchor = (game: Game): { left: number; top: number } => {
-  const onRight = game.ship.pos.x > game.w / 2;
-  const onBottom = game.ship.pos.y > game.h / 2;
-  return {
-    left: onRight ? game.w * 0.25 : game.w * 0.75,
-    top: onBottom ? game.h * 0.28 : game.h * 0.72,
-  };
-};
-
-// Fade "Wave N" into the quadrant near (but not under) the ship.
+// Fade "Wave N" into the centre of the screen so it picks up directly from
+// where the previous wave's "Completed Wave N" title sat in the summary panel.
 const showWaveAnnounce = (game: Game) => {
   let el = document.getElementById("wave-announce");
   if (!el) {
@@ -372,9 +368,6 @@ const showWaveAnnounce = (game: Game) => {
     el.appendChild(inner);
     document.body.appendChild(el);
   }
-  const anchor = waveLabelAnchor(game);
-  el.style.left = `${anchor.left}px`;
-  el.style.top = `${anchor.top}px`;
   const inner = el.firstElementChild as HTMLSpanElement;
   inner.textContent = `Wave ${game.wave}`;
   el.classList.remove("show");

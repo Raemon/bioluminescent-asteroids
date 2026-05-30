@@ -3,7 +3,7 @@ import { Vec, v, add, mul, sub, len, rand, pick, TAU } from "./vec";
 // Five powerup kinds, each with its own glyph so the player can read the
 // canister at a glance from across the screen. Keeping the list short
 // (rather than 10+ kinds) means each one stays familiar after a few waves.
-export type PowerupKind = "trident" | "rapid" | "pierce" | "shield" | "slow" | "radar" | "longshot";
+export type PowerupKind = "trident" | "rapid" | "pierce" | "shield" | "slow" | "radar" | "longshot" | "sideEngines";
 
 // Hue is kept for downstream effects (pickup burst tinting) but the canister
 // itself renders pure white so the player reads it as "incoming pod" first
@@ -16,6 +16,7 @@ export const POWERUP_HUE: Record<PowerupKind, number> = {
   slow: 130,
   radar: 30,
   longshot: 270,
+  sideEngines: 25,
 };
 
 const POWERUP_GLYPH: Record<PowerupKind, string> = {
@@ -26,9 +27,10 @@ const POWERUP_GLYPH: Record<PowerupKind, string> = {
   slow: "Z",
   radar: "X",
   longshot: "L",
+  sideEngines: "E",
 };
 
-export const POWERUP_KINDS: PowerupKind[] = ["trident", "shield", "slow", "radar", "longshot"];
+export const POWERUP_KINDS: PowerupKind[] = ["trident", "shield", "slow", "radar", "longshot", "sideEngines"];
 
 // warp-out plays a brief vortex flash before the canister vanishes so the player
 //   sees a deliberate departure (not just a soft offscreen fade) when they let a pod drift past.

@@ -160,6 +160,7 @@ export type SoundName =
   | "explosionSmall"
   | "thrust"
   | "reverseThrust"
+  | "sideThrust"
   | "death"
   | "waveClear"
   | "bassKick"
@@ -228,6 +229,18 @@ export class Sound {
     mainGain: GainNode;
   } | null = null;
   reverseThrustNode: {
+    tri1: OscillatorNode;
+    tri2: OscillatorNode;
+    sub: OscillatorNode;
+    lfo: OscillatorNode;
+    lfoDepth: GainNode;
+    filter: BiquadFilterNode;
+    tremoloGain: GainNode;
+    mainGain: GainNode;
+  } | null = null;
+  // Side engines (Z/X) — third engine voice; pitch sits between forward thrust
+  // and retro so the player hears it as a distinct vector.
+  sideThrustNode: {
     tri1: OscillatorNode;
     tri2: OscillatorNode;
     sub: OscillatorNode;
@@ -873,6 +886,7 @@ export class Sound {
     const savedEnabled = this.enabled;
     const savedThrust = this.thrustNode;
     const savedReverseThrust = this.reverseThrustNode;
+    const savedSideThrust = this.sideThrustNode;
 
     // Build a fresh master node + compressor inside the offline graph that
     // mirrors the live tone chain (master → compressor → destination), so
@@ -895,6 +909,7 @@ export class Sound {
     // offline ctx. We restore the live one in `finally`.
     this.thrustNode = null;
     this.reverseThrustNode = null;
+    this.sideThrustNode = null;
 
     try {
       this.play(name, pitchRatio);
@@ -909,6 +924,7 @@ export class Sound {
       this.enabled = savedEnabled;
       this.thrustNode = savedThrust;
       this.reverseThrustNode = savedReverseThrust;
+      this.sideThrustNode = savedSideThrust;
     }
   }
 
@@ -921,6 +937,7 @@ export class Sound {
     this.enabled = on;
     if (!on && this.thrustNode) this.stopThrust();
     if (!on && this.reverseThrustNode) this.stopReverseThrust();
+    if (!on && this.sideThrustNode) this.stopSideThrust();
     if (!on) this.stopAllAlienDrones();
     if (!on) this.stopAllBassteroidDrones();
     if (!on) this.stopAllCometShimmers();
@@ -2342,6 +2359,7 @@ export class Sound {
       case "explosionSmall": this.playExplosion(cfgN("explosionSmall", "volume", 0.4), cfgN("explosionSmall", "lowpassStart", 340), cfgN("explosionSmall", "duration", 0.3)); break;
       case "thrust": this.startThrust(); break;
       case "reverseThrust": this.startReverseThrust(); break;
+      case "sideThrust": this.startSideThrust(); break;
       case "death": this.playDeath(); break;
       case "waveClear": this.playWaveClear(); break;
       case "bassKick": this.playBassKick(effectivePitch); break;
@@ -3218,6 +3236,74 @@ export class Sound {
     sub.stop(t + 0.1);
     lfo.stop(t + 0.1);
     this.reverseThrustNode = null;
+  }
+
+  // Side engines — third engine voice. Architecture mirrors thrust/retro, but
+  // pitch sits between the two (90Hz/45Hz here vs 110/55 forward and 72/36 retro)
+  // and the filter cutoff opens slightly brighter so the side jet reads as
+  // a tighter, more agile burst than either main thruster.
+  private startSideThrust() {
+    if (!this.ctx || !this.master) return;
+    if (this.sideThrustNode) return;
+    const t = this.ctx.currentTime;
+
+    const tri1 = this.ctx.createOscillator();
+    tri1.type = "triangle";
+    tri1.frequency.value = 90.0;
+    const tri2 = this.ctx.createOscillator();
+    tri2.type = "triangle";
+    tri2.frequency.value = 90.7;
+    const sub = this.ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.value = 45.0;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 1500;
+    filter.Q.value = 0.7;
+
+    const tremoloGain = this.ctx.createGain();
+    tremoloGain.gain.value = 1.0;
+
+    const lfo = this.ctx.createOscillator();
+    lfo.type = "sine";
+    lfo.frequency.value = 6.5;
+    const lfoDepth = this.ctx.createGain();
+    lfoDepth.gain.value = 0.1;
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(tremoloGain.gain);
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.setValueAtTime(0.0001, t);
+    mainGain.gain.exponentialRampToValueAtTime(0.14, t + 0.06);
+
+    tri1.connect(filter);
+    tri2.connect(filter);
+    sub.connect(filter);
+    filter.connect(tremoloGain);
+    tremoloGain.connect(mainGain);
+    mainGain.connect(this.master);
+
+    tri1.start(t);
+    tri2.start(t);
+    sub.start(t);
+    lfo.start(t);
+
+    this.sideThrustNode = { tri1, tri2, sub, lfo, lfoDepth, filter, tremoloGain, mainGain };
+  }
+
+  stopSideThrust() {
+    if (!this.ctx || !this.sideThrustNode) return;
+    const t = this.ctx.currentTime;
+    const { tri1, tri2, sub, lfo, mainGain } = this.sideThrustNode;
+    mainGain.gain.cancelScheduledValues(t);
+    mainGain.gain.setValueAtTime(mainGain.gain.value, t);
+    mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    tri1.stop(t + 0.09);
+    tri2.stop(t + 0.09);
+    sub.stop(t + 0.09);
+    lfo.stop(t + 0.09);
+    this.sideThrustNode = null;
   }
 
   // Player-ship death: deep, dramatic, satisfying. Layered as:

@@ -75,6 +75,7 @@ export const showTitle = (game: Game) => {
   game.ship.shieldActive = false;
   game.ship.radarActive = false;
   game.ship.longshotActive = false;
+  game.ship.sideEnginesActive = false;
   syncPowerupHud(game);
   hideScoreEntry(game);
   showLeaderboard(game);
@@ -160,8 +161,11 @@ const enterPause = (game: Game) => {
   game.state = "paused";
   game.ship.thrustOn = false;
   game.ship.reverseThrustOn = false;
+  game.ship.portThrustOn = false;
+  game.ship.starboardThrustOn = false;
   game.sound.stopThrust();
   game.sound.stopReverseThrust();
+  game.sound.stopSideThrust();
   game.overlayTitleEl.textContent = "Paused";
   game.overlayStartEl.innerHTML = 'press <span class="key">esc</span> or <span class="key">enter</span> to resume';
   game.overlayEl.classList.remove("hidden");
@@ -180,8 +184,11 @@ export const abortMission = (game: Game) => {
   game.state = "gameover";
   game.ship.thrustOn = false;
   game.ship.reverseThrustOn = false;
+  game.ship.portThrustOn = false;
+  game.ship.starboardThrustOn = false;
   game.sound.stopThrust();
   game.sound.stopReverseThrust();
+  game.sound.stopSideThrust();
   stopAllPersistentAudio(game);
   game.lastRunScore = game.score;
   game.lastRunScoreId = null;
@@ -211,6 +218,7 @@ export const killShip = (game: Game) => {
   clearComboSilently(game);
   game.sound.stopThrust();
   game.sound.stopReverseThrust();
+  game.sound.stopSideThrust();
   game.sound.stopHaloAmbient();
   game.sound.play("death");
   emitShipDebris(game.particles, game.ship.pos);

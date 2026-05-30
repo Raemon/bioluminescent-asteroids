@@ -1,7 +1,7 @@
 import type { Ship } from "../Ship";
 
 // collisions test the visible halo outline, not a bounding circle, so the outline IS the hitbox.
-export const haloVertices = (ship: Ship): Array<[number, number]> => {
+export const haloVertices = (ship: Ship, offset: number = ship.haloOffset): Array<[number, number]> => {
   const hull: Array<[number, number]> = [
     [Math.cos(ship.heading) * ship.radius * 1.4, Math.sin(ship.heading) * ship.radius * 1.4],
     [Math.cos(ship.heading + Math.PI * 0.78) * ship.radius * 1.0, Math.sin(ship.heading + Math.PI * 0.78) * ship.radius * 1.0],
@@ -9,7 +9,7 @@ export const haloVertices = (ship: Ship): Array<[number, number]> => {
   ];
   const s = polygonOutwardSign(hull);
   const halo: Array<[number, number]> = [];
-  for (let k = 0; k < 3; k++) halo.push(miterVertex(hull, k, s, ship.haloOffset));
+  for (let k = 0; k < 3; k++) halo.push(miterVertex(hull, k, s, offset));
   return halo;
 };
 

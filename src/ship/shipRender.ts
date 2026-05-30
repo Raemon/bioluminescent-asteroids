@@ -75,6 +75,28 @@ const paintRetroFlares = (ctx: CanvasRenderingContext2D, ship: Ship) => {
   }
 };
 
+// side-engine jet vents from the flank opposite the push direction. Warm hue
+// separates it visually from the cyan forward/retro flames so the player can
+// tell which engine is firing at a glance.
+const paintSideJet = (ctx: CanvasRenderingContext2D, ship: Ship, side: "port" | "starboard") => {
+  const ventAngle = ship.heading + (side === "port" ? Math.PI / 2 : -Math.PI / 2);
+  const vent = fromAngle(ventAngle, ship.radius * 0.85 + Math.random() * 3);
+  const flareR = 12 * (0.85 + Math.random() * 0.3);
+  const grad = ctx.createRadialGradient(vent.x, vent.y, 0, vent.x, vent.y, flareR);
+  grad.addColorStop(0, "hsla(38, 100%, 90%, 1.0)");
+  grad.addColorStop(0.4, "hsla(28, 100%, 65%, 0.55)");
+  grad.addColorStop(1, "hsla(20, 100%, 55%, 0)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(vent.x, vent.y, flareR, 0, TAU);
+  ctx.fill();
+};
+
+const paintSideJets = (ctx: CanvasRenderingContext2D, ship: Ship) => {
+  if (ship.portThrustOn) paintSideJet(ctx, ship, "port");
+  if (ship.starboardThrustOn) paintSideJet(ctx, ship, "starboard");
+};
+
 // rounded-corner triangle path tracing the halo polygon; cornerRadius is in local pixels.
 const traceRoundedTriangle = (
   ctx: CanvasRenderingContext2D,
@@ -100,17 +122,24 @@ const traceRoundedTriangle = (
   ctx.closePath();
 };
 
-// shield draws a rounded-corner triangle tracing the (expanded) halo polygon — same shape as the hitbox.
+// shield draws an additional rounded-corner triangle 12px outside the ship's normal halo —
+//   purely cosmetic (hitbox stays at the base halo). Multi-pass glow sells the energy field.
 const paintShieldRing = (ctx: CanvasRenderingContext2D, ship: Ship, beatPulse: number) => {
   if (!ship.shieldActive) return;
   const shieldBrightness = 0.6 + 0.4 * beatPulse;
   const shieldHue = POWERUP_HUE.shield;
-  const halo = haloVertices(ship);
-  ctx.strokeStyle = `hsla(${shieldHue}, 100%, 80%, ${0.75 * shieldBrightness})`;
-  ctx.lineWidth = 1.4;
+  const ringOffset = ship.haloOffset + ship.shieldRingOffset;
+  const ring = haloVertices(ship, ringOffset);
   ctx.shadowColor = `hsla(${shieldHue}, 100%, 70%, 1)`;
-  ctx.shadowBlur = 16;
-  traceRoundedTriangle(ctx, halo, 6);
+  ctx.shadowBlur = 28 * shieldBrightness;
+  ctx.strokeStyle = `hsla(${shieldHue}, 100%, 60%, ${0.35 * shieldBrightness})`;
+  ctx.lineWidth = 4.5;
+  traceRoundedTriangle(ctx, ring, 10);
+  ctx.stroke();
+  ctx.shadowBlur = 14;
+  ctx.strokeStyle = `hsla(${shieldHue}, 100%, 88%, ${0.95 * shieldBrightness})`;
+  ctx.lineWidth = 1.6;
+  traceRoundedTriangle(ctx, ring, 10);
   ctx.stroke();
   ctx.shadowBlur = 0;
 };
@@ -135,6 +164,7 @@ export const renderShipBody = (ctx: CanvasRenderingContext2D, ship: Ship, t: num
   paintShipHull(ctx, verts, invuln, beatPulse);
   paintThrustFlame(ctx, ship);
   paintRetroFlares(ctx, ship);
+  paintSideJets(ctx, ship);
   paintShieldRing(ctx, ship, beatPulse);
   ctx.restore();
 };

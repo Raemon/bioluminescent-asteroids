@@ -18,6 +18,9 @@ export type Popup = {
   popDuration: number;
   holdUntil: number;
   fadeGain: number;
+  // when set, replaces the default text fill at render time — lets a popup
+  // composite its own glyphs (e.g. keycaps for the Side Engines pickup).
+  draw?: (ctx: CanvasRenderingContext2D, p: Popup, alpha: number, scale: number) => void;
 };
 
 const COMBO_POPUP_LIFE = 0.9;
@@ -33,6 +36,7 @@ const POWERUP_LABEL: Record<PowerupKind, string> = {
   slow: "SLOW-MO",
   radar: "RADAR",
   longshot: "LONGSHOT",
+  sideEngines: "SIDE ENGINES",
 };
 
 // anchors the multiplier feedback at the spot the player actually struck, not a corner pulse.
@@ -159,8 +163,116 @@ export const renderPopups = (ctx: CanvasRenderingContext2D, popups: Popup[]) => 
     ctx.save();
     ctx.translate(p.pos.x, p.pos.y);
     ctx.scale(scale, scale);
-    ctx.fillText(p.text, 0, 0);
+    if (p.draw) p.draw(ctx, p, alpha, scale);
+    else ctx.fillText(p.text, 0, 0);
     ctx.restore();
   }
   ctx.restore();
+};
+
+// rounded-square keycap glyph rendered at the popup's local origin.
+// x is the cap's center; returns the cap's full width (so the caller can
+// advance the cursor).
+const drawKeyCap = (
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number,
+  label: string,
+  color: string, shadow: string,
+): number => {
+  const w = 22, h = 22, r = 5;
+  const x = cx - w / 2, y = cy - h / 2;
+  ctx.save();
+  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = color;
+  ctx.shadowColor = shadow;
+  ctx.shadowBlur = 10;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = color;
+  ctx.font = "700 14px 'Space Grotesk', system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, cx, cy + 1);
+  ctx.restore();
+  return w;
+};
+
+// "SIDE ENGINES (Z X)" — label text, then a parens-wrapped pair of keycaps
+// for the Z and X bindings so the player learns the controls at pickup time.
+export const popupSideEnginesPickup = (pos: Vec): Popup => {
+  const hue = POWERUP_HUE.sideEngines;
+  const fill = `hsl(${hue}, 95%, 72%)`;
+  const shadow = `hsla(${hue}, 95%, 65%, 0.9)`;
+  const labelFont = "700 18px 'Space Grotesk', system-ui, sans-serif";
+  const parenFont = "700 20px 'Space Grotesk', system-ui, sans-serif";
+  return {
+    pos: { x: pos.x, y: pos.y - 24 },
+    vel: { x: 0, y: -18 },
+    life: PICKUP_POPUP_LIFE,
+    maxLife: PICKUP_POPUP_LIFE,
+    text: "SIDE ENGINES (Z X)",
+    font: labelFont,
+    fill,
+    shadowColor: shadow,
+    shadowBlur: 14,
+    decayX: 1, decayY: 0.96,
+    popPeak: 0.3, popDuration: 0.15,
+    holdUntil: 0.3, fadeGain: 1,
+    draw: (ctx) => {
+      // measure piece widths so the whole row centers around the popup origin.
+      ctx.save();
+      ctx.font = labelFont;
+      const labelW = ctx.measureText("SIDE ENGINES ").width;
+      ctx.font = parenFont;
+      const parenLW = ctx.measureText("(").width;
+      const parenRW = ctx.measureText(")").width;
+      const capW = 22;
+      const capGap = 6;
+      const groupW = parenLW + capW + capGap + capW + parenRW;
+      const total = labelW + groupW;
+      let cursor = -total / 2;
+
+      // label
+      ctx.font = labelFont;
+      ctx.fillStyle = fill;
+      ctx.shadowColor = shadow;
+      ctx.shadowBlur = 14;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText("SIDE ENGINES ", cursor, 0);
+      cursor += labelW;
+
+      // "("
+      ctx.font = parenFont;
+      ctx.fillText("(", cursor, 0);
+      cursor += parenLW;
+
+      // [Z]
+      drawKeyCap(ctx, cursor + capW / 2, 0, "Z", fill, shadow);
+      cursor += capW + capGap;
+
+      // [X]
+      drawKeyCap(ctx, cursor + capW / 2, 0, "X", fill, shadow);
+      cursor += capW;
+
+      // ")"
+      ctx.font = parenFont;
+      ctx.fillStyle = fill;
+      ctx.shadowColor = shadow;
+      ctx.shadowBlur = 14;
+      ctx.fillText(")", cursor, 0);
+      ctx.restore();
+    },
+  };
 };

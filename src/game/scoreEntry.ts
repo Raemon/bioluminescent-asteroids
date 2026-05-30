@@ -102,9 +102,7 @@ export const isScoreEntryBlockingEnter = (game: Game): boolean => {
   return game.scoreSubmitState !== "submitted";
 };
 
-type RankedRow = { row: HighscoreRow; rank: number };
-
-// max-combo-first sort celebrates the headline streak stat; used for the global top-10 view.
+// max-combo-first sort celebrates the headline streak stat; used for the title-screen view.
 const sortByComboThenScore = (rows: HighscoreRow[]): HighscoreRow[] =>
   [...rows].sort((a, b) => {
     const comboDiff = (b.max_combo ?? 0) - (a.max_combo ?? 0);
@@ -112,17 +110,34 @@ const sortByComboThenScore = (rows: HighscoreRow[]): HighscoreRow[] =>
     return b.score - a.score;
   });
 
-// neighborhood view ranks strictly by score so "5 closest in either direction" is
-//   well-defined; the API already returns rows in this order.
+// gameover ranks strictly by score so "5 closest in either direction" around the
+//   player's run is well-defined.
 const sortByScore = (rows: HighscoreRow[]): HighscoreRow[] =>
   [...rows].sort((a, b) => b.score - a.score);
 
-const renderRows = (game: Game, ranked: RankedRow[], selfId: number | null) => {
-  if (ranked.length === 0) {
+// 11-row window (5 above + selected + 5 below) matches the original neighborhood view.
+const WINDOW_RADIUS = 5;
+const WINDOW_SIZE = WINDOW_RADIUS * 2 + 1;
+
+// Window anchor that keeps the selection centred when possible, but clamps
+//   against the list boundaries so we never show empty slots above the #1 row
+//   or below the last row.
+const windowStart = (selection: number, total: number): number => {
+  if (total <= WINDOW_SIZE) return 0;
+  const ideal = selection - WINDOW_RADIUS;
+  const maxStart = total - WINDOW_SIZE;
+  return Math.max(0, Math.min(maxStart, ideal));
+};
+
+const renderLeaderboard = (game: Game) => {
+  const rows = game.leaderboardRows;
+  if (rows.length === 0) {
     game.leaderboardListEl.innerHTML =
       '<li class="leaderboard-status">No scores yet — be the first pilot on the board.</li>';
     return;
   }
+  const start = windowStart(game.leaderboardSelection, rows.length);
+  const end = Math.min(rows.length, start + WINDOW_SIZE);
   const header = `<li class="lb-header">
     <span class="lb-rank"></span>
     <span class="lb-name">Pilot</span>
@@ -130,50 +145,25 @@ const renderRows = (game: Game, ranked: RankedRow[], selfId: number | null) => {
     <span class="lb-combo">Rhythm</span>
     <span class="lb-wave">Wave</span>
   </li>`;
-  const items = ranked
-    .map(({ row, rank }) => {
-      const safeName = escapeHtml(row.name);
-      const combo = row.max_combo ?? 0;
-      const comboTier = combo >= 8 ? "white" : combo >= 4 ? "gold" : combo >= 2 ? "cyan" : "dim";
-      const wave = row.wave ?? 1;
-      const isSelf = selfId !== null && row.id === selfId;
-      const cls = isSelf ? ' class="lb-self"' : "";
-      return `<li${cls}>
-        <span class="lb-rank">${rank}</span>
-        <span class="lb-name">${safeName}</span>
-        <span class="lb-score">${row.score.toLocaleString()}</span>
-        <span class="lb-combo lb-combo-${comboTier}">
-          <span class="lb-combo-value">${combo}<span class="lb-combo-x">×</span></span>
-        </span>
-        <span class="lb-wave">${wave}</span>
-      </li>`;
-    })
-    .join("");
-  game.leaderboardListEl.innerHTML = header + items;
-};
-
-const renderTopRows = (game: Game, rows: HighscoreRow[]) => {
-  const sorted = sortByComboThenScore(rows);
-  const ranked: RankedRow[] = sorted.map((row, idx) => ({ row, rank: idx + 1 }));
-  renderRows(game, ranked, null);
-};
-
-// pick the 5 score-rank neighbours above and below the player's row so a returning
-//   pilot sees who they need to beat next and who's nipping at their heels.
-const renderNeighborhoodRows = (game: Game, rows: HighscoreRow[], selfId: number) => {
-  const sorted = sortByScore(rows);
-  const selfIdx = sorted.findIndex((r) => r.id === selfId);
-  if (selfIdx < 0) {
-    renderTopRows(game, rows);
-    return;
+  const items: string[] = [];
+  for (let i = start; i < end; i++) {
+    const row = rows[i];
+    const safeName = escapeHtml(row.name);
+    const combo = row.max_combo ?? 0;
+    const comboTier = combo >= 8 ? "white" : combo >= 4 ? "gold" : combo >= 2 ? "cyan" : "dim";
+    const wave = row.wave ?? 1;
+    const cls = i === game.leaderboardSelection ? ' class="lb-self"' : "";
+    items.push(`<li${cls}>
+      <span class="lb-rank">${i + 1}</span>
+      <span class="lb-name">${safeName}</span>
+      <span class="lb-score">${row.score.toLocaleString()}</span>
+      <span class="lb-combo lb-combo-${comboTier}">
+        <span class="lb-combo-value">${combo}<span class="lb-combo-x">×</span></span>
+      </span>
+      <span class="lb-wave">${wave}</span>
+    </li>`);
   }
-  const RADIUS = 5;
-  const start = Math.max(0, selfIdx - RADIUS);
-  const end = Math.min(sorted.length, selfIdx + RADIUS + 1);
-  const ranked: RankedRow[] = sorted
-    .slice(start, end)
-    .map((row, idx) => ({ row, rank: start + idx + 1 }));
-  renderRows(game, ranked, selfId);
+  game.leaderboardListEl.innerHTML = header + items.join("");
 };
 
 const escapeHtml = (s: string): string =>
@@ -182,8 +172,9 @@ const escapeHtml = (s: string): string =>
   );
 
 // matches the API's MAX_LIMIT — fetching the full slice means a returning pilot
-//   ranked anywhere in the top tier will be found by id and centered in the view.
-const NEIGHBORHOOD_FETCH_LIMIT = 50;
+//   ranked anywhere in the top tier will be found by id and the rotation has
+//   enough pilots to scroll through.
+const LEADERBOARD_FETCH_LIMIT = 50;
 
 const setLeaderboardTitle = (game: Game, text: string) => {
   const titleEl = game.leaderboardEl.querySelector(".leaderboard-title");
@@ -196,18 +187,95 @@ export const showLeaderboard = (game: Game) => {
   setLeaderboardTitle(game, showNeighborhood ? "Your Standing" : "Top Pilots");
   game.leaderboardListEl.innerHTML =
     `<li class="leaderboard-status">${showNeighborhood ? "Loading your standing…" : "Loading top pilots…"}</li>`;
+  game.leaderboardRows = [];
+  game.leaderboardSelection = 0;
+  game.leaderboardActive = false;
   void refreshLeaderboard(game);
 };
 
 export const refreshLeaderboard = async (game: Game) => {
   const selfId = game.lastRunScoreId;
-  const limit = selfId !== null ? NEIGHBORHOOD_FETCH_LIMIT : 10;
   try {
-    const rows = await fetchHighscores(limit);
-    if (selfId !== null) renderNeighborhoodRows(game, rows, selfId);
-    else renderTopRows(game, rows);
+    const rows = await fetchHighscores(LEADERBOARD_FETCH_LIMIT);
+    const sorted = selfId !== null ? sortByScore(rows) : sortByComboThenScore(rows);
+    game.leaderboardRows = sorted;
+    if (selfId !== null) {
+      const selfIdx = sorted.findIndex((r) => r.id === selfId);
+      game.leaderboardSelection = selfIdx >= 0 ? selfIdx : 0;
+    } else {
+      game.leaderboardSelection = 0;
+    }
+    game.leaderboardActive = sorted.length > 0;
+    renderLeaderboard(game);
   } catch {
     game.leaderboardListEl.innerHTML =
       '<li class="leaderboard-status">Leaderboard unavailable.</li>';
+    game.leaderboardActive = false;
   }
+};
+
+// up/down on title + gameover slide the yellow selector toward the centre of
+//   the visible 11-row window; once centred (or already centred, as on the
+//   gameover "Your Standing" view), further presses scroll the underlying list
+//   by clamping selection ± 1 against the row count.
+export const moveLeaderboardSelection = (game: Game, delta: number) => {
+  if (!game.leaderboardActive) return;
+  const total = game.leaderboardRows.length;
+  if (total === 0) return;
+  const next = game.leaderboardSelection + delta;
+  if (next < 0 || next >= total) return;
+  game.leaderboardSelection = next;
+  renderLeaderboard(game);
+};
+
+// Holding ↑/↓ should keep scrolling: an initial press fires immediately,
+//   then after a short delay we tick at a steady cadence. Tracked per
+//   direction so reversing mid-hold restarts the delay.
+const REPEAT_DELAY = 0.35;
+const REPEAT_INTERVAL = 0.08;
+let upHeldTime = -1;
+let upNextFireAt = 0;
+let downHeldTime = -1;
+let downNextFireAt = 0;
+
+const tickRepeatDirection = (
+  game: Game,
+  dt: number,
+  isDown: boolean,
+  heldRef: { held: number; nextAt: number },
+  delta: number,
+): { held: number; nextAt: number } => {
+  if (!isDown) return { held: -1, nextAt: 0 };
+  let { held, nextAt } = heldRef;
+  if (held < 0) {
+    moveLeaderboardSelection(game, delta);
+    return { held: 0, nextAt: REPEAT_DELAY };
+  }
+  held += dt;
+  while (held >= nextAt) {
+    moveLeaderboardSelection(game, delta);
+    nextAt += REPEAT_INTERVAL;
+  }
+  return { held, nextAt };
+};
+
+export const tickLeaderboardKeyRepeat = (game: Game, dt: number) => {
+  const upState = tickRepeatDirection(
+    game,
+    dt,
+    game.input.down("arrowup"),
+    { held: upHeldTime, nextAt: upNextFireAt },
+    -1,
+  );
+  upHeldTime = upState.held;
+  upNextFireAt = upState.nextAt;
+  const downState = tickRepeatDirection(
+    game,
+    dt,
+    game.input.down("arrowdown"),
+    { held: downHeldTime, nextAt: downNextFireAt },
+    1,
+  );
+  downHeldTime = downState.held;
+  downNextFireAt = downState.nextAt;
 };

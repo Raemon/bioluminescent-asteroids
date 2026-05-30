@@ -15,6 +15,7 @@ import { AlienBullet } from "./AlienBullet";
 import { v } from "./vec";
 import { Popup } from "./game/popups";
 import { KilledSnapshot } from "./game/killSnapshot";
+import type { HighscoreRow } from "./game/highscores";
 import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
@@ -118,6 +119,13 @@ export class Game implements HudElements {
   //   player's run instead of the global top 10. Cleared when a new run starts.
   lastRunScore: number | null = null;
   lastRunScoreId: number | null = null;
+  // up/down on the title + gameover leaderboard moves a yellow selector through
+  //   the fetched pilot list (cap of 50). The selector slides toward the centre
+  //   slot of the 11-row window first; once centred, further presses scroll the
+  //   underlying list. See game/scoreEntry.ts.
+  leaderboardRows: HighscoreRow[] = [];
+  leaderboardSelection = 0;
+  leaderboardActive = false;
 
   // post-run trophy lineup; replayed in the end-of-mission parade with original kill sounds.
   killedSnapshots: KilledSnapshot[] = [];

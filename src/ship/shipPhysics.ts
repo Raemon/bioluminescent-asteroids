@@ -4,7 +4,7 @@ import { Input } from "../Input";
 import { ParticleSystem } from "../Particle";
 import { Bullet } from "../Bullet";
 import { Sound } from "../Sound";
-import { emitThrust, emitReverseThrust } from "./shipParticles";
+import { emitThrust, emitReverseThrust, emitSideThrust } from "./shipParticles";
 import { fireBullets } from "./shipWeapons";
 import { BEAT_GRID } from "../game/rhythmConstants";
 import { ReticuleTarget } from "./reticule/trajectoryPreview";
@@ -55,6 +55,28 @@ const updateReverseThrust = (ship: Ship, input: Input, particles: ParticleSystem
   } else if (wasReversing) sound.stopReverseThrust();
 };
 
+// z/x lateral thrust — gated by the side-engines powerup. Z pushes port (left of heading),
+// X pushes starboard. Shares one audio loop that runs while either key is held.
+const updateSideThrust = (ship: Ship, input: Input, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
+  const enabled = ship.sideEnginesActive;
+  const wasActive = ship.portThrustOn || ship.starboardThrustOn;
+  ship.portThrustOn = enabled && input.down("z");
+  ship.starboardThrustOn = enabled && input.down("x");
+  if (ship.portThrustOn) {
+    ship.vel = add(ship.vel, mul(fromAngle(ship.heading - Math.PI / 2, ship.thrustPower), dt));
+    emitSideThrust(ship, particles, t, "port");
+    ship.lastThrustActiveAt = t / 1000;
+  }
+  if (ship.starboardThrustOn) {
+    ship.vel = add(ship.vel, mul(fromAngle(ship.heading + Math.PI / 2, ship.thrustPower), dt));
+    emitSideThrust(ship, particles, t, "starboard");
+    ship.lastThrustActiveAt = t / 1000;
+  }
+  const isActive = ship.portThrustOn || ship.starboardThrustOn;
+  if (isActive && !wasActive) sound.play("sideThrust");
+  else if (!isActive && wasActive) sound.stopSideThrust();
+};
+
 // rapid powerup halves the cooldown; both states use the same trigger gate.
 const updateFireTrigger = (ship: Ship, input: Input, bullets: Bullet[]) => {
   if (!(input.down(" ") || input.down("spacebar"))) return;
@@ -95,6 +117,7 @@ export const tickShip = (
   updateTurning(ship, input, dt, w, h, targets);
   updateForwardThrust(ship, input, particles, sound, dt, t);
   updateReverseThrust(ship, input, particles, sound, dt, t);
+  updateSideThrust(ship, input, particles, sound, dt, t);
   updateFireTrigger(ship, input, bullets);
   integrateMotion(ship, dt, w, h);
 };

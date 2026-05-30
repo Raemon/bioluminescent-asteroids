@@ -60,6 +60,36 @@ const emitReverseSpark = (ship: Ship, particles: ParticleSystem, muzzle: { x: nu
   });
 };
 
+// Z/X side engines — jet vents from the opposite flank so a port push (Z)
+// reads as gas blowing out starboard. Hue sits warm so it visually separates
+// from the cyan forward/retro flames.
+export const emitSideThrust = (ship: Ship, particles: ParticleSystem, t: number, side: "port" | "starboard") => {
+  const flicker = 0.7 + 0.3 * Math.sin(t * 0.05);
+  const ventAngle = ship.heading + (side === "port" ? Math.PI / 2 : -Math.PI / 2);
+  const ventOffset = fromAngle(ventAngle, ship.radius * 0.85);
+  const muzzle = add(ship.pos, ventOffset);
+  for (let i = 0; i < 2; i++) {
+    const jitter = (Math.random() - 0.5) * 0.45;
+    const spread = fromAngle(ventAngle + jitter, 1);
+    particles.emit({
+      pos: muzzle,
+      vel: add(mul(spread, 200 + Math.random() * 120), mul(ship.vel, 0.25)),
+      life: 0.2 + Math.random() * 0.14, maxLife: 0.34,
+      size: 1.5 * flicker, hue: 28 + Math.random() * 22,
+      shrink: 1, drag: 2.2,
+    });
+  }
+  const haloJitter = (Math.random() - 0.5) * 0.9;
+  const haloSpread = fromAngle(ventAngle + haloJitter, 1);
+  particles.emit({
+    pos: muzzle,
+    vel: add(mul(haloSpread, 80 + Math.random() * 70), mul(ship.vel, 0.2)),
+    life: 0.32 + Math.random() * 0.18, maxLife: 0.5,
+    size: 2.0 * flicker, hue: 18 + Math.random() * 20,
+    shrink: 1, drag: 1.6,
+  });
+};
+
 // twin front-corner jets sell the retro as venting forward to brake, not as backward thrust.
 export const emitReverseThrust = (ship: Ship, particles: ParticleSystem, t: number) => {
   const flicker = 0.7 + 0.3 * Math.sin(t * 0.06);

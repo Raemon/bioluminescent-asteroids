@@ -60,6 +60,12 @@ const TRACKS: Track[] = [
     animator: drawShip({ thrust: false, reverse: true }),
   },
   {
+    label: "side thrusting",
+    sublabel: "sideThrust · continuous",
+    trigger: { kind: "loop", sound: "sideThrust" },
+    animator: drawShip({ thrust: false, reverse: false }),
+  },
+  {
     label: "weak bullet",
     sublabel: "fire · off-beat",
     trigger: { kind: "beat", sound: "fire", periodBeats: 1, phaseBeats: 0.5 },
@@ -313,6 +319,7 @@ function handleCheckChange(h: RowHandle) {
     } else if (!h.checkbox.checked && h.loopActive) {
       if (h.track.trigger.sound === "thrust") sound.stopThrust();
       else if (h.track.trigger.sound === "reverseThrust") sound.stopReverseThrust();
+      else if (h.track.trigger.sound === "sideThrust") sound.stopSideThrust();
       h.loopActive = false;
     }
   }
