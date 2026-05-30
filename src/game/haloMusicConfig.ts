@@ -22,10 +22,11 @@
 //          Centroid ~425 Hz ambient/melodic, ~2.1 kHz sparkle. Bass-heavy
 //          pad needs conservative gain 0.22.
 //   r4-sb  Self-built flagship: rhythmic 16th-note arp + pad (ambient),
-//          syncopated sawtooth lead riff (melodic), celesta counter-melody
-//          (sparkle). Three rhythmic layers interlocked on a 16th-note grid.
-//          Plays gain 0.25 across all layers — sparkle matches melodic so
-//          the hook + counter-melody stay balanced.
+//          smooth calliope-synth melody that breathes in the gaps between
+//          sparkle cascades (melodic), celesta counter-melody (sparkle).
+//          Three layers interlocked on a 16th-note grid with the melody
+//          phrased to leave room for the cascade fragments. Plays gain
+//          0.25 across all layers.
 //
 // Every pool entry is fetched + decoded at startGame so the first 4x
 // doesn't pay fetch latency regardless of which one comes up.

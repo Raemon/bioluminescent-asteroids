@@ -1072,7 +1072,10 @@ export class Asteroid {
   //   < 0.35  → "center"   — clean 2-medium split
   //   > 0.7   → "glancing" — 1 medium continues + 2 small chips off struck side
   //   else    → "normal"   — 2-medium wedge
-  // Large combo+rhythm bonus (combo ≥ 2 AND onBeat): 4 small full pulverise.
+  // Large kills have a flat 1-in-10 chance to pulverise into 4 smalls — rare
+  // so it stays a treat. Two flavours, picked 50/50: "line" (four smalls
+  // fanned along the perpendicular axis) and "cross" (four smalls at 90°
+  // apart around the bullet axis). Both conserve perpendicular momentum.
   // Medium always → 2-small wedge.
   private splitRegular(opts?: { impactDir?: Vec; impactPos?: Vec; combo?: number; onBeat?: boolean }): Asteroid[] {
     const impactDir = opts?.impactDir;
@@ -1100,7 +1103,12 @@ export class Asteroid {
       perpSign = perp >= 0 ? 1 : -1;
     }
 
-    const comboBonus = (opts?.combo ?? 0) >= 2 && opts?.onBeat === true;
+    // Rare 4-small pulverise: a flat 1-in-10 roll on any large kill. Kept
+    // rare so it stays a treat rather than the default outcome.
+    const PULVERISE_CHANCE = 0.1;
+    const pulverise = Math.random() < PULVERISE_CHANCE;
+    // When the pulverise fires, pick line vs cross 50/50.
+    const pulveriseCross = pulverise && Math.random() < 0.5;
 
     // Mass units (small = 1, medium = 8, large = 64). Used only for the
     // momentum-balance arithmetic below, not for any other game system.
@@ -1124,8 +1132,25 @@ export class Asteroid {
 
     let specs: FragSpec[];
     if (this.size === "large") {
-      if (comboBonus) {
-        // 4 small: symmetric ±k, ±3k pattern (mass-weighted perp sums to 0).
+      if (pulverise && pulveriseCross) {
+        // 4 small in a cross: four equal-mass fragments at 90° apart around the
+        // bullet axis. The four perp/forward kicks sum to zero in the burst
+        // frame, so parent momentum is preserved. A uniform forward bullet-push
+        // shifts the rubble cloud's centre of mass slightly along the bullet
+        // direction (same intent as BULLET_PUSH in the other branches).
+        // Rotate the cross by 45° off the bullet axis so no fragment flies
+        // straight back at the shooter.
+        const crossSpeed = PERP_BURST * 1.15;
+        specs = [
+          { size: "small", perpKick:  crossSpeed * Math.SQRT1_2, bulletKick: BULLET_PUSH + crossSpeed * Math.SQRT1_2 },
+          { size: "small", perpKick:  crossSpeed * Math.SQRT1_2, bulletKick: BULLET_PUSH - crossSpeed * Math.SQRT1_2 },
+          { size: "small", perpKick: -crossSpeed * Math.SQRT1_2, bulletKick: BULLET_PUSH + crossSpeed * Math.SQRT1_2 },
+          { size: "small", perpKick: -crossSpeed * Math.SQRT1_2, bulletKick: BULLET_PUSH - crossSpeed * Math.SQRT1_2 },
+        ];
+      } else if (pulverise) {
+        // 4 small in a line: symmetric ±k, ±3k pattern (mass-weighted perp
+        // sums to 0). All four fragments share the same forward bullet-push,
+        // so they spread out along the perpendicular axis.
         specs = [
           { size: "small", perpKick: -PERP_BURST * 1.6, bulletKick: BULLET_PUSH },
           { size: "small", perpKick: -PERP_BURST * 0.55, bulletKick: BULLET_PUSH },

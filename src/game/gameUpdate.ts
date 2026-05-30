@@ -26,7 +26,7 @@ import {
 import { startGame, showTitle, togglePause, respawn } from "./lifecycle";
 import { targetsForReticule } from "./gameRender";
 import { syncHud, syncPowerupHud } from "./hud";
-import { renderKilledRow } from "./killedParade";
+import { renderKilledRow, stopParade } from "./killedParade";
 import { updatePopups } from "./popups";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
@@ -68,7 +68,12 @@ const updateGameOver = (game: Game, dt: number) => {
   //   outside the input before pressing Escape.
   if (game.input.pressed("escape") || game.input.pressed("esc")) hideScoreEntry(game);
   const enterPressed = game.input.pressed("enter") || game.input.pressed("return");
-  if (enterPressed && !isScoreEntryBlockingEnter(game)) showTitle(game);
+  if (enterPressed && !isScoreEntryBlockingEnter(game)) {
+    stopParade(game);
+    game.killedRowEl.classList.add("hidden");
+    game.killedSnapshots = [];
+    showTitle(game);
+  }
   for (const a of game.asteroids) a.update(dt, game.w, game.h);
   game.beatTime += dt;
   tickAuxBeats(game);

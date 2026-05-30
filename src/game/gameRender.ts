@@ -5,6 +5,7 @@ import { renderTrails } from "./trailsRender";
 import { renderPopups } from "./popups";
 import { computeConeFrame } from "../ship/reticule/coneGeometry";
 import { pickCenterMostTargetForFocus, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
+import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
 
 // Why: shake is purely cosmetic; isolate its math so render() reads top-down.
 const applyScreenShake = (game: Game): { shakeX: number; shakeY: number } => {
@@ -84,6 +85,7 @@ export const targetsForReticule = (game: Game) => [
 const paintForeground = (game: Game) => {
   const { ctx } = game;
   game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targetsForReticule(game), game.beatTime);
+  renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.beatTime, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
   renderPopups(ctx, game.popups);
 };

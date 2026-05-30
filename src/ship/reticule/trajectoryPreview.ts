@@ -10,7 +10,8 @@ export const BULLET_HIT_RADIUS_OFF_BEAT = 1.8 * 2.5;
 // element without ripping out its code. Useful while tuning the visual language.
 const SHOW_AIM_INTERSECTION_X = false;
 const SHOW_FIRST_BEAT_DOT = true;
-const SHOW_ON_RHYTHM_RETICULE = true;
+const SHOW_ON_RHYTHM_RETICULE = false;
+export const SHOW_SHIP_TRAJECTORY = true;
 
 // Why: the on-rhythm reticule overlay for the focused target paints brighter by this factor —
 // the focused-sprite glow itself is drawn additively in gameRender (no ctx.filter), but the

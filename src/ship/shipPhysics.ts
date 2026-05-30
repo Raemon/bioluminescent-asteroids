@@ -10,7 +10,7 @@ import { BEAT_GRID } from "../game/rhythmConstants";
 import { ReticuleTarget } from "./reticule/trajectoryPreview";
 import { resolveHeadingWithLock } from "./reticule/headingLockOn";
 
-// Why: tap-to-nudge feel; rotation ramps in over ~0.18s so a tap turns gently and a hold turns fast.
+// Why: tap-to-nudge feel; rotation ramps in over ~0.35s so a tap turns finely and a hold turns fast.
 // Visible trajectory lines exert a soft snap on the heading — see resolveHeadingWithLock.
 const updateTurning = (
   ship: Ship, input: Input, dt: number, w: number, h: number,
@@ -18,9 +18,9 @@ const updateTurning = (
 ) => {
   const turnLeft = input.down("arrowleft") || input.down("a");
   const turnRight = input.down("arrowright") || input.down("d");
-  if (turnLeft || turnRight) ship.rotRamp = Math.min(1, ship.rotRamp + dt / 0.18);
+  if (turnLeft || turnRight) ship.rotRamp = Math.min(1, ship.rotRamp + dt / 0.35);
   else ship.rotRamp = 0;
-  const turnScale = 0.18 + 0.82 * ship.rotRamp;
+  const turnScale = 0.08 + 0.92 * ship.rotRamp;
   let intendedDelta = 0;
   if (turnLeft) intendedDelta -= ship.rotSpeed * turnScale * dt;
   if (turnRight) intendedDelta += ship.rotSpeed * turnScale * dt;

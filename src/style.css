@@ -252,6 +252,30 @@ html, body {
 
 #overlay.hidden { display: none; }
 
+#soundeditor-link {
+  position: absolute;
+  top: 22px;
+  right: 28px;
+  pointer-events: auto;
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(106, 215, 255, 0.7);
+  text-decoration: none;
+  padding: 6px 12px;
+  border: 1px solid rgba(106, 215, 255, 0.25);
+  border-radius: 3px;
+  background: rgba(8, 16, 36, 0.4);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+#soundeditor-link.hidden { display: none; }
+
+#soundeditor-link:hover {
+  color: #6ad7ff;
+  border-color: rgba(106, 215, 255, 0.6);
+}
+
 #overlay h1 {
   font-weight: 300;
   font-size: clamp(32px, 6vw, 72px);

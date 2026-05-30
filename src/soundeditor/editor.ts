@@ -8,7 +8,8 @@ import { Sound, type SoundName } from "../Sound";
 import { Ship } from "../Ship";
 import { Bullet } from "../Bullet";
 import { Asteroid } from "../Asteroid";
-import { v, TAU } from "../vec";
+import { Pulsar } from "../Pulsar";
+import { v } from "../vec";
 import { loadSoundConfig } from "../soundConfig";
 import { BEAT_GRID } from "../game/rhythmConstants";
 
@@ -92,65 +93,40 @@ const TRACKS: Track[] = [
 
 // ── visuals ─────────────────────────────────────────────────────────────
 
-// A miniature pulsar — a hot bright core with two opposing beams that snap
-// to peak on every beat fire, then decay. Independent of the in-game Pulsar
-// class (which draws to a full-screen canvas with planets); this is a
-// portable cell-sized version that reads the same as "the pulsar pulsing."
+// Uses the real in-game Pulsar — same render path as the centre of the game
+// screen, just scoped to a cell-sized canvas. Offsets are zeroed so the star
+// sits in the middle of the canvas (the in-game version drifts in from the
+// upper-left as waves progress), planets are removed (busy in a 200×100 cell),
+// and we drive a fixed mid-run wave level so it reads at a visible size
+// instead of the wave-1 pinprick.
 function drawPulsar() {
-  return ({ ctx, w, h, t, firedAt }: AnimatorCtx) => {
-    ctx.clearRect(0, 0, w, h);
-    const cx = w / 2;
-    const cy = h / 2;
-    // Pulse envelope: snaps to 1 at firedAt and decays with a ~0.4s tail.
-    const sincePulse = firedAt >= 0 ? t - firedAt : Infinity;
-    const pulse = Math.max(0, Math.exp(-sincePulse * 3.2));
-    // Slow rotation so the beams sweep visibly between pulses.
-    const spin = t * 1.6;
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-
-    // Outer halo (the "approach glow"), driven by pulse.
-    const haloR = 32 + 18 * pulse;
-    const haloG = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
-    haloG.addColorStop(0, `hsla(48, 100%, 70%, ${0.45 + 0.4 * pulse})`);
-    haloG.addColorStop(0.5, `hsla(48, 100%, 60%, ${0.18 + 0.2 * pulse})`);
-    haloG.addColorStop(1, `hsla(48, 100%, 60%, 0)`);
-    ctx.fillStyle = haloG;
-    ctx.beginPath();
-    ctx.arc(cx, cy, haloR, 0, TAU);
-    ctx.fill();
-
-    // Twin beams — lengthen on the pulse.
-    const beamLen = 26 + 22 * pulse;
-    const beamW = 4 + 6 * pulse;
-    for (const dir of [0, Math.PI]) {
-      const a = spin + dir;
-      const tipX = cx + Math.cos(a) * beamLen;
-      const tipY = cy + Math.sin(a) * beamLen;
-      const grad = ctx.createLinearGradient(cx, cy, tipX, tipY);
-      grad.addColorStop(0, `hsla(48, 100%, 92%, ${0.85 + 0.15 * pulse})`);
-      grad.addColorStop(1, `hsla(48, 100%, 80%, 0)`);
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = beamW;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(tipX, tipY);
-      ctx.stroke();
+  let pulsar: Pulsar | null = null;
+  let lastFiredAt = -1;
+  let beatClock = 0;
+  return ({ ctx, w, h, dt, firedAt }: AnimatorCtx) => {
+    if (!pulsar || pulsar.w !== w || pulsar.h !== h) {
+      pulsar = new Pulsar(w, h);
+      pulsar.baseOffsetX = 0;
+      pulsar.baseOffsetY = 0;
+      pulsar.planets = [];
+      pulsar.setWaveLevel(6);
+      pulsar.displayWaveLevel = 6;
     }
 
-    // Bright neutron-star core.
-    const coreR = 5 + 4 * pulse;
-    const coreG = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
-    coreG.addColorStop(0, `hsla(60, 100%, 98%, 1)`);
-    coreG.addColorStop(0.5, `hsla(48, 100%, 88%, 0.8)`);
-    coreG.addColorStop(1, `hsla(48, 100%, 70%, 0)`);
-    ctx.fillStyle = coreG;
-    ctx.beginPath();
-    ctx.arc(cx, cy, coreR, 0, TAU);
-    ctx.fill();
+    // Soft per-beat pulse on each fired event (mirrors what Game does via
+    // pulsar.update's internal beat-index tracking).
+    if (firedAt !== lastFiredAt && firedAt >= 0) {
+      lastFiredAt = firedAt;
+      pulsar.beat();
+    }
 
-    ctx.restore();
+    // beatTime drives the magnetic-axis spin; we just advance a local clock.
+    // The pulsar's own beat-index trigger inside update() is harmless here —
+    // it just adds an extra small pulse alongside our explicit one.
+    beatClock += dt;
+    ctx.clearRect(0, 0, w, h);
+    pulsar.update(dt, beatClock, BEAT_GRID);
+    pulsar.render(ctx);
   };
 }
 
@@ -273,6 +249,12 @@ let lastFrameMs = 0;
 
 async function init() {
   await loadSoundConfig();
+  // The bgBeat is gated on bgBeatIntensity (0 = silent), which Game ramps
+  // 0.08 → 1.0 across waves 1–30. The editor has no wave clock, so without
+  // this the "pulsar beat" row would tick visually but emit nothing. Pin to
+  // the same wave-6 level the pulsar visual is locked to, so audio matches
+  // what you see and reads as typical-game volume rather than wave-30 peak.
+  sound.bgBeatIntensity = 0.08 + (5 / 29) * 0.92;
   const list = document.getElementById("se-list");
   if (!list) return;
 

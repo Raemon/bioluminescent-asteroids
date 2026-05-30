@@ -115,7 +115,7 @@ export type HaloMusicVariation =
   | "r2-el"   // ElevenLabs 32-second C-pedal cinematic bed + sustained-tone piano
   | "r2-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
   | "r3-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + crystalline arp sparkle
-  | "r4-sb"   // Self-built 32-second C-pedal flagship — pulsing arp + syncopated saw lead + celesta counter-melody (rhythmic, interlocked)
+  | "r4-sb"   // Self-built 32-second C-pedal flagship — pulsing arp + smooth calliope melody + celesta counter-melody (rhythmic, interlocked)
   | "none";   // Legacy synthesized pad (the original startHaloAmbient)
 
 type HaloMusicNode = {
@@ -201,9 +201,9 @@ export type SoundName =
 // through bakedOut. The other audition files (design-1, frank-wise, etc.) are
 // kept on disk in the same folder but excluded from the live pool.
 const PILOT_LOG_1_TAKES: readonly string[] = [
-  // "ralf-deep.mp3",
-  "ralf-deep-log2-a.mp3",
-  "ralf-deep-log2-b.mp3",
+  "ralf-deep.mp3",
+  // "ralf-deep-log2-a.mp3",
+  // "ralf-deep-log2-b.mp3",
 ];
 
 // Resolve the URLs for a given pilot-log index. Index 1 = the 6x take pool;
@@ -1920,10 +1920,10 @@ export class Sound {
       // +6.8 dB above the ≥4 dB pass threshold. Going higher risks the
       // analog pad fighting the bass field.
       case "r3-el": return 0.22;
-      // r4-sb is the rhythmic flagship — pulsing arp + syncopated saw lead.
-      // Audit at gain 0.25 keeps lo-mid clean by ≥13 dB across all three
-      // layers. Same gain applied to all layers since rhythmic interlock
-      // needs even relative loudness between hook + counter-melody.
+      // r4-sb is the rhythmic flagship — pulsing arp + smooth calliope-synth
+      // melody that breathes in the gaps left by the sparkle cascades. Audit
+      // at gain 0.25 keeps lo-mid clean by ≥8.9 dB with all three layers
+      // stacked; same gain applied across layers so the interlock stays even.
       case "r4-sb": return 0.25;
       default:      return 0.30;
     }
