@@ -127,7 +127,7 @@ const renderRows = (game: Game, ranked: RankedRow[], selfId: number | null) => {
     <span class="lb-rank"></span>
     <span class="lb-name">Pilot</span>
     <span class="lb-score">Score</span>
-    <span class="lb-combo">Peak Combo</span>
+    <span class="lb-combo">Peak Rhythm</span>
   </li>`;
   const items = ranked
     .map(({ row, rank }) => {
