@@ -64,6 +64,7 @@
       </div>
     </div>
     <div id="overlay" class="hidden">
+      <button id="tutorial-link" type="button">tutorial</button>
       <a id="soundeditor-link" href="/soundeditor" class="hidden">sound editor →</a>
       <h1 id="overlay-title">Pulsar</h1>
       <p id="overlay-sub">
@@ -85,12 +86,71 @@
         <ol id="leaderboard-list"></ol>
       </div>
       <button id="abort-mission" type="button" class="hidden">Abort Mission</button>
+      <div id="tutorial-panel" class="hidden" role="dialog" aria-labelledby="tutorial-heading" aria-modal="true">
+        <button id="tutorial-close" type="button" aria-label="Close tutorial">×</button>
+        <h2 id="tutorial-heading">Pilot Briefing</h2>
+        <section class="tutorial-section">
+          <h3>Controls</h3>
+          <p>
+            <span class="key">←</span> <span class="key">→</span> rotate &nbsp;·&nbsp;
+            <span class="key">↑</span> <span class="key">↓</span> thrust &nbsp;·&nbsp;
+            <span class="key">space</span> fire &nbsp;·&nbsp;
+            <span class="key">esc</span> pause
+          </p>
+        </section>
+        <section class="tutorial-section">
+          <h3>The Pulsar</h3>
+          <p>
+            A neutron star spins at the centre of the system. Its beam keeps a
+            steady beat — that beat is also the rhythm of the soundtrack.
+            Match your fire to the pulse and the field will reward you.
+          </p>
+        </section>
+        <section class="tutorial-section">
+          <h3>Combo &amp; Halo</h3>
+          <p>
+            Consecutive on-beat hits build your combo. As the combo climbs the
+            halo music layers in, the score multiplier rises, and pilot's-log
+            entries unlock. A missed beat or a hit taken collapses the chain.
+          </p>
+        </section>
+        <section class="tutorial-section">
+          <h3>Canisters &amp; Crystals</h3>
+          <p>
+            Asteroids sometimes drop canisters — fly over them to claim a
+            powerup: <em>trident</em> spreads three shots, <em>pierce</em>
+            cuts through, <em>shield</em> absorbs one hit, <em>slow-mo</em>
+            dilates time, <em>radar</em> widens your firing arc. Gold
+            crystals reward a clean rhythm hit with a fresh canister.
+          </p>
+        </section>
+        <p id="tutorial-dismiss">press <span class="key">esc</span> or click outside to close</p>
+      </div>
     </div>
     <script>
       // Reveal the /soundeditor link only on localhost dev builds.
       if (["localhost", "127.0.0.1", "::1"].includes(location.hostname)) {
         document.getElementById("soundeditor-link")?.classList.remove("hidden");
       }
+      // Tutorial panel toggle. Lives outside the game loop so it works even
+      // before main.ts has finished booting the Game.
+      (() => {
+        const btn = document.getElementById("tutorial-link");
+        const panel = document.getElementById("tutorial-panel");
+        const closeBtn = document.getElementById("tutorial-close");
+        if (!btn || !panel || !closeBtn) return;
+        const open = () => panel.classList.remove("hidden");
+        const close = () => panel.classList.add("hidden");
+        btn.addEventListener("click", (e) => { e.stopPropagation(); open(); });
+        closeBtn.addEventListener("click", close);
+        panel.addEventListener("click", (e) => { if (e.target === panel) close(); });
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && !panel.classList.contains("hidden")) {
+            e.stopPropagation();
+            close();
+          }
+        }, true);
+      })();
     </script>
     <script type="module" src="/src/main.ts"></script>
   </body>

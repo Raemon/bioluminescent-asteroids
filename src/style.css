@@ -252,10 +252,10 @@ html, body {
 
 #overlay.hidden { display: none; }
 
-#soundeditor-link {
+#soundeditor-link,
+#tutorial-link {
   position: absolute;
   top: 22px;
-  right: 28px;
   pointer-events: auto;
   font-size: 12px;
   letter-spacing: 0.22em;
@@ -267,11 +267,106 @@ html, body {
   border-radius: 3px;
   background: rgba(8, 16, 36, 0.4);
   transition: color 0.15s ease, border-color 0.15s ease;
+  font-family: inherit;
+  cursor: pointer;
 }
+
+#soundeditor-link { right: 28px; }
+#tutorial-link { right: 158px; }
 
 #soundeditor-link.hidden { display: none; }
 
-#soundeditor-link:hover {
+#soundeditor-link:hover,
+#tutorial-link:hover {
+  color: #6ad7ff;
+  border-color: rgba(106, 215, 255, 0.6);
+}
+
+#tutorial-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 40px 24px;
+  pointer-events: auto;
+  background: radial-gradient(ellipse at 50% 50%, rgba(0, 8, 24, 0.85) 0%, rgba(0, 0, 5, 0.96) 70%);
+  backdrop-filter: blur(6px);
+  overflow-y: auto;
+}
+
+#tutorial-panel.hidden { display: none; }
+
+#tutorial-panel h2 {
+  font-weight: 700;
+  font-size: clamp(22px, 3.5vw, 36px);
+  letter-spacing: 0.3em;
+  color: #c8efff;
+  text-shadow: 0 0 18px rgba(76, 182, 255, 0.55);
+  text-transform: uppercase;
+  margin: 0 0 8px;
+}
+
+.tutorial-section {
+  max-width: 620px;
+  text-align: center;
+}
+
+.tutorial-section h3 {
+  font-size: 13px;
+  letter-spacing: 0.32em;
+  color: #6ad7ff;
+  text-transform: uppercase;
+  margin: 0 0 6px;
+  font-weight: 500;
+}
+
+.tutorial-section p {
+  font-size: 14px;
+  line-height: 1.6;
+  letter-spacing: 0.06em;
+  color: #b8d8e8;
+  text-transform: none;
+  font-weight: 300;
+  margin: 0;
+}
+
+.tutorial-section em {
+  font-style: normal;
+  color: #d8f3ff;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+#tutorial-dismiss {
+  margin-top: 18px;
+  font-size: 11px !important;
+  letter-spacing: 0.28em !important;
+  color: rgba(106, 215, 255, 0.55) !important;
+}
+
+#tutorial-close {
+  position: absolute;
+  top: 22px;
+  right: 28px;
+  width: 36px;
+  height: 36px;
+  font-size: 22px;
+  line-height: 1;
+  color: rgba(106, 215, 255, 0.75);
+  background: rgba(8, 16, 36, 0.4);
+  border: 1px solid rgba(106, 215, 255, 0.25);
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+#tutorial-close:hover {
   color: #6ad7ff;
   border-color: rgba(106, 215, 255, 0.6);
 }
