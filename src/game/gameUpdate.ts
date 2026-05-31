@@ -34,6 +34,14 @@ import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderbo
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
+  // A full-screen menu (settings dialog / tap calibrator) is up mid-run — freeze
+  //   the sim so the ship can't drift or die behind it. The modal owns the keys
+  //   (it stops propagation), so input is already shielded; we just hold the
+  //   world until both flags clear, then play resumes exactly where it left off.
+  if ((game.settingsOpen || game.calibrating) && (game.state === "playing" || game.state === "dying")) {
+    game.input.endFrame();
+    return;
+  }
   if (game.input.pressed("escape") || game.input.pressed("esc")) togglePause(game);
   else if (game.state === "paused" && pressedStart(game)) togglePause(game);
   if (game.state === "paused") { game.input.endFrame(); return; }

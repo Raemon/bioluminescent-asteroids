@@ -202,6 +202,15 @@ export const BeatCalibrator = () => {
         exitToHome();
         return;
       }
+      // Return / Enter confirms the result and continues to the next screen.
+      if (e.key === "Enter") {
+        if (phaseRef.current === "done") {
+          e.preventDefault();
+          e.stopPropagation();
+          finishWith(resultSecRef.current);
+        }
+        return;
+      }
       if (e.code === "Space" || e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
         e.stopPropagation();

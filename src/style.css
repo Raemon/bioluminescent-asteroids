@@ -158,6 +158,8 @@ html:has(#sound-root), body:has(> #sound-root) {
   display: flex;
   align-items: center;
   gap: 16px;
+  /* leave room for the fixed settings gear pinned to the corner */
+  margin-right: 36px;
 }
 
 #debug-overlay {
@@ -326,6 +328,41 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 #volume.muted { opacity: 0.2; }
 
+/* Fixed + above the title overlay (z 10) so it's clickable on the title and
+   menus, not just during play; sits in the top-right corner by the volume. */
+#settings-gear {
+  position: fixed;
+  top: 19px;
+  right: 28px;
+  z-index: 15;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #6ad7ff;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, transform 0.4s ease;
+}
+
+#settings-gear:hover { opacity: 1; transform: rotate(40deg); }
+
+#settings-gear svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px rgba(106, 215, 255, 0.8));
+}
+
 #lives {
   display: flex;
   gap: 8px;
@@ -370,8 +407,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 #overlay.hidden { display: none; }
 
 #sound-link,
-#tutorial-link,
-#calibrate-link {
+#tutorial-link {
   position: absolute;
   top: 22px;
   pointer-events: auto;
@@ -390,14 +426,13 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 #sound-link { left: 28px; }
-#tutorial-link { right: 28px; }
-#calibrate-link { right: 28px; top: 60px; }
+/* shifted left of the fixed settings gear in the corner */
+#tutorial-link { right: 72px; }
 
 #sound-link.hidden { display: none; }
 
 #sound-link:hover,
-#tutorial-link:hover,
-#calibrate-link:hover {
+#tutorial-link:hover {
   color: #6ad7ff;
   border-color: rgba(106, 215, 255, 0.6);
 }
@@ -1182,6 +1217,195 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 .cal-redo:hover { color: rgba(180, 220, 245, 0.85); }
+
+#settings-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 28;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  background: radial-gradient(ellipse at 50% 50%, rgba(0, 8, 24, 0.85) 0%, rgba(0, 0, 5, 0.96) 70%);
+  backdrop-filter: blur(5px);
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  width: min(440px, 86vw);
+  padding: 32px 34px 28px;
+  text-align: left;
+  background: rgba(8, 16, 36, 0.55);
+  border: 1px solid rgba(106, 215, 255, 0.18);
+  border-radius: 6px;
+}
+
+.settings-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #c8efff;
+  text-shadow: 0 0 16px rgba(76, 182, 255, 0.45);
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #6ad7ff;
+}
+
+.settings-hint {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: none;
+  color: rgba(150, 200, 235, 0.5);
+}
+
+.settings-latency {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-latency input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 4px;
+  background: rgba(106, 215, 255, 0.15);
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+}
+
+.settings-latency input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #d6f6ff, #4cb6ff 70%);
+  cursor: pointer;
+  filter: drop-shadow(0 0 4px rgba(106, 215, 255, 0.8));
+}
+
+.settings-latency input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #d6f6ff, #4cb6ff 70%);
+  cursor: pointer;
+}
+
+.settings-step {
+  width: 26px;
+  height: 26px;
+  font: inherit;
+  font-size: 16px;
+  color: #d8f3ff;
+  background: rgba(106, 215, 255, 0.08);
+  border: 1px solid rgba(106, 215, 255, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.settings-step:hover { background: rgba(106, 215, 255, 0.2); border-color: rgba(180, 235, 255, 0.7); }
+
+.settings-ms {
+  min-width: 64px;
+  text-align: right;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: #c8efff;
+}
+
+.settings-resync {
+  align-self: flex-start;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(150, 200, 235, 0.7);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.settings-resync:hover { color: #6ad7ff; }
+
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6ad7ff;
+  cursor: pointer;
+}
+
+.settings-check input { width: 15px; height: 15px; accent-color: #4cb6ff; cursor: pointer; }
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6ad7ff;
+}
+
+.settings-field input {
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #d8f3ff;
+  background: rgba(106, 215, 255, 0.06);
+  border: 1px solid rgba(106, 215, 255, 0.25);
+  border-radius: 4px;
+  padding: 8px 12px;
+  outline: none;
+}
+
+.settings-field input:focus { border-color: rgba(106, 215, 255, 0.6); }
+
+.settings-done {
+  align-self: center;
+  margin-top: 2px;
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #d8f3ff;
+  background: rgba(106, 215, 255, 0.1);
+  border: 1px solid rgba(106, 215, 255, 0.45);
+  border-radius: 4px;
+  padding: 10px 30px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.settings-done:hover { background: rgba(106, 215, 255, 0.22); color: #fff; border-color: rgba(180, 235, 255, 0.8); }
 
 @keyframes pulse {
   0%, 100% { opacity: 0.5; }

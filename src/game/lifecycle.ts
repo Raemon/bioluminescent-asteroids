@@ -35,6 +35,20 @@ export const markFirstWaveTutorialComplete = () => {
   }
 };
 
+// Settings-dialog mirror of the same flag: "enabled" means the wave-1 tutorial
+//   will still play on the next run. Reaching 6x rhythm calls
+//   markFirstWaveTutorialComplete(), so this naturally reads back as disabled
+//   once a pilot has graduated.
+export const isStartTutorialEnabled = (): boolean => !isFirstWaveTutorialComplete();
+export const setStartTutorialEnabled = (enabled: boolean) => {
+  try {
+    if (enabled) localStorage.removeItem(FIRST_WAVE_TUTORIAL_KEY);
+    else localStorage.setItem(FIRST_WAVE_TUTORIAL_KEY, "1");
+  } catch {
+    // best-effort persistence; ignore quota / blocked storage.
+  }
+};
+
 // React-side <FirstWaveHint> subscribes to this so the canvas/game loop stays
 //   out of layout + transitions — CSS + a single setTimeout do the dismiss work.
 export const setFirstWaveHintStage = (game: Game, stage: 0 | 1 | 2 | 3 | 4) => {

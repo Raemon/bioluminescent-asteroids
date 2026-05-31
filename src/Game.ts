@@ -64,6 +64,10 @@ export class Game implements HudElements {
   // latched while the tap-to-beat calibrator overlay is open so the title loop
   //   doesn't keep re-firing the start request behind it.
   calibrating = false;
+  // true while the settings dialog is open. Together with `calibrating`, this
+  //   freezes the sim during play (see updateGame) so the ship can't drift or
+  //   die behind a full-screen menu.
+  settingsOpen = false;
   lastBgBeatIndex = -1;
   nextBeatToEvaluate = 0;
   beatCombo = 0;
@@ -247,6 +251,14 @@ export class Game implements HudElements {
     window.addEventListener("beat-calibrator:cancel", () => {
       this.calibrating = false;
     });
+    // Settings dialog's manual latency slider — applies live (and persists) so a
+    //   nudge takes effect immediately, even mid-run.
+    window.addEventListener("beat-offset:set", (e) => {
+      const { offsetSec } = (e as CustomEvent).detail;
+      applyBeatOffset(this, offsetSec);
+    });
+    window.addEventListener("settings:opened", () => { this.settingsOpen = true; });
+    window.addEventListener("settings:closed", () => { this.settingsOpen = false; });
     // <FirstWaveHint> owns its own stage-3 auto-dismiss timer; when it fades
     //   out it asks the game to clear the stage. The tutorial is marked
     //   complete here so future runs skip the overlay entirely.
