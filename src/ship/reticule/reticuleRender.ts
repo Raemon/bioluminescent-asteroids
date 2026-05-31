@@ -4,7 +4,7 @@ import { computeConeFrame } from "./coneGeometry";
 import { paintConeBackground, paintRangeArcs } from "./radarCone";
 import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost } from "./trajectoryPreview";
 import {
-  reticuleOverlapsAnyTarget, reticuleDirectlyOnTarget,
+  reticuleOverlapsAnyTarget,
   computeBaseHitAlpha, paintAimDiscs,
 } from "./aimDisc";
 import { PRONG_SPREAD } from "../shipWeapons";
@@ -121,8 +121,7 @@ export const renderShipReticules = (
     const overlaps = onFirstBeatDot
       ? true
       : reticuleOverlapsAnyTarget(pos, targets, w, h);
-    const directlyOn = reticuleDirectlyOnTarget(pos, targets, w, h);
-    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, onFirstBeatDot, directlyOn, tutorialHighlight);
+    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, onFirstBeatDot, tutorialHighlight);
   }
   ctx.restore();
 };

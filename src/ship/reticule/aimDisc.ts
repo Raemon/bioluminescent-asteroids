@@ -36,33 +36,21 @@ export const reticuleOverlapsAnyTarget = (
   return false;
 };
 
-// stricter "directly on" check — the reticule's centre is inside the target's body. Keeps the
-// reticule bright when aimed at a target body, even if no first-beat dot is right under the cursor.
-export const reticuleDirectlyOnTarget = (
-  reticulePos: Vec, targets: ReadonlyArray<ReticuleTarget>, w: number, h: number,
-): boolean => {
-  for (const t of targets) {
-    const [dx, dy] = toroidalDelta(reticulePos.x - t.pos.x, reticulePos.y - t.pos.y, w, h);
-    const r = t.radius ?? 0;
-    if (dx * dx + dy * dy <= r * r) return true;
-  }
-  return false;
-};
-
 // dim during cooldown + slow pulse so the player feels the rhythm window even with nothing in sight.
 export const computeBaseHitAlpha = (onCooldown: boolean, hitboxPulse: number): number =>
   RETICULE_HITBOX_ALPHA * (onCooldown ? RETICULE_COOLDOWN_DIM : 1) * hitboxPulse;
 
 // two concentric dashed circles — inner is off-beat hit radius, outer is on-beat (larger).
-// Brightness is steady when locked (over a first-beat dot or a target body); the per-beat
+// Bright only when a first-beat dot sits under the reticule (or tutorial highlight); otherwise
+// dim, so the bright state means "this shot lands on the next beat" unambiguously. The per-beat
 // pulse already lives in `baseAlpha` via the caller, so no time-varying flicker is added here.
 export const paintAimDiscs = (
   ctx: CanvasRenderingContext2D, reticulePos: Vec, baseAlpha: number,
-  overlapsTarget: boolean, onFirstBeatDot: boolean, directlyOnTarget: boolean,
+  overlapsTarget: boolean, onFirstBeatDot: boolean,
   tutorialHighlight: boolean = false,
 ) => {
   const overlapBoost = overlapsTarget ? RETICULE_OVERLAP_BRIGHTNESS : 1;
-  const locked = onFirstBeatDot || directlyOnTarget || tutorialHighlight;
+  const locked = onFirstBeatDot || tutorialHighlight;
   const offDotDim = locked ? 1 : RETICULE_OFF_FIRST_DOT_DIM;
   const hitAlpha = Math.min(1, baseAlpha * overlapBoost * offDotDim);
   ctx.globalAlpha = 1;
