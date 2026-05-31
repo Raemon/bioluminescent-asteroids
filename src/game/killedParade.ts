@@ -171,6 +171,12 @@ const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number,
       e.played = true;
       e.playedAtBeat = t;
       game.sound.play(e.snap.killSound);
+      // replay the on-beat reward pair (sparkle + pitched chime) for kills that landed
+      //   on rhythm, using the multiplier captured at kill time so the chime pitch matches.
+      if (e.snap.rhythmHit) {
+        game.sound.play("comboSparkle");
+        game.sound.playComboChime(e.snap.rhythmHit.combo);
+      }
       if (e.snap.bassDrone) {
         e.droneKey = {};
         game.sound.startBassteroidDrone(e.droneKey, e.snap.bassDrone.kind, e.snap.bassDrone.size);

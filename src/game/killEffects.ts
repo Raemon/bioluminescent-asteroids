@@ -93,12 +93,14 @@ const restartChildBassDrones = (game: Game, children: Asteroid[]) => {
 //   scoreEarned is captured into the snapshot so the parade can flash "+N" beneath each sprite.
 //   impactPos is the bullet position at the moment of the kill (or undefined for ram kills);
 //   it lets split() classify center vs glancing hits for the asymmetric breakup patterns.
+//   comboAtKill is the multiplier that drove the chime pitch; 0 for ram/off-beat kills.
 const finishAsteroidKillCore = (
   game: Game,
   a: Asteroid,
   killerVel: Vec,
   isOnBeatHit: boolean,
   scoreEarned: number,
+  comboAtKill: number,
   impactPos?: Vec,
 ): Asteroid[] => {
   emitExplosion(game.particles, game.shards, a, isOnBeatHit);
@@ -116,6 +118,7 @@ const finishAsteroidKillCore = (
     if (a.isBass() && (a.size === "medium" || a.size === "small")) {
       snap.bassDrone = { kind: a.kind as "bassA" | "bassB" | "bassC" | "bassD", size: a.size };
     }
+    if (isOnBeatHit && comboAtKill >= 1) snap.rhythmHit = { combo: comboAtKill };
     game.killedSnapshots.push(snap);
   }
   bumpKill(game, asteroidBucket(a));
@@ -148,13 +151,14 @@ export const onAsteroidKilledByBullet = (
   isOnBeatHit: boolean,
 ): Asteroid[] => {
   const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit);
+  const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   if (a.isBass()) game.sound.play("bassEcho", 1, a.pos);
   // On-beat plain asteroid kills get the taiko boom in place of the noise
   // explosion — replacing rather than layering so the acoustic drum isn't
   // masked by the broadband crash.
   const useTaiko = isOnBeatHit && a.kind === "normal";
   game.sound.play(useTaiko ? "asteroidBoomBeat" : hitSoundFor(a), 1, a.pos);
-  return finishAsteroidKillCore(game, a, b.vel, isOnBeatHit, scoreEarned, b.pos);
+  return finishAsteroidKillCore(game, a, b.vel, isOnBeatHit, scoreEarned, comboAtKill, b.pos);
 };
 
 // asteroidHit → bassEcho (reverse of bullet path) preserves the original ram-branch order.
@@ -163,7 +167,7 @@ export const onAsteroidKilledByRam = (game: Game, a: Asteroid, shipVel: Vec): As
   if (a.isBass()) game.sound.play("bassHit", 1, a.pos);
   game.sound.play(hitSoundFor(a), 1, a.pos);
   if (a.isBass()) game.sound.play("bassEcho", 1, a.pos);
-  return finishAsteroidKillCore(game, a, shipVel, false, 0);
+  return finishAsteroidKillCore(game, a, shipVel, false, 0, 0);
 };
 
 // bassteroids take multiple hits to kill; chip points keep the player rewarded for
@@ -188,12 +192,16 @@ export const onAsteroidCrackedByRam = (game: Game, a: Asteroid) => {
 // no split path here — alien deaths fall into the "single body, fixed sound" pattern.
 export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boolean) => {
   const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit);
+  const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   game.shake = Math.min(game.shake + 0.5, 1.4);
   game.sound.play("alienExplode", 1, al.pos);
   game.sound.stopAlienDrone(al);
   emitAlienExplosion(game.particles, al);
   const snap = snapshotAlienKill(al, "alienExplode", scoreEarned);
-  if (snap) game.killedSnapshots.push(snap);
+  if (snap) {
+    if (isOnBeatHit && comboAtKill >= 1) snap.rhythmHit = { combo: comboAtKill };
+    game.killedSnapshots.push(snap);
+  }
   bumpKill(game, `alien_${al.size}`);
 };
 
@@ -223,7 +231,10 @@ export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: bool
   game.sound.stopCometShimmer(c);
   emitCometExplosion(game.particles, c);
   const snap = snapshotCometKill(c, deathSound, scoreEarned);
-  if (snap) game.killedSnapshots.push(snap);
+  if (snap) {
+    if (isOnBeatHit && game.beatCombo >= 1) snap.rhythmHit = { combo: game.beatCombo };
+    game.killedSnapshots.push(snap);
+  }
   bumpKill(game, "comet");
   syncHud(game);
 };

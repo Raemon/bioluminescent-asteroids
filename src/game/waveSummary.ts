@@ -10,7 +10,7 @@ import { BEAT_GRID } from "./rhythmConstants";
 //   over the playfield, anchored to the center of the screen.
 
 const PANEL_ID = "wave-summary";
-const TICK_AMOUNT = 50;
+const TICK_AMOUNT = 100;
 
 // BEAT_GRID is in seconds; everything in this file is in milliseconds.
 const BEAT_MS = BEAT_GRID * 1000; // 500ms at 120 BPM
@@ -96,29 +96,30 @@ const ROW_SOUNDS: Array<{ name: "chime" | "tink"; pitch: number }> = [
   { name: "tink", pitch: 1.498 }, // ~perfect fifth up
 ];
 
-// 16-step ascending major-scale melody for the drain — a small song that
-//   arcs from root up two octaves, with the downbeats (positions 0/4/8/12)
-//   landing on chord tones (1, 8, 5, 8) so a bassKick accent there reads as
-//   a real beat under a real tune. Looping the phrase past 16 ticks snaps
-//   back to root, which gives a clear musical "verse" feel on long drains
-//   rather than an endless ascent.
+// 16-step natural-minor melody for the drain. Downbeats (positions 0/4/8/12)
+//   land on the chord roots of a rotating i — VI — III — VII progression
+//   (A minor → F → C → G), which the summaryDownbeat chord voicing mirrors.
+//   Between downbeats the line wanders through neighbor tones of the current
+//   chord, with the contour drifting downward into the VI before climbing
+//   back through III and VII — gives the drain a haunting circular feel
+//   rather than a triumphant ascent.
 const DRAIN_PITCHES = [
-  1.0,    // 1   (root, downbeat)
-  1.25,   // 3
-  1.5,    // 5
-  1.667,  // 6
-  2.0,    // 8   (octave, downbeat)
-  1.875,  // 7
-  1.5,    // 5
-  1.667,  // 6
-  1.5,    // 5   (downbeat)
-  1.25,   // 3
-  1.5,    // 5
-  1.667,  // 6
-  2.0,    // 8   (downbeat, climax setup)
-  2.5,    // 10  (high 3rd)
-  3.0,    // 12  (high 5th)
-  3.75,   // 15  (two octaves)
+  1.0,    // A  (i root, downbeat)
+  1.189,  // C  (b3)
+  1.122,  // B  (2)
+  1.0,    // A
+  1.682,  // F  (VI root, downbeat — drops below for haunting lift)
+  1.587,  // E
+  1.498,  // Eb tritone color
+  1.682,  // F
+  1.189,  // C  (III root, downbeat)
+  1.335,  // D
+  1.498,  // Eb leading-tone tension
+  1.682,  // F
+  1.782,  // G  (VII root, downbeat)
+  2.0,    // A  octave
+  1.782,  // G
+  1.682,  // F  (resolves into next phrase's drop to A)
 ];
 
 export const showWaveSummary = (
@@ -176,14 +177,16 @@ export const showWaveSummary = (
       pulseScore(scoreValueEl);
       syncHud(game);
 
-      // Play the next note in the ascending melody. Every 4th tick is a
-      //   downbeat — a tight, fixed-pitch summaryDownbeat lands ON the beat
-      //   (no slow MembraneSynth swoop) and grounds the climbing melody
-      //   without competing with its pitch.
+      // Play the next note in the haunting minor melody. Every 4th tick is
+      //   a downbeat — summaryDownbeat layers a rotating i-VI-III-VII chord
+      //   over a soft kick, and the chord index passed in selects which
+      //   harmony lands. The drain melody's downbeat pitch is a chord tone
+      //   of that voicing.
       const pitch = DRAIN_PITCHES[tickIndex % DRAIN_PITCHES.length];
       game.sound.play("scoreBlip", pitch);
       if (tickIndex % TICKS_PER_BEAT === 0) {
-        game.sound.play("summaryDownbeat");
+        const chordIndex = (tickIndex / TICKS_PER_BEAT) % 4;
+        game.sound.play("summaryDownbeat", chordIndex);
       }
       tickIndex++;
 

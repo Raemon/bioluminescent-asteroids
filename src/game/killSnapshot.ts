@@ -8,6 +8,8 @@ import { Comet } from "../Comet";
 //   `bassDrone` is set for bassteroid kills whose voice has a longrunning drone
 //   (medium/small only — large bass doesn't get one), so the parade can layer the
 //   continuous bed under the beat sound just like during play.
+// `rhythmHit` captures the on-beat reward at kill time so the parade can replay it.
+//   combo is the multiplier at the moment of the kill — drives playComboChime pitch.
 export type KilledSnapshot = {
   full: HTMLCanvasElement;
   fullRadius: number;
@@ -15,6 +17,7 @@ export type KilledSnapshot = {
   maxHp: number;
   scoreEarned: number;
   bassDrone?: { kind: "bassA" | "bassB" | "bassC" | "bassD"; size: "medium" | "small" };
+  rhythmHit?: { combo: number };
 };
 
 // one canvas-creation + translate ritual for all three kill flavours; caller owns the freeze.

@@ -4,26 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pulsar / sound</title>
-    <link rel="stylesheet" href="/src/style.css" />
-    <link rel="stylesheet" href="/src/sound/page/editor.css" />
   </head>
-  <body class="sound-page-body">
-    <header class="se-header">
-      <div class="se-title">
-        <a class="se-logo" href="/">PULSAR</a>
-        <span class="se-sep">/</span>
-        <span class="se-sub">sound</span>
-      </div>
-      <div class="se-header-right">
-        <div class="se-bpm">cycle <strong>0.5s</strong> · 120 bpm</div>
-        <a class="se-back" href="/">← game</a>
-      </div>
-    </header>
-
-    <main class="se-main">
-      <div class="se-list" id="se-list"></div>
-    </main>
-
-    <script type="module" src="/src/sound/page/editor.ts"></script>
+  <body>
+    <div id="sound-root"></div>
+    <script type="module" src="/src/sound/page/editor.tsx"></script>
   </body>
 </html>

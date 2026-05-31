@@ -2497,7 +2497,7 @@ export class Sound {
       case "comboSparkle": this.playComboSparkle(); break;
       case "tink": this.playTink(); break;
       case "scoreBlip": this.playScoreBlip(effectivePitch); break;
-      case "summaryDownbeat": this.playSummaryDownbeat(); break;
+      case "summaryDownbeat": this.playSummaryDownbeat(Math.round(pitchRatio)); break;
       case "powerup": this.playPowerup(); break;
       case "shieldPop": this.playShieldPop(); break;
       case "pulsarHum": this.playPulsarHum(); break;
@@ -4116,28 +4116,31 @@ export class Sound {
     }
   }
 
-  // Marimba-like melody voice for the wave-summary drain. Fires four-per-beat.
-  // Three sine partials in 1:2:3 ratio with a brief inharmonic high-octave
-  // sparkle — closer to a wooden mallet than the previous pure sine fifth, so
-  // the ear gets a defined pitch with body instead of a thin whistle. Decay
-  // stays short so 8 Hz tick rate doesn't smear into a drone.
+  // Haunting bell voice for the wave-summary drain. Fires four-per-beat.
+  // Root drops an octave from the old marimba (E5 → E4) so the line sits in
+  // a deeper, more melancholic register. Sub-octave partial gives body, two
+  // slightly detuned fundamentals produce a slow beat-frequency wobble that
+  // reads as "uneasy", and a soft triangle high partial replaces the bright
+  // inharmonic sparkle so the tone is round rather than glassy. Longer tail
+  // (~0.32s) lets adjacent notes overlap into a continuous haunted line.
   private playScoreBlip(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    const root = 660 * pitchRatio; // E5 — drops an octave from the old whistle
-    // Fundamental + octave + twelfth, each quieter and shorter than the last.
-    const layers: Array<{ freq: number; peak: number; decay: number }> = [
-      { freq: root,       peak: 0.075, decay: 0.18 },
-      { freq: root * 2,   peak: 0.030, decay: 0.10 },
-      { freq: root * 3.01, peak: 0.012, decay: 0.05 },
+    const root = 330 * pitchRatio; // E4
+    const layers: Array<{ freq: number; peak: number; decay: number; type: OscillatorType }> = [
+      { freq: root * 0.5,    peak: 0.050, decay: 0.40, type: "sine" },
+      { freq: root,          peak: 0.070, decay: 0.32, type: "sine" },
+      { freq: root * 1.003,  peak: 0.060, decay: 0.32, type: "sine" }, // detune wobble
+      { freq: root * 2,      peak: 0.022, decay: 0.18, type: "sine" },
+      { freq: root * 3,      peak: 0.010, decay: 0.10, type: "triangle" },
     ];
-    for (const { freq, peak, decay } of layers) {
+    for (const { freq, peak, decay, type } of layers) {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
-      osc.type = "sine";
+      osc.type = type;
       osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(peak, t + 0.003);
+      gain.gain.exponentialRampToValueAtTime(peak, t + 0.006);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
       osc.connect(gain);
       gain.connect(this.master);
@@ -4147,27 +4150,33 @@ export class Sound {
   }
 
   // Downbeat anchor for the wave-summary drain — fires once per beat (every
-  // 4th tick). Tight kick that lands ON the trigger: 3ms attack, a short
-  // pitch snap (one octave over 12ms, not a swoopy MembraneSynth sweep), and
-  // a fixed-pitch sine body at C2 so every downbeat sounds identical and
-  // grounds the climbing melody rather than competing with it.
-  private playSummaryDownbeat() {
+  // 4th tick). Kick body grounds the time, a sustained minor-key chord
+  // voicing layered on top carries the harmony. The chord rotates through
+  // i — VI — III — VII (A minor → F → C → G) across the four downbeats of
+  // each phrase so every 4-beat segment lands on different harmonic ground.
+  // The drain melody's downbeat notes are chord tones of these voicings, so
+  // the two voices interlock instead of fighting.
+  private playSummaryDownbeat(chordIndex = 0) {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    // Body: sine at C2 (~65 Hz) with a tiny initial pitch snap for "thump".
+    // Body: sine at A1 (~55 Hz) with a tiny initial pitch snap for "thump".
+    //   Dropped a major third lower than before so it sits under the deeper
+    //   scoreBlip without crowding the melody register.
     const body = this.ctx.createOscillator();
     const bodyGain = this.ctx.createGain();
     body.type = "sine";
-    body.frequency.setValueAtTime(130, t);
-    body.frequency.exponentialRampToValueAtTime(65.4, t + 0.012);
+    body.frequency.setValueAtTime(110, t);
+    body.frequency.exponentialRampToValueAtTime(55, t + 0.014);
     bodyGain.gain.setValueAtTime(0.0001, t);
-    bodyGain.gain.exponentialRampToValueAtTime(0.42, t + 0.003);
-    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    bodyGain.gain.exponentialRampToValueAtTime(0.40, t + 0.003);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
     body.connect(bodyGain);
     bodyGain.connect(this.master);
     body.start(t);
-    body.stop(t + 0.2);
+    body.stop(t + 0.24);
     // Click: short bandpassed noise so the transient locks the beat in time.
+    //   Centered lower (900 Hz vs the old 1800) so it reads as a soft mallet
+    //   rather than a crisp tick — fits the haunting palette.
     const noise = this.ctx.createBufferSource();
     const buf = this.ctx.createBuffer(1, 512, this.ctx.sampleRate);
     const data = buf.getChannelData(0);
@@ -4175,17 +4184,48 @@ export class Sound {
     noise.buffer = buf;
     const bp = this.ctx.createBiquadFilter();
     bp.type = "bandpass";
-    bp.frequency.value = 1800;
-    bp.Q.value = 1.2;
+    bp.frequency.value = 900;
+    bp.Q.value = 1.4;
     const noiseGain = this.ctx.createGain();
     noiseGain.gain.setValueAtTime(0.0001, t);
-    noiseGain.gain.exponentialRampToValueAtTime(0.07, t + 0.001);
+    noiseGain.gain.exponentialRampToValueAtTime(0.05, t + 0.001);
     noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.025);
     noise.connect(bp);
     bp.connect(noiseGain);
     noiseGain.connect(this.master);
     noise.start(t);
     noise.stop(t + 0.04);
+
+    // Sustained chord voicing — root + minor/major triad + open fifth in the
+    //   bell register, each chord's frequencies expressed as Hz triads.
+    //   i: A minor (A3 E4 C5), VI: F major (F3 C4 A4), III: C major (C4 G4 E5),
+    //   VII: G major (G3 D4 B4). The voicings stay within ~half an octave of
+    //   each other so the rotation reads as motion, not jumps.
+    const voicings: Array<[number, number, number]> = [
+      [220.0, 329.6, 523.3], // i  — A minor
+      [174.6, 261.6, 440.0], // VI — F major
+      [261.6, 392.0, 659.3], // III — C major
+      [196.0, 293.7, 493.9], // VII — G major
+    ];
+    const chord = voicings[chordIndex % voicings.length];
+    // Chord notes use a slow attack (60ms) and long sustain (~1.4s) so each
+    //   downbeat blooms under the four marimba-blip ticks that follow it,
+    //   then fades just in time for the next downbeat's chord to take over.
+    for (let i = 0; i < chord.length; i++) {
+      const freq = chord[i];
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      const peak = 0.085 / (1 + i * 0.35); // root loudest, top of chord quietest
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(peak, t + 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      osc.stop(t + 1.45);
+    }
   }
 
   // Ascending sine arpeggio with a sparkle overlay — the "you got something
