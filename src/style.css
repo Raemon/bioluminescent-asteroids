@@ -1383,7 +1383,9 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 .first-wave-hint__line {
-  font-size: clamp(18px, 2.1vw, 26px);
+  font-size: clamp(9px, 1.05vw, 20px);
+  opacity: 0.7;
+  font-weight: 400;
 }
 
 .first-wave-hint__accent {
@@ -1393,8 +1395,9 @@ html:has(#sound-root), body:has(> #sound-root) {
 .first-wave-hint__sub {
   display: block;
   margin-top: 20px;
-  font-size: clamp(13px, 1.5vw, 18px);
+  font-size: clamp(6.5px, 1vw, 18px);
   opacity: 0;
+  font-weight: 400;
   transition: opacity 1000ms ease-out;
 }
 
