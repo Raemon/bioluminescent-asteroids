@@ -20,7 +20,7 @@ import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
-import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, markFirstWaveTutorialComplete } from "./game/lifecycle";
+import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, markFirstWaveTutorialComplete, triggerOverlayStart } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 
@@ -224,6 +224,7 @@ export class Game implements HudElements {
       this.volumeEl.classList.toggle("near", near);
     });
     this.abortEl.addEventListener("click", () => abortMission(this));
+    this.overlayStartEl.addEventListener("click", () => triggerOverlayStart(this));
     // <FirstWaveHint> owns its own stage-3 auto-dismiss timer; when it fades
     //   out it asks the game to clear the stage. The tutorial is marked
     //   complete here so future runs skip the overlay entirely.

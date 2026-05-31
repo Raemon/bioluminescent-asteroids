@@ -35,7 +35,7 @@ import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderbo
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
   if (game.input.pressed("escape") || game.input.pressed("esc")) togglePause(game);
-  else if (game.state === "paused" && (game.input.pressed("enter") || game.input.pressed("return"))) togglePause(game);
+  else if (game.state === "paused" && pressedStart(game)) togglePause(game);
   if (game.state === "paused") { game.input.endFrame(); return; }
   game.time += dt * 1000;
   // title/gameover/paused freeze beatTime; playing+dying defer pulsar to after tickBassBeats.
@@ -52,9 +52,13 @@ const routeStateUpdate = (game: Game, dt: number) => {
   else updatePlaying(game, dt);
 };
 
+// Enter/Return/Space all trigger start — covers different keyboards and the arcade reflex.
+const pressedStart = (game: Game): boolean =>
+  game.input.pressed("enter") || game.input.pressed("return") || game.input.pressed(" ") || game.input.pressed("spacebar");
+
 // title needs cosmetic motion + enter-to-start; nothing else fires here.
 const updateTitle = (game: Game, dt: number) => {
-  if (game.input.pressed("enter") || game.input.pressed("return")) startGame(game);
+  if (pressedStart(game)) startGame(game);
   tickLeaderboardKeyRepeat(game, dt);
   for (const a of game.asteroids) a.update(dt, game.w, game.h);
   game.particles.update(dt);
@@ -68,7 +72,7 @@ const updateGameOver = (game: Game, dt: number) => {
   //   Handled here in addition to the input-level listener for the case where the player clicked
   //   outside the input before pressing Escape.
   if (game.input.pressed("escape") || game.input.pressed("esc")) hideScoreEntry(game);
-  const enterPressed = game.input.pressed("enter") || game.input.pressed("return");
+  const enterPressed = pressedStart(game);
   if (enterPressed && !isScoreEntryBlockingEnter(game)) {
     stopParade(game);
     game.killedRowEl.classList.add("hidden");
@@ -125,8 +129,8 @@ const transitionToGameOver = (game: Game) => {
   game.comets = [];
   game.lastRunScore = game.score;
   game.lastRunScoreId = null;
-  game.overlayTitleEl.textContent = "Game Over";
-  game.overlayStartEl.innerHTML = `score <strong>${String(game.score).padStart(6, "0")}</strong> &nbsp;·&nbsp; press <span class="key">enter</span> to restart`;
+  game.overlayTitleEl.textContent = `Game Over — ${String(game.score).padStart(6, "0")}`;
+  game.overlayStartEl.textContent = "Restart";
   game.overlayEl.classList.remove("hidden");
   renderKilledRow(game);
   showScoreEntry(game);

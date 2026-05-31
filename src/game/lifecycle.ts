@@ -11,7 +11,7 @@ import { newWaveEventSchedule } from "./waveEvents";
 import { stopParade } from "./killedParade";
 import { renderKilledRow } from "./killedParade";
 import { emitShipDebris } from "./particleBursts";
-import { hideScoreEntry, showLeaderboard, showScoreEntry } from "./scoreEntry";
+import { hideScoreEntry, isScoreEntryBlockingEnter, showLeaderboard, showScoreEntry } from "./scoreEntry";
 import { HALO_MUSIC_POOL } from "./haloMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
 
@@ -135,7 +135,7 @@ export const showTitle = (game: Game) => {
   game.betaMode = false;
   game.state = "title";
   game.overlayTitleEl.textContent = "Pulsar";
-  game.overlayStartEl.innerHTML = 'press <span class="key">enter</span> to begin';
+  game.overlayStartEl.textContent = "Begin";
   game.overlayEl.classList.remove("hidden");
   renderKilledRow(game);
   clearComboSilently(game);
@@ -245,6 +245,19 @@ export const togglePause = (game: Game) => {
   else if (game.state === "paused") leavePause(game);
 };
 
+// Click-equivalent of pressing Enter on whichever overlay is showing.
+export const triggerOverlayStart = (game: Game) => {
+  if (game.state === "title") startGame(game);
+  else if (game.state === "paused") leavePause(game);
+  else if (game.state === "gameover") {
+    if (isScoreEntryBlockingEnter(game)) return;
+    stopParade(game);
+    game.killedRowEl.classList.add("hidden");
+    game.killedSnapshots = [];
+    showTitle(game);
+  }
+};
+
 const enterPause = (game: Game) => {
   game.state = "paused";
   game.ship.thrustOn = false;
@@ -255,7 +268,7 @@ const enterPause = (game: Game) => {
   game.sound.stopReverseThrust();
   game.sound.stopSideThrust();
   game.overlayTitleEl.textContent = "Paused";
-  game.overlayStartEl.innerHTML = 'press <span class="key">esc</span> or <span class="key">enter</span> to resume';
+  game.overlayStartEl.textContent = "Resume";
   game.overlayEl.classList.remove("hidden");
   game.abortEl.classList.remove("hidden");
 };
@@ -281,8 +294,8 @@ export const abortMission = (game: Game) => {
   game.lastRunScore = game.score;
   game.lastRunScoreId = null;
   game.abortEl.classList.add("hidden");
-  game.overlayTitleEl.textContent = "Mission Aborted";
-  game.overlayStartEl.innerHTML = `score <strong>${String(game.score).padStart(6, "0")}</strong> &nbsp;·&nbsp; press <span class="key">enter</span> to restart`;
+  game.overlayTitleEl.textContent = `Mission Aborted — ${String(game.score).padStart(6, "0")}`;
+  game.overlayStartEl.textContent = "Restart";
   game.overlayEl.classList.remove("hidden");
   renderKilledRow(game);
   showScoreEntry(game);

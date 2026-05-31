@@ -67,10 +67,10 @@ export const Overlay = () => {
           <span className="key">space</span> fire &nbsp;·&nbsp;
           <span className="key">esc</span> pause
         </p>
-        <p id="overlay-start">
-          press <span className="key">enter</span> to begin
-        </p>
       </div>
+      <button id="overlay-start" type="button">
+        Begin
+      </button>
       <canvas id="killed-row" className="hidden" width={0} height={0} />
       <form id="score-entry" className="hidden" autoComplete="off" noValidate>
         <label htmlFor="score-entry-name">Enter callsign</label>

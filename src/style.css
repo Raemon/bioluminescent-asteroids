@@ -348,6 +348,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   flex-direction: column;
   align-items: center;
   gap: 20px;
+  padding-top: 75px;
 }
 
 #overlay.hidden { display: none; }
@@ -553,8 +554,27 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 #overlay-start {
-  margin-top: 50px;
   animation: pulse 2s ease-in-out infinite;
+  pointer-events: auto;
+  margin-top: 60px;
+  cursor: pointer;
+  padding: 12px 36px;
+  font: inherit;
+  font-size: 16px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #d8f3ff;
+  background: rgba(106, 215, 255, 0.08);
+  border: 1px solid rgba(106, 215, 255, 0.45);
+  border-radius: 4px;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+#overlay-start:hover {
+  animation: pulse-subtle 2s ease-in-out infinite;
+  background: rgba(106, 215, 255, 0.2);
+  color: #fff;
+  border-color: rgba(180, 235, 255, 0.8);
 }
 
 .key {
@@ -946,6 +966,11 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 @keyframes pulse {
   0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 0.9; }
   50% { opacity: 1; }
 }
 
