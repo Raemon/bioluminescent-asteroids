@@ -47,13 +47,10 @@ const TRAJECTORY_FIRST_BEAT_HALO_RADIUS = 6;
 const TRAJECTORY_FIRST_BEAT_HALO_ALPHA = 0.18;
 const TRAJECTORY_FIRST_BEAT_HALO_LINE_WIDTH = 0.75;
 const TRAJECTORY_FIRST_BEAT_HALO_DASH: number[] = [2, 2];
-// 6Hz flicker when directly on a target reads as an unmistakeable "shot will land" cue.
-const TRAJECTORY_DIRECT_FLASH_HZ = 6;
-const TRAJECTORY_DIRECT_FLASH_DEPTH = 0.55;
 // tutorial highlight repaints the first-beat dot in solid white so it reads as the focal
 // point of the wave-1 "use your targeting tools" cue.
 const TUTORIAL_FIRST_DOT_HSL = "0, 0%, 100%";
-// shadow blur halo so the flash reads as a soft glow rather than just a brightness bump.
+// entry-flash glow halo so a new contact reads as a soft glow rather than just a brightness bump.
 const TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR = 18;
 const TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA = 0.85;
 const TRAJECTORY_AIM_INTERSECTION_X_RADIUS = 5;
@@ -228,16 +225,14 @@ const paintOnRhythmReticule = (
 // dimFactor < 1 is used for the doubletime half-beat "first dot" — still glows, but fainter.
 const paintFirstBeatDot = (
   ctx: CanvasRenderingContext2D, px: number, py: number,
-  proximity01: number, directFlash: number, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
+  proximity01: number, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
   dimFactor: number = 1, tutorialHighlight: boolean = false, focused: boolean = false,
 ) => {
   const proximityAlpha = TRAJECTORY_FIRST_BEAT_DOT_ALPHA
     + (TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA - TRAJECTORY_FIRST_BEAT_DOT_ALPHA) * proximity01;
-  const rawAlpha = proximityAlpha * (1 + directFlash) * entryFlashBoost * beatPulseBoost * focusBoost * dimFactor;
+  const rawAlpha = proximityAlpha * entryFlashBoost * beatPulseBoost * focusBoost * dimFactor;
   const alpha = Math.min(1, tutorialHighlight ? Math.max(rawAlpha, 0.95) : rawAlpha);
-  const flash01 = directFlash > 0 ? directFlash / TRAJECTORY_DIRECT_FLASH_DEPTH : 0;
-  const entryGlow01 = Math.max(0, Math.min(1, (entryFlashBoost - 1) / (TRAJECTORY_ENTRY_FLASH_PEAK_BOOST - 1)));
-  const glow01 = Math.max(flash01, entryGlow01);
+  const glow01 = Math.max(0, Math.min(1, (entryFlashBoost - 1) / (TRAJECTORY_ENTRY_FLASH_PEAK_BOOST - 1)));
   const prevShadowBlur = ctx.shadowBlur;
   const prevShadowColor = ctx.shadowColor;
   const dotHsl = tutorialHighlight ? TUTORIAL_FIRST_DOT_HSL : RETICULE_DASH_HSL;
@@ -274,7 +269,7 @@ const paintFirstBeatDot = (
     return;
   }
   const rawHaloAlpha = TRAJECTORY_FIRST_BEAT_HALO_ALPHA
-    * (1 + directFlash) * entryFlashBoost * beatPulseBoost * focusBoost * dimFactor;
+    * entryFlashBoost * beatPulseBoost * focusBoost * dimFactor;
   const haloAlpha = Math.min(1, tutorialHighlight ? Math.max(rawHaloAlpha, 0.6) : rawHaloAlpha);
   ctx.strokeStyle = `hsla(${dotHsl}, ${haloAlpha})`;
   ctx.lineWidth = TRAJECTORY_FIRST_BEAT_HALO_LINE_WIDTH;
@@ -375,7 +370,7 @@ const drawBeatDotsAlongRay = (
   rawStartX: number, rawStartY: number, ux: number, uy: number,
   retX: number, retY: number,
   sMin: number, sMax: number, dotStep: number, dotOffset: number,
-  flashPulse: number, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
+  entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
   w: number, h: number, doubletime: boolean, tutorialHighlight: boolean, focused: boolean,
 ): DotWalkResult => {
   let overlapsReticule = false;
@@ -400,11 +395,11 @@ const drawBeatDotsAlongRay = (
     const halfBeat = isHalfBeatK(k);
     if (halfBeat) {
       if (drawnHalfBeatDots === 0) {
-        // dimmed first-dot glow — no proximity/flash check against the on-beat reticule, since
+        // dimmed first-dot glow — no proximity check against the on-beat reticule, since
         // this dot represents a different bullet endpoint (half-beat shot, not on-beat shot).
         if (SHOW_FIRST_BEAT_DOT) {
           paintFirstBeatDot(
-            ctx, drawX, drawY, 0, 0, entryFlashBoost, beatPulseBoost, focusBoost,
+            ctx, drawX, drawY, 0, entryFlashBoost, beatPulseBoost, focusBoost,
             TRAJECTORY_HALF_BEAT_FIRST_DOT_ALPHA_FACTOR, false, focused,
           );
         }
@@ -417,8 +412,7 @@ const drawBeatDotsAlongRay = (
         const overlap = firstDotOverlapsReticule(px, py, retX, retY);
         if (SHOW_FIRST_BEAT_DOT) {
           const proximity01 = firstDotProximity01(px, py, retX, retY);
-          const directFlash = overlap ? flashPulse : 0;
-          paintFirstBeatDot(ctx, drawX, drawY, proximity01, directFlash, entryFlashBoost, beatPulseBoost, focusBoost, 1, tutorialHighlight, focused);
+          paintFirstBeatDot(ctx, drawX, drawY, proximity01, entryFlashBoost, beatPulseBoost, focusBoost, 1, tutorialHighlight, focused);
         }
         if (overlap) overlapsReticule = true;
       } else {
@@ -456,13 +450,6 @@ const drawAimIntersectionsAlongRay = (
 const remapReticuleToTarget = (apex: Vec, reticulePos: Vec, w: number, h: number): [number, number] => {
   const [retDx, retDy] = toroidalDelta(reticulePos.x - apex.x, reticulePos.y - apex.y, w, h);
   return [apex.x + retDx, apex.y + retDy];
-};
-
-// square-wave-ish flicker in [0, DEPTH] driven by beatTime — clearly reads as a flash, not a pulse.
-const computeDirectFlashPulse = (beatTime: number): number => {
-  const phase = (beatTime * TRAJECTORY_DIRECT_FLASH_HZ) % 1;
-  const tri = phase < 0.5 ? phase * 2 : (1 - phase) * 2;
-  return TRAJECTORY_DIRECT_FLASH_DEPTH * tri;
 };
 
 // on-rhythm aim spot uses the same lock-circle + crosshair visual as the first-beat dot so the
@@ -531,7 +518,7 @@ const computeOnBeatAim = (
 // lingering ghost remains visible even after the target has left the radar wedge.
 const paintTrajectoryFromSnapshot = (
   ctx: TrajectoryContext, snap: TrajectorySnapshot, firstSeen: number,
-  alphaMultiplier: number, flashPulse: number, clipToCone: boolean,
+  alphaMultiplier: number, clipToCone: boolean,
   showOnRhythmSpot: boolean,
 ): boolean => {
   const speed = Math.hypot(snap.velX, snap.velY);
@@ -584,7 +571,7 @@ const paintTrajectoryFromSnapshot = (
   }
   const result = drawBeatDotsAlongRay(
     ctx.ctx, rawStartX, rawStartY, ux, uy, retX, retY,
-    sMin, sMax, dotStep, dotOffset, flashPulse, entryFlashBoost, beatPulseBoost, focusBoost,
+    sMin, sMax, dotStep, dotOffset, entryFlashBoost, beatPulseBoost, focusBoost,
     ctx.w, ctx.h, ctx.doubletime, ctx.tutorialHighlight, showOnRhythmSpot,
   );
   if (SHOW_ON_RHYTHM_RETICULE && showOnRhythmSpot) {
@@ -638,11 +625,11 @@ const trajectoryRayOverlapsCone = (
   return clip.sMax > clip.sMin;
 };
 
-// per-target live render — checks cone membership, updates track, and draws with flash boost.
+// per-target live render — checks cone membership and updates track.
 // Treat the trajectory as "in cone" if EITHER the target overlaps the cone OR its forward path
 // crosses the cone; the player can still aim the radar at the trajectory line itself.
 const previewLiveTarget = (
-  ctx: TrajectoryContext, t: ReticuleTarget, flashPulse: number, rendered: Set<object>,
+  ctx: TrajectoryContext, t: ReticuleTarget, rendered: Set<object>,
   showSpot: boolean,
 ): boolean => {
   const [dx, dy] = toroidalDelta(t.pos.x - ctx.apex.x, t.pos.y - ctx.apex.y, ctx.w, ctx.h);
@@ -655,7 +642,7 @@ const previewLiveTarget = (
   // when only the ray (not the target itself) is in the cone, disable cone clipping so the
   // visible dots span the full forward path — clipping would chop the line back inside the wedge
   // and could omit the section the radar is actually overlapping.
-  return paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, 1, flashPulse, targetInCone, showSpot);
+  return paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, 1, targetInCone, showSpot);
 };
 
 // drain expired fade entries and render fading-out trajectories for targets that left the cone or
@@ -663,7 +650,7 @@ const previewLiveTarget = (
 // If the target is still alive, refresh the snapshot from its live pos/vel each frame so the ghost
 // animates with the target instead of freezing where the radar last saw it.
 const renderFadingTrajectories = (
-  ctx: TrajectoryContext, rendered: Set<object>, flashPulse: number,
+  ctx: TrajectoryContext, rendered: Set<object>,
   liveByKey: Map<object, ReticuleTarget>,
 ) => {
   for (const [key, track] of ctx.trajectoryTracks) {
@@ -680,7 +667,7 @@ const renderFadingTrajectories = (
         radius: live.radius ?? track.snapshot.radius,
       };
     }
-    paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, fade, flashPulse, false, false);
+    paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, fade, false, false);
   }
 };
 
@@ -722,16 +709,15 @@ export const paintTrajectoryPreviews = (
   ctx.ctx.setLineDash([]);
   ctx.ctx.lineWidth = 1.5;
   ctx.ctx.shadowBlur = 0;
-  const flashPulse = computeDirectFlashPulse(ctx.beatTime);
   const rendered = new Set<object>();
   const spotTarget = pickCenterMostTarget(ctx, targets);
   let overlapsReticule = false;
   const liveByKey = new Map<object, ReticuleTarget>();
   for (const t of targets) liveByKey.set(t as unknown as object, t);
   for (const t of targets) {
-    if (previewLiveTarget(ctx, t, flashPulse, rendered, t === spotTarget)) overlapsReticule = true;
+    if (previewLiveTarget(ctx, t, rendered, t === spotTarget)) overlapsReticule = true;
   }
-  renderFadingTrajectories(ctx, rendered, flashPulse, liveByKey);
+  renderFadingTrajectories(ctx, rendered, liveByKey);
   ctx.ctx.restore();
   return overlapsReticule;
 };

@@ -345,15 +345,19 @@ html:has(#sound-root), body:has(> #sound-root) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-evenly;
+  justify-content: flex-start;
   gap: 20px;
-  padding: 0;
+  padding: 48px 24px 64px;
   text-align: center;
-  pointer-events: none;
+  pointer-events: auto;
   z-index: 10;
   background: radial-gradient(ellipse at 50% 50%, rgba(0, 8, 24, 0.5) 0%, rgba(0, 0, 5, 0.85) 70%);
   backdrop-filter: blur(2px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
+
+#overlay > * { flex-shrink: 0; }
 
 #overlay-title-group {
   display: flex;
@@ -384,11 +388,8 @@ html:has(#sound-root), body:has(> #sound-root) {
   cursor: pointer;
 }
 
-#sound-link { right: 28px; }
-#tutorial-link { right: 188px; }
-/* When the sound link is hidden (production builds), the tutorial
-   button slides into the corner instead of leaving an awkward gap. */
-#overlay:not(:has(#sound-link:not(.hidden))) #tutorial-link { right: 28px; }
+#sound-link { left: 28px; }
+#tutorial-link { right: 28px; }
 
 #sound-link.hidden { display: none; }
 
@@ -946,16 +947,6 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 #leaderboard-show-more.hidden { display: none; }
-
-/* When the player clicks "show more", the leaderboard renders every loaded
-   row instead of the 7-row window. The overlay flips to top-anchored,
-   scrollable layout so the long list can be scrolled through. */
-#overlay.leaderboard-expanded {
-  justify-content: flex-start;
-  overflow-y: auto;
-  padding: 48px 24px 64px;
-  pointer-events: auto;
-}
 
 #leaderboard-top-only {
   display: inline-flex;

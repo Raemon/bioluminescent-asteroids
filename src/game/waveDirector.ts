@@ -84,6 +84,7 @@ export { newBeatClaimSet };
 export type { BeatClaimSet };
 
 // mid-wave window means the canister can't appear at warm-up start nor wave-clear end.
+const CANISTER_FIRST_WAVE = 2;
 const CANISTER_CHANCE_PER_WAVE = 1 / 3;
 const CANISTER_SPAWN_WINDOW: [number, number] = [8, 24];
 
@@ -279,11 +280,13 @@ const setForeshadowState = (game: Game) => {
 
 // each event rolls independently so we can't get e.g. canister + shockwave coupled by accident.
 const rollWaveEvents = (game: Game) => {
-  maybeSchedule(game.waveEvents, CANISTER_CHANCE_PER_WAVE, CANISTER_SPAWN_WINDOW, () => {
-    const c = spawnCanister(game.w, game.h, game.ship.pos);
-    game.canisters.push(c);
-    game.sound.play("canisterAppear", 1, c.pos);
-  });
+  if (game.wave >= CANISTER_FIRST_WAVE) {
+    maybeSchedule(game.waveEvents, CANISTER_CHANCE_PER_WAVE, CANISTER_SPAWN_WINDOW, () => {
+      const c = spawnCanister(game.w, game.h, game.ship.pos);
+      game.canisters.push(c);
+      game.sound.play("canisterAppear", 1, c.pos);
+    });
+  }
   if (game.wave >= SHOCKWAVE_FIRST_WAVE) {
     maybeSchedule(game.waveEvents, SHOCKWAVE_CHANCE_PER_WAVE, SHOCKWAVE_SPAWN_WINDOW, () => startShockwave(game));
   }

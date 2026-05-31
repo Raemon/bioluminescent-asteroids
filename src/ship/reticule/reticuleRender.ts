@@ -5,7 +5,7 @@ import { paintConeBackground, paintRangeArcs } from "./radarCone";
 import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost } from "./trajectoryPreview";
 import {
   reticuleOverlapsAnyTarget, reticuleDirectlyOnTarget,
-  computeBaseHitAlpha, paintAimDiscs, computeDirectFlashPulse,
+  computeBaseHitAlpha, paintAimDiscs,
 } from "./aimDisc";
 import { PRONG_SPREAD } from "../shipWeapons";
 
@@ -115,14 +115,14 @@ export const renderShipReticules = (
     ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule, aimCircleCenter, aimCircleRadius,
     trajectoryTracks: state.trajectoryTracks, doubletime, tutorialHighlight,
   }, targets);
-  const flashPulse = computeDirectFlashPulse(beatTime);
   for (let i = 0; i < reticulePositions.length; i++) {
     const pos = reticulePositions[i];
-    const overlaps = fromTrajectory && i === primaryIndex
+    const onFirstBeatDot = fromTrajectory && i === primaryIndex;
+    const overlaps = onFirstBeatDot
       ? true
       : reticuleOverlapsAnyTarget(pos, targets, w, h);
     const directlyOn = reticuleDirectlyOnTarget(pos, targets, w, h);
-    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, directlyOn ? flashPulse : 0, tutorialHighlight);
+    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, onFirstBeatDot, directlyOn, tutorialHighlight);
   }
   ctx.restore();
 };
