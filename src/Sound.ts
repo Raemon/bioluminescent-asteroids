@@ -506,9 +506,9 @@ export class Sound {
     // proper voice with built-in lowpass that the envelope can sweep.
     const bassPluck = wireToBus(new Tone.MonoSynth({
       oscillator: { type: "sawtooth" },
-      filter: { type: "lowpass", Q: 6 },
-      envelope: { attack: 0.005, decay: 0.18, sustain: 0.15, release: 0.45 },
-      filterEnvelope: { attack: 0.005, decay: 0.4, sustain: 0.05, release: 0.6, baseFrequency: 220, octaves: 3 },
+      filter: { type: "lowpass", Q: 6, rolloff: -24 },
+      envelope: { attack: 0.005, decay: 0.18, sustain: 0, release: 0.25 },
+      filterEnvelope: { attack: 0.005, decay: 0.18, sustain: 0.1, release: 0.3, baseFrequency: 90, octaves: 3 },
       volume: -8,
     }));
 
