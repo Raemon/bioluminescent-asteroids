@@ -93,6 +93,10 @@ const ALIEN_FIRST_WAVE = 3;
 const ALIEN_CHANCE_PER_WAVE = 1 / 3;
 const ALIEN_SPAWN_WINDOW: [number, number] = [5, 22];
 
+// shockwave / comet / alien are the three "headline" wave events. When one rolls,
+// the remaining ones are dampened so a single wave rarely stacks two of them.
+const HEADLINE_EVENT_DAMPEN = 0.35;
+
 // tink stays off the unlock order so it reads as a treat, not a guaranteed sound.
 const TINK_FIRST_WAVE = 3;
 const TINK_CHANCE_PER_WAVE = 1 / 3;
@@ -118,7 +122,7 @@ const COMET_LIFETIME: [number, number] = [22, 30];
 
 // gated to wave 3+ so early-game stays focused on core mechanics before the field reshapes.
 const SHOCKWAVE_FIRST_WAVE = 3;
-const SHOCKWAVE_CHANCE_PER_WAVE = 1 / 10;
+const SHOCKWAVE_CHANCE_PER_WAVE = 1 / 20;
 const SHOCKWAVE_SPAWN_WINDOW: [number, number] = [6, 22];
 
 // predicates let the wave director read declaratively, not as inline boolean expressions.
@@ -257,7 +261,6 @@ export const spawnWave = (game: Game) => {
   const claimed = newBeatClaimSet();
   spawnWaveAsteroids(game, claimed);
   rollTinkSpawn(game, claimed);
-  rollAlienSpawn(game);
 };
 
 // capture planet pos BEFORE hiding it so the boss materialises where the player last saw the planet.
@@ -278,7 +281,11 @@ const setForeshadowState = (game: Game) => {
   }
 };
 
-// each event rolls independently so we can't get e.g. canister + shockwave coupled by accident.
+// Each independent event rolls on its own. The three "headline" events
+// (shockwave, comet, alien) cross-suppress: when one rolls successfully,
+// the next ones in the sequence have their chance multiplied by
+// HEADLINE_EVENT_DAMPEN so a single wave rarely stacks two of them.
+// Order is randomised each wave to keep the suppression symmetric.
 const rollWaveEvents = (game: Game) => {
   if (game.wave >= CANISTER_FIRST_WAVE) {
     maybeSchedule(game.waveEvents, CANISTER_CHANCE_PER_WAVE, CANISTER_SPAWN_WINDOW, () => {
@@ -287,11 +294,52 @@ const rollWaveEvents = (game: Game) => {
       game.sound.play("canisterAppear", 1, c.pos);
     });
   }
-  if (game.wave >= SHOCKWAVE_FIRST_WAVE) {
-    maybeSchedule(game.waveEvents, SHOCKWAVE_CHANCE_PER_WAVE, SHOCKWAVE_SPAWN_WINDOW, () => startShockwave(game));
+  rollHeadlineEvents(game);
+};
+
+type HeadlineRoll = { gate: boolean; baseChance: number; fire: () => boolean };
+
+const rollHeadlineEvents = (game: Game) => {
+  const rolls: HeadlineRoll[] = [
+    {
+      gate: game.wave >= SHOCKWAVE_FIRST_WAVE,
+      baseChance: SHOCKWAVE_CHANCE_PER_WAVE,
+      fire: () => {
+        maybeSchedule(game.waveEvents, 1, SHOCKWAVE_SPAWN_WINDOW, () => startShockwave(game));
+        return true;
+      },
+    },
+    {
+      gate: game.wave >= COMET_FIRST_WAVE,
+      baseChance: COMET_CHANCE_PER_WAVE,
+      fire: () => {
+        maybeSchedule(game.waveEvents, 1, COMET_SPAWN_WINDOW, () => spawnComet(game));
+        return true;
+      },
+    },
+    {
+      gate: game.wave >= ALIEN_FIRST_WAVE,
+      baseChance: ALIEN_CHANCE_PER_WAVE,
+      fire: () => {
+        const size = rollAlienSize(game.wave);
+        maybeSchedule(game.waveEvents, 1, ALIEN_SPAWN_WINDOW, () => spawnAlien(game, size));
+        return true;
+      },
+    },
+  ];
+
+  // randomise order so no single event always gets the un-dampened first roll.
+  for (let i = rolls.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [rolls[i], rolls[j]] = [rolls[j], rolls[i]];
   }
-  if (game.wave >= COMET_FIRST_WAVE) {
-    maybeSchedule(game.waveEvents, COMET_CHANCE_PER_WAVE, COMET_SPAWN_WINDOW, () => spawnComet(game));
+
+  let dampen = 1;
+  for (const r of rolls) {
+    if (!r.gate) continue;
+    if (Math.random() >= r.baseChance * dampen) continue;
+    r.fire();
+    dampen *= HEADLINE_EVENT_DAMPEN;
   }
 };
 
@@ -333,9 +381,3 @@ const rollTinkSpawn = (game: Game, claimed: BeatClaimSet) => {
   }
 };
 
-// size rolled at schedule-time and closed over the firing callback so it can't change mid-wave.
-const rollAlienSpawn = (game: Game) => {
-  if (game.wave < ALIEN_FIRST_WAVE || Math.random() >= ALIEN_CHANCE_PER_WAVE) return;
-  const size = rollAlienSize(game.wave);
-  maybeSchedule(game.waveEvents, 1, ALIEN_SPAWN_WINDOW, () => spawnAlien(game, size));
-};
