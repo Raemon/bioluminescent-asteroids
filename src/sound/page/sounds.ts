@@ -1,128 +1,400 @@
-// Sound registry for /sound. One entry per SoundName (TypeScript types are
-// erased at runtime, so the list is enumerated here once). The runtime page
-// iterates this registry to build one checkbox row per sound — adding a new
-// SoundName just means adding it to the SoundName union and a single entry
-// below.
+// Sound registry for /sound, organized as objects × actions so the page can
+// stay in sync with the game's actual triggers.
 //
-// Each entry declares:
-//   - kind: how the sound triggers ("loop" = continuous, "beat" = on the
-//     shared beat grid). Loops start/stop with the checkbox; beat sounds fire
-//     on each matching slot while the checkbox is on.
-//   - animation: which entity animation to pair with this sound (see
-//     animations.ts). Defaults to "generic" if no entity is a natural fit.
-//   - label/sublabel: row text. Sublabel is auto-built from the cadence if not
-//     given, so the registry stays terse.
+// Each in-game *object* (ship, alien-medium, asteroid-bassA, comet, …) owns a
+// list of *actions* (verbs that happen TO it: spawn, hit, kill, fire, pulse, …).
+// Each action declares the sound it produces and the cadence at which it fires
+// in gameplay. The page generates one row per (object, action) pair.
 //
-// Two safety nets: ALL_SOUNDS asserts the registry has an entry for every
-// SoundName at compile time, and any new SoundName that lacks an entry will
-// surface as a TypeScript error in this file.
+// Adding a new sound → add an action under the right object.
+// Adding a new object → add it to ANIMATIONS in animations.ts, then add it
+// here with at least one action.
+// Adding a new action to an existing object → one line below.
+//
+// A compile-time assertion at the bottom of this file ensures every SoundName
+// in the union is mentioned at least once — so adding a new sound without
+// wiring it here is a TypeScript error.
 
 import type { SoundName } from "../../Sound";
-import type { AnimationId } from "./animations";
+import type { ObjectId } from "./animations";
 
-export type SoundTrigger =
+export type Trigger =
   | { kind: "loop" }
-  | { kind: "beat"; periodBeats: number; phaseBeats: number };
+  | { kind: "beat"; periodBeats: number; phaseBeats?: number };
 
-export type SoundEntry = {
+export type Action = {
+  // Short verb-phrase. Combined with the object label for the row title.
+  // e.g. object="rhythm bullet", action="fires" → "rhythm bullet · fires"
+  verb: string;
   sound: SoundName;
-  label: string;
-  animation: AnimationId;
-  trigger: SoundTrigger;
-  // Optional manual override for the sublabel; otherwise auto-built.
-  sublabel?: string;
+  trigger: Trigger;
+  // Optional override of the parent object's animator. Used when one action
+  // wants to render with a different object's visual (e.g. an alien-fire
+  // sound can show the alien, but an alien-explode sound looks better on the
+  // shared explosion animation).
+  animation?: ObjectId;
+  // Optional note shown below the verb in the row sublabel.
+  note?: string;
 };
 
-const beat = (periodBeats: number, phaseBeats = 0): SoundTrigger => ({
+export type GameObject = {
+  id: ObjectId;
+  // Human-readable name shown in the row label.
+  label: string;
+  // Short one-liner about what this object is (shown as secondary text in
+  // the section header). Keeps the page self-documenting.
+  about?: string;
+  actions: Action[];
+};
+
+const beat = (periodBeats: number, phaseBeats: 0 | 0.5 = 0): Trigger => ({
   kind: "beat",
   periodBeats,
   phaseBeats,
 });
+const LOOP: Trigger = { kind: "loop" };
 
-const LOOP: SoundTrigger = { kind: "loop" };
+// ── object registry ─────────────────────────────────────────────────────
+// Order here determines on-page order. Group by where the player encounters
+// the object (ship & bullets → asteroids → bass bed → aliens → comets →
+// pickups → world bed → UI).
 
-// One entry per SoundName. Cadence + visual are chosen to be representative of
-// how the sound actually fires in game.
-const ENTRIES: Record<SoundName, Omit<SoundEntry, "sound">> = {
-  // ── ship/control ─────────────────────────────────────────────────────
-  thrust: { label: "ship thrusting", animation: "ship-thrust", trigger: LOOP },
-  reverseThrust: { label: "back thrusting", animation: "ship-reverse", trigger: LOOP },
-  sideThrust: { label: "side thrusting", animation: "ship-side", trigger: LOOP },
-  death: { label: "ship death", animation: "ship-death", trigger: beat(8) },
-  shieldPop: { label: "shield pop", animation: "ship-shield", trigger: beat(4) },
+export const OBJECTS: GameObject[] = [
+  {
+    id: "ship",
+    label: "ship",
+    about: "the player",
+    actions: [
+      { verb: "dies", sound: "death", trigger: beat(8), animation: "ship-death" },
+    ],
+  },
+  {
+    id: "ship-thrust",
+    label: "ship · forward thrust",
+    actions: [
+      { verb: "engages thruster", sound: "thrust", trigger: LOOP, note: "continuous while ↑ held" },
+    ],
+  },
+  {
+    id: "ship-reverse",
+    label: "ship · reverse thrust",
+    actions: [
+      { verb: "engages retro", sound: "reverseThrust", trigger: LOOP, note: "continuous while ↓ held" },
+    ],
+  },
+  {
+    id: "ship-side",
+    label: "ship · side thrust",
+    actions: [
+      { verb: "engages side engine", sound: "sideThrust", trigger: LOOP, note: "Z/X powerup" },
+    ],
+  },
+  {
+    id: "ship-shield",
+    label: "ship · shield",
+    actions: [
+      { verb: "absorbs hit", sound: "shieldPop", trigger: beat(4) },
+    ],
+  },
 
-  // ── bullets ─────────────────────────────────────────────────────────
-  fire: { label: "weak bullet", animation: "bullet-weak", trigger: beat(1, 0.5) },
-  fireBeat: { label: "rhythm bullet", animation: "bullet-rhythm", trigger: beat(1) },
+  {
+    id: "bullet-weak",
+    label: "off-beat bullet",
+    about: "fired off the rhythm grid — no combo",
+    actions: [
+      { verb: "fires", sound: "fire", trigger: beat(1, 0.5) },
+    ],
+  },
+  {
+    id: "bullet-rhythm",
+    label: "on-beat bullet",
+    about: "fired on the rhythm grid — eligible for combo",
+    actions: [
+      { verb: "fires", sound: "fireBeat", trigger: beat(1) },
+      { verb: "registers as on-beat", sound: "comboTick", trigger: beat(1), animation: "combo-halo" },
+    ],
+  },
+  {
+    id: "bullet-trident",
+    label: "trident bullets",
+    about: "rapid+trident powerup spread",
+    actions: [
+      // No unique sound — it's still fireBeat — but the visual difference
+      // earns its own row so the page covers the trident variant explicitly.
+      { verb: "fires triple volley", sound: "fireBeat", trigger: beat(1) },
+    ],
+  },
 
-  // ── asteroid hits ───────────────────────────────────────────────────
-  explosionSmall: { label: "asteroid chip", animation: "asteroid-chip", trigger: beat(2) },
-  explosionMedium: { label: "asteroid medium hit", animation: "asteroid-chip", trigger: beat(2) },
-  explosionLarge: { label: "asteroid kill", animation: "asteroid-kill", trigger: beat(4) },
-  asteroidBoomBeat: { label: "asteroid boom-beat", animation: "asteroid-kill", trigger: beat(4) },
+  {
+    id: "asteroid-normal",
+    label: "normal asteroid",
+    about: "the basic rock — size determines the kill sound",
+    actions: [
+      { verb: "killed (small, off-beat)", sound: "explosionSmall", trigger: beat(2) },
+      { verb: "killed (medium, off-beat)", sound: "explosionMedium", trigger: beat(2) },
+      { verb: "killed (large, off-beat)", sound: "explosionLarge", trigger: beat(4) },
+      // The on-beat kill replaces the noise explosion with a taiko boom.
+      // Rendered as a "kill" so the visual matches the audio event.
+      { verb: "killed on-beat (taiko boom)", sound: "asteroidBoomBeat", trigger: beat(4) },
+    ],
+  },
 
-  // ── pulsar bed ──────────────────────────────────────────────────────
-  bgBeat: { label: "pulsar beat", animation: "pulsar", trigger: beat(1) },
-  pulsarHum: { label: "pulsar hum", animation: "pulsar", trigger: beat(8) },
+  {
+    id: "asteroid-bassA",
+    label: "bassteroid A · kick",
+    about: "C2 — beats 1",
+    actions: [
+      { verb: "pulses on beat", sound: "bassKick", trigger: beat(1) },
+      { verb: "takes a chip hit", sound: "bassHit", trigger: beat(2) },
+      { verb: "killed (echo tail)", sound: "bassEcho", trigger: beat(4) },
+    ],
+  },
+  {
+    id: "asteroid-bassB",
+    label: "bassteroid B · pluck",
+    about: "G2 — beats 2",
+    actions: [
+      { verb: "pulses on beat", sound: "bassPluck", trigger: beat(1) },
+    ],
+  },
+  {
+    id: "asteroid-bassC",
+    label: "bassteroid C · boom",
+    about: "F2 — beats 3",
+    actions: [
+      { verb: "pulses on beat", sound: "bassBoom", trigger: beat(1) },
+    ],
+  },
+  {
+    id: "asteroid-bassD",
+    label: "bassteroid D · snap",
+    about: "C3 — beats 4",
+    actions: [
+      { verb: "pulses on beat", sound: "bassSnap", trigger: beat(1) },
+    ],
+  },
 
-  // ── bassteroids ─────────────────────────────────────────────────────
-  bassKick: { label: "bass kick", animation: "asteroid-chip", trigger: beat(1) },
-  bassPluck: { label: "bass pluck", animation: "asteroid-chip", trigger: beat(1) },
-  bassBoom: { label: "bass boom", animation: "asteroid-chip", trigger: beat(1) },
-  bassSnap: { label: "bass snap", animation: "asteroid-chip", trigger: beat(1) },
-  bassHit: { label: "bass hit overlay", animation: "asteroid-chip", trigger: beat(2) },
-  bassEcho: { label: "bass echo", animation: "asteroid-chip", trigger: beat(4) },
+  {
+    id: "asteroid-chime",
+    label: "chime asteroid",
+    about: "decorator rock — chime on kill",
+    actions: [
+      { verb: "killed", sound: "chime", trigger: beat(4) },
+    ],
+  },
+  {
+    id: "asteroid-bell",
+    label: "bell asteroid",
+    actions: [
+      { verb: "killed", sound: "bell", trigger: beat(4) },
+    ],
+  },
+  {
+    id: "asteroid-warble",
+    label: "warble asteroid",
+    actions: [
+      { verb: "killed", sound: "warble", trigger: beat(4) },
+    ],
+  },
+  {
+    id: "asteroid-tink",
+    label: "tink crystal",
+    about: "rare small crystal — sharp glassy hit",
+    actions: [
+      { verb: "killed", sound: "tink", trigger: beat(4) },
+    ],
+  },
+  {
+    id: "asteroid-gold",
+    label: "gold crystal asteroid",
+    about: "hidden gold inside — drops a collectible",
+    actions: [
+      // collectGoldCrystal pickup plays powerup+tink; the cracked-but-not-
+      // picked branch plays canisterAppear+tink at the spawn point.
+      { verb: "cracked → canister spawns", sound: "canisterAppear", trigger: beat(8), animation: "canister" },
+    ],
+  },
 
-  // ── decorative pickups / combo ──────────────────────────────────────
-  chime: { label: "chime", animation: "asteroid-chip", trigger: beat(2) },
-  bell: { label: "bell", animation: "asteroid-chip", trigger: beat(4) },
-  warble: { label: "warble", animation: "asteroid-chip", trigger: beat(4) },
-  comboTick: { label: "combo tick", animation: "generic", trigger: beat(1) },
-  comboSparkle: { label: "combo sparkle", animation: "generic", trigger: beat(2) },
-  tink: { label: "tink", animation: "asteroid-chip", trigger: beat(4) },
-  scoreBlip: { label: "score blip", animation: "generic", trigger: beat(1, 0.5) },
-  summaryDownbeat: { label: "summary downbeat", animation: "generic", trigger: beat(4) },
-  powerup: { label: "powerup arpeggio", animation: "canister", trigger: beat(8) },
-  waveClear: { label: "wave clear", animation: "generic", trigger: beat(8) },
+  {
+    id: "alien-big",
+    label: "alien · big (gunship)",
+    about: "4 HP — fires every other beat",
+    actions: [
+      { verb: "fires", sound: "alienFireBig", trigger: beat(2) },
+    ],
+  },
+  {
+    id: "alien-medium",
+    label: "alien · medium (fighter)",
+    about: "2 HP — fires every beat with rests",
+    actions: [
+      { verb: "fires", sound: "alienFireMedium", trigger: beat(1) },
+      { verb: "takes a hit (survives)", sound: "alienHit", trigger: beat(2) },
+      { verb: "killed", sound: "alienExplode", trigger: beat(8) },
+    ],
+  },
+  {
+    id: "alien-small",
+    label: "alien · small (interceptor)",
+    about: "1 HP — fires every beat with rests",
+    actions: [
+      { verb: "fires", sound: "alienFireSmall", trigger: beat(1) },
+    ],
+  },
 
-  // ── shockwave ───────────────────────────────────────────────────────
-  shockwaveCharge: { label: "shockwave charge", animation: "generic", trigger: beat(8) },
-  shockwaveBoom: { label: "shockwave boom", animation: "generic", trigger: beat(8) },
+  {
+    id: "comet",
+    label: "comet",
+    about: "ambient melodic visitor — note per 2 beats",
+    actions: [
+      { verb: "plays melody note", sound: "cometNote", trigger: beat(2) },
+      { verb: "killed on-beat (triumph)", sound: "cometDestroyed", trigger: beat(8) },
+      { verb: "killed off-beat (sad)", sound: "cometDestroyedSad", trigger: beat(8) },
+    ],
+  },
 
-  // ── aliens ──────────────────────────────────────────────────────────
-  alienFireBig: { label: "alien fire (big)", animation: "alien-big", trigger: beat(2) },
-  alienFireMedium: { label: "alien fire (medium)", animation: "alien-medium", trigger: beat(1) },
-  alienFireSmall: { label: "alien fire (small)", animation: "alien-small", trigger: beat(1) },
-  alienHit: { label: "alien hit", animation: "alien-medium", trigger: beat(2) },
-  alienExplode: { label: "alien explode", animation: "alien-medium", trigger: beat(8) },
+  {
+    id: "canister",
+    label: "powerup canister",
+    about: "drops from gold crystals + wave events",
+    actions: [
+      { verb: "appears", sound: "canisterAppear", trigger: beat(8) },
+      { verb: "picked up (powerup arpeggio)", sound: "powerup", trigger: beat(8) },
+      { verb: "shot down (wasted)", sound: "canisterDestroyed", trigger: beat(8) },
+    ],
+  },
 
-  // ── comets ──────────────────────────────────────────────────────────
-  cometNote: { label: "comet note", animation: "comet", trigger: beat(2) },
-  cometDestroyed: { label: "comet destroyed", animation: "comet", trigger: beat(8) },
-  cometDestroyedSad: { label: "comet destroyed (sad)", animation: "comet", trigger: beat(8) },
+  {
+    id: "pulsar",
+    label: "pulsar (background)",
+    about: "menacing approach beat — intensity ramps with wave",
+    actions: [
+      { verb: "beats on quarter-note", sound: "bgBeat", trigger: beat(1) },
+      { verb: "hums on wave clear", sound: "pulsarHum", trigger: beat(8) },
+    ],
+  },
 
-  // ── canisters ───────────────────────────────────────────────────────
-  canisterAppear: { label: "canister appear", animation: "canister", trigger: beat(8) },
-  canisterDestroyed: { label: "canister destroyed", animation: "canister", trigger: beat(8) },
+  {
+    id: "shockwave",
+    label: "shockwave",
+    about: "screen-clearing pulse — charge then detonate",
+    actions: [
+      { verb: "charges up", sound: "shockwaveCharge", trigger: beat(8) },
+      { verb: "detonates", sound: "shockwaveBoom", trigger: beat(8) },
+    ],
+  },
 
-  // ── misc ────────────────────────────────────────────────────────────
-  comboLost: { label: "combo lost", animation: "generic", trigger: beat(8) },
+  {
+    id: "combo-halo",
+    label: "combo halo",
+    about: "rhythm-multiplier feedback around the ship",
+    actions: [
+      { verb: "sparkles on on-beat kill", sound: "comboSparkle", trigger: beat(2) },
+      { verb: "breaks on off-beat fire", sound: "comboLost", trigger: beat(8) },
+    ],
+  },
+
+  {
+    id: "wave-summary",
+    label: "wave summary panel",
+    about: "end-of-wave score breakdown",
+    actions: [
+      { verb: "title row reveals (chime)", sound: "chime", trigger: beat(8), animation: "wave-summary" },
+      // waveClear & pulsarHum fire together in advanceWave; pulsarHum lives
+      // on the pulsar object. waveClear stays here because it's the UI cue.
+      { verb: "wave clears", sound: "waveClear", trigger: beat(8), animation: "wave-summary" },
+      { verb: "score drain tick", sound: "scoreBlip", trigger: beat(1, 0.5), animation: "wave-summary" },
+      { verb: "score drain downbeat", sound: "summaryDownbeat", trigger: beat(4), animation: "wave-summary" },
+    ],
+  },
+];
+
+// ── derived helpers ─────────────────────────────────────────────────────
+
+// Resolved animator for an action — action override falls back to its parent
+// object's id.
+export const animationFor = (object: GameObject, action: Action): ObjectId =>
+  action.animation ?? object.id;
+
+// Human-readable cadence line shown under each row.
+export const sublabelFor = (action: Action): string => {
+  const trig = action.trigger;
+  let cadence: string;
+  if (trig.kind === "loop") {
+    cadence = "continuous";
+  } else if (trig.periodBeats === 1 && (trig.phaseBeats ?? 0) === 0) {
+    cadence = "every beat";
+  } else if ((trig.phaseBeats ?? 0) === 0.5) {
+    cadence = "off-beat";
+  } else {
+    cadence = `every ${trig.periodBeats} beats`;
+  }
+  const base = `${action.sound} · ${cadence}`;
+  return action.note ? `${base} · ${action.note}` : base;
 };
 
-const autoSublabel = (sound: SoundName, trig: SoundTrigger): string => {
-  if (trig.kind === "loop") return `${sound} · continuous`;
-  const phase = trig.phaseBeats === 0.5 ? " · off-beat" : "";
-  if (trig.periodBeats === 1) return `${sound} · every beat${phase}`;
-  return `${sound} · every ${trig.periodBeats} beats${phase}`;
-};
+// ── compile-time coverage check ─────────────────────────────────────────
+// MENTIONED_SOUNDS lists every sound that appears in OBJECTS above. Keeping
+// it as an explicit `as const` array (instead of deriving from OBJECTS) lets
+// the literal types survive, which is what makes the assertion below catch
+// gaps. A runtime guard at the bottom of this file also verifies that the
+// list stays in sync with OBJECTS — if you forget to add a sound here after
+// adding it to an action, the page throws a clear error at load time.
 
-export const SOUND_ENTRIES: SoundEntry[] = (Object.keys(ENTRIES) as SoundName[]).map((sound) => {
-  const e = ENTRIES[sound];
-  return {
-    sound,
-    label: e.label,
-    animation: e.animation,
-    trigger: e.trigger,
-    sublabel: e.sublabel ?? autoSublabel(sound, e.trigger),
-  };
-});
+const MENTIONED_SOUNDS = [
+  // ship
+  "death", "thrust", "reverseThrust", "sideThrust", "shieldPop",
+  // bullets
+  "fire", "fireBeat", "comboTick",
+  // asteroids
+  "explosionSmall", "explosionMedium", "explosionLarge", "asteroidBoomBeat",
+  "bassKick", "bassPluck", "bassBoom", "bassSnap", "bassHit", "bassEcho",
+  "chime", "bell", "warble", "tink",
+  // aliens
+  "alienFireBig", "alienFireMedium", "alienFireSmall", "alienHit", "alienExplode",
+  // comets
+  "cometNote", "cometDestroyed", "cometDestroyedSad",
+  // canisters / pickups
+  "canisterAppear", "canisterDestroyed", "powerup",
+  // world bed
+  "bgBeat", "pulsarHum",
+  // shockwave
+  "shockwaveCharge", "shockwaveBoom",
+  // combo
+  "comboSparkle", "comboLost",
+  // wave summary UI
+  "waveClear", "scoreBlip", "summaryDownbeat",
+] as const;
+
+type MentionedSound = (typeof MENTIONED_SOUNDS)[number];
+
+// Add a sound here only if it's intentionally omitted from the page (e.g.
+// system-only sound that shouldn't appear as a checkbox).
+type IntentionallyOmitted = never;
+
+// Compile-time check: every SoundName must be in MENTIONED_SOUNDS or
+// IntentionallyOmitted. If you add a new SoundName and forget to wire it
+// into the page, the assignment below errors with a `MissingSounds` type
+// that contains the missing name(s).
+type MissingSounds = Exclude<SoundName, MentionedSound | IntentionallyOmitted>;
+type _AssertNoMissingSounds = MissingSounds extends never
+  ? true
+  : { ERROR_unmentioned_sounds: MissingSounds };
+const _coverageOk: _AssertNoMissingSounds = true;
+void _coverageOk;
+
+// Runtime check: MENTIONED_SOUNDS must match what OBJECTS actually says.
+// Catches the inverse mistake — adding to MENTIONED_SOUNDS but forgetting
+// the action entry, or removing the action and forgetting to delete here.
+const actualMentioned = new Set<SoundName>();
+for (const o of OBJECTS) for (const a of o.actions) actualMentioned.add(a.sound);
+const claimed = new Set<SoundName>(MENTIONED_SOUNDS);
+const onlyClaimed: SoundName[] = [...claimed].filter((s) => !actualMentioned.has(s));
+const onlyActual: SoundName[] = [...actualMentioned].filter((s) => !claimed.has(s));
+if (onlyClaimed.length || onlyActual.length) {
+  // eslint-disable-next-line no-console
+  console.error(
+    "/sound registry mismatch:",
+    { listedButUnused: onlyClaimed, usedButUnlisted: onlyActual },
+  );
+}

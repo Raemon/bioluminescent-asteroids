@@ -21,7 +21,7 @@ html:has(.sound-page-body) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 28px;
+  padding: 8px 16px;
   border-bottom: 1px solid rgba(106, 215, 255, 0.18);
   background: linear-gradient(180deg, rgba(106, 215, 255, 0.06), transparent);
 }
@@ -29,11 +29,11 @@ html:has(.sound-page-body) {
 .se-title {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
 }
 
 .se-logo {
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 600;
   letter-spacing: 0.18em;
   color: #6ad7ff;
@@ -49,7 +49,7 @@ html:has(.sound-page-body) {
 .se-sep { color: rgba(214, 236, 255, 0.35); }
 
 .se-sub {
-  font-size: 13px;
+  font-size: 12px;
   color: rgba(214, 236, 255, 0.7);
   letter-spacing: 0.08em;
 }
@@ -57,11 +57,11 @@ html:has(.sound-page-body) {
 .se-header-right {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
 }
 
 .se-bpm {
-  font-size: 11px;
+  font-size: 10px;
   color: rgba(214, 236, 255, 0.45);
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -76,8 +76,8 @@ html:has(.sound-page-body) {
 .se-back {
   color: rgba(214, 236, 255, 0.7);
   text-decoration: none;
-  font-size: 13px;
-  padding: 6px 12px;
+  font-size: 12px;
+  padding: 3px 8px;
   border: 1px solid rgba(106, 215, 255, 0.25);
   border-radius: 3px;
 }
@@ -88,25 +88,34 @@ html:has(.sound-page-body) {
 }
 
 .se-main {
-  padding: 40px 32px 80px;
-  max-width: 720px;
+  padding: 8px 16px 24px;
+  max-width: 980px;
   margin: 0 auto;
 }
 
 .se-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
+
+.se-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.se-section:first-child { margin-top: 0; }
 
 .se-row {
   display: grid;
-  grid-template-columns: 220px 1fr auto;
+  grid-template-columns: 150px 200px 180px 1fr auto;
   align-items: center;
-  gap: 28px;
-  padding: 22px 24px;
+  gap: 14px;
+  padding: 2px 10px;
   border: 1px solid rgba(106, 215, 255, 0.08);
-  border-radius: 6px;
+  border-radius: 4px;
   background: rgba(106, 215, 255, 0.015);
   transition: border-color 0.15s, background 0.15s;
 }
@@ -114,6 +123,16 @@ html:has(.sound-page-body) {
 .se-row.checked {
   border-color: rgba(106, 215, 255, 0.32);
   background: rgba(106, 215, 255, 0.04);
+}
+
+.se-object {
+  font-size: 12px;
+  color: #6ad7ff;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .se-vis canvas {
@@ -125,29 +144,29 @@ html:has(.sound-page-body) {
   border-radius: 4px;
 }
 
-.se-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-
 .se-label {
-  font-size: 16px;
+  font-size: 14px;
   color: #e0f7ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .se-sublabel {
   font-size: 11px;
   color: rgba(214, 236, 255, 0.45);
   letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 /* Custom checkbox — circular, glows when checked. */
 .se-check {
   position: relative;
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
   cursor: pointer;
   user-select: none;
 }
@@ -181,7 +200,7 @@ html:has(.sound-page-body) {
 .se-check input:checked + .se-check-mark::after {
   content: "";
   position: absolute;
-  inset: 7px;
+  inset: 5px;
   background: #6ad7ff;
   border-radius: 50%;
   box-shadow: 0 0 8px #6ad7ff;

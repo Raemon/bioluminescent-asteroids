@@ -1,40 +1,37 @@
-// /sound — checkbox-based mixer. Each row is a "track" built from the sound
-// registry (sounds.ts) and animation registry (animations.ts). Checked tracks
-// play together on a shared 0.5s (BEAT_GRID) beat clock at the cadence they'd
-// hit during gameplay; continuous loops (thrust / reverseThrust / sideThrust)
-// start/stop directly off the checkbox.
+// /sound — checkbox-based mixer. The page walks the object×action registry
+// (sounds.ts) and renders one section per game object, with one checkbox row
+// per action that object performs. Checked rows play together on a shared
+// 0.5s (BEAT_GRID) beat clock at the cadence they'd hit in gameplay;
+// continuous loops (thrust / reverseThrust / sideThrust) start/stop directly
+// off the checkbox.
 //
-// Adding a new sound = one entry in sounds.ts. Adding a new entity visual =
-// one entry in animations.ts. Nothing in this file changes.
+// Add a sound → an action in sounds.ts under the right object.
+// Add an object → entry in animations.ts + entry in OBJECTS in sounds.ts.
 
 import { Sound } from "../../Sound";
 import { loadSoundConfig } from "../../soundConfig";
 import { BEAT_GRID } from "../../game/rhythmConstants";
 import { ANIMATIONS, type Animator } from "./animations";
-import { SOUND_ENTRIES, type SoundEntry } from "./sounds";
+import { OBJECTS, animationFor, sublabelFor, type Action, type GameObject } from "./sounds";
 
 const sound = new Sound();
 
 type RowHandle = {
-  entry: SoundEntry;
+  object: GameObject;
+  action: Action;
   el: HTMLElement;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   checkbox: HTMLInputElement;
   animator: Animator;
   mountedAt: number;
-  // Track-local "last fire" timestamp in animator seconds (since mount). The
-  // animator uses this to detect a new fire event and start/restart a
-  // hit-flash or bullet volley.
+  // Animator-relative seconds when this row's sound last fired (-1 if never).
   lastFiredAtAnim: number;
-  // For loop tracks — whether we've already started the underlying sound.
+  // For loop rows — whether we've already started the underlying sound.
   loopActive: boolean;
 };
 
 const handles: RowHandle[] = [];
-// Shared beat clock — seconds since the page mounted, ticked every frame.
-// Integer beat slots fall on multiples of BEAT_GRID. Eighth-note phase
-// (0.5 beats) is used by off-beat rows.
 let masterBeatTime = 0;
 let lastBeatTickIdx = -1;
 let lastHalfBeatTickIdx = -1;
@@ -51,49 +48,57 @@ async function init() {
   const list = document.getElementById("se-list");
   if (!list) return;
 
-  for (const entry of SOUND_ENTRIES) {
-    const el = document.createElement("div");
-    el.className = "se-row";
-    el.innerHTML = `
-      <div class="se-vis"><canvas width="200" height="100"></canvas></div>
-      <div class="se-meta">
-        <div class="se-label">${entry.label}</div>
-        <div class="se-sublabel">${entry.sublabel ?? ""}</div>
-      </div>
-      <label class="se-check">
-        <input type="checkbox" />
-        <span class="se-check-mark"></span>
-      </label>
-    `;
-    list.appendChild(el);
+  for (const object of OBJECTS) {
+    const section = document.createElement("section");
+    section.className = "se-section";
 
-    const canvas = el.querySelector("canvas") as HTMLCanvasElement;
-    const ctx2d = canvas.getContext("2d");
-    const checkbox = el.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    if (!ctx2d) continue;
+    object.actions.forEach((action, idx) => {
+      const el = document.createElement("div");
+      el.className = "se-row";
+      // Object label only on the first row of each object — keeps a visual
+      // grouping without spending a whole row on a header.
+      const objectLabel = idx === 0 ? object.label : "";
+      el.innerHTML = `
+        <div class="se-object">${objectLabel}</div>
+        <div class="se-vis"><canvas width="200" height="100"></canvas></div>
+        <div class="se-label">${action.verb}</div>
+        <div class="se-sublabel">${sublabelFor(action)}</div>
+        <label class="se-check">
+          <input type="checkbox" />
+          <span class="se-check-mark"></span>
+        </label>
+      `;
+      section.appendChild(el);
 
-    const animator = ANIMATIONS[entry.animation]();
+      const canvas = el.querySelector("canvas") as HTMLCanvasElement;
+      const ctx2d = canvas.getContext("2d");
+      const checkbox = el.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      if (!ctx2d) return;
 
-    const handle: RowHandle = {
-      entry,
-      el,
-      canvas,
-      ctx: ctx2d,
-      checkbox,
-      animator,
-      mountedAt: performance.now(),
-      lastFiredAtAnim: -1,
-      loopActive: false,
-    };
-    handles.push(handle);
+      const animator = ANIMATIONS[animationFor(object, action)]();
+      const handle: RowHandle = {
+        object,
+        action,
+        el,
+        canvas,
+        ctx: ctx2d,
+        checkbox,
+        animator,
+        mountedAt: performance.now(),
+        lastFiredAtAnim: -1,
+        loopActive: false,
+      };
+      handles.push(handle);
 
-    checkbox.addEventListener("change", () => {
-      el.classList.toggle("checked", checkbox.checked);
-      // Resume audio on the first user gesture so iOS / Chrome let us play.
-      sound.ensureContext();
-      if (sound.ctx?.state === "suspended") sound.ctx.resume();
-      handleCheckChange(handle);
+      checkbox.addEventListener("change", () => {
+        el.classList.toggle("checked", checkbox.checked);
+        sound.ensureContext();
+        if (sound.ctx?.state === "suspended") sound.ctx.resume();
+        handleCheckChange(handle);
+      });
     });
+
+    list.appendChild(section);
   }
 
   lastFrameMs = performance.now();
@@ -101,19 +106,16 @@ async function init() {
 }
 
 function handleCheckChange(h: RowHandle) {
-  if (h.entry.trigger.kind !== "loop") return;
+  if (h.action.trigger.kind !== "loop") return;
   if (h.checkbox.checked && !h.loopActive) {
-    sound.play(h.entry.sound);
+    sound.play(h.action.sound);
     h.loopActive = true;
     return;
   }
   if (!h.checkbox.checked && h.loopActive) {
-    // Each continuous-loop sound has its own stop method. Anything else falls
-    // through harmlessly (one-shot semantics — the sound has already finished
-    // by the time the user unchecks).
-    if (h.entry.sound === "thrust") sound.stopThrust();
-    else if (h.entry.sound === "reverseThrust") sound.stopReverseThrust();
-    else if (h.entry.sound === "sideThrust") sound.stopSideThrust();
+    if (h.action.sound === "thrust") sound.stopThrust();
+    else if (h.action.sound === "reverseThrust") sound.stopReverseThrust();
+    else if (h.action.sound === "sideThrust") sound.stopSideThrust();
     h.loopActive = false;
   }
 }
@@ -134,16 +136,15 @@ function tick(nowMs: number) {
     fireSlot(lastBeatTickIdx, 0);
   }
 
-  // Off-beat (eighth-note) slots: phaseBeats = 0.5 tracks fire half a beat
-  // after each downbeat. We detect the crossing of the half-beat mark
-  // separately so the eighth grid stays robust to dt jitter.
+  // Off-beat (eighth-note) slots: phaseBeats = 0.5 rows fire half a beat
+  // after each downbeat. Detected via a parallel index so the eighth grid
+  // stays robust to dt jitter.
   const halfBeatNow = Math.floor((masterBeatTime - BEAT_GRID * 0.5) / BEAT_GRID);
   while (lastHalfBeatTickIdx < halfBeatNow) {
     lastHalfBeatTickIdx += 1;
     fireSlot(lastHalfBeatTickIdx, 0.5);
   }
 
-  // Per-row animator tick.
   for (const h of handles) {
     const t = (nowMs - h.mountedAt) / 1000;
     h.animator({
@@ -163,19 +164,17 @@ function tick(nowMs: number) {
 function fireSlot(beatIdx: number, phaseBeats: 0 | 0.5) {
   for (const h of handles) {
     if (!h.checkbox.checked) continue;
-    const trig = h.entry.trigger;
+    const trig = h.action.trigger;
     if (trig.kind !== "beat") continue;
-    if (trig.phaseBeats !== phaseBeats) continue;
+    if ((trig.phaseBeats ?? 0) !== phaseBeats) continue;
     if (beatIdx % trig.periodBeats !== 0) continue;
     fireRow(h);
   }
 }
 
 function fireRow(h: RowHandle) {
-  sound.play(h.entry.sound);
-  // Animator-relative timestamp so the visual flash lines up with the audio.
+  sound.play(h.action.sound);
   h.lastFiredAtAnim = (performance.now() - h.mountedAt) / 1000;
-  // Brief CSS flash on the canvas frame.
   h.el.classList.add("firing");
   window.setTimeout(() => h.el.classList.remove("firing"), 160);
 }

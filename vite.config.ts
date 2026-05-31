@@ -26,11 +26,11 @@ const cleanUrls = () => ({
   },
 });
 
-// Dev-only writer for /sounds/config.json — the sound editor PUTs new
-// tuning values back to disk on every knob change so commits can capture
-// them. Only active under `vite dev`; the production build never receives
-// these writes (the editor still works in prod-preview, but changes only
-// live in localStorage if you ever expose it there).
+// Dev-only writer for /sounds/config.json — the /sound page PUTs new tuning
+// values back to disk on every knob change so commits can capture them. Only
+// active under `vite dev`; the production build never receives these writes
+// (the page still works in prod-preview, but changes only live in
+// localStorage if you ever expose it there).
 const soundConfigWriter = () => {
   const target = resolve(__dirname, "public/sounds/config.json");
   return {

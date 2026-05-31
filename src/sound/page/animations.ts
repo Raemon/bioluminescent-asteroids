@@ -1,13 +1,14 @@
-// Animation registry for /sound. Each entry is a self-contained animator that
-// renders one in-game entity into a 200×100 cell canvas and reacts to a "fire"
-// event (one-shot trigger) or a "playing" flag (continuous loop).
+// Animation registry for /sound. One animator per game object that the page
+// renders into a 200×100 cell. Animators are pure closures over AnimatorCtx:
+// they react to a `firedAt` change for one-shot triggers and a `playing` flag
+// for continuous loops.
 //
-// Adding a new entity = one entry. The registry is keyed by AnimationId; the
-// sound registry maps each SoundName to one of these IDs.
+// Add a new object → add an entry in ANIMATIONS keyed by an ObjectId.
+// The sound registry then maps actions to those object IDs.
 
 import { Ship } from "../../Ship";
 import { Bullet } from "../../Bullet";
-import { Asteroid } from "../../Asteroid";
+import { Asteroid, type AsteroidKind } from "../../Asteroid";
 import { Pulsar } from "../../Pulsar";
 import { Alien } from "../../Alien";
 import { Comet } from "../../Comet";
@@ -28,29 +29,44 @@ export type AnimatorCtx = {
 
 export type Animator = (a: AnimatorCtx) => void;
 
-// IDs that the sound registry uses to look up an animator. New entities slot in
-// here and in the ANIMATIONS map below — nothing else changes.
-export type AnimationId =
-  | "pulsar"
+// IDs the sound registry can attach to. Each is one game object — typically
+// one entity class (Ship, Comet) or one *kind* of an entity (asteroid-bassA
+// vs asteroid-normal vs alien-big), because the visual differs per kind.
+export type ObjectId =
+  | "ship"
   | "ship-thrust"
   | "ship-reverse"
   | "ship-side"
+  | "ship-shield"
+  | "ship-death"
   | "bullet-weak"
   | "bullet-rhythm"
   | "bullet-trident"
-  | "asteroid-chip"
-  | "asteroid-kill"
+  | "asteroid-normal"
+  | "asteroid-bassA"
+  | "asteroid-bassB"
+  | "asteroid-bassC"
+  | "asteroid-bassD"
+  | "asteroid-chime"
+  | "asteroid-bell"
+  | "asteroid-warble"
+  | "asteroid-tink"
+  | "asteroid-gold"
   | "alien-big"
   | "alien-medium"
   | "alien-small"
   | "comet"
   | "canister"
-  | "ship-death"
-  | "ship-shield"
-  | "generic";
+  | "pulsar"
+  | "shockwave"
+  | "wave-summary"
+  | "combo-halo"
+  | "generic-pulse";
 
-// Uses the real in-game Pulsar — same render path as the centre of the game
-// screen, just scoped to a cell-sized canvas.
+// ── primitives ──────────────────────────────────────────────────────────
+
+const PULSAR_WAVE_LEVEL = 6;
+
 function drawPulsar(): Animator {
   let pulsar: Pulsar | null = null;
   let lastFiredAt = -1;
@@ -61,8 +77,8 @@ function drawPulsar(): Animator {
       pulsar.baseOffsetX = 0;
       pulsar.baseOffsetY = 0;
       pulsar.planets = [];
-      pulsar.setWaveLevel(6);
-      pulsar.displayWaveLevel = 6;
+      pulsar.setWaveLevel(PULSAR_WAVE_LEVEL);
+      pulsar.displayWaveLevel = PULSAR_WAVE_LEVEL;
     }
     if (firedAt !== lastFiredAt && firedAt >= 0) {
       lastFiredAt = firedAt;
@@ -75,19 +91,27 @@ function drawPulsar(): Animator {
   };
 }
 
-function drawShip(opts: { thrust: boolean; reverse: boolean; shield?: boolean; death?: boolean }): Animator {
+function drawShip(opts: { thrust?: boolean; reverse?: boolean; shield?: boolean; death?: boolean }): Animator {
   const ship = new Ship(v(0, 0));
   ship.invuln = 0;
-  let deathAt = -1;
+  let lastDeathAt = -1;
   return ({ ctx, w, h, t, playing, firedAt }) => {
     ctx.clearRect(0, 0, w, h);
     ship.pos = v(w / 2, h / 2);
     ship.heading = -Math.PI / 2 + Math.sin(t * 0.6) * 0.2;
-    ship.thrustOn = opts.thrust && playing;
-    ship.reverseThrustOn = opts.reverse && playing;
-    if (opts.shield) ship.invuln = playing ? 1.2 : 0;
-    if (opts.death && firedAt !== deathAt && firedAt >= 0) {
-      deathAt = firedAt;
+    ship.thrustOn = !!opts.thrust && playing;
+    ship.reverseThrustOn = !!opts.reverse && playing;
+    if (opts.shield) {
+      // Shield-pop is a one-shot — flare invuln briefly each fire so the
+      // bubble visibly pops rather than steady-on.
+      if (firedAt !== lastDeathAt && firedAt >= 0) {
+        lastDeathAt = firedAt;
+        ship.invuln = 0.8;
+      }
+      ship.invuln = Math.max(0, ship.invuln - 1 / 60);
+    }
+    if (opts.death && firedAt !== lastDeathAt && firedAt >= 0) {
+      lastDeathAt = firedAt;
       ship.invuln = 2.0;
     }
     ship.render(ctx, t * 1000, 0);
@@ -125,27 +149,33 @@ function drawBullet(opts: { onBeat: boolean; boosted: boolean; count: number }):
   };
 }
 
-function drawAsteroidHit(opts: { killing: boolean }): Animator {
-  let asteroid = new Asteroid(v(0, 0), v(0, 0), "large");
+// Asteroid animator parameterised by kind. Same closure for every kind —
+// the kind picks the silhouette/colour the Asteroid class builds at construct
+// time. `mode` is "chip" (re-spawns after each kill) or "kill" (walks HP to 0
+// on each fire).
+function drawAsteroid(kind: AsteroidKind, mode: "chip" | "kill"): Animator {
+  const fresh = (): Asteroid => {
+    const a = new Asteroid(v(0, 0), v(0, 0), "large", undefined, kind);
+    return a;
+  };
+  let asteroid = fresh();
   let lastFiredAt = -1;
   let killedAt = -Infinity;
   return ({ ctx, w, h, t, dt, firedAt }) => {
     ctx.clearRect(0, 0, w, h);
     if (firedAt !== lastFiredAt && firedAt >= 0) {
       lastFiredAt = firedAt;
-      if (opts.killing) {
+      if (mode === "kill") {
         asteroid.hp = 0;
         asteroid.flashAmount = 1;
         killedAt = t;
       } else {
-        if (asteroid.hp <= 1) {
-          asteroid = new Asteroid(v(0, 0), v(0, 0), "large");
-        }
+        if (asteroid.hp <= 1) asteroid = fresh();
         asteroid.applyDamage(1);
       }
     }
-    if (opts.killing && t - killedAt > 0.9 && asteroid.hp === 0) {
-      asteroid = new Asteroid(v(0, 0), v(0, 0), "large");
+    if (mode === "kill" && t - killedAt > 0.9 && asteroid.hp === 0) {
+      asteroid = fresh();
       killedAt = -Infinity;
     }
     const fit = 0.78;
@@ -162,9 +192,6 @@ function drawAsteroidHit(opts: { killing: boolean }): Animator {
 }
 
 function drawAlien(size: "big" | "medium" | "small"): Animator {
-  // Tiny constant velocity so the alien's internal rotation = heading-of-velocity
-  // points nose-right with a gentle weave. We pin pos in the centre each frame
-  // so the saucer hovers in the cell instead of drifting across.
   const alien = new Alien(v(0, 0), v(40, 0), size);
   let lastFiredAt = -1;
   return ({ ctx, w, h, t, dt, firedAt }) => {
@@ -172,10 +199,6 @@ function drawAlien(size: "big" | "medium" | "small"): Animator {
     alien.pos = v(w / 2, h / 2);
     alien.update(dt, w * 4, h * 4);
     alien.pos = v(w / 2, h / 2);
-    // Fire flashes & hit flashes use the alien's own fields — animate them on
-    // each row firing so the row visually responds (hit on explode/hit sounds,
-    // muzzle flash on alien-fire sounds; both look fine here as a generic
-    // "alien-reacts" cue).
     if (firedAt !== lastFiredAt && firedAt >= 0) {
       lastFiredAt = firedAt;
       alien.fireFlash = 1;
@@ -192,10 +215,9 @@ function drawAlien(size: "big" | "medium" | "small"): Animator {
 }
 
 function drawComet(): Animator {
-  let comet = new Comet(v(0, 0), v(40, 0), 200);
+  let comet = new Comet(v(-20, 50), v(40, 0), 200);
   return ({ ctx, w, h, dt }) => {
     ctx.clearRect(0, 0, w, h);
-    // Wrap horizontally so the comet keeps streaking across the cell.
     if (comet.pos.x > w + 40) comet = new Comet(v(-20, h / 2), v(40, 0), 200);
     comet.update(dt, w, h);
     comet.render(ctx);
@@ -213,9 +235,105 @@ function drawCanister(): Animator {
   };
 }
 
-// Fallback used for sounds that don't have a dedicated entity (UI-only sounds,
-// abstract ambience, etc.). Renders a soft pulse on each fire so the row still
-// has visual feedback when its sound triggers.
+// Expanding ring with a charge-up bloom. Used for shockwave actions; the
+// difference between "charge" and "boom" is just timing — both look like
+// the in-game shockwave at distinct moments of its lifecycle.
+function drawShockwave(): Animator {
+  let lastFiredAt = -1;
+  let flash = 0;
+  return ({ ctx, w, h, dt, firedAt }) => {
+    if (firedAt !== lastFiredAt && firedAt >= 0) {
+      lastFiredAt = firedAt;
+      flash = 1;
+    }
+    flash = Math.max(0, flash - dt * 1.6);
+    ctx.clearRect(0, 0, w, h);
+    const cx = w / 2, cy = h / 2;
+    // Expanding outer ring on each fire.
+    const r = (1 - flash) * Math.min(w, h) * 0.55;
+    ctx.strokeStyle = `rgba(255, 216, 106, ${flash * 0.85})`;
+    ctx.lineWidth = 2 + flash * 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 4, 0, Math.PI * 2);
+    ctx.stroke();
+    // Bright core that fades with the ring.
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 26);
+    grad.addColorStop(0, `rgba(255, 244, 200, ${flash * 0.9})`);
+    grad.addColorStop(1, "rgba(255, 244, 200, 0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 26, 0, Math.PI * 2);
+    ctx.fill();
+  };
+}
+
+// Wave-summary row mockup — a thin score line that briefly highlights on
+// each fire, mimicking how the end-of-wave panel reveals one row per beat.
+function drawWaveSummary(): Animator {
+  let lastFiredAt = -1;
+  let flash = 0;
+  return ({ ctx, w, h, dt, firedAt }) => {
+    if (firedAt !== lastFiredAt && firedAt >= 0) {
+      lastFiredAt = firedAt;
+      flash = 1;
+    }
+    flash = Math.max(0, flash - dt * 2.5);
+    ctx.clearRect(0, 0, w, h);
+    const pad = 18;
+    const rowH = 16;
+    for (let i = 0; i < 4; i++) {
+      const y = 18 + i * (rowH + 6);
+      const isActive = i === 1;
+      const a = 0.18 + (isActive ? flash * 0.7 : 0);
+      ctx.fillStyle = `rgba(106, 215, 255, ${a * 0.18})`;
+      ctx.fillRect(pad, y, w - pad * 2, rowH);
+      ctx.strokeStyle = `rgba(106, 215, 255, ${0.25 + (isActive ? flash * 0.5 : 0)})`;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(pad + 0.5, y + 0.5, w - pad * 2 - 1, rowH - 1);
+      // Right-aligned number flash.
+      ctx.fillStyle = `rgba(255, 216, 106, ${0.4 + (isActive ? flash * 0.6 : 0)})`;
+      ctx.font = "10px ui-monospace, Menlo, monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(isActive ? "1234" : "—", w - pad - 6, y + rowH - 4);
+      ctx.textAlign = "left";
+    }
+  };
+}
+
+// Combo-halo ring around a static ship silhouette. Used for combo-related
+// sounds (sparkle, tick, lost). The halo brightens on fire and fades.
+function drawComboHalo(): Animator {
+  const ship = new Ship(v(0, 0));
+  ship.invuln = 0;
+  let lastFiredAt = -1;
+  let flash = 0;
+  return ({ ctx, w, h, t, dt, firedAt }) => {
+    if (firedAt !== lastFiredAt && firedAt >= 0) {
+      lastFiredAt = firedAt;
+      flash = 1;
+    }
+    flash = Math.max(0, flash - dt * 2);
+    ctx.clearRect(0, 0, w, h);
+    const cx = w / 2, cy = h / 2;
+    // Halo ring.
+    const grad = ctx.createRadialGradient(cx, cy, 20, cx, cy, 44);
+    grad.addColorStop(0, "rgba(255, 216, 106, 0)");
+    grad.addColorStop(0.6, `rgba(255, 216, 106, ${0.22 + flash * 0.5})`);
+    grad.addColorStop(1, "rgba(255, 216, 106, 0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 44, 0, Math.PI * 2);
+    ctx.fill();
+    ship.pos = v(cx, cy);
+    ship.heading = -Math.PI / 2;
+    ship.thrustOn = false;
+    ship.reverseThrustOn = false;
+    ship.render(ctx, t * 1000, 0);
+  };
+}
+
+// Fallback for sounds without a clear visual home — soft glow pulse on each
+// fire, ambient hum while a loop is active.
 function drawGenericPulse(): Animator {
   let lastFiredAt = -1;
   let flash = 0;
@@ -246,22 +364,34 @@ function drawGenericPulse(): Animator {
   };
 }
 
-export const ANIMATIONS: Record<AnimationId, () => Animator> = {
-  pulsar: drawPulsar,
-  "ship-thrust": () => drawShip({ thrust: true, reverse: false }),
-  "ship-reverse": () => drawShip({ thrust: false, reverse: true }),
-  "ship-side": () => drawShip({ thrust: false, reverse: false }),
-  "ship-shield": () => drawShip({ thrust: false, reverse: false, shield: true }),
-  "ship-death": () => drawShip({ thrust: false, reverse: false, death: true }),
+export const ANIMATIONS: Record<ObjectId, () => Animator> = {
+  ship: () => drawShip({}),
+  "ship-thrust": () => drawShip({ thrust: true }),
+  "ship-reverse": () => drawShip({ reverse: true }),
+  "ship-side": () => drawShip({}),
+  "ship-shield": () => drawShip({ shield: true }),
+  "ship-death": () => drawShip({ death: true }),
   "bullet-weak": () => drawBullet({ onBeat: false, boosted: false, count: 1 }),
   "bullet-rhythm": () => drawBullet({ onBeat: true, boosted: false, count: 1 }),
   "bullet-trident": () => drawBullet({ onBeat: true, boosted: true, count: 3 }),
-  "asteroid-chip": () => drawAsteroidHit({ killing: false }),
-  "asteroid-kill": () => drawAsteroidHit({ killing: true }),
+  "asteroid-normal": () => drawAsteroid("normal", "chip"),
+  "asteroid-bassA": () => drawAsteroid("bassA", "chip"),
+  "asteroid-bassB": () => drawAsteroid("bassB", "chip"),
+  "asteroid-bassC": () => drawAsteroid("bassC", "chip"),
+  "asteroid-bassD": () => drawAsteroid("bassD", "chip"),
+  "asteroid-chime": () => drawAsteroid("chime", "chip"),
+  "asteroid-bell": () => drawAsteroid("bell", "chip"),
+  "asteroid-warble": () => drawAsteroid("warble", "chip"),
+  "asteroid-tink": () => drawAsteroid("tink", "chip"),
+  "asteroid-gold": () => drawAsteroid("goldCrystal", "chip"),
   "alien-big": () => drawAlien("big"),
   "alien-medium": () => drawAlien("medium"),
   "alien-small": () => drawAlien("small"),
   comet: drawComet,
   canister: drawCanister,
-  generic: drawGenericPulse,
+  pulsar: drawPulsar,
+  shockwave: drawShockwave,
+  "wave-summary": drawWaveSummary,
+  "combo-halo": drawComboHalo,
+  "generic-pulse": drawGenericPulse,
 };
