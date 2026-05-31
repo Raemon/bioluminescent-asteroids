@@ -224,7 +224,7 @@ export const FirstWaveHint = () => {
           </div>
           {subMounted && (
             <div className={`mt-8 first-wave-hint__sub ${subVisible ? "visible" : ""}`}>
-              (Use your targeting tools to help)
+              Use your targeting tools to aim.
             </div>
           )}
         </>
@@ -242,7 +242,7 @@ export const FirstWaveHint = () => {
             ))}
           </div>
             <div className={`first-wave-hint__sub visible`}>
-              (Use your targeting tools to help)
+              <div>Match your target's velocity, and use your targeting tools.</div>
             </div>
           </div>
         </>

@@ -25,7 +25,6 @@ import {
   handleGoldCrystalPickups,
 } from "./collisions";
 import { startGame, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress } from "./lifecycle";
-import { targetsForReticule } from "./gameRender";
 import { syncHud, syncPowerupHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
 import { updatePopups } from "./popups";
@@ -193,7 +192,7 @@ const updatePlaying = (game: Game, dt: number) => {
   const bulletsBeforeShipUpdate = game.bullets.length;
   game.ship.setCombo(game.beatCombo);
   syncHaloAmbient(game);
-  game.ship.update(dt, game.input, game.particles, game.bullets, game.w, game.h, game.time, game.sound, targetsForReticule(game));
+  game.ship.update(dt, game.input, game.particles, game.bullets, game.w, game.h, game.time, game.sound);
   const musicDt = tickSlowMoTimer(game, dt);
   tickBassBeats(game, musicDt);
   // pulsar runs against freshly-advanced beatTime so its flash lands with the bass voices.

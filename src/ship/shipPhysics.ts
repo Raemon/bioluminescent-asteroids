@@ -6,29 +6,16 @@ import { Bullet } from "../Bullet";
 import { Sound } from "../Sound";
 import { emitThrust, emitReverseThrust, emitSideThrust } from "./shipParticles";
 import { fireBullets } from "./shipWeapons";
-import { BEAT_GRID } from "../game/rhythmConstants";
-import { ReticuleTarget } from "./reticule/trajectoryPreview";
-import { resolveHeadingWithLock } from "./reticule/headingLockOn";
 
 // tap-to-nudge feel; rotation ramps in over ~0.35s so a tap turns finely and a hold turns fast.
-// Visible trajectory lines exert a soft snap on the heading — see resolveHeadingWithLock.
-const updateTurning = (
-  ship: Ship, input: Input, dt: number, w: number, h: number,
-  targets: ReadonlyArray<ReticuleTarget>,
-) => {
+const updateTurning = (ship: Ship, input: Input, dt: number) => {
   const turnLeft = input.down("arrowleft") || input.down("a");
   const turnRight = input.down("arrowright") || input.down("d");
   if (turnLeft || turnRight) ship.rotRamp = Math.min(1, ship.rotRamp + dt / 0.35);
   else ship.rotRamp = 0;
   const turnScale = 0.08 + 0.92 * ship.rotRamp;
-  let intendedDelta = 0;
-  if (turnLeft) intendedDelta -= ship.rotSpeed * turnScale * dt;
-  if (turnRight) intendedDelta += ship.rotSpeed * turnScale * dt;
-  // No rotation input → drop any active lock so the next press starts fresh.
-  if (intendedDelta === 0) { ship.headingLock = null; return; }
-  const result = resolveHeadingWithLock(ship, intendedDelta, BEAT_GRID, w, h, targets, ship.headingLock);
-  ship.heading = result.heading;
-  ship.headingLock = result.lock;
+  if (turnLeft) ship.heading -= ship.rotSpeed * turnScale * dt;
+  if (turnRight) ship.heading += ship.rotSpeed * turnScale * dt;
 };
 
 // thruster has to gate sound start/stop on the edge so the loop doesn't restart every frame.
@@ -120,13 +107,12 @@ export const tickShip = (
   ship: Ship, dt: number, input: Input,
   particles: ParticleSystem, bullets: Bullet[],
   w: number, h: number, t: number, sound: Sound,
-  targets: ReadonlyArray<ReticuleTarget>,
 ) => {
   if (!ship.alive) return;
   if (ship.invuln > 0) ship.invuln -= dt;
   if (ship.fireCooldown > 0) ship.fireCooldown -= dt;
   easeComboHaloIntensity(ship, dt);
-  updateTurning(ship, input, dt, w, h, targets);
+  updateTurning(ship, input, dt);
   updateForwardThrust(ship, input, particles, sound, dt, t);
   updateReverseThrust(ship, input, particles, sound, dt, t);
   updateSideThrust(ship, input, particles, sound, dt, t);
