@@ -37,15 +37,15 @@ Always read before recording:
 
 **Synthesis strategy: one-shot, not per-phrase.** Entries 2 and 3 first attempted per-phrase synthesis (one ElevenLabs call per scripted line, with directorial tags repeated each time, then slot-quantized in post). This failed badly — Ralf+v3 + tags + short fragments triggers the swallowed-line failure mode on most calls, and even when phrases came back at plausible duration they were often garbled or only contained the first 2-3 words. Per-phrase coverage routinely scored 0.00–0.50 against the script. **The fix is to send the entire script as one ElevenLabs call**, with the directorial tag block at the top once. v3 then conditions each line on the previous one, the captain's natural pauses are organic, and coverage scores match Entry 1 (~0.92). Slot alignment is recovered in post by silence-detect + phrase quantization (see `generate_pilot_log_3_oneshot.py` for the reference pipeline). The trade-off — losing precise control over which downbeat a specific word lands on — is worth it because the *words actually come out*.
 
-**Radio FX (voice).** Bandpass 380–2700Hz, +3.5dB at 160Hz (chest resonance), +2.0dB at 2200Hz (presence), `acompressor=threshold=-20dB:ratio=4`, bitcrush to 64 levels. This is the radio character. Keep it on every take so the pool mixes interchangeably.
+**Vocal post-processing: NONE.** The current rule is the vocal mp3 from ElevenLabs is passed through to the final master *untouched*. No pitch shift, no bandpass, no EQ, no compression, no slot/grid quantization, no loudnorm, no silence-trimming. Whatever ElevenLabs delivers — pacing, breath, EQ, level — is what plays in-game. This rule supersedes the older "radio FX chain" entirely (the bandpass + chest/presence EQ + comp + bitcrush stack was producing audible distortion the user heard as static). If a take sounds wrong, regenerate it (different stability/style settings, different tags, or another attempt for the dice roll) — do not try to fix it in post. The only post-synthesis step is the opening static staple (next bullet).
 
-**Static layers (the noise bed).** *No static. None.* The user's standing direction has tightened over time, and the current rule is **no static of any kind**:
-- **No squelch-in.** Earlier pipelines opened with a 0.22s "kssht" white-noise burst. Remove it. The transmission starts with the captain's voice, dry.
-- **No squelch-out tail.** Same reason.
+**Static: opening only, stapled — never under the voice.**
+- **Opening static: a short standalone clip concatenated onto the front of the raw vocal.** ~0.35s of bandpassed (1200–4500 Hz) white noise with a fast attack and a tail fade, generated with `anoisesrc`. The final mp3 is `ffmpeg -filter_complex "[0:a][1:a]concat=n=2:v=0:a=1"` of [static] + [raw ElevenLabs mp3]. Nothing else. AIs (including past me) reliably drift toward `amix` + `adelay` so the static overlaps the voice — do not. Use `concat`. See `staple_static_to_raw` in `rerender_pilot_log_3_from_raw.py` for the reference implementation.
+- **No squelch-out tail.** The transmission ends when the ElevenLabs mp3 ends.
 - **No hiss bed during the body.** No pink noise, no continuous wash, no fade-in/fade-out halo.
-- **No crackle layer.** Leave `make_crackle` returning `anullsrc` or remove the call entirely.
+- **No crackle layer.** Remove all `make_crackle`/`make_hiss` calls; old scripts may reference them.
 
-If a take feels "too dry," the fix is *not* adding noise. Either ship it dry or adjust the radio EQ (bandpass + chest boost + presence) on the voice. The radio character comes from the EQ + compression + bitcrush — not from layered noise. Reintroducing any noise layer is a regression.
+If a take feels "too dry" or "too clean," the fix is not to add noise or run the voice through more FX — it is to regenerate or to change the directorial tags. The opening static is the only noise that touches the master; the vocal itself is delivered as ElevenLabs returned it.
 
 **No clipping. Ever.** The user has been burned by takes where phrases clipped — the early-mid words audible but the final words cut off or distorted because the assembly assumed a phrase fit a slot and it didn't. The fixes that must be in place every time:
 
@@ -54,9 +54,9 @@ If a take feels "too dry," the fix is *not* adding noise. Either ship it dry or 
 - **No tail-cutting silenceremove on long phrases.** The `silenceremove` stop_threshold at -50dB can clip a softly-fading word ending. For phrases ending in -s/-th/-f (fricatives that fade gently), raise the stop_threshold to -58dB or skip the tail trim entirely.
 - **`loudnorm` is not a clip-fix.** `loudnorm=I=-20:TP=-3:LRA=11` mastering is fine as a final pass, but it will not save a take whose voice track already lost words. Verify content before mastering.
 
-**Pitch.** Down 1 semitone, formant-preserved, via `rubberband -q --formant -p -1.0`. Ralf is already deep — more than 1 semitone makes him cartoonish.
+**Pitch.** None applied in post. Earlier pipelines pitched down 1 semitone via rubberband; the current rule of "vocal untouched" supersedes that. Ralf at native pitch is what plays.
 
-**Mastering.** `loudnorm=I=-20:TP=-3:LRA=11`. The take routes through `bakedOut` in Sound.ts, which bypasses master comp/reverb so the bake-in FX aren't smeared.
+**Mastering.** None applied in post. No `loudnorm`, no comp, no limiter. The ElevenLabs mp3 level is whatever ElevenLabs returns. The take routes through `bakedOut` in Sound.ts, which bypasses master comp/reverb so nothing further is applied at playback time either.
 
 ## The pipeline
 
@@ -133,7 +133,7 @@ If the take is a new entry (entry 2, entry 3, etc.):
 
 - **v3 swallowing short lines.** "Yeah. Me too." came back as 0.08s of audio with Ralf + murmuring tags. The verifier caught it (coverage 0.29). Without the verifier this would have shipped. Always verify.
 - **v3 partially swallowing longer lines.** Worse failure than full swallow: Ralf returns ~1.0s of audio for a 6-word phrase, passes the duration heuristic, but only speaks the first 2-3 words. Discovered on pilot-log-3: "Hands went cold around hour four" came back at 1.02s and final coverage was 34%. Duration checks alone do *not* catch this. Per-phrase Whisper verification is the mandatory gate.
-- **Static creep.** The original pipeline shipped with a squelch-in pre-roll, squelch-out tail, continuous pink hiss, and brown-noise crackle. The user has progressively removed all of these: first the crackle, then the hiss bed, then the squelch-out, then the squelch-in. The current rule is **no static at all** — the take starts with the captain's voice, dry, and ends with it. The radio character must come entirely from the voice's EQ + compression + bitcrush chain. Reintroducing any noise layer is a regression even if the spec docs or older scripts reference them.
+- **Static creep.** The original pipeline shipped with a squelch-in pre-roll, squelch-out tail, continuous pink hiss, and brown-noise crackle. The user progressively removed all of these, then briefly the squelch-in too, then reinstated a *stapled* squelch-in only. The current rule: **opening static, separate clip, concatenated** — never mixed/overlapped under the voice, never any other noise layer (no squelch-out, no hiss, no crackle). When in doubt, less. AIs reliably drift toward layering noise *under* the voice or extending the static; both are regressions. Use the `concat` filter (see `concat_to_mp3` in `rerender_pilot_log_3_from_raw.py`), not `amix` with delays.
 - **Phrases clipping into the next slot.** When a 2.4s phrase lands in a 2.0s slot, its tail bleeds under the next phrase's start. The user calls this "clipping." Either route the long phrase across two slots, or move the next phrase one slot later. Don't trust the slot grid blindly.
 - **Static piled up.** Continuous pink hiss + brown crackle + squelch bookends all stacked = too much noise. The user's standard: brief stacking only, body of the take stays clear. The current pipeline reflects this; don't regress it.
 - **Trimming the wrong end.** `silenceremove` at -50dB can clip the trailing breath off a phrase that fades into nothing. If a trimmed phrase ends abruptly, raise the threshold (-55dB) for that phrase.

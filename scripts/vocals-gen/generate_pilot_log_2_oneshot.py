@@ -1,4 +1,4 @@
-"""Generate pilot-log-3 — one-shot ElevenLabs synthesis, zero post on the vocal.
+"""Generate pilot-log-2 — one-shot ElevenLabs synthesis, zero post on the vocal.
 
 The vocal file ElevenLabs returns is passed through *exactly as received*.
 No pitch shift, no EQ, no compression, no slot quantization, no loudnorm.
@@ -10,7 +10,12 @@ Pipeline:
   2. Whisper-tiny coverage check on the raw response (no re-encoding).
      Retry on low score, up to 3 attempts. Save every attempt.
   3. Generate a 0.35s opening static clip (bandpassed white noise).
-  4. Concat [static] + [raw ElevenLabs mp3] -> final pilot-log-3.mp3.
+  4. Concat [static] + [raw ElevenLabs mp3] -> final pilot-log-2.mp3.
+
+Outputs:
+  raw/oneshot_attempt<N>_cov<C>.mp3   each attempt's raw response
+  raw/oneshot_CHOSEN.mp3              the chosen raw
+  pilot-log-2.mp3                     static + raw, no other processing
 """
 
 import re
@@ -31,20 +36,21 @@ OPEN_STATIC_SECONDS = 0.35
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENV_PATH = REPO_ROOT / ".env"
-OUT_DIR = REPO_ROOT / "public" / "sounds" / "vocals" / "pilot-log-3-takes"
+OUT_DIR = REPO_ROOT / "public" / "sounds" / "vocals" / "pilot-log-2-takes"
 RAW_DIR = OUT_DIR / "raw"
-FINAL_OUT = REPO_ROOT / "public" / "sounds" / "vocals" / "pilot-log-3.mp3"
+FINAL_OUT = REPO_ROOT / "public" / "sounds" / "vocals" / "pilot-log-2.mp3"
 
 TAGS = "[low voice][gravelly][slowly][weary][murmuring]"
 
 SCRIPT = (
-    "Couldn't sleep, huh.\n\n"
+    "Couldn't sleep, huh. "
+    "Fair enough.\n\n"
     "Listen. Close your eyes. "
     "Here's three notes out here. "
     "Same three, every time. Counted 'em.\n\n"
     "One coming low, that you feel in your bones. "
-    "One droning on till it tickles your throat. "
-    "One swelling up, like it's calling you home.\n\n"
+    "One swelling up, like it's calling you home. "
+    "One droning on till it tickles your throat.\n\n"
     "That's the trick, see. "
     "You don't count sheep out here. "
     "You count the ones that sing back."
@@ -149,7 +155,10 @@ def make_open_static(out_path: Path, duration: float) -> None:
 
 def staple_static_to_raw(raw_mp3: Path, static_wav: Path, out_mp3: Path) -> None:
     """Concat [static] + [untouched ElevenLabs mp3] -> final mp3. The vocal
-    is not pitched, EQ'd, compressed, normalized, sliced, or re-mastered."""
+    is not pitched, EQ'd, compressed, normalized, sliced, or re-mastered. The
+    only ffmpeg touch on the vocal is the concat filter glue, which re-encodes
+    once at 128k mp3. Everything ElevenLabs sent us about delivery — pacing,
+    breath, EQ, level — is preserved."""
     run([
         "ffmpeg", "-y", "-loglevel", "error",
         "-i", str(static_wav),
@@ -169,7 +178,7 @@ def main() -> None:
     api_key = load_api_key()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="pilot-log-3-oneshot-") as td:
+    with tempfile.TemporaryDirectory(prefix="pilot-log-2-oneshot-") as td:
         workdir = Path(td)
 
         best_raw_mp3: Path | None = None
