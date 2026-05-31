@@ -245,6 +245,13 @@ export class Alien {
   // Hand-built ship silhouette (panels + lights + engines). Built once at
   // spawn and reused for both the body draw and the damage-crack clip mask.
   ship: AlienShip;
+  // Pre-baked hull (panel fills + outlined strokes with shadowBlur + seam
+  // lines). Drawn once per frame with one drawImage instead of re-running
+  // ~10 shadowBlur strokes per panel — shadowBlur is one of the heaviest
+  // canvas ops, and pre-baking it eliminates that per-frame cost entirely.
+  sprite: HTMLCanvasElement;
+  // Half of the sprite's canvas size, used to centre the drawImage blit.
+  spriteHalfSize: number = 0;
   // Score awarded on kill.
   scoreValue: number;
   alive = true;
@@ -265,6 +272,7 @@ export class Alien {
     this.weaveSpeed = rand(0.6, 1.1);
     this.rotation = Math.atan2(vel.y, vel.x);
     this.ship = buildAlienShape(size);
+    this.sprite = this.buildSprite();
     this.scoreValue = SIZE_SCORE[size];
     // Trail tuned per size — bigger aliens have a thicker, slower-pulsing
     // wake; small ones flicker faster, matching their tighter firing rate.
@@ -333,6 +341,75 @@ export class Alien {
     return Math.hypot(dx, dy) < this.radius * 0.9 + pointRadius;
   }
 
+  // Bakes the static hull (panel fills, outlined strokes with shadowBlur,
+  // centre-stripe seams) once at construction. Drawn live each frame: halo,
+  // engine plumes, running lights, damage cracks, hit-flash overlay.
+  buildSprite(): HTMLCanvasElement {
+    const r = this.radius;
+    const baseHue = this.hue;
+    const ship = this.ship;
+    // Padding accommodates the shadowBlur=10 outline glow extending past panel edges.
+    const padding = 14;
+    const size = Math.ceil(2 * (r + padding));
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const sctx = canvas.getContext("2d")!;
+    this.spriteHalfSize = size / 2;
+    sctx.translate(size / 2, size / 2);
+    sctx.globalCompositeOperation = "lighter";
+
+    const tracePanel = (panel: AlienPanel) => {
+      sctx.beginPath();
+      for (let i = 0; i < panel.vertices.length; i++) {
+        const x = panel.vertices[i].x * r;
+        const y = panel.vertices[i].y * r;
+        if (i === 0) sctx.moveTo(x, y);
+        else sctx.lineTo(x, y);
+      }
+      sctx.closePath();
+    };
+
+    sctx.shadowColor = `hsla(${baseHue + 10}, 100%, 70%, 1)`;
+    for (const panel of ship.panels) {
+      tracePanel(panel);
+      const fill = sctx.createLinearGradient(-r, -r, r, r);
+      fill.addColorStop(0, `hsla(${baseHue}, 70%, 22%, 0.9)`);
+      fill.addColorStop(0.5, `hsla(${baseHue + 8}, 65%, 32%, 0.9)`);
+      fill.addColorStop(1, `hsla(${baseHue - 5}, 75%, 14%, 0.9)`);
+      sctx.fillStyle = fill;
+      sctx.shadowBlur = 0;
+      sctx.fill();
+      sctx.shadowBlur = 10;
+      sctx.lineWidth = 1.6;
+      sctx.strokeStyle = `hsla(${baseHue + 14}, 100%, 80%, 0.95)`;
+      sctx.stroke();
+    }
+    sctx.shadowBlur = 0;
+
+    sctx.lineWidth = 0.8;
+    sctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 85%, 0.45)`;
+    for (const panel of ship.panels) {
+      sctx.save();
+      tracePanel(panel);
+      sctx.clip();
+      let cx = 0;
+      let cy = 0;
+      for (const p of panel.vertices) {
+        cx += p.x;
+        cy += p.y;
+      }
+      cx = (cx / panel.vertices.length) * r;
+      cy = (cy / panel.vertices.length) * r;
+      sctx.beginPath();
+      sctx.moveTo(cx - r * 0.3, cy);
+      sctx.lineTo(cx + r * 0.3, cy);
+      sctx.stroke();
+      sctx.restore();
+    }
+    return canvas;
+  }
+
   render(ctx: CanvasRenderingContext2D, t: number) {
     const baseHue = this.hue;
     const r = this.radius;
@@ -373,6 +450,10 @@ export class Alien {
       ctx.fill();
     }
 
+    // Baked panel hull (fills + outlined strokes with shadowBlur + seams).
+    ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
+
+    // tracePanel used by cracks (clip mask) and hit-flash (fill mask) below.
     const tracePanel = (panel: AlienPanel) => {
       ctx.beginPath();
       for (let i = 0; i < panel.vertices.length; i++) {
@@ -383,47 +464,6 @@ export class Alien {
       }
       ctx.closePath();
     };
-
-    // Panelled hull — hard edges with a bright outline, like bassteroid plates.
-    ctx.shadowColor = `hsla(${baseHue + 10}, 100%, 70%, 1)`;
-    for (const panel of ship.panels) {
-      tracePanel(panel);
-      const fill = ctx.createLinearGradient(-r, -r, r, r);
-      fill.addColorStop(0, `hsla(${baseHue}, 70%, 22%, 0.9)`);
-      fill.addColorStop(0.5, `hsla(${baseHue + 8}, 65%, 32%, 0.9)`);
-      fill.addColorStop(1, `hsla(${baseHue - 5}, 75%, 14%, 0.9)`);
-      ctx.fillStyle = fill;
-      ctx.shadowBlur = 0;
-      ctx.fill();
-      ctx.shadowBlur = 10;
-      ctx.lineWidth = 1.6;
-      ctx.strokeStyle = `hsla(${baseHue + 14}, 100%, 80%, 0.95)`;
-      ctx.stroke();
-    }
-    ctx.shadowBlur = 0;
-
-    // Thin centre-stripe inside each panel — plated-metal seam, same trick
-    // as the bassteroid renderer uses.
-    ctx.lineWidth = 0.8;
-    ctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 85%, 0.45)`;
-    for (const panel of ship.panels) {
-      ctx.save();
-      tracePanel(panel);
-      ctx.clip();
-      let cx = 0;
-      let cy = 0;
-      for (const p of panel.vertices) {
-        cx += p.x;
-        cy += p.y;
-      }
-      cx = (cx / panel.vertices.length) * r;
-      cy = (cy / panel.vertices.length) * r;
-      ctx.beginPath();
-      ctx.moveTo(cx - r * 0.3, cy);
-      ctx.lineTo(cx + r * 0.3, cy);
-      ctx.stroke();
-      ctx.restore();
-    }
 
     // Running lights — each blinks on its own phase. Fire-flash boosts every
     // light so the moment of firing reads as a coordinated pulse.

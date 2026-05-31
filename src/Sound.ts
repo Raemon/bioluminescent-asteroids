@@ -375,6 +375,20 @@ export class Sound {
     // Build the Tone bus immediately so master is hot before the first
     // voice plays. ensureToneEngine wires master → voiceBusDry/Wet.
     this.ensureToneEngine();
+    // Pre-fill the noise-buffer cache so the first bassteroid/comet spawn
+    // doesn't pay the 6-8s buffer allocation mid-gameplay. AudioBuffers can't
+    // be created before the context exists, so this is the earliest we can do
+    // it — runs once, on first user interaction.
+    this.prewarmNoiseBuffers();
+  }
+
+  // Every duration ever passed to makeNoiseBuffer across the codebase. Grep
+  // for `makeNoiseBuffer(` if you add a new caller with a fresh duration —
+  // missing entries still work (lazy alloc on first call), they just pay
+  // the spawn-time stutter you're avoiding here.
+  private prewarmNoiseBuffers() {
+    const durations = [0.018, 0.025, 0.08, 0.18, 0.3, 0.4, 3, 4, 6, 8];
+    for (const d of durations) this.makeNoiseBuffer(d);
   }
 
   // Lazy-build the Tone.js master bus and shared synths. Shares our existing
@@ -2410,12 +2424,20 @@ export class Sound {
     eng.bgBeatKick.triggerAttackRelease(note, "8n", undefined, velocity);
   }
 
+  // Cached per requested duration. The samples are pure random noise — there's
+  // no perceptible difference between "fresh noise every spawn" and a single
+  // shared buffer, but allocating + filling a 6s buffer (264k samples) on every
+  // bassteroid spawn was a noticeable main-thread stutter on slower devices.
+  private noiseBufferCache: Map<number, AudioBuffer> = new Map();
   private makeNoiseBuffer(duration: number): AudioBuffer | null {
     if (!this.ctx) return null;
+    const cached = this.noiseBufferCache.get(duration);
+    if (cached) return cached;
     const length = Math.floor(this.ctx.sampleRate * duration);
     const buf = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    this.noiseBufferCache.set(duration, buf);
     return buf;
   }
 
