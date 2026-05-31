@@ -9,6 +9,18 @@ import { loadSoundConfig } from "./soundConfig";
 import { installBetaTest } from "./game/betaTest";
 import { installTutorialDemos } from "./tutorial";
 
+// Globally disable canvas shadowBlur — it's one of the most expensive 2D-canvas
+// operations and was hurting FPS across the game. Swallow writes on the prototype
+// so every existing `ctx.shadowBlur = N` site becomes a no-op without code changes.
+(() => {
+  const proto = (CanvasRenderingContext2D.prototype as unknown) as Record<string, unknown>;
+  Object.defineProperty(proto, "shadowBlur", {
+    get() { return 0; },
+    set() { /* swallow */ },
+    configurable: true,
+  });
+})();
+
 // Mount React first and force a synchronous commit so the HUD/Overlay
 // markup is on the page before bindHudElements() runs inside `new Game()`.
 const rootEl = document.getElementById("root");

@@ -50,12 +50,9 @@ const TRAJECTORY_FIRST_BEAT_HALO_DASH: number[] = [2, 2];
 // 6Hz flicker when directly on a target reads as an unmistakeable "shot will land" cue.
 const TRAJECTORY_DIRECT_FLASH_HZ = 6;
 const TRAJECTORY_DIRECT_FLASH_DEPTH = 0.55;
-// tutorial highlight ("Use your targeting tools to aim.") repaints the first-beat dot
-// in white with a yellow shadow-blur halo so it reads as the focal point of the cue.
+// tutorial highlight repaints the first-beat dot in solid white so it reads as the focal
+// point of the wave-1 "use your targeting tools" cue.
 const TUTORIAL_FIRST_DOT_HSL = "0, 0%, 100%";
-const TUTORIAL_FIRST_DOT_GLOW_HSL = "52, 100%, 60%";
-const TUTORIAL_FIRST_DOT_GLOW_BLUR = 14;
-const TUTORIAL_FIRST_DOT_GLOW_ALPHA = 0.95;
 // shadow blur halo so the flash reads as a soft glow rather than just a brightness bump.
 const TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR = 18;
 const TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA = 0.85;
@@ -244,10 +241,7 @@ const paintFirstBeatDot = (
   const prevShadowBlur = ctx.shadowBlur;
   const prevShadowColor = ctx.shadowColor;
   const dotHsl = tutorialHighlight ? TUTORIAL_FIRST_DOT_HSL : RETICULE_DASH_HSL;
-  if (tutorialHighlight) {
-    ctx.shadowBlur = TUTORIAL_FIRST_DOT_GLOW_BLUR;
-    ctx.shadowColor = `hsla(${TUTORIAL_FIRST_DOT_GLOW_HSL}, ${TUTORIAL_FIRST_DOT_GLOW_ALPHA})`;
-  } else if (glow01 > 0) {
+  if (glow01 > 0) {
     ctx.shadowBlur = TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR * glow01;
     ctx.shadowColor = `hsla(${RETICULE_DASH_HSL}, ${TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA * glow01})`;
   }
