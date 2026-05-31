@@ -2,7 +2,7 @@ import type { Game } from "../Game";
 import { Vec } from "../vec";
 import { BEAT_GRID, BEAT_WINDOW, DEBUG_BEAT_TIMING } from "./rhythmConstants";
 import { syncComboHud } from "./hud";
-import { popupBeatDebug, popupComboLost } from "./popups";
+import { popupBeatDebug, popupComboLost, popupComboPartialLost } from "./popups";
 
 // Two grid tiers, measured as the period between on-beat slots:
 //   combo 0–11       → quarter-notes (BEAT_GRID): the default groove.
@@ -65,17 +65,22 @@ export const spawnBeatDebugPopup = (game: Game, pos: Vec, time: number, prefix: 
 };
 
 // only meaningful losses (combo ≥2 → 0) fire wrrr + red halo; primed-only loss is too noisy.
-//   sourcePos anchors the "RHYTHM LOST" popup at whatever caused the break (ship fire / target hit).
+//   ≥12 drops by 8, ≥8 drops by 4 — keeps a partial streak instead of a hard reset.
+//   sourcePos anchors the popup at whatever caused the break (ship fire / target hit).
 export const loseCombo = (game: Game, sourcePos?: Vec) => {
   if (game.beatCombo === 0) return;
-  const wasMeaningful = game.beatCombo >= 2;
+  const prev = game.beatCombo;
+  const wasMeaningful = prev >= 2;
   const haloActive = game.ship.comboHaloTier >= 2;
-  game.beatCombo = 0;
+  const partial = prev >= 8;
+  if (prev >= 12) game.beatCombo = prev - 8;
+  else if (prev >= 8) game.beatCombo = prev - 4;
+  else game.beatCombo = 0;
   if (wasMeaningful) {
     game.sound.play("comboLost");
     game.ship.comboLossFlash = 1;
     if (sourcePos && (!game.hasLostComboEver || haloActive)) {
-      game.popups.push(popupComboLost(sourcePos));
+      game.popups.push(partial ? popupComboPartialLost(sourcePos) : popupComboLost(sourcePos));
     }
     game.hasLostComboEver = true;
   }

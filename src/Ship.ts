@@ -108,9 +108,9 @@ export class Ship {
   // aim disc + radar cone + trajectory previews share one composition — single delegate.
   renderReticules(
     ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number,
-    targets: ReadonlyArray<ReticuleTarget> = [], beatTime: number = 0,
+    targets: ReadonlyArray<ReticuleTarget> = [], beatTime: number = 0, doubletime: boolean = false,
   ) {
-    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks }, ctx, beatGrid, w, h, targets, beatTime);
+    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks }, ctx, beatGrid, w, h, targets, beatTime, doubletime);
   }
 
   // hull + thrust + retro + shield + combo halo all composite together in one save/restore block.

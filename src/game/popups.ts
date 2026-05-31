@@ -71,6 +71,22 @@ export const popupComboLost = (pos: Vec): Popup => ({
   holdUntil: 0, fadeGain: 1.4,
 });
 
+// softer cue for the partial-loss path (≥8 combo drops back to a music tier rather than 0).
+export const popupComboPartialLost = (pos: Vec): Popup => ({
+  pos: { x: pos.x, y: pos.y - 6 },
+  vel: { x: rand(-10, 10), y: -55 },
+  life: 1.1,
+  maxLife: 1.1,
+  text: "Lost Rhythm",
+  font: "700 16px 'Space Grotesk', system-ui, sans-serif",
+  fill: "#ffb06a",
+  shadowColor: "rgba(255, 160, 90, 0.85)",
+  shadowBlur: 14,
+  decayX: 0.94, decayY: 0.94,
+  popPeak: 0.4, popDuration: 0.15,
+  holdUntil: 0, fadeGain: 1.4,
+});
+
 // "+N" readout at the kill site so the player sees exactly what their hit was worth.
 export const popupScore = (pos: Vec, points: number): Popup => ({
   pos: { x: pos.x, y: pos.y - 22 },

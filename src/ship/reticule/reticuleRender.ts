@@ -17,8 +17,9 @@ const RETICULE_RADAR_PULSE_MAX = 1;
 const RETICULE_RADAR_PULSE_MIN = 0.4;
 const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
 
-// rapid fires every half-beat, so the off-beat bullet only travels half as far before the next beat.
-const RAPID_HALF_BEAT_FRACTION = 0.5;
+// doubletime (rapid powerup or combo ≥ 12) fires every half-beat, so the off-beat bullet
+// only travels half as far before the next beat.
+const HALF_BEAT_FRACTION = 0.5;
 
 // bind ship state to per-target memo so trajectory previews can track entry-flash and fade across frames.
 type ReticuleState = { trajectoryTracks: TrajectoryTrackMap };
@@ -50,22 +51,23 @@ const effectiveBulletLife = (ship: Ship): number => {
   return life;
 };
 
-// prong fans the aim into two angles (no centred shot); rapid adds a half-beat preview at half
-// distance; integer-k reticules mark every beat-slot the bullet actually crosses (t = beatGrid*k
-// < life), so the count adapts to longshot/pierce range and to the rhythm-gate tempo (eighth-grid
-// at combo ≥ 12 or under rapid). primaryIndex points at the centred 1-beat reticule (anchor for
-// the trajectory's first-dot overlap check), or -1 when prong is active — there's no centred shot
-// to anchor on, so the trajectory uses the standalone centred position for previews instead.
+// prong fans the aim into two angles (no centred shot); doubletime adds a half-beat preview at
+// half distance; integer-k reticules mark every beat-slot the bullet actually crosses
+// (t = beatGrid*k < life), so the count adapts to longshot/pierce range and to the rhythm-gate
+// tempo (eighth-grid at combo ≥ 12 or under rapid). primaryIndex points at the centred 1-beat
+// reticule (anchor for the trajectory's first-dot overlap check), or -1 when prong is active —
+// there's no centred shot to anchor on, so the trajectory uses the standalone centred position
+// for previews instead.
 type ReticulePositions = { positions: Vec[]; primaryIndex: number };
 const computeReticulePositions = (
-  ship: Ship, beatGrid: number, w: number, h: number,
+  ship: Ship, beatGrid: number, w: number, h: number, doubletime: boolean,
 ): ReticulePositions => {
   const angleOffsets = ship.prongActive ? [-PRONG_SPREAD, PRONG_SPREAD] : [0];
   const bulletLife = effectiveBulletLife(ship);
   const slotCount = Math.max(1, Math.floor(bulletLife / beatGrid));
   const integerFractions: number[] = [];
   for (let k = 1; k <= slotCount; k++) integerFractions.push(k);
-  const beatFractions = ship.rapidActive ? [RAPID_HALF_BEAT_FRACTION, ...integerFractions] : integerFractions;
+  const beatFractions = doubletime ? [HALF_BEAT_FRACTION, ...integerFractions] : integerFractions;
   const positions: Vec[] = [];
   let primaryIndex = -1;
   for (const frac of beatFractions) {
@@ -88,10 +90,10 @@ const cosineEnvelope = (beatTime: number, period: number, min: number, max: numb
 export const renderShipReticules = (
   ship: Ship, state: ReticuleState,
   ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number,
-  targets: ReadonlyArray<ReticuleTarget>, beatTime: number,
+  targets: ReadonlyArray<ReticuleTarget>, beatTime: number, doubletime: boolean,
 ) => {
   if (!ship.alive) return;
-  const { positions: reticulePositions, primaryIndex } = computeReticulePositions(ship, beatGrid, w, h);
+  const { positions: reticulePositions, primaryIndex } = computeReticulePositions(ship, beatGrid, w, h, doubletime);
   // trajectory preview anchors on the centred "shoot now to hit next beat" spot. With prong
   // active there's no drawn reticule there, so compute the anchor directly from ship heading.
   const primaryReticule = primaryIndex >= 0

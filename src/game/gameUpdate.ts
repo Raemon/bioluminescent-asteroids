@@ -138,7 +138,8 @@ import { HALO_MUSIC_POOL, pickHaloMusicVariation } from "./haloMusicConfig";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
 
 // yellow-halo (combo ≥ 4) opens the ambient pad; combo ≥ 6 adds the
-//   melodic layer; combo ≥ 12 adds the sparkle layer (chimes/celesta);
+//   melodic layer; combo ≥ 12 adds the percussion layer (drums/rhythmic
+//   counter-content; the r2-el slot is a lonely-violin exception);
 //   white-bullet tier (≥ 8) thickens the legacy synth pad with an octave-up
 //   sparkle layer. Comet presence slides the colour-third from E→Eb so the
 //   pad stays consonant with the comet's phrygian shimmer instead of
@@ -147,17 +148,17 @@ import { BASS_MEASURE_LENGTH } from "../Asteroid";
 //   Music variation: each time combo crosses 4 from below, we pick a fresh
 //   random variation from HALO_MUSIC_POOL — so successive combo runs in the
 //   same wave don't always sound the same. The chosen variation persists on
-//   game.sound.haloMusic.variation, so the 6x melodic-layer and 12x sparkle
+//   game.sound.haloMusic.variation, so the 6x melodic-layer and 12x percussion
 //   toggles use the same variation's stems (no half-EL/half-self-built
 //   mash-ups).
 const syncHaloAmbient = (game: Game) => {
   const hasYellowHalo = game.beatCombo >= 4;
   const hasMelodic = game.beatCombo >= 6;
   const hasWhiteBullets = game.beatCombo >= 8;
-  const hasSparkle = game.beatCombo >= 12;
+  const hasPercussion = game.beatCombo >= 12;
 
   if (HALO_MUSIC_POOL.length > 0) {
-    // Pre-rendered music path. Three layers: ambient (4x) + melodic (6x) + sparkle (12x).
+    // Pre-rendered music path. Three layers: ambient (4x) + melodic (6x) + percussion (12x).
     if (hasYellowHalo) {
       if (!game.sound.haloMusic) {
         const variation = pickHaloMusicVariation();
@@ -168,10 +169,10 @@ const syncHaloAmbient = (game: Game) => {
         // than mid-bar.
         const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
         const measureAlignDelay = nextDownbeat - game.beatTime;
-        void game.sound.startHaloMusic(variation, hasMelodic, measureAlignDelay, hasSparkle);
+        void game.sound.startHaloMusic(variation, hasMelodic, measureAlignDelay, hasPercussion);
       } else {
         game.sound.setHaloMusicMelodicLayer(hasMelodic);
-        game.sound.setHaloMusicSparkleLayer(hasSparkle);
+        game.sound.setHaloMusicPercussionLayer(hasPercussion);
       }
     } else if (game.sound.haloMusic) {
       game.sound.stopHaloMusic();

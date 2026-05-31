@@ -1,6 +1,6 @@
 import type { Game } from "../Game";
 import { BEAT_GRID } from "./rhythmConstants";
-import { currentBeatPulse } from "./rhythmGate";
+import { currentBeatPulse, comboGrid } from "./rhythmGate";
 import { renderTrails } from "./trailsRender";
 import { renderPopups } from "./popups";
 import { computeConeFrame } from "../ship/reticule/coneGeometry";
@@ -85,7 +85,8 @@ export const targetsForReticule = (game: Game) => [
 // ship + reticule are the foreground; popups (combo/pickup/debug) sit above everything else.
 const paintForeground = (game: Game) => {
   const { ctx } = game;
-  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targetsForReticule(game), game.beatTime);
+  const doubletime = comboGrid(game) < BEAT_GRID;
+  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targetsForReticule(game), game.beatTime, doubletime);
   renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.beatTime, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
   renderPopups(ctx, game.popups);

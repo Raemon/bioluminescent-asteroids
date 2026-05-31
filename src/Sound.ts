@@ -114,31 +114,31 @@ type HaloAmbientNode = {
 export type HaloMusicVariation =
   | "r2-el"   // ElevenLabs 32-second C-pedal cinematic bed + sustained-tone piano
   | "r2-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
-  | "r3-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + crystalline arp sparkle
-  | "r4-sb"   // Self-built 32-second C-pedal flagship — pulsing arp + smooth calliope melody + celesta counter-melody (rhythmic, interlocked)
+  | "r3-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + percussion layer
+  | "r4-sb"   // Self-built 32-second C-pedal flagship — pulsing arp + smooth calliope melody + percussion layer (rhythmic, interlocked)
   | "none";   // Legacy synthesized pad (the original startHaloAmbient)
 
 type HaloMusicNode = {
   // Three looping AudioBufferSourceNodes — ambient runs whenever music is
-  // active; melodic + sparkle run continuously but their gains are ducked to
+  // active; melodic + percussion run continuously but their gains are ducked to
   // 0 until their respective tiers are requested (melodic at combo ≥ 6,
-  // sparkle at combo ≥ 12). Starting a layer only when its tier first hits
+  // percussion at combo ≥ 12). Starting a layer only when its tier first hits
   // would risk a phase-misalignment with the ambient loop, so we keep all
   // three always-playing-but-silent for sample-accurate phase lock.
   ambientSrc: AudioBufferSourceNode;
   melodicSrc: AudioBufferSourceNode;
-  sparkleSrc: AudioBufferSourceNode;
+  percussionSrc: AudioBufferSourceNode;
   ambientGain: GainNode;
   melodicGain: GainNode;
-  sparkleGain: GainNode;
+  percussionGain: GainNode;
   mainGain: GainNode;
   // Variation that's currently loaded — preserved so a 6x→4x→6x tier flick
   // doesn't trigger a reload.
   variation: HaloMusicVariation;
   // Whether the melodic layer is currently ducked-up (combo ≥ 6) or down.
   melodicActive: boolean;
-  // Whether the sparkle layer is currently ducked-up (combo ≥ 12) or down.
-  sparkleActive: boolean;
+  // Whether the percussion layer is currently ducked-up (combo ≥ 12) or down.
+  percussionActive: boolean;
 };
 
 // Optional pan + distance-falloff splice. When a sound (one-shot or drone)
@@ -2042,7 +2042,7 @@ export class Sound {
   // Routed via this.master (not bakedOut) so the music sits inside the same
   // reverb/compressor bus as live voices. The pre-rendered stems are already
   // loop-faded so the master bus's reverb tail at the seam won't click.
-  private haloMusicUrl(variation: HaloMusicVariation, layer: "ambient" | "melodic" | "sparkle"): string {
+  private haloMusicUrl(variation: HaloMusicVariation, layer: "ambient" | "melodic" | "percussion"): string {
     return `/sounds/halo-music/${variation}-${layer}.mp3`;
   }
 
@@ -2060,7 +2060,7 @@ export class Sound {
       // analog pad fighting the bass field.
       case "r3-el": return 0.22;
       // r4-sb is the rhythmic flagship — pulsing arp + smooth calliope-synth
-      // melody that breathes in the gaps left by the sparkle cascades. Audit
+      // melody that breathes in the gaps left by the percussion layer. Audit
       // at gain 0.25 keeps lo-mid clean by ≥8.9 dB with all three layers
       // stacked; same gain applied across layers so the interlock stays even.
       case "r4-sb": return 0.25;
@@ -2068,33 +2068,19 @@ export class Sound {
     }
   }
 
-  // Sparkle-layer playback gain (combo ≥ 12). Higher than the ambient/melodic
-  // gain because the sparkle stems live above 1 kHz, well clear of the bass
-  // danger zone — the audit shows bass dominance >15 dB in lo-mid at every
-  // shipped gain.
-  // r2-{el,sb} were reworked from sparse chimes (4 onsets/phrase) to 16th-note
-  // ostinatos (~192 onsets/loop) so 12x reads as a tempo lift, not a louder
-  // 6x — the beat grid halves to 8ths at the same moment and the sparkle
-  // matches the new bullet cadence.
-  private haloMusicSparkleGain(variation: HaloMusicVariation): number {
+  // Percussion-layer playback gain (combo ≥ 12). Calibrated per variation
+  // against the in-game-mix audit so the bass kit stays dominant by ≥6 dB
+  // in lo-mid and ≥10 dB in bass. r2-el is the exception — its "percussion"
+  // slot holds a lonely solo violin (matching the r2-el cinematic-strings
+  // aesthetic), so it gets a slightly lower gain to sit as a third voice
+  // rather than a drum hit.
+  private haloMusicPercussionGain(variation: HaloMusicVariation): number {
     switch (variation) {
-      // 16th-note synth arp on a New Age pad + halo-pad wash. Continuous
-      // ostinato, so 0.35 (down from sparse-chime levels would have been).
-      case "r2-el": return 0.35;
-      // 16th-note steel-string fast-pluck (mandolin-tremolo character).
-      // Dropped to 0.40 from the original sparse-glockenspiel 0.55 — the
-      // continuous pluck doesn't need the headroom that rare chime rings did.
-      case "r2-sb": return 0.40;
-      // r3-el sparkle is EL-generated arpeggiated bells (176 onsets — already
-      // close to 16th-note density). Centroid 2.1 kHz, above the bass danger
-      // zone. Audit at gain 0.30 keeps the lo-mid 13 dB clean.
-      case "r3-el": return 0.30;
-      // r4-sb sparkle is a celesta counter-melody (8th-note cascades).
-      // Same gain as ambient+melodic (0.25) so the three rhythmic layers
-      // interlock at even volume — sparkle is meant to *fill* the gaps in
-      // the hook, not to spotlight over it.
-      case "r4-sb": return 0.25;
-      default:      return 0.40;
+      case "r2-el": return 0.45;   // lonely violin (not a kit)
+      case "r2-sb": return 0.55;   // warm-dry brushy kit
+      case "r3-el": return 0.55;   // synthwave electronic kit
+      case "r4-sb": return 0.55;   // interlocked 16th-note kit
+      default:      return 0.50;
     }
   }
 
@@ -2129,7 +2115,7 @@ export class Sound {
     this.ensureContext();
     void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient"));
     void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic"));
-    void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "sparkle"));
+    void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "percussion"));
   }
 
   // Start (or hot-restart) the pre-rendered halo music for a variation. If a
@@ -2147,7 +2133,7 @@ export class Sound {
   // anyway.
   async startHaloMusic(variation: HaloMusicVariation, melodicActive: boolean,
                        measureAlignDelay: number = 0,
-                       sparkleActive: boolean = false): Promise<void> {
+                       percussionActive: boolean = false): Promise<void> {
     if (variation === "none") return;
     if (!this.enabled) return;
     this.ensureContext();
@@ -2155,39 +2141,39 @@ export class Sound {
     // Same variation already running — just sync the layered tiers.
     if (this.haloMusic && this.haloMusic.variation === variation) {
       this.setHaloMusicMelodicLayer(melodicActive);
-      this.setHaloMusicSparkleLayer(sparkleActive);
+      this.setHaloMusicPercussionLayer(percussionActive);
       return;
     }
     // Different variation playing — fade out the old node before swapping.
     if (this.haloMusic) this.stopHaloMusic();
 
-    const [ambientBuf, melodicBuf, sparkleBuf] = await Promise.all([
+    const [ambientBuf, melodicBuf, percussionBuf] = await Promise.all([
       this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient")),
       this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic")),
-      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "sparkle")),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "percussion")),
     ]);
     if (!this.ctx || !this.master) return;
-    if (!ambientBuf || !melodicBuf || !sparkleBuf) return;
+    if (!ambientBuf || !melodicBuf || !percussionBuf) return;
     if (this.haloMusic) return;  // raced with another start
 
     const t = this.ctx.currentTime;
     const startAt = t + Math.max(0, measureAlignDelay);
     const ambientSrc = this.ctx.createBufferSource();
     const melodicSrc = this.ctx.createBufferSource();
-    const sparkleSrc = this.ctx.createBufferSource();
+    const percussionSrc = this.ctx.createBufferSource();
     ambientSrc.buffer = ambientBuf;
     melodicSrc.buffer = melodicBuf;
-    sparkleSrc.buffer = sparkleBuf;
+    percussionSrc.buffer = percussionBuf;
     ambientSrc.loop = true;
     melodicSrc.loop = true;
-    sparkleSrc.loop = true;
+    percussionSrc.loop = true;
 
     // Per-variation playback peak gain. See haloMusicGain — round-2 stems
     // (-12 dBFS peak) need lower gain than round-1 (-6 dBFS peak) to sit
-    // under the bass field. Sparkle layer has its own gain since it lives
-    // above 1 kHz and tolerates a louder mix without fighting the bass.
+    // under the bass field. Percussion layer has its own gain since it lives
+    // outside the bass-melodic register and tolerates an independent mix.
     const peakGain = this.haloMusicGain(variation);
-    const sparklePeak = this.haloMusicSparkleGain(variation);
+    const percussionPeak = this.haloMusicPercussionGain(variation);
 
     // Fade-in starts at the *aligned* start time, not now, so the music
     // doesn't bleed in during the wait-for-downbeat window.
@@ -2201,10 +2187,10 @@ export class Sound {
       melodicGain.gain.exponentialRampToValueAtTime(peakGain, startAt + 0.5);
     }
 
-    const sparkleGain = this.ctx.createGain();
-    sparkleGain.gain.setValueAtTime(0.0001, startAt);
-    if (sparkleActive) {
-      sparkleGain.gain.exponentialRampToValueAtTime(sparklePeak, startAt + 0.5);
+    const percussionGain = this.ctx.createGain();
+    percussionGain.gain.setValueAtTime(0.0001, startAt);
+    if (percussionActive) {
+      percussionGain.gain.exponentialRampToValueAtTime(percussionPeak, startAt + 0.5);
     }
 
     const mainGain = this.ctx.createGain();
@@ -2212,24 +2198,24 @@ export class Sound {
 
     ambientSrc.connect(ambientGain);
     melodicSrc.connect(melodicGain);
-    sparkleSrc.connect(sparkleGain);
+    percussionSrc.connect(percussionGain);
     ambientGain.connect(mainGain);
     melodicGain.connect(mainGain);
-    sparkleGain.connect(mainGain);
+    percussionGain.connect(mainGain);
     mainGain.connect(this.master);
 
     // All three sources start at exactly the same audio time so they remain
     // phase-locked for the lifetime of the music — switching the melodic
-    // or sparkle tier is then just a gain ramp, no fresh .start() that
+    // or percussion tier is then just a gain ramp, no fresh .start() that
     // would risk loop-phase drift between the stems.
     ambientSrc.start(startAt);
     melodicSrc.start(startAt);
-    sparkleSrc.start(startAt);
+    percussionSrc.start(startAt);
 
     this.haloMusic = {
-      ambientSrc, melodicSrc, sparkleSrc,
-      ambientGain, melodicGain, sparkleGain, mainGain,
-      variation, melodicActive, sparkleActive,
+      ambientSrc, melodicSrc, percussionSrc,
+      ambientGain, melodicGain, percussionGain, mainGain,
+      variation, melodicActive, percussionActive,
     };
   }
 
@@ -2249,22 +2235,21 @@ export class Sound {
     this.haloMusic.melodicActive = active;
   }
 
-  // Fade the sparkle layer in (true) or out (false). Slightly slower fade-in
-  // than melodic (0.7s vs 0.5s) so the 12x reward blooms in rather than
-  // snapping — the sparkle is meant to feel like a halo expanding, not a
-  // new instrument punching in. 1.1s fade-out cushions a combo break so the
-  // chimes ring down instead of cutting.
-  setHaloMusicSparkleLayer(active: boolean): void {
+  // Fade the percussion layer in (true) or out (false). Slightly slower
+  // fade-in than melodic (0.7s vs 0.5s) so the 12x reward blooms in rather
+  // than snapping. 1.1s fade-out cushions a combo break so the rhythm rings
+  // down instead of cutting.
+  setHaloMusicPercussionLayer(active: boolean): void {
     if (!this.ctx || !this.haloMusic) return;
-    if (this.haloMusic.sparkleActive === active) return;
+    if (this.haloMusic.percussionActive === active) return;
     const t = this.ctx.currentTime;
-    const peakGain = this.haloMusicSparkleGain(this.haloMusic.variation);
+    const peakGain = this.haloMusicPercussionGain(this.haloMusic.variation);
     const target = active ? peakGain : 0.0001;
     const ramp = active ? 0.7 : 1.1;
-    this.haloMusic.sparkleGain.gain.cancelScheduledValues(t);
-    this.haloMusic.sparkleGain.gain.setValueAtTime(this.haloMusic.sparkleGain.gain.value, t);
-    this.haloMusic.sparkleGain.gain.exponentialRampToValueAtTime(target, t + ramp);
-    this.haloMusic.sparkleActive = active;
+    this.haloMusic.percussionGain.gain.cancelScheduledValues(t);
+    this.haloMusic.percussionGain.gain.setValueAtTime(this.haloMusic.percussionGain.gain.value, t);
+    this.haloMusic.percussionGain.gain.exponentialRampToValueAtTime(target, t + ramp);
+    this.haloMusic.percussionActive = active;
   }
 
   // Long fade-out + teardown. ~1.2s matches stopHaloAmbient so swapping
@@ -2280,7 +2265,7 @@ export class Sound {
     const stopAt = t + 1.3;
     node.ambientSrc.stop(stopAt);
     node.melodicSrc.stop(stopAt);
-    node.sparkleSrc.stop(stopAt);
+    node.percussionSrc.stop(stopAt);
     this.haloMusic = null;
   }
 
@@ -3990,8 +3975,8 @@ export class Sound {
     ];
     // Scale tail (notes 3..15) per variation. Each is 13 ascending pitches
     // chosen so the final note of the cycle lands somewhere bright but not
-    // piercing (≤ ~880 Hz / A5) — well under the sparkle-layer centroid so
-    // the chime doesn't fight the music's high band.
+    // piercing (≤ ~880 Hz / A5) — well under the music's upper-layer centroid
+    // so the chime doesn't fight the music's high band.
     const TAIL_MINOR_DORIAN: number[] = [
       // Eb, F, G, Bb, C, Eb, F, G, Bb, C, Eb, F, G — C minor pentatonic + F.
       // Haunting: the Eb tracks the minor-third pad voicing.
