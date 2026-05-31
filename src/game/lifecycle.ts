@@ -86,8 +86,8 @@ export const showTitle = (game: Game) => {
 // per-run randomised bass intro order means the wave-2/3 picks vary between runs.
 export const startGame = (game: Game) => {
   game.sound.resume();
-  game.sound.preloadPilotLog(1);
-  game.sound.preloadPilotLog(3);
+  game.sound.preloadPilotLog(6);
+  game.sound.preloadPilotLog(12);
   // Warm every halo music stem in the pool so whichever variation gets
   // randomly picked at the first 4x doesn't pay fetch+decode latency.
   // Pool size × 2 stems × ~600 KB ≈ 2.5 MB for the current 2-variation pool —

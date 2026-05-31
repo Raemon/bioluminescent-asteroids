@@ -17,7 +17,7 @@ If the user explicitly wants to A/B two takes in-game, *they* run the game and r
 
 Always read before recording:
 
-1. **`scripts/vocals-gen/generate_pilot_log_2.py`** — the reference pipeline. Mirror its structure for new entries.
+1. **`scripts/vocals-gen/generate_pilot_log_3_oneshot.py`** — the reference pipeline. Modern no-post (concat-static-onto-raw) flow. Mirror its structure for new entries.
 2. **`scripts/vocals-gen/verify_transcript.py`** — the verifier. Required step after every synthesis.
 3. **`src/Sound.ts`** lines 195–216 (`PILOT_LOG_1_TAKES` pool, `pilotLogUrlsForIndex`), 2200–2240 (`preloadPilotLog`, `playPilotLog`).
 4. **`src/game/pilotLog.ts`** — the trigger. `tryUnlockPilotLog1` snaps to the next 2.0s downbeat.
@@ -31,11 +31,9 @@ Always read before recording:
 
 **Tags caveat.** Tags + short lines + Ralf occasionally cause v3 to return near-silence (0.05–0.10s of nothing where 1–2s of speech was expected). This is the dominant failure mode. The verifier will catch it. When a phrase comes back too short, regenerate that phrase with the same prompt before falling back to changing the tags or splitting the line.
 
-**Beat grid.** Phrases land on the 2.0s downbeat slot grid (`DOWNBEAT_SECONDS = BEAT_GRID * 4`). Each phrase placed at slot `n` starts at `n × 2.0s` in the master timeline. Slot 0 holds the squelch-in pre-roll; the first spoken phrase usually goes at slot 1 (= 2.0s in), so the player gets a 2-second "wait... is something happening?" before the captain speaks. That dramaturgy is load-bearing — preserve it.
+**Beat grid: not enforced anymore.** Earlier pipelines slot-quantized phrases onto a 2.0s downbeat grid. That was part of the post-processing layer we removed. The take starts on the downbeat (because `playPilotLog` is fired on a downbeat by `pilotLog.ts`), and from there the captain talks at whatever pacing ElevenLabs delivered. The dramaturgy of the original slot-0 squelch + slot-1 voice is preserved organically: ~0.35s of static, then the captain comes in.
 
-**Phrase length.** Keep each scripted phrase at ≤ 1.8 slots of natural delivery so it doesn't bleed into the next slot. Ralf is fast and deep — most short phrases come back at 0.5–1.2s, leaving deliberate space. Long lines (>10 words) can run over a slot; either accept the bleed (if the next slot is short or empty) or split the line across two slots.
-
-**Synthesis strategy: one-shot, not per-phrase.** Entries 2 and 3 first attempted per-phrase synthesis (one ElevenLabs call per scripted line, with directorial tags repeated each time, then slot-quantized in post). This failed badly — Ralf+v3 + tags + short fragments triggers the swallowed-line failure mode on most calls, and even when phrases came back at plausible duration they were often garbled or only contained the first 2-3 words. Per-phrase coverage routinely scored 0.00–0.50 against the script. **The fix is to send the entire script as one ElevenLabs call**, with the directorial tag block at the top once. v3 then conditions each line on the previous one, the captain's natural pauses are organic, and coverage scores match Entry 1 (~0.92). Slot alignment is recovered in post by silence-detect + phrase quantization (see `generate_pilot_log_3_oneshot.py` for the reference pipeline). The trade-off — losing precise control over which downbeat a specific word lands on — is worth it because the *words actually come out*.
+**Synthesis strategy: one-shot, not per-phrase.** Send the entire script as one ElevenLabs call, with the directorial tag block at the top once. v3 conditions each line on the previous one, the captain's natural pauses are organic, and coverage scores reliably hit ~0.85–0.92. Per-phrase synthesis was attempted for Entries 2 and 3 and failed badly — Ralf+v3 + tags + short fragments triggers a swallowed-line failure mode where the model returns 1s of audio for a 6-word phrase containing only the first 2-3 words. One-shot avoids this.
 
 **Vocal post-processing: NONE.** The current rule is the vocal mp3 from ElevenLabs is passed through to the final master *untouched*. No pitch shift, no bandpass, no EQ, no compression, no slot/grid quantization, no loudnorm, no silence-trimming. Whatever ElevenLabs delivers — pacing, breath, EQ, level — is what plays in-game. This rule supersedes the older "radio FX chain" entirely (the bandpass + chest/presence EQ + comp + bitcrush stack was producing audible distortion the user heard as static). If a take sounds wrong, regenerate it (different stability/style settings, different tags, or another attempt for the dice roll) — do not try to fix it in post. The only post-synthesis step is the opening static staple (next bullet).
 
@@ -47,12 +45,7 @@ Always read before recording:
 
 If a take feels "too dry" or "too clean," the fix is not to add noise or run the voice through more FX — it is to regenerate or to change the directorial tags. The opening static is the only noise that touches the master; the vocal itself is delivered as ElevenLabs returned it.
 
-**No clipping. Ever.** The user has been burned by takes where phrases clipped — the early-mid words audible but the final words cut off or distorted because the assembly assumed a phrase fit a slot and it didn't. The fixes that must be in place every time:
-
-- **Per-phrase Whisper verification during synth.** Duration alone does not catch the dominant failure mode (Ralf+v3 returning audio that *sounds* full-length but only speaks the first 2-3 words of the line). After every TTS call: trim silence, run Whisper-tiny on the trimmed wav, require ≥ 0.75 word-coverage against the scripted phrase. Below that → regenerate. This is the single most important quality gate; without it the verifier at the end catches it but you've already wasted both takes.
-- **Slot layout must accommodate the *actual* phrase duration.** When a phrase comes back at 2.4s for a 2.0s slot, either give it two slots, or move the next phrase one slot later. The fade-in/fade-out from `adelay` + `amix` will not clip — what clips is the *next* phrase starting on top of the previous one's tail. Watch for slot collisions before assembly.
-- **No tail-cutting silenceremove on long phrases.** The `silenceremove` stop_threshold at -50dB can clip a softly-fading word ending. For phrases ending in -s/-th/-f (fricatives that fade gently), raise the stop_threshold to -58dB or skip the tail trim entirely.
-- **`loudnorm` is not a clip-fix.** `loudnorm=I=-20:TP=-3:LRA=11` mastering is fine as a final pass, but it will not save a take whose voice track already lost words. Verify content before mastering.
+**Coverage gate.** Whisper-tiny on the raw ElevenLabs mp3 after every synth call. Require coverage ≥ 0.85 against the full script. Below that → retry the whole one-shot (up to 3 attempts). This catches the v3-swallowed-line failure mode where the audio sounds plausible but only the first few words of a phrase are present. Save every attempt's raw mp3 so the user can audition.
 
 **Pitch.** None applied in post. Earlier pipelines pitched down 1 semitone via rubberband; the current rule of "vocal untouched" supersedes that. Ralf at native pitch is what plays.
 
@@ -62,29 +55,35 @@ If a take feels "too dry" or "too clean," the fix is not to add noise or run the
 
 ```
 scripts/vocals-gen/
-├── generate_pilot_log_2.py    The reference. Copy + adapt for new entries.
-└── verify_transcript.py        Whisper transcript-diff. Required after every gen.
+├── generate_pilot_log_2_oneshot.py    Entry 2 reference. Modern no-post pipeline.
+├── generate_pilot_log_3_oneshot.py    Entry 3 reference. Modern no-post pipeline.
+├── rerender_pilot_log_3_from_raw.py   Re-staple static onto an existing raw take.
+├── verify_transcript.py               Whisper transcript-diff. Required after every gen.
+└── *.legacy.py                        Old per-phrase + radio-FX pipelines. Reference only.
 
 public/sounds/vocals/
-├── 6x-takes/                   Live pool. Files listed in PILOT_LOG_1_TAKES are played.
-├── pilot-log-1.mp3             Legacy single-file entry 1 (still referenced).
-└── pilot-log-N-takes/          Auditioning material for entry N (kept on disk).
+├── in-use/                     **Canonical live folder.** One subfolder per combo milestone.
+│   ├── 6x/                        random pool fired when player hits combo x6
+│   │   └── ralf-deep.mp3
+│   └── 12x/                       random pool fired when player hits combo x12
+│       └── lullaby.mp3
+├── 6x-takes/                   Audition material for the 6x pool. Not loaded.
+└── pilot-log-N-takes/          Audition material + raw/ + ladder/ for past entries. Not loaded.
 ```
+
+Sound.ts loads everything from `/sounds/vocals/in-use/<milestone>x/`. `playPilotLog(milestone)` picks one file at random from that folder's pool (defined by `PILOT_LOG_POOLS` in Sound.ts). To add a new take to a milestone: drop the mp3 in the folder, add its filename to the pool entry. To add a new milestone: create the folder, add an entry to `PILOT_LOG_POOLS`, wire a `tryUnlockPilotLogN` in `src/game/pilotLog.ts`, preload it from `lifecycle.ts`.
 
 ### One-shot synthesis (the loop)
 
 1. POST to `https://api.elevenlabs.io/v1/text-to-speech/A9evEp8yGjv4c3WsIKuY` with `model_id=eleven_v3`, text = `[low voice][gravelly][slowly][weary][murmuring]\n\n<full_script>`, voice settings `stability=0.55, similarity_boost=0.75, style=0.35, use_speaker_boost=true`. The tag block appears **once** at the top; the rest of the body is the unannotated script. Returns one mp3 for the whole take.
-2. Decode mp3 → mono 44.1k wav via ffmpeg.
-3. Pitch shift -1 semitone via rubberband (formant-preserved).
-4. Run Whisper-tiny on the pitched wav, compute word coverage against the full script. If < 0.85, retry the whole one-shot synth (up to 3 attempts). Save every attempt's raw mp3 to `pilot-log-N-takes/raw/<variant>/oneshot_attempt<N>_cov<C>.mp3` so the user can audition.
+2. Run Whisper-tiny **on the raw mp3** (no decode, no pitch shift, no re-encode). Compute word coverage against the full script. If < 0.85, retry the whole one-shot synth (up to 3 attempts). Save every attempt's raw mp3 to `pilot-log-N-takes/raw/oneshot_attempt<N>_cov<C>.mp3` so the user can audition.
 
-### Slot-quantize assembly
+### Final assembly — concat, nothing else
 
-1. `ffmpeg silencedetect` on the chosen pitched wav with `noise=-38dB:d=0.30` to find phrase boundaries.
-2. Slice the wav into per-phrase wavs along those boundaries (pad ends ~50ms so trailing consonants don't clip).
-3. Place each phrase at the next free 2.0s downbeat slot. If a phrase's duration would exceed one slot, give it the slots it needs and start the next phrase one slot after this one ends.
-4. Apply radio FX (`apply_radio_fx`) to the combined voice track — bandpass 380–2700, chest EQ at 160Hz, presence boost at 2.2kHz, comp, bitcrush. **No noise layers mixed in.**
-5. Master with `loudnorm=I=-18:TP=-2:LRA=11` and encode to mp3. The output is voice-only — no squelch, no hiss, no crackle.
+1. Generate the opening static clip with `anoisesrc` → bandpass 1200–4500 Hz → volume 0.30 → 0.02s fade-in, ~0.18s fade-out. ~0.35s total.
+2. `ffmpeg -filter_complex "[0:a][1:a]concat=n=2:v=0:a=1"` of [static.wav, chosen_raw.mp3] → `pilot-log-N.mp3` (libmp3lame 128k). That is the entire final-assembly step. No `amix`, no `adelay`, no pitch shift, no `loudnorm`, no `silenceremove`, no slot quantization, no `apply_radio_fx`. The vocal mp3 ElevenLabs returned is in the final master byte-for-byte equivalent (re-encoded once by libmp3lame as a side effect of the concat).
+
+If a take needs different pacing, EQ, level, or pitch — that is an ElevenLabs settings/tags problem, not a post-processing problem. Regenerate; do not fix in post.
 
 ### Verification — REQUIRED
 
@@ -117,28 +116,28 @@ Never ship a take with `status: "warn"` without telling the user explicitly that
 
 ### Integration into the live pool
 
-If the take is meant for the 6x random pool:
+`pilotLogUrlsForIndex(milestone)` loads from `public/sounds/vocals/in-use/<milestone>x/`. Audition takes stay in `*-takes/` folders; only finalized files get promoted.
 
-1. Copy the final mp3 to `public/sounds/vocals/6x-takes/ralf-deep-<name>.mp3`.
-2. Add the filename to `PILOT_LOG_1_TAKES` in `src/Sound.ts` (around line 198).
+To add a new take to an existing milestone (e.g. another 6x option):
+
+1. Move the final mp3 to `public/sounds/vocals/in-use/<milestone>x/<name>.mp3`.
+2. Add the filename to the milestone's array in `PILOT_LOG_POOLS` in `src/Sound.ts` (around line 205).
 3. The voice character must match the rest of the pool (same actor, same FX chain) or the random pick will sound like a different person mid-game.
 
-If the take is a new entry (entry 2, entry 3, etc.):
+To add a new milestone (e.g. x18):
 
-1. Leave it in `public/sounds/vocals/pilot-log-N-takes/`.
-2. The fallback path in `pilotLogUrlsForIndex` already handles `pilot-log-N.mp3` — name the chosen variant accordingly and copy it to `public/sounds/vocals/pilot-log-N.mp3`.
-3. Wire a new `tryUnlockPilotLogN` in `src/game/pilotLog.ts` modeled after `tryUnlockPilotLog1`. Add a flag on Game, reset it on `startGame`, gate the trigger on the combo milestone, snap to next downbeat, preload via `preloadPilotLog(N)`.
+1. Create `public/sounds/vocals/in-use/<milestone>x/` and drop the first take inside.
+2. Add an entry to `PILOT_LOG_POOLS` keyed by the milestone integer.
+3. Wire a `tryUnlockPilotLogN` in `src/game/pilotLog.ts` modeled after `tryUnlockPilotLog1` — add a flag on Game, reset it on `startGame`, gate the trigger on the combo threshold, snap to next downbeat. Call `playPilotLog(<milestone>)` and `preloadPilotLog(<milestone>)` in `lifecycle.ts`.
 
 ## Things that have burned us before
 
 - **v3 swallowing short lines.** "Yeah. Me too." came back as 0.08s of audio with Ralf + murmuring tags. The verifier caught it (coverage 0.29). Without the verifier this would have shipped. Always verify.
 - **v3 partially swallowing longer lines.** Worse failure than full swallow: Ralf returns ~1.0s of audio for a 6-word phrase, passes the duration heuristic, but only speaks the first 2-3 words. Discovered on pilot-log-3: "Hands went cold around hour four" came back at 1.02s and final coverage was 34%. Duration checks alone do *not* catch this. Per-phrase Whisper verification is the mandatory gate.
-- **Static creep.** The original pipeline shipped with a squelch-in pre-roll, squelch-out tail, continuous pink hiss, and brown-noise crackle. The user progressively removed all of these, then briefly the squelch-in too, then reinstated a *stapled* squelch-in only. The current rule: **opening static, separate clip, concatenated** — never mixed/overlapped under the voice, never any other noise layer (no squelch-out, no hiss, no crackle). When in doubt, less. AIs reliably drift toward layering noise *under* the voice or extending the static; both are regressions. Use the `concat` filter (see `concat_to_mp3` in `rerender_pilot_log_3_from_raw.py`), not `amix` with delays.
-- **Phrases clipping into the next slot.** When a 2.4s phrase lands in a 2.0s slot, its tail bleeds under the next phrase's start. The user calls this "clipping." Either route the long phrase across two slots, or move the next phrase one slot later. Don't trust the slot grid blindly.
-- **Static piled up.** Continuous pink hiss + brown crackle + squelch bookends all stacked = too much noise. The user's standard: brief stacking only, body of the take stays clear. The current pipeline reflects this; don't regress it.
-- **Trimming the wrong end.** `silenceremove` at -50dB can clip the trailing breath off a phrase that fades into nothing. If a trimmed phrase ends abruptly, raise the threshold (-55dB) for that phrase.
+- **Vocal post-processing is a regression magnet.** Over many iterations the pipeline grew a pitch shift, bandpass, chest/presence EQ, compressor, bitcrush, slot quantization, and loudnorm. Every step added some artifact the user eventually heard as "static" or "wrong." The current rule — *zero post on the vocal, just staple static on the front* — is the resting state. Do not add a pitch shift back. Do not add an EQ back. Do not "just normalize the level." If something sounds wrong, regenerate the take.
+- **Static creep.** Same story: hiss bed, brown crackle, squelch bookends, then bitcrush as a covert static layer disguised as "radio character." All removed. Opening static only, separate clip, concatenated. No `amix`, no `adelay`, no overlap.
 - **Voice identity drift.** The original 6x pool had 10 different voices — felt random and broke the captain's character. The pool was narrowed to 3 Ralf takes for a reason. Don't reintroduce other voices without explicit user buy-in.
-- **Single-shot generation.** Synthesizing the whole script as one long ElevenLabs call lets the model decide pacing and ignores the 2s beat grid. Always synth phrase-by-phrase so each one can be placed on its slot.
+- **v3 swallowing short lines is a TTS-side problem, not a post problem.** When a phrase fails synthesis, retry with different stability/style settings, change tags, or split/expand the phrase wording. Do not try to compensate in post.
 
 ## What "done" looks like in your report
 

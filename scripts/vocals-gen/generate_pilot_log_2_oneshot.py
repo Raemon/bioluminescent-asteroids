@@ -1,21 +1,27 @@
-"""Generate pilot-log-2 — one-shot ElevenLabs synthesis, zero post on the vocal.
-
-The vocal file ElevenLabs returns is passed through *exactly as received*.
-No pitch shift, no EQ, no compression, no slot quantization, no loudnorm.
-The only thing the pipeline does after synthesis is staple a short opening
-static burst onto the front of the mp3.
+"""Generate pilot-log-2 — one-shot ElevenLabs, beat-resynced, two final flavors.
 
 Pipeline:
-  1. One ElevenLabs v3 call with directorial tags at top.
-  2. Whisper-tiny coverage check on the raw response (no re-encoding).
-     Retry on low score, up to 3 attempts. Save every attempt.
-  3. Generate a 0.35s opening static clip (bandpassed white noise).
-  4. Concat [static] + [raw ElevenLabs mp3] -> final pilot-log-2.mp3.
+  1. ElevenLabs v3, one-shot synth of the whole script with directorial tags.
+     Tags target hints-of-lullaby-but-slightly-cracked, not pure lullaby.
+  2. Whisper-tiny coverage check on the raw mp3, retry up to MAX_ATTEMPTS.
+  3. Decode -> wav, pitch -1 semitone (rubberband, formant-preserved).
+  4. Apply the full radio FX chain (chest+presence EQ, bandpass, compressor).
+  5. Branch into two final variants:
+       a. _loudnorm:  + volume 1.3 + loudnorm I=-18:TP=-2:LRA=11
+       b. _bitcrush:  + bitcrush floor(val*64)/64
+  6. For each variant, silencedetect + slot-quantize onto the 2.0s downbeat
+     grid so phrases land on beats.
+  7. Staple the 0.35s opening static clip onto the front of each (concat —
+     not mixed under the voice).
 
 Outputs:
-  raw/oneshot_attempt<N>_cov<C>.mp3   each attempt's raw response
-  raw/oneshot_CHOSEN.mp3              the chosen raw
-  pilot-log-2.mp3                     static + raw, no other processing
+  raw/oneshot_attempt<N>_cov<C>.mp3
+  raw/oneshot_CHOSEN.mp3
+  pilot-log-2-takes/pilot-log-2-loudnorm.mp3
+  pilot-log-2-takes/pilot-log-2-bitcrush.mp3
+
+The user picks which flavor to promote to public/sounds/vocals/pilot-log-2.mp3
+after auditioning both.
 """
 
 import re
@@ -29,28 +35,36 @@ import requests
 
 VOICE_ID = "A9evEp8yGjv4c3WsIKuY"  # PL_Ralf_Deep
 MODEL = "eleven_v3"
+SLOT_SECONDS = 2.0
+PITCH_SEMITONES = -1.0
 SAMPLE_RATE = 44100
 COVERAGE_THRESHOLD = 0.85
 MAX_ATTEMPTS = 3
+SILENCE_NOISE_DB = -38
+SILENCE_MIN_DUR = 0.30
 OPEN_STATIC_SECONDS = 0.35
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENV_PATH = REPO_ROOT / ".env"
 OUT_DIR = REPO_ROOT / "public" / "sounds" / "vocals" / "pilot-log-2-takes"
 RAW_DIR = OUT_DIR / "raw"
-FINAL_OUT = REPO_ROOT / "public" / "sounds" / "vocals" / "pilot-log-2.mp3"
 
-TAGS = "[low voice][gravelly][slowly][weary][murmuring]"
+# Tags target: weary, slightly off, hints of lullaby cadence — not full lullaby.
+# Earlier takes were "too lullaby-ish". Dropped [murmuring][slowly] (gentle),
+# kept [low voice][gravelly][weary], added [unsettled] for the slight-crazy hint.
+TAGS = "[low voice][gravelly][weary][unsettled]"
 
+# Paragraph breaks become longer pauses; line breaks become shorter ones. The
+# whitespace layout matches the design doc in scripts/pilotlog.md.
 SCRIPT = (
-    "Couldn't sleep, huh. "
-    "Fair enough.\n\n"
-    "Listen. Close your eyes. "
+    "Couldn't sleep, huh.\n\n"
+    "Listen.\n\n"
+    "Close your eyes.\n\n"
     "Here's three notes out here. "
     "Same three, every time. Counted 'em.\n\n"
     "One coming low, that you feel in your bones. "
-    "One swelling up, like it's calling you home. "
-    "One droning on till it tickles your throat.\n\n"
+    "One droning on till it tickles your throat. "
+    "One swelling up, like it's calling you home.\n\n"
     "That's the trick, see. "
     "You don't count sheep out here. "
     "You count the ones that sing back."
@@ -76,9 +90,9 @@ def synth_oneshot(api_key: str, full_text: str, out_path: Path) -> None:
         "text": f"{TAGS}\n\n{full_text}",
         "model_id": MODEL,
         "voice_settings": {
-            "stability": 0.55,
+            "stability": 0.45,        # slightly lower than before -> more variation
             "similarity_boost": 0.75,
-            "style": 0.35,
+            "style": 0.50,            # slightly higher -> more performance, less neutral
             "use_speaker_boost": True,
         },
     }
@@ -137,9 +151,137 @@ def coverage(expected: str, transcript: str) -> tuple[float, list[str]]:
     return (len(e) - len(missing)) / len(e), missing
 
 
+def to_wav(src: Path, dst: Path, pitch_semitones: float = 0.0) -> None:
+    """Decode -> mono 44.1k wav, optionally pitch-shift (formant-preserved)."""
+    pre = dst.with_suffix(".pre.wav")
+    run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src),
+         "-ac", "1", "-ar", str(SAMPLE_RATE), str(pre)])
+    if pitch_semitones != 0.0:
+        run(["rubberband", "-q", "--formant", "-p", f"{pitch_semitones}",
+             str(pre), str(dst)])
+        pre.unlink()
+    else:
+        pre.rename(dst)
+
+
+def apply_radio_chain(voice_in: Path, voice_out: Path) -> None:
+    """Chest EQ + presence + bandpass + compressor. No bitcrush, no loudnorm
+    — those are the per-variant tail filters that get added after this."""
+    run([
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", str(voice_in),
+        "-af",
+        "equalizer=f=160:t=q:w=1.2:g=3.5,"
+        "equalizer=f=2200:t=q:w=1.5:g=2.0,"
+        "highpass=f=380,lowpass=f=2700,"
+        "acompressor=threshold=-20dB:ratio=4:attack=5:release=80",
+        "-ar", str(SAMPLE_RATE), "-ac", "1",
+        str(voice_out),
+    ])
+
+
+def apply_loudnorm_tail(voice_in: Path, voice_out: Path) -> None:
+    run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(voice_in),
+         "-af", "volume=1.3,loudnorm=I=-18:TP=-2:LRA=11",
+         "-ar", str(SAMPLE_RATE), "-ac", "1", str(voice_out)])
+
+
+def apply_bitcrush_tail(voice_in: Path, voice_out: Path) -> None:
+    run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(voice_in),
+         "-af", "aeval='floor(val(0)*64)/64':c=same,volume=1.3",
+         "-ar", str(SAMPLE_RATE), "-ac", "1", str(voice_out)])
+
+
+def detect_silences(wav_path: Path) -> list[tuple[float, float]]:
+    result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-i", str(wav_path),
+         "-af", f"silencedetect=noise={SILENCE_NOISE_DB}dB:d={SILENCE_MIN_DUR}",
+         "-f", "null", "-"],
+        capture_output=True, text=True, check=False,
+    )
+    silences: list[tuple[float, float]] = []
+    cur_start: float | None = None
+    for line in result.stderr.splitlines():
+        m = re.search(r"silence_start: ([0-9.]+)", line)
+        if m:
+            cur_start = float(m.group(1))
+        m = re.search(r"silence_end: ([0-9.]+)", line)
+        if m and cur_start is not None:
+            silences.append((cur_start, float(m.group(1))))
+            cur_start = None
+    return silences
+
+
+def extract_phrases(wav_path: Path, total_dur: float, workdir: Path,
+                     tag: str) -> list[Path]:
+    """Slice the wav into phrase wavs along detected silences."""
+    silences = detect_silences(wav_path)
+    phrases: list[tuple[float, float]] = []
+    prev_end = 0.0
+    for s_start, s_end in silences:
+        if s_start > prev_end + 0.05:
+            phrases.append((prev_end, s_start))
+        prev_end = s_end
+    if prev_end < total_dur - 0.05:
+        phrases.append((prev_end, total_dur))
+    phrases = [(a, b) for a, b in phrases if (b - a) >= 0.15]
+
+    print(f"  [{tag}] silence-detected {len(phrases)} phrases:")
+    for i, (a, b) in enumerate(phrases):
+        print(f"    [{i:02d}] {a:.2f}s -> {b:.2f}s ({b-a:.2f}s)")
+
+    paths: list[Path] = []
+    for i, (start, end) in enumerate(phrases):
+        out = workdir / f"{tag}_phrase_{i:02d}.wav"
+        pad_end = min(0.05, max(0.0, total_dur - end))
+        run([
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", str(wav_path),
+            "-ss", f"{max(0, start - 0.02):.3f}",
+            "-to", f"{end + pad_end:.3f}",
+            "-ar", str(SAMPLE_RATE), "-ac", "1",
+            str(out),
+        ])
+        paths.append(out)
+    return paths
+
+
+def quantize_to_grid(phrase_paths: list[Path], out_path: Path) -> float:
+    """Place each phrase at the next free 2.0s downbeat slot. A phrase longer
+    than one slot gets the slots it needs, and the next phrase starts one slot
+    after the previous one ends. Captain's first phrase starts at t=0."""
+    placements: list[tuple[float, Path]] = []
+    next_slot_time = 0.0
+    for path in phrase_paths:
+        dur = probe_duration(path)
+        slots_needed = max(1, int((dur + 0.4) // SLOT_SECONDS) + 1)
+        placements.append((next_slot_time, path))
+        next_slot_time += slots_needed * SLOT_SECONDS
+    total_seconds = next_slot_time + 0.5
+
+    inputs: list[str] = []
+    filters: list[str] = []
+    for i, (start, path) in enumerate(placements):
+        inputs += ["-i", str(path)]
+        delay_ms = int(start * 1000)
+        filters.append(f"[{i}]adelay={delay_ms}|{delay_ms}[v{i}]")
+    mix_inputs = "".join(f"[v{i}]" for i in range(len(placements)))
+    filters.append(f"{mix_inputs}amix=inputs={len(placements)}:normalize=0[mix]")
+    filters.append(f"[mix]apad=whole_dur={total_seconds},atrim=duration={total_seconds}[out]")
+    run([
+        "ffmpeg", "-y", "-loglevel", "error",
+        *inputs,
+        "-filter_complex", ";".join(filters),
+        "-map", "[out]",
+        "-ar", str(SAMPLE_RATE), "-ac", "1",
+        str(out_path),
+    ])
+    print(f"    placed {len(placements)} phrases over {total_seconds:.1f}s")
+    return total_seconds
+
+
 def make_open_static(out_path: Path, duration: float) -> None:
-    """Standalone opening 'kssht'. Concatenated onto the front of the master;
-    NEVER mixed under the voice."""
+    """Standalone opening 'kssht'. Concatenated onto the front; not mixed."""
     fade_out = min(0.18, duration * 0.6)
     run([
         "ffmpeg", "-y", "-loglevel", "error",
@@ -153,16 +295,11 @@ def make_open_static(out_path: Path, duration: float) -> None:
     ])
 
 
-def staple_static_to_raw(raw_mp3: Path, static_wav: Path, out_mp3: Path) -> None:
-    """Concat [static] + [untouched ElevenLabs mp3] -> final mp3. The vocal
-    is not pitched, EQ'd, compressed, normalized, sliced, or re-mastered. The
-    only ffmpeg touch on the vocal is the concat filter glue, which re-encodes
-    once at 128k mp3. Everything ElevenLabs sent us about delivery — pacing,
-    breath, EQ, level — is preserved."""
+def staple_static(voice_wav: Path, static_wav: Path, out_mp3: Path) -> None:
     run([
         "ffmpeg", "-y", "-loglevel", "error",
         "-i", str(static_wav),
-        "-i", str(raw_mp3),
+        "-i", str(voice_wav),
         "-filter_complex",
         f"[0:a]aformat=sample_rates={SAMPLE_RATE}:channel_layouts=mono[s];"
         f"[1:a]aformat=sample_rates={SAMPLE_RATE}:channel_layouts=mono[v];"
@@ -174,6 +311,26 @@ def staple_static_to_raw(raw_mp3: Path, static_wav: Path, out_mp3: Path) -> None
     ])
 
 
+def build_variant(pitched_wav: Path, workdir: Path, tag: str,
+                   tail_fn, out_mp3: Path, open_static: Path) -> None:
+    """tail_fn applies the per-variant tail filter (loudnorm or bitcrush) to
+    the radio-chain wav. Then slot-quantize, then staple static."""
+    chain_wav = workdir / f"{tag}_chain.wav"
+    apply_radio_chain(pitched_wav, chain_wav)
+
+    tail_wav = workdir / f"{tag}_tail.wav"
+    tail_fn(chain_wav, tail_wav)
+
+    total = probe_duration(tail_wav)
+    phrase_wavs = extract_phrases(tail_wav, total, workdir, tag)
+
+    quantized = workdir / f"{tag}_quantized.wav"
+    quantize_to_grid(phrase_wavs, quantized)
+
+    staple_static(quantized, open_static, out_mp3)
+    print(f"  wrote {out_mp3.name} ({probe_duration(out_mp3):.2f}s)")
+
+
 def main() -> None:
     api_key = load_api_key()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -181,25 +338,24 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="pilot-log-2-oneshot-") as td:
         workdir = Path(td)
 
-        best_raw_mp3: Path | None = None
+        best_raw: Path | None = None
         best_cov = -1.0
         best_attempt = -1
         for attempt in range(MAX_ATTEMPTS):
             print(f"attempt {attempt+1}: one-shot synth")
             raw_mp3 = workdir / f"oneshot_a{attempt}.mp3"
             synth_oneshot(api_key, SCRIPT, raw_mp3)
-            dur = probe_duration(raw_mp3)
             transcript = whisper_transcribe(raw_mp3)
             cov, missing = coverage(SCRIPT, transcript)
+            dur = probe_duration(raw_mp3)
             print(f"  dur={dur:.2f}s cov={cov:.2f}")
             print(f"  heard: {transcript!r}")
             print(f"  missing: {missing}")
 
             shutil.copy2(raw_mp3, RAW_DIR / f"oneshot_attempt{attempt+1}_cov{cov:.2f}.mp3")
-
             if cov > best_cov:
                 best_cov = cov
-                best_raw_mp3 = raw_mp3
+                best_raw = raw_mp3
                 best_attempt = attempt
             if cov >= COVERAGE_THRESHOLD:
                 print("  -> cleared threshold")
@@ -207,17 +363,26 @@ def main() -> None:
         else:
             print(f"WARN: best cov={best_cov:.2f} after {MAX_ATTEMPTS} attempts")
 
-        assert best_raw_mp3 is not None
-        shutil.copy2(best_raw_mp3, RAW_DIR / "oneshot_CHOSEN.mp3")
+        assert best_raw is not None
+        shutil.copy2(best_raw, RAW_DIR / "oneshot_CHOSEN.mp3")
+
+        pitched = workdir / "pitched.wav"
+        to_wav(best_raw, pitched, pitch_semitones=PITCH_SEMITONES)
 
         open_static = workdir / "open_static.wav"
         make_open_static(open_static, OPEN_STATIC_SECONDS)
 
-        FINAL_OUT.parent.mkdir(parents=True, exist_ok=True)
-        staple_static_to_raw(best_raw_mp3, open_static, FINAL_OUT)
-        print(f"\nwrote {FINAL_OUT} ({probe_duration(FINAL_OUT):.2f}s, "
-              f"static {OPEN_STATIC_SECONDS}s + untouched ElevenLabs vocal, "
-              f"best cov={best_cov:.2f})")
+        loudnorm_out = OUT_DIR / "pilot-log-2-loudnorm.mp3"
+        bitcrush_out = OUT_DIR / "pilot-log-2-bitcrush.mp3"
+        build_variant(pitched, workdir, "loudnorm",
+                      apply_loudnorm_tail, loudnorm_out, open_static)
+        build_variant(pitched, workdir, "bitcrush",
+                      apply_bitcrush_tail, bitcrush_out, open_static)
+
+    print(f"\nDone. Audition both:")
+    print(f"  loudnorm flavor:  {loudnorm_out}")
+    print(f"  bitcrush flavor:  {bitcrush_out}")
+    print(f"Tell me which to promote to public/sounds/vocals/pilot-log-2.mp3.")
 
 
 if __name__ == "__main__":

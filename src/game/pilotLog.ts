@@ -1,9 +1,9 @@
 import type { Game } from "../Game";
 import { BEAT_GRID } from "./rhythmConstants";
 
-// Pilot's Log unlocks fire at specific combo milestones. Each entry has a
-// vocal cue (pre-rendered scratchy-radio MP3 in /sounds/vocals/) and a brief
-// "unlocked" overlay on the HUD. Combo x6 = entry 1.
+// Pilot's Log unlocks fire at specific combo milestones (x6, x12). Each
+// milestone has its own random pool of takes under /sounds/vocals/in-use/<n>x/.
+// playPilotLog takes the milestone number directly.
 //
 // Cadence: vocals are aligned to the next downbeat (every 2s = 4 beats) so
 // the spoken line lands on the pad melody's phrase grid instead of floating
@@ -46,7 +46,7 @@ export const tryUnlockPilotLog1 = (game: Game) => {
   showUnlockToast("Chapter 1: The Outer Rim");
   game.sound.pilotLogPlaying = true;
   const delay = nextDownbeatDelay(game.beatTime);
-  game.sound.playPilotLog(1, delay, 1.0).then((dur) => {
+  game.sound.playPilotLog(6, delay, 1.0).then((dur) => {
     window.setTimeout(() => { game.sound.pilotLogPlaying = false; }, (delay + dur + 0.5) * 1000);
   });
 };
@@ -64,7 +64,7 @@ export const tryUnlockPilotLog3 = (game: Game) => {
   game.pilotLog3Unlocked = true;
   game.sound.pilotLogPlaying = true;
   const delay = nextDownbeatDelay(game.beatTime);
-  game.sound.playPilotLog(3, delay, 1.0).then((dur) => {
+  game.sound.playPilotLog(12, delay, 1.0).then((dur) => {
     window.setTimeout(() => { game.sound.pilotLogPlaying = false; }, (delay + dur + 0.5) * 1000);
   });
 };

@@ -198,26 +198,22 @@ export type SoundName =
   | "canisterDestroyed"
   | "comboLost";
 
-// Combo-x6 unlock vocal pool. Each entry is a pre-rendered ElevenLabs take of
-// the captain's voice at the 6x trigger — three takes by the same actor
-// (PL_Ralf_Deep), two of which are Entry 2's lullaby script and one of which
-// is the original Entry 1 "loud" line. Picking randomly per fire keeps repeat
-// plays from feeling canned, while keeping the voice identity consistent so
-// the character stays the same person every time. All takes share the same
-// scratchy-radio post (bandpass + bitcrush + hiss) so they mix interchangeably
-// through bakedOut. The other audition files (design-1, frank-wise, etc.) are
-// kept on disk in the same folder but excluded from the live pool.
-const PILOT_LOG_1_TAKES: readonly string[] = [
-  "ralf-deep.mp3",
-  // "ralf-deep-log2-a.mp3",
-  // "ralf-deep-log2-b.mp3",
-];
+// Combo-milestone vocal pools. Each milestone (x6, x12) has its own folder
+// under /sounds/vocals/in-use/. When the player hits the milestone, one file
+// is picked at random from that folder. Adding a new take = drop the mp3 in
+// the folder and add its filename here. Picking randomly per fire keeps the
+// captain's voice from feeling canned across replays.
+const PILOT_LOG_POOLS: Readonly<Record<number, readonly string[]>> = {
+  6: ["ralf-deep.mp3"],
+  12: ["lullaby.mp3"],
+};
 
-// Resolve the URLs for a given pilot-log index. Index 1 = the 6x take pool;
-// any other index falls back to the legacy single-file naming.
-const pilotLogUrlsForIndex = (index: number): string[] => {
-  if (index === 1) return PILOT_LOG_1_TAKES.map((f) => `/sounds/vocals/6x-takes/${f}`);
-  return [`/sounds/vocals/pilot-log-${index}.mp3`];
+// Resolve the URLs for a given combo milestone. Everything lives under
+// /sounds/vocals/in-use/<milestone>x/ — that folder is the canonical source
+// of truth for what plays in-game. Audition material stays elsewhere.
+const pilotLogUrlsForIndex = (milestone: number): string[] => {
+  const pool = PILOT_LOG_POOLS[milestone] ?? [];
+  return pool.map((f) => `/sounds/vocals/in-use/${milestone}x/${f}`);
 };
 
 export class Sound {
@@ -2369,33 +2365,25 @@ export class Sound {
   }
 
   // Warm the buffer cache so the first playPilotLog doesn't pay fetch+decode
-  // latency at trigger time. the caller's delaySec is computed from the
-  // music clock *before* awaiting the load — if the buffer isn't cached, the
-  // load can stretch hundreds of ms and the vocal lands well past the intended
-  // downbeat. For index 1 this warms every take in the pool so whichever one
-  // gets randomly picked at fire time is already decoded.
-  preloadPilotLog(index: number): void {
+  // latency. `milestone` is the combo threshold (6, 12, ...). For pooled
+  // milestones this warms every take so whichever one gets randomly picked at
+  // fire time is already decoded.
+  preloadPilotLog(milestone: number): void {
     this.ensureContext();
-    for (const url of pilotLogUrlsForIndex(index)) void this.loadPilotLogBuffer(url);
+    for (const url of pilotLogUrlsForIndex(milestone)) void this.loadPilotLogBuffer(url);
   }
 
-  // Fire a Pilot's Log vocal cue. `delaySec` lets the caller align the start
-  // to the next musical phrase boundary. Routes straight to bakedOut so the
-  // master comp/reverb doesn't smear the spoken word — the bandpass/static is
-  // already baked into the file. Returns the buffer duration once loaded so
-  // callers can clear their "playing" flag at the right moment. Index 1 picks
-  // a random take from the 6x-takes pool each fire so repeat plays don't
-  // sound canned.
-  async playPilotLog(index: number, delaySec = 0, gain = 1.0): Promise<number> {
+  // Fire a Pilot's Log vocal cue for the given combo milestone. Picks one
+  // file at random from the milestone's pool (so repeat plays don't sound
+  // canned), then routes through bakedOut so master comp/reverb doesn't smear
+  // the spoken word. `delaySec` lets the caller align to a downbeat.
+  async playPilotLog(milestone: number, delaySec = 0, gain = 1.0): Promise<number> {
     if (!this.enabled) return 0;
     this.ensureContext();
     if (!this.ctx || !this.bakedOut) return 0;
-    const urls = pilotLogUrlsForIndex(index);
+    const urls = pilotLogUrlsForIndex(milestone);
+    if (urls.length === 0) return 0;
     const url = urls[Math.floor(Math.random() * urls.length)];
-    // Anchor the scheduled start to ctx.currentTime *before* the await — if
-    // the buffer isn't cached yet, fetch+decode can chew through the delay
-    // budget and src.start(now + delaySec) would land long after the intended
-    // downbeat. Past target falls back to "play immediately" via Math.max.
     const targetStartTime = this.ctx.currentTime + Math.max(0, delaySec);
     const buf = await this.loadPilotLogBuffer(url);
     if (!buf || !this.ctx || !this.bakedOut) return 0;

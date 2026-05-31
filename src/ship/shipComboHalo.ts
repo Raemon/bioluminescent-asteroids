@@ -1,9 +1,10 @@
 import type { Ship } from "../Ship";
 import { haloVertices } from "./shipHitbox";
 
-// combo tier <2 hides halo entirely; 2–3 shows cyan; ≥4 promotes to gold.
+// combo tier <2 hides halo entirely; 2–3 cyan; 4–7 gold; ≥8 white (matches white bullets).
 export const setComboFromValue = (ship: Ship, combo: number) => {
-  if (combo >= 4) ship.comboHaloTier = 2;
+  if (combo >= 8) ship.comboHaloTier = 3;
+  else if (combo >= 4) ship.comboHaloTier = 2;
   else if (combo >= 2) ship.comboHaloTier = 1;
   else ship.comboHaloTier = 0;
 };
@@ -17,14 +18,16 @@ const paintDullHaloOutline = (ctx: CanvasRenderingContext2D, dullAlpha: number) 
   ctx.stroke();
 };
 
-// cyan→gold colour shift signals tier crossover; alpha pulses on beat so the rhythm reads at a glance.
-const paintActiveHalo = (ctx: CanvasRenderingContext2D, tier1: number, tier2: number, beatPulse: number) => {
+// cyan→gold→white colour shift signals tier crossover; alpha pulses on beat so the rhythm reads at a glance.
+const paintActiveHalo = (ctx: CanvasRenderingContext2D, tier1: number, tier2: number, tier3: number, beatPulse: number) => {
   if (tier1 <= 0.001) return;
   const hue = 195 + (45 - 195) * tier2;
+  const sat = 100 * (1 - tier3);
+  const light = 78 + (100 - 78) * tier3;
   const alpha = (0.45 + 0.35 * beatPulse) * tier1;
-  ctx.strokeStyle = `hsla(${hue}, 100%, 78%, ${alpha})`;
+  ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
   ctx.lineWidth = 1.6;
-  ctx.shadowColor = `hsla(${hue}, 100%, 70%, 1)`;
+  ctx.shadowColor = `hsla(${hue}, ${sat}%, ${70 + 30 * tier3}%, 1)`;
   ctx.shadowBlur = 10 + 6 * beatPulse;
   ctx.stroke();
   ctx.shadowBlur = 0;
@@ -57,8 +60,9 @@ export const renderComboHalo = (ctx: CanvasRenderingContext2D, ship: Ship, beatP
   const i = ship.comboHaloIntensity;
   const tier1 = Math.min(1, i);
   const tier2 = Math.max(0, Math.min(1, i - 1));
+  const tier3 = Math.max(0, Math.min(1, i - 2));
   traceHaloPath(ctx, ship);
   paintDullHaloOutline(ctx, 0.4 * (1 - tier1));
-  paintActiveHalo(ctx, tier1, tier2, beatPulse);
+  paintActiveHalo(ctx, tier1, tier2, tier3, beatPulse);
   paintComboLossFlash(ctx, ship.comboLossFlash);
 };
