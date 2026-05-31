@@ -21,6 +21,8 @@ export type HudElements = {
   scoreEntryStatusEl: HTMLElement;
   leaderboardEl: HTMLElement;
   leaderboardListEl: HTMLOListElement;
+  debugOverlayEl: HTMLElement;
+  debugFpsEl: HTMLElement;
 };
 
 // Cached references for the powerup slot row; resolved once at boot.
@@ -54,6 +56,8 @@ export const bindHudElements = (): HudElements => {
     scoreEntryStatusEl: document.getElementById("score-entry-status")!,
     leaderboardEl: document.getElementById("leaderboard")!,
     leaderboardListEl: document.getElementById("leaderboard-list") as HTMLOListElement,
+    debugOverlayEl: document.getElementById("debug-overlay")!,
+    debugFpsEl: document.getElementById("debug-fps")!,
   };
 };
 

@@ -113,6 +113,10 @@ export class Game implements HudElements {
   scoreEntryStatusEl: HTMLElement;
   leaderboardEl: HTMLElement;
   leaderboardListEl: HTMLOListElement;
+  debugOverlayEl: HTMLElement;
+  debugFpsEl: HTMLElement;
+  // backtick (`) toggles. Starts on so the FPS readout is visible by default.
+  debugMode = true;
   // prevents a double-submit if the player mashes Enter while the POST is in flight.
   scoreSubmitState: "idle" | "submitting" | "submitted" = "idle";
   // lets the title screen after a game-over show a score-neighborhood (±5) around the
@@ -175,11 +179,18 @@ export class Game implements HudElements {
     this.scoreEntryStatusEl = hud.scoreEntryStatusEl;
     this.leaderboardEl = hud.leaderboardEl;
     this.leaderboardListEl = hud.leaderboardListEl;
+    this.debugOverlayEl = hud.debugOverlayEl;
+    this.debugFpsEl = hud.debugFpsEl;
+    this.debugOverlayEl.classList.toggle("hidden", !this.debugMode);
     this.muteEl.addEventListener("click", () => toggleMute(this));
     this.abortEl.addEventListener("click", () => abortMission(this));
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();
       if (k === "m" && this.state !== "title") toggleMute(this);
+      if (k === "`") {
+        this.debugMode = !this.debugMode;
+        this.debugOverlayEl.classList.toggle("hidden", !this.debugMode);
+      }
     });
     showTitle(this);
   }

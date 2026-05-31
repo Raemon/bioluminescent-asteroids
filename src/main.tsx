@@ -36,11 +36,25 @@ installBetaTest(game);
 installTutorialDemos();
 
 let last = performance.now();
+// Rolling FPS — count frames over a window then publish; cheaper than smoothing per-frame dts.
+const FPS_WINDOW_MS = 500;
+let fpsWindowStart = last;
+let fpsFrames = 0;
 const tick = (now: number) => {
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
   game.update(dt);
   game.render();
+  fpsFrames++;
+  const windowElapsed = now - fpsWindowStart;
+  if (windowElapsed >= FPS_WINDOW_MS) {
+    if (game.debugMode) {
+      const fps = (fpsFrames * 1000) / windowElapsed;
+      game.debugFpsEl.textContent = `FPS ${fps.toFixed(0)}`;
+    }
+    fpsWindowStart = now;
+    fpsFrames = 0;
+  }
   requestAnimationFrame(tick);
 };
 requestAnimationFrame(tick);

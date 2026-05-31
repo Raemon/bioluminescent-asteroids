@@ -160,6 +160,26 @@ html:has(#sound-root), body:has(> #sound-root) {
   gap: 16px;
 }
 
+#debug-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  pointer-events: none;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #7fffa7;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.85);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 4px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  z-index: 5;
+}
+
+#debug-overlay.hidden {
+  display: none;
+}
+
 #powerups {
   position: absolute;
   left: 50%;

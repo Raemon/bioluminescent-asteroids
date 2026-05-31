@@ -91,5 +91,8 @@ export const Hud = () => (
     <div id="hud-right">
       <button id="mute" type="button" title="Mute (M)" aria-label="Mute">♪</button>
     </div>
+    <div id="debug-overlay" className="hidden">
+      <div id="debug-fps">FPS --</div>
+    </div>
   </div>
 );
