@@ -382,7 +382,7 @@ const drawBeatDotsAlongRay = (
   retX: number, retY: number,
   sMin: number, sMax: number, dotStep: number, dotOffset: number,
   flashPulse: number, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
-  w: number, h: number, doubletime: boolean, tutorialHighlight: boolean,
+  w: number, h: number, doubletime: boolean, tutorialHighlight: boolean, focused: boolean,
 ): DotWalkResult => {
   let overlapsReticule = false;
   // doubletime halves the spacing and marks every other k as a half-beat (off-beat) dot.
@@ -411,7 +411,7 @@ const drawBeatDotsAlongRay = (
         if (SHOW_FIRST_BEAT_DOT) {
           paintFirstBeatDot(
             ctx, drawX, drawY, 0, 0, entryFlashBoost, beatPulseBoost, focusBoost,
-            TRAJECTORY_HALF_BEAT_FIRST_DOT_ALPHA_FACTOR,
+            TRAJECTORY_HALF_BEAT_FIRST_DOT_ALPHA_FACTOR, false, focused,
           );
         }
       } else {
@@ -424,7 +424,7 @@ const drawBeatDotsAlongRay = (
         if (SHOW_FIRST_BEAT_DOT) {
           const proximity01 = firstDotProximity01(px, py, retX, retY);
           const directFlash = overlap ? flashPulse : 0;
-          paintFirstBeatDot(ctx, drawX, drawY, proximity01, directFlash, entryFlashBoost, beatPulseBoost, focusBoost, 1, tutorialHighlight);
+          paintFirstBeatDot(ctx, drawX, drawY, proximity01, directFlash, entryFlashBoost, beatPulseBoost, focusBoost, 1, tutorialHighlight, focused);
         }
         if (overlap) overlapsReticule = true;
       } else {
@@ -591,7 +591,7 @@ const paintTrajectoryFromSnapshot = (
   const result = drawBeatDotsAlongRay(
     ctx.ctx, rawStartX, rawStartY, ux, uy, retX, retY,
     sMin, sMax, dotStep, dotOffset, flashPulse, entryFlashBoost, beatPulseBoost, focusBoost,
-    ctx.w, ctx.h, ctx.doubletime, ctx.tutorialHighlight,
+    ctx.w, ctx.h, ctx.doubletime, ctx.tutorialHighlight, showOnRhythmSpot,
   );
   if (SHOW_ON_RHYTHM_RETICULE && showOnRhythmSpot) {
     const aim = computeOnBeatAim(
