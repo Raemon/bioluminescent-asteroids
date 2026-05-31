@@ -8,19 +8,19 @@ import tailwindcss from "@tailwindcss/vite";
 
 loadDotenv();
 
-// Clean-URL middleware: rewrite extensionless /soundeditor → /soundeditor.html
-// so the address bar can show /soundeditor in dev/preview.
+// Clean-URL middleware: rewrite extensionless /sound → /sound.html so the
+// address bar can show /sound in dev/preview.
 const cleanUrls = () => ({
   name: "clean-urls",
   configureServer(server: { middlewares: { use: (fn: (req: { url?: string }, _res: unknown, next: () => void) => void) => void } }) {
     server.middlewares.use((req, _res, next) => {
-      if (req.url === "/soundeditor") req.url = "/soundeditor.html";
+      if (req.url === "/sound") req.url = "/sound.html";
       next();
     });
   },
   configurePreviewServer(server: { middlewares: { use: (fn: (req: { url?: string }, _res: unknown, next: () => void) => void) => void } }) {
     server.middlewares.use((req, _res, next) => {
-      if (req.url === "/soundeditor") req.url = "/soundeditor.html";
+      if (req.url === "/sound") req.url = "/sound.html";
       next();
     });
   },
@@ -180,7 +180,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        soundeditor: resolve(__dirname, "soundeditor.html"),
+        sound: resolve(__dirname, "sound.html"),
       },
     },
   },

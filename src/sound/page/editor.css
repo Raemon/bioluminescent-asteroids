@@ -1,8 +1,8 @@
-/* Sound editor — checkbox tracks that play together on a shared beat clock.
-   Each row pairs the in-game visual with a custom checkbox; checking it adds
-   that sound to the live mix. */
+/* /sound — checkbox tracks that play together on a shared beat clock. Each
+   row pairs the in-game visual with a custom checkbox; checking it adds that
+   sound to the live mix. */
 
-.soundeditor-body {
+.sound-page-body {
   background: #04060a;
   color: #d6ecff;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -12,7 +12,7 @@
   overflow-y: auto;
 }
 
-html:has(.soundeditor-body) {
+html:has(.sound-page-body) {
   height: auto;
   overflow-y: auto;
 }

@@ -53,11 +53,11 @@ export const Overlay = () => {
         tutorial
       </button>
       <a
-        id="soundeditor-link"
-        href="/soundeditor"
+        id="sound-link"
+        href="/sound"
         className={isLocalhost() ? "" : "hidden"}
       >
-        sound editor →
+        sound →
       </a>
       <div id="overlay-title-group">
         <h1 id="overlay-title">Pulsar</h1>

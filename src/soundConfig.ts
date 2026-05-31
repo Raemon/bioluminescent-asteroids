@@ -1,7 +1,6 @@
-// Shared sound-tuning config — loaded by both the game and the /soundeditor
-// page. The on-disk source of truth is /sounds/config.json; the editor PUTs
-// changes back via the dev plugin in vite.config.ts so that edits are
-// committable.
+// Shared sound-tuning config — loaded by both the game and the /sound page.
+// The on-disk source of truth is /sounds/config.json; the page PUTs changes
+// back via the dev plugin in vite.config.ts so that edits are committable.
 //
 // Each sound has a `universal` block (volume + pitch — applied at the
 // dispatcher in Sound.play) and an optional `semantic` block whose keys are

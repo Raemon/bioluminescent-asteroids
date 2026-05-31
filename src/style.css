@@ -295,7 +295,7 @@ html, body {
 
 #overlay.hidden { display: none; }
 
-#soundeditor-link,
+#sound-link,
 #tutorial-link {
   position: absolute;
   top: 22px;
@@ -314,15 +314,15 @@ html, body {
   cursor: pointer;
 }
 
-#soundeditor-link { right: 28px; }
+#sound-link { right: 28px; }
 #tutorial-link { right: 188px; }
 /* When the sound editor link is hidden (production builds), the tutorial
    button slides into the corner instead of leaving an awkward gap. */
-#overlay:not(:has(#soundeditor-link:not(.hidden))) #tutorial-link { right: 28px; }
+#overlay:not(:has(#sound-link:not(.hidden))) #tutorial-link { right: 28px; }
 
-#soundeditor-link.hidden { display: none; }
+#sound-link.hidden { display: none; }
 
-#soundeditor-link:hover,
+#sound-link:hover,
 #tutorial-link:hover {
   color: #6ad7ff;
   border-color: rgba(106, 215, 255, 0.6);

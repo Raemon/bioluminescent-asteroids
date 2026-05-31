@@ -3960,61 +3960,132 @@ export class Sound {
     }
   }
 
-  // Escalating melody chime — one note per successive combo kill. The 16-note
-  // C-major-pentatonic climb fits the C-pedal halo music: combo 2 plays note 0
-  // (C5), combo 3 → D5, … combo 17 → C7; beyond that the index wraps mod 16
-  // so a long streak loops the same ascending motif. Bell-like FM-ish voice
-  // (fundamental + octave + twelfth sine partials) sits just below sparkle so
-  // the two layer cleanly when both fire on the same on-beat kill.
-  playComboChime(comboValue: number, pos?: Pos) {
+  // Escalating melody chime — one rounded synth note per successive on-beat
+  // kill. All variants open with the same three universal anchor notes on a
+  // C pedal (C2 → G2 → D3 — root, fifth, ninth), then branch into a scale
+  // that matches the currently-playing halo music's modal colour:
+  //   r2-sb / r2-el / r4-sb → C minor / dorian-leaning (haunting Eb, Bb)
+  //   r3-el                 → C major pentatonic (open, hopeful)
+  //   no music (default)    → C dorian without 3rd (mode-neutral)
+  // r4-sb additionally drifts toward Cmaj7 colour at higher combos so the line
+  // crosses the same major/minor ambiguity its arp does.
+  // Voice: soft sine pad — slow attack, long round decay, gentle detune for
+  // analog-synth warmth. No spatial panning: a melody should sit centered in
+  // the mix instead of jumping with each kill.
+  playComboChime(comboValue: number, _pos?: Pos) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     if (comboValue < 2) return;
-    // C-major pentatonic over three octaves (C5..C7) — 16 ascending steps.
-    const SCALE_HZ = [
-      523.25,  // C5
-      587.33,  // D5
-      659.25,  // E5
-      783.99,  // G5
-      880.00,  // A5
-      1046.50, // C6
-      1174.66, // D6
-      1318.51, // E6
-      1567.98, // G6
-      1760.00, // A6
-      2093.00, // C7
-      2349.32, // D7
-      2637.02, // E7
-      3135.96, // G7
-      3520.00, // A7
-      4186.01, // C8
+    // Universal opening: root, fifth, ninth on the C pedal. Deep enough that
+    // the climb has 13 more steps to ascend before getting strained.
+    const ANCHOR_HZ: number[] = [
+      65.41,   // C2
+      98.00,   // G2
+      146.83,  // D3
     ];
-    const idx = (comboValue - 2) % SCALE_HZ.length;
-    const fundamental = SCALE_HZ[idx];
+    // Scale tail (notes 3..15) per variation. Each is 13 ascending pitches
+    // chosen so the final note of the cycle lands somewhere bright but not
+    // piercing (≤ ~880 Hz / A5) — well under the sparkle-layer centroid so
+    // the chime doesn't fight the music's high band.
+    const TAIL_MINOR_DORIAN: number[] = [
+      // Eb, F, G, Bb, C, Eb, F, G, Bb, C, Eb, F, G — C minor pentatonic + F.
+      // Haunting: the Eb tracks the minor-third pad voicing.
+      155.56, 174.61, 196.00, 233.08, 261.63,
+      311.13, 349.23, 392.00, 466.16, 523.25,
+      622.25, 698.46, 783.99,
+    ];
+    const TAIL_MAJOR: number[] = [
+      // E, G, A, C, D, E, G, A, C, D, E, G, A — C major pentatonic.
+      // Hopeful: pure C-major triadic colour.
+      164.81, 196.00, 220.00, 261.63, 293.66,
+      329.63, 392.00, 440.00, 523.25, 587.33,
+      659.25, 783.99, 880.00,
+    ];
+    const TAIL_BITTERSWEET: number[] = [
+      // E, G, Bb, C, Eb, F, G, Bb, C, D, Eb, G, Bb — smears Eb (minor3) with
+      // E natural and Bb (Cmaj7 longing). r4-sb cycles all three colours, so
+      // the chime crosses them too instead of committing to one.
+      164.81, 196.00, 233.08, 261.63, 311.13,
+      349.23, 392.00, 466.16, 523.25, 587.33,
+      622.25, 783.99, 932.33,
+    ];
+    const TAIL_NO_3RD: number[] = [
+      // F, G, A, C, D, F, G, A, C, D, F, G, A — C dorian/mixolydian crossover
+      // with the major/minor 3rd avoided entirely. Mode-safe default when no
+      // halo music is playing.
+      174.61, 196.00, 220.00, 261.63, 293.66,
+      349.23, 392.00, 440.00, 523.25, 587.33,
+      698.46, 783.99, 880.00,
+    ];
+    const tailFor = (): number[] => {
+      const v = this.haloMusic?.variation;
+      if (v === "r3-el") return TAIL_MAJOR;
+      if (v === "r4-sb") return TAIL_BITTERSWEET;
+      if (v === "r2-sb" || v === "r2-el") return TAIL_MINOR_DORIAN;
+      return TAIL_NO_3RD;
+    };
+    const scale = [...ANCHOR_HZ, ...tailFor()];
+    const idx = (comboValue - 2) % scale.length;
+    const fundamental = scale[idx];
+
     const t = this.ctx.currentTime;
-    const spatial = pos ? this.makeSpatial(pos, this.master) : null;
-    const sink: AudioNode = spatial ? spatial.panner : this.master;
-    // Partials: fundamental, octave, twelfth. Inharmonic 12th (×3.01) gives a
-    // touch of bell glint without going full FM-metallic.
-    const partials: Array<{ ratio: number; peak: number; decay: number }> = [
-      { ratio: 1,    peak: 0.34, decay: 0.55 },
-      { ratio: 2,    peak: 0.12, decay: 0.32 },
-      { ratio: 3.01, peak: 0.05, decay: 0.18 },
-    ];
-    for (const { ratio, peak, decay } of partials) {
+    // Three detuned sines per note — fundamental + ±7-cent detune pair gives
+    // a soft analog-synth chorus without any extra hardware. Lowpass tracks
+    // fundamental so high notes don't shrill; low notes keep body.
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = 0.6;
+    // Cap the cutoff so deep notes still pass; never below 1.2 kHz so the
+    // very lowest C2 has some upper-partial air, never above 3.2 kHz so the
+    // top A5 stays soft.
+    filter.frequency.value = Math.min(3200, Math.max(1200, fundamental * 3.0));
+
+    // Volume scaled to ~2/3 of the previous bell version (fundamental 0.34
+    // → 0.22 — split across three detuned voices so combined peak ~0.22).
+    const peak = 0.22;
+    const attack = 0.08;
+    const sustain = 2.0;
+    const release = 3.0;
+
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(peak, t + attack);
+    env.gain.exponentialRampToValueAtTime(peak * 0.45, t + attack + sustain);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + attack + sustain + release);
+    env.connect(filter);
+    filter.connect(this.master);
+
+    const detuneCents = [0, -7, +7];
+    const voices: OscillatorNode[] = [];
+    for (const cents of detuneCents) {
       const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
       osc.type = "sine";
-      osc.frequency.value = fundamental * ratio;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
-      osc.connect(gain);
-      gain.connect(sink);
+      osc.frequency.value = fundamental;
+      osc.detune.value = cents;
+      const vGain = this.ctx.createGain();
+      vGain.gain.value = cents === 0 ? 0.5 : 0.32;
+      osc.connect(vGain);
+      vGain.connect(env);
       osc.start(t);
-      osc.stop(t + decay + 0.02);
+      voices.push(osc);
     }
+    // Subtle octave-up shimmer at low fundamentals so the deepest notes still
+    // read as a defined pitch instead of a rumble. Fades fast so it doesn't
+    // colour the higher notes.
+    if (fundamental < 200) {
+      const shimmer = this.ctx.createOscillator();
+      shimmer.type = "sine";
+      shimmer.frequency.value = fundamental * 2;
+      const sGain = this.ctx.createGain();
+      sGain.gain.value = 0.18;
+      shimmer.connect(sGain);
+      sGain.connect(env);
+      shimmer.start(t);
+      voices.push(shimmer);
+    }
+    const stopAt = t + attack + sustain + release + 0.04;
+    for (const v of voices) v.stop(stopAt);
   }
 
   // Bright glassy "tink" — high stacked sine fifth with a fast attack. Used
