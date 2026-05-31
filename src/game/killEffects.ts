@@ -7,7 +7,7 @@ import { Vec } from "../vec";
 import { spawnGoldCrystalAt } from "../GoldCrystal";
 import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
-import { markFirstWaveTutorialComplete, setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
+import { markFirstWaveTutorialComplete, setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress, emitTutorialFireHitDone } from "./lifecycle";
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
 import { popupCombo, popupScore } from "./popups";
 import {
@@ -48,6 +48,12 @@ export const hitSoundFor = (
 // same combo-update rule for every kill type — one helper means callers don't reimplement.
 //   hitPos anchors the "RHYTHM LOST" popup at the target the off-beat shot landed on.
 export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) => {
+  // guided-tutorial fire-hit gate: the first on-beat hit after the hover gate
+  //   graduates the player to the real wave (tickTutorialSpawn picks it up).
+  if (isOnBeatHit && game.tutorialActive && game.tutorialHoverDone && !game.tutorialFireHitDone) {
+    game.tutorialFireHitDone = true;
+    emitTutorialFireHitDone();
+  }
   if (isOnBeatHit && game.beatCombo >= 1) {
     const crossedSparkleThreshold = game.beatCombo === 11;
     game.beatCombo += 1;

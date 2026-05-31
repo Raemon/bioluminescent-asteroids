@@ -6,7 +6,7 @@ import { v } from "../vec";
 import { BEAT_WINDOW } from "./rhythmConstants";
 import { syncHud, syncComboHud, syncPowerupHud } from "./hud";
 import { comboGrid } from "./rhythmGate";
-import { spawnWave, updateBgBeatIntensity } from "./waveDirector";
+import { spawnWave, updateBgBeatIntensity, spawnTutorialSmall } from "./waveDirector";
 import { newWaveEventSchedule } from "./waveEvents";
 import { stopParade } from "./killedParade";
 import { renderKilledRow } from "./killedParade";
@@ -14,7 +14,7 @@ import { emitShipDebris } from "./particleBursts";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showLeaderboard, showScoreEntry } from "./scoreEntry";
 import { HALO_MUSIC_POOL } from "./haloMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
-import { hasCalibrated } from "./beatCalibration";
+import { hasCalibrated, CALIBRATION_BEAT_INTENSITY } from "./beatCalibration";
 
 // once a player reaches 6x rhythm we flip this flag so future runs skip the
 //   wave-1 tutorial overlays. localStorage may be blocked (private mode) — in
@@ -109,6 +109,19 @@ export const emitFirstWaveHintRhythmProgress = (count: number) => {
   window.dispatchEvent(new CustomEvent("first-wave-hint:rhythmProgress", { detail: { count } }));
 };
 
+// Guided-tutorial signals (consumed by the tutorial UI). hoverProgress drives the
+//   "hold your reticule" circle (0→1 over one second); the two *Done events mark
+//   the milestones that gate the spawn machine — see gameUpdate.tickTutorialSpawn.
+export const emitTutorialHoverProgress = (value: number) => {
+  window.dispatchEvent(new CustomEvent("tutorial:hoverProgress", { detail: { value } }));
+};
+export const emitTutorialHoverDone = () => {
+  window.dispatchEvent(new CustomEvent("tutorial:hoverDone"));
+};
+export const emitTutorialFireHitDone = () => {
+  window.dispatchEvent(new CustomEvent("tutorial:fireHitDone"));
+};
+
 
 // Fisher-Yates over Array.sort — sort's randomness is biased and varies across engines.
 const shuffled = <T,>(arr: ReadonlyArray<T>): T[] => {
@@ -185,19 +198,90 @@ export const showTitle = (game: Game) => {
 //   speaker and they've no idea where the beat even is. Once they've calibrated
 //   (or skipped) the result persists, so every later run goes straight in.
 export const requestStart = (game: Game) => {
-  if (game.calibrating) return;
+  if (game.calibrating || game.calibrationIntro) return;
   if (hasCalibrated()) { startGame(game); return; }
-  openBeatCalibrator(game, true);
+  startCalibrationIntro(game);
 };
 
-// Hands the React <BeatCalibrator> the audio context it schedules clicks on.
-//   startAfter distinguishes the first-run gate (true → start the game when the
-//   player finishes) from the title-screen "calibrate" link (false → just close).
-export const openBeatCalibrator = (game: Game, startAfter: boolean) => {
-  if (game.calibrating) return;
+// Recalibration only (settings "Resync the beat"): the standalone calibrator
+//   schedules its own beat, used when there's no run to fold the pulse into.
+export const openBeatCalibrator = (game: Game) => {
+  if (game.calibrating || game.calibrationIntro) return;
   game.calibrating = true;
   game.sound.resume();
-  window.dispatchEvent(new CustomEvent("beat-calibrator:open", { detail: { sound: game.sound, startAfter } }));
+  window.dispatchEvent(new CustomEvent("beat-calibrator:open", { detail: { sound: game.sound, intro: false } }));
+};
+
+// First run: the run actually begins, but the world is held and only the beat
+//   plays while the player practices tapping in rhythm. The same beat clock
+//   carries straight into live play (updateCalibration → finishCalibrationIntro),
+//   so there's no stop-restart at the hand-off.
+export const startCalibrationIntro = (game: Game) => {
+  game.sound.resume();
+  game.sound.preloadPilotLog(6);
+  game.sound.preloadPilotLog(12);
+  for (const variation of HALO_MUSIC_POOL) game.sound.preloadHaloMusic(variation);
+  game.betaMode = false;
+  game.state = "playing";
+  game.calibrationIntro = true;
+  game.calibrating = true;
+  game.score = 0;
+  game.wave = 1;
+  game.lives = 3;
+  game.waveTransitioning = false;
+  resetRunTimers(game);
+  resetRunCollections(game);
+  game.asteroids = []; // clear the title's decorative rocks; the wave spawns at finish
+  game.bassOrder = shuffled(BASS_KINDS);
+  game.particles = new ParticleSystem();
+  game.ship = new Ship(v(game.w / 2, game.h / 2));
+  game.ship.invuln = 1e9; // untouchable through the warm-up
+  game.pulsar.setBossPlanetState("idle");
+  game.pulsar.setWaveLevel(game.wave);
+  game.sound.bgBeatIntensity = CALIBRATION_BEAT_INTENSITY;
+  game.beatIntensityRamp = null;
+  game.overlayEl.classList.add("hidden");
+  hideScoreEntry(game);
+  game.leaderboardEl.classList.add("hidden");
+  game.lastRunScore = null;
+  game.lastRunScoreId = null;
+  syncHud(game);
+  window.dispatchEvent(new CustomEvent("beat-calibrator:open", { detail: { sound: game.sound, intro: true } }));
+};
+
+// Player locked in: bring the world to life on the same beat. Spawns wave 1 +
+//   tutorial exactly like startGame, but leaves beatTime untouched (continuous
+//   pulse) and ramps the bgBeat from the loud practice level down to the wave
+//   level over a couple seconds so the loudness eases rather than drops.
+export const finishCalibrationIntro = (game: Game) => {
+  game.calibrationIntro = false;
+  game.calibrating = false;
+  game.ship.invuln = 2.0;
+  updateBgBeatIntensity(game);
+  const waveTarget = game.sound.bgBeatIntensity;
+  game.sound.bgBeatIntensity = CALIBRATION_BEAT_INTENSITY;
+  game.beatIntensityRamp = { from: CALIBRATION_BEAT_INTENSITY, to: waveTarget, t: 0, dur: 2.5 };
+  game.firstWaveOnBeatFireCount = 0;
+  game.firstWaveOnBeatHitCount = 0;
+  game.tutorialActive = false;
+  game.tutorialHoverDone = false;
+  game.tutorialFireHitDone = false;
+  emitFirstWaveHintProgress(0);
+  emitFirstWaveHintHitProgress(0);
+  emitFirstWaveHintRhythmProgress(0);
+  if (isFirstWaveTutorialComplete()) {
+    // veterans skip the guided tutorial: straight to the normal 3-asteroid wave.
+    setFirstWaveHintStage(game, 0);
+    spawnWave(game);
+  } else {
+    // rookies: the guided tutorial. One small practice rock to begin; the spawn
+    //   machine (tickTutorialSpawn) keeps a single rock alive until the player
+    //   clears the hover + fire-hit gates, then graduates to the real wave.
+    setFirstWaveHintStage(game, 0); // legacy stage machine stays dormant; the tutorial flow drives the UI
+    game.tutorialActive = true;
+    spawnTutorialSmall(game);
+  }
+  syncHud(game);
 };
 
 // per-run randomised bass intro order means the wave-2/3 picks vary between runs.
@@ -255,6 +339,10 @@ const resetRunTimers = (game: Game) => {
   game.hasLostComboEver = false;
   game.pilotLog1Unlocked = false;
   game.pilotLog3Unlocked = false;
+  game.tutorialActive = false;
+  game.tutorialHoverDone = false;
+  game.tutorialFireHitDone = false;
+  game.beatIntensityRamp = null;
 };
 
 // parade + drones from the previous title screen must be torn down before the new run runs.

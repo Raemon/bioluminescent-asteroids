@@ -383,7 +383,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 20px;
+  gap: 40px;
   padding: 48px 24px 64px;
   text-align: center;
   pointer-events: auto;
@@ -411,6 +411,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   text-transform: uppercase;
   font-weight: 300;
   margin: 0;
+  margin-left: -8px;
   padding-left: 0.55em;
 }
 
@@ -1058,6 +1059,14 @@ html:has(#sound-root), body:has(> #sound-root) {
   pointer-events: auto;
   background: radial-gradient(ellipse at 50% 50%, rgba(0, 8, 24, 0.88) 0%, rgba(0, 0, 5, 0.97) 70%);
   backdrop-filter: blur(6px);
+  transition: opacity 0.65s ease, backdrop-filter 0.65s ease;
+}
+
+/* fade the practice overlay out as the world comes alive on the same beat. */
+#beat-calibrator.fading {
+  opacity: 0;
+  backdrop-filter: blur(0);
+  pointer-events: none;
 }
 
 .cal-inner {

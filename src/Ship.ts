@@ -72,7 +72,8 @@ export class Ship {
   // per-target trajectory state — drives entry-flash phase, fade-out lingering, and pulse phase.
   private trajectoryTracks: TrajectoryTrackMap = new Map();
   // persists across frames so the 8th-note hover ring can fill in over a continuous hover.
-  private hoverDotRingState: { hoverStartBeatTime: number | null } = { hoverStartBeatTime: null };
+  //   Public so the tutorial can read hover duration for its "hold the reticule" gate.
+  hoverDotRingState: { hoverStartBeatTime: number | null } = { hoverStartBeatTime: null };
 
   constructor(pos: Vec) { this.pos = pos; }
 

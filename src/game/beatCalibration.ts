@@ -10,6 +10,12 @@ import type { Game } from "../Game";
 //   move to meet their ears.
 const BEAT_OFFSET_KEY = "pulsar.beatOffsetSec.v1";
 
+// Loud-and-clear bgBeat level for the calibration practice phase (vs the near-
+//   silent 0.08 of wave 1). The first-run intro plays the game's beat at this
+//   level, then ramps down to the wave level as play begins so it's one
+//   continuous pulse. Sound.scheduleCalibrationBeat uses the same value.
+export const CALIBRATION_BEAT_INTENSITY = 0.6;
+
 // Guard rails: a genuine offset is at most a couple hundred ms either way.
 //   Anything wider is a miss-tap or a clock glitch, so clamp before trusting it.
 const MIN_OFFSET = -0.2;

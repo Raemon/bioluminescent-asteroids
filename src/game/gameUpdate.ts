@@ -13,7 +13,7 @@ import {
 import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } from "./bassClock";
 import { tickWaveEvents } from "./waveEvents";
 import { detonateShockwave } from "./shockwave";
-import { spawnWave, isBossWave, updateBgBeatIntensity } from "./waveDirector";
+import { spawnWave, isBossWave, updateBgBeatIntensity, spawnTutorialSmall } from "./waveDirector";
 import { showWaveSummary } from "./waveSummary";
 import {
   handleCollisions,
@@ -24,7 +24,7 @@ import {
   handleCanisterShots,
   handleGoldCrystalPickups,
 } from "./collisions";
-import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress } from "./lifecycle";
+import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialHoverDone } from "./lifecycle";
 import { syncHud, syncPowerupHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
 import { updatePopups } from "./popups";
@@ -34,9 +34,13 @@ import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderbo
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
-  // A full-screen menu (settings dialog / tap calibrator) is up mid-run — freeze
-  //   the sim so the ship can't drift or die behind it. The modal owns the keys
-  //   (it stops propagation), so input is already shielded; we just hold the
+  // First-run warm-up: the run has started but the world is held — only the beat
+  //   ticks while the player practices the rhythm. The same clock carries into
+  //   live play when finishCalibrationIntro fires, so the pulse never restarts.
+  if (game.calibrationIntro) { updateCalibration(game, dt); return; }
+  // A full-screen menu (settings dialog / standalone recalibrator) is up mid-run —
+  //   freeze the sim so the ship can't drift or die behind it. The modal owns the
+  //   keys (it stops propagation), so input is already shielded; we just hold the
   //   world until both flags clear, then play resumes exactly where it left off.
   if ((game.settingsOpen || game.calibrating) && (game.state === "playing" || game.state === "dying")) {
     game.input.endFrame();
@@ -58,6 +62,17 @@ const routeStateUpdate = (game: Game, dt: number) => {
   else if (game.state === "gameover") updateGameOver(game, dt);
   else if (game.state === "dying") updateDying(game, dt);
   else updatePlaying(game, dt);
+};
+
+// First-run warm-up tick: advance the beat clock and play the bgBeat (the very
+//   same path live play uses) plus the pulsar's visual flash — nothing else. The
+//   player taps along behind the calibration overlay; finishCalibrationIntro
+//   hands straight over to updatePlaying without resetting beatTime.
+const updateCalibration = (game: Game, dt: number) => {
+  game.beatTime += dt;
+  tickAuxBeats(game);
+  game.pulsar.update(dt, game.perceivedBeatTime, BEAT_GRID);
+  game.input.endFrame();
 };
 
 // Enter/Return/Space all trigger start — covers different keyboards and the arcade reflex.
@@ -199,8 +214,47 @@ const syncHaloAmbient = (game: Game) => {
   game.sound.setHaloAmbientCometMode(game.comets.length > 0);
 };
 
+// seconds the reticule must rest on a first-beat dot to clear the hover gate.
+const TUTORIAL_HOVER_SEC = 1.0;
+
+// Guided-tutorial spawn machine. Holds exactly one small practice rock (respawns
+//   when killed) and watches the two gates: hover a first-beat dot for 1s, then
+//   land one on-beat hit (set in killEffects). Clearing both graduates to the
+//   real 3-asteroid wave. The hover gate reads the ship's hover-ring timer.
+const tickTutorialSpawn = (game: Game) => {
+  if (!game.tutorialActive) return;
+  if (game.tutorialFireHitDone) {
+    game.tutorialActive = false;
+    spawnWave(game);
+    return;
+  }
+  if (!game.tutorialHoverDone) {
+    const hoverStart = game.ship.hoverDotRingState.hoverStartBeatTime;
+    const elapsed = hoverStart === null ? 0 : game.perceivedBeatTime - hoverStart;
+    emitTutorialHoverProgress(Math.max(0, Math.min(1, elapsed / TUTORIAL_HOVER_SEC)));
+    if (elapsed >= TUTORIAL_HOVER_SEC) {
+      game.tutorialHoverDone = true;
+      emitTutorialHoverDone();
+    }
+  }
+  if (game.asteroids.length === 0) spawnTutorialSmall(game);
+};
+
+// eases bgBeat loudness from the calibration practice level down to the wave
+//   level across the calibration→play hand-off (set by finishCalibrationIntro).
+const tickBeatIntensityRamp = (game: Game, dt: number) => {
+  const r = game.beatIntensityRamp;
+  if (!r) return;
+  r.t += dt;
+  const f = Math.min(1, r.t / r.dur);
+  game.sound.bgBeatIntensity = r.from + (r.to - r.from) * f;
+  if (f >= 1) game.beatIntensityRamp = null;
+};
+
 // ordered phases (ship → bass → world → collisions) so cause-and-effect reads top-down.
 const updatePlaying = (game: Game, dt: number) => {
+  tickBeatIntensityRamp(game, dt);
+  tickTutorialSpawn(game);
   const bulletsBeforeShipUpdate = game.bullets.length;
   game.ship.setCombo(game.beatCombo);
   syncHaloAmbient(game);
@@ -219,7 +273,7 @@ const updatePlaying = (game: Game, dt: number) => {
   runCollisionPasses(game);
   evaluateClosedBeats(game);
   syncPowerupHud(game);
-  if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning) advanceWave(game);
+  if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning && !game.tutorialActive) advanceWave(game);
 };
 
 // slow-mo timer ticks in wall-clock so its lifespan isn't extended by its own effect.

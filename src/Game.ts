@@ -20,7 +20,7 @@ import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
-import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, markFirstWaveTutorialComplete, triggerOverlayStart, startGame, openBeatCalibrator } from "./game/lifecycle";
+import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, markFirstWaveTutorialComplete, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
@@ -68,6 +68,21 @@ export class Game implements HudElements {
   //   freezes the sim during play (see updateGame) so the ship can't drift or
   //   die behind a full-screen menu.
   settingsOpen = false;
+  // true during the first-run calibration warm-up: the run has started and the
+  //   beat is playing, but the world is held while the player practices the
+  //   rhythm (see updateCalibration). Distinct from `calibrating`, which also
+  //   covers the standalone recalibrator that doesn't run the game's beat.
+  calibrationIntro = false;
+  // one-shot lerp of bgBeatIntensity (calibration loudness → wave level) so the
+  //   beat eases in volume across the calibration→play hand-off instead of jumping.
+  beatIntensityRamp: { from: number; to: number; t: number; dur: number } | null = null;
+  // first-run guided tutorial (rookies only). While active the field holds a
+  //   single small practice rock (respawning when killed); the two milestones
+  //   below gate progress: hover a first-beat dot for 1s, then land one on-beat
+  //   hit — after which the real 3-asteroid wave spawns and tutorialActive clears.
+  tutorialActive = false;
+  tutorialHoverDone = false;
+  tutorialFireHitDone = false;
   lastBgBeatIndex = -1;
   nextBeatToEvaluate = 0;
   beatCombo = 0;
@@ -241,14 +256,23 @@ export class Game implements HudElements {
     // <BeatCalibrator> (React) owns the tap-to-beat UI; the game owns the audio
     //   context it schedules clicks on, plus persistence of the result. These
     //   three events are the contract between them.
-    window.addEventListener("beat-calibrator:request", () => openBeatCalibrator(this, false));
+    window.addEventListener("beat-calibrator:request", () => openBeatCalibrator(this));
     window.addEventListener("beat-calibrator:done", (e) => {
-      const { offsetSec, startAfter } = (e as CustomEvent).detail;
+      const { offsetSec } = (e as CustomEvent).detail;
       applyBeatOffset(this, offsetSec);
+      // First-run intro folds straight into live play on the same beat; standalone
+      //   recalibration just applies the offset and unfreezes whatever was behind it.
+      if (this.calibrationIntro) finishCalibrationIntro(this);
       this.calibrating = false;
-      if (startAfter) startGame(this);
     });
     window.addEventListener("beat-calibrator:cancel", () => {
+      // Bailing out of the first-run warm-up abandons the nascent run back to the title.
+      if (this.calibrationIntro) {
+        this.calibrationIntro = false;
+        this.beatIntensityRamp = null;
+        this.sound.bgBeatIntensity = 0;
+        showTitle(this);
+      }
       this.calibrating = false;
     });
     // Settings dialog's manual latency slider — applies live (and persists) so a

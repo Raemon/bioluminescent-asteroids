@@ -37,8 +37,8 @@ const HOVER_ARC_LINE_WIDTH = 1.5;
 // sits just past the crosshair tips so arcs don't crowd the aim disc.
 const HOVER_DOT_RING_RADIUS = 26;
 const HOVER_DOT_BUILDING_ALPHA = 0.45;
-// short enough to feel responsive, long enough for the eye to catch the motion.
-const HOVER_ARC_FADE_IN_SEC = 0.08;
+// long enough that the arc visibly sweeps out from 0 to full length before settling.
+const HOVER_ARC_FADE_IN_SEC = 0.22;
 // once complete, arcs breathe 1.0 → reticule's hovered base alpha so peak = "this shot lands".
 const HOVER_DOT_PULSE_PEAK_ALPHA = 1.0;
 const HOVER_DOT_PULSE_MIN_ALPHA = 0.28;
@@ -115,21 +115,27 @@ const paintHoverDotRing = (
     ? cosineEnvelope(beatTime, HOVER_DOT_PULSE_PERIOD_SEC, HOVER_DOT_PULSE_MIN_ALPHA, HOVER_DOT_PULSE_PEAK_ALPHA)
     : HOVER_DOT_BUILDING_ALPHA;
   ctx.lineWidth = HOVER_ARC_LINE_WIDTH;
-  ctx.lineCap = "butt";
+  // round caps soften the leading edge as the arc sweeps outward.
+  ctx.lineCap = "round";
   ctx.setLineDash([]);
   // first arc centred at 12 o'clock, then clockwise — reads as a natural "starting point".
   const slot = TAU / HOVER_DOT_COUNT;
   const start = -Math.PI / 2;
   for (let i = 0; i < visibleCount; i++) {
     const age = elapsed - i * slotDuration;
-    const fadeIn = Math.min(1, Math.max(0, age / HOVER_ARC_FADE_IN_SEC));
-    // smoothstep ease so the fade-in has a soft start and finish, not a linear ramp.
-    const eased = fadeIn * fadeIn * (3 - 2 * fadeIn);
-    const alpha = baseAlpha * eased;
+    const t = Math.min(1, Math.max(0, age / HOVER_ARC_FADE_IN_SEC));
+    // easeOutCubic: arc shoots out fast then settles, feels springy + joyful.
+    const sweepEase = 1 - Math.pow(1 - t, 3);
+    // alpha rises slightly ahead of the sweep so the leading edge stays bright.
+    const alphaEase = Math.sqrt(t);
+    const alpha = baseAlpha * alphaEase;
     ctx.strokeStyle = `hsla(${HOVER_DOT_HSL}, ${alpha})`;
     const mid = start + i * slot;
+    // grow from the counter-clockwise end (fixed) toward the clockwise end (advancing).
+    const ccwEnd = mid - HOVER_ARC_SWEEP / 2;
+    const cwEnd = ccwEnd + HOVER_ARC_SWEEP * sweepEase;
     ctx.beginPath();
-    ctx.arc(center.x, center.y, HOVER_DOT_RING_RADIUS, mid - HOVER_ARC_SWEEP / 2, mid + HOVER_ARC_SWEEP / 2);
+    ctx.arc(center.x, center.y, HOVER_DOT_RING_RADIUS, ccwEnd, cwEnd);
     ctx.stroke();
   }
 };

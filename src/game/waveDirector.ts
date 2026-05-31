@@ -8,6 +8,7 @@ import { BEAT_GRID } from "./rhythmConstants";
 import { spawnAwayFromShip } from "./spawnAwayFromShip";
 import { newWaveEventSchedule, maybeSchedule } from "./waveEvents";
 import { startShockwave } from "./shockwave";
+import { emitCrackParticles } from "./particleBursts";
 import { alignVelocityToRhythm, BeatClaimSet, newBeatClaimSet } from "./rhythmTrajectory";
 
 // 0.5 s (one BEAT_GRID) of bullet flight = 310 px at the ship's 620 px/s
@@ -134,6 +135,8 @@ export const isBossForeshadowWave = (wave: number): boolean => (BOSS_FORESHADOW_
 
 // ramp 0.08 → 1.0 across waves 1–30; player reaches the pulsar by wave 30 so rumble peaks.
 export const updateBgBeatIntensity = (game: Game) => {
+  // a deliberate per-wave set wins over any in-flight calibration→play loudness ramp.
+  game.beatIntensityRamp = null;
   const ramp = Math.max(0, Math.min(1, (game.wave - 1) / 29));
   game.sound.bgBeatIntensity = 0.08 + ramp * 0.92;
 };
@@ -251,6 +254,15 @@ export const spawnComet = (game: Game) => {
 //   One `claimed` set is shared across the wave's asteroid + tink rolls so
 //   each fresh rock takes a distinct beat slot — the result is a steady
 //   beat-by-beat target procession the player can combo through.
+// Tutorial: a single small practice rock, rhythm-aligned like a normal spawn so
+//   its first-beat dot is meaningful, with a little materialize puff so a respawn
+//   reads as "a fresh one drifts in".
+export const spawnTutorialSmall = (game: Game) => {
+  const a = spawnAsteroidAway(game, 240, undefined, "small", newBeatClaimSet());
+  game.asteroids.push(a);
+  emitCrackParticles(game.particles, a, true);
+};
+
 export const spawnWave = (game: Game) => {
   game.asteroids = [];
   game.canisters = [];
@@ -383,4 +395,3 @@ const rollTinkSpawn = (game: Game, claimed: BeatClaimSet) => {
     game.asteroids.push(spawnTink(game, claimed));
   }
 };
-
