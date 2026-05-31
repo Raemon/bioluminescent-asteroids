@@ -1065,24 +1065,6 @@ export class Sound {
     if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
   }
 
-  // First-user-gesture entry point. Browsers gate AudioContext creation +
-  // resume on a user gesture; main.tsx wires this to keydown/pointerdown so
-  // the heavy bake work overlaps with the title screen rather than the first
-  // few seconds of gameplay. Returns a promise that resolves when every
-  // currently-queued bake (including the bgBeat sweep in warmBakedCache) is
-  // done — startGame awaits it so the first beats land on cached buffers.
-  // Idempotent: repeated calls return the same promise.
-  private warmPromise: Promise<void> | null = null;
-  warmAudio(): Promise<void> {
-    if (this.warmPromise) return this.warmPromise;
-    this.resume();
-    // ensureToneEngine internally calls warmBakedCache; we capture bakeChain
-    // *after* that so the returned promise covers the full warm queue. Wrap
-    // in a fresh promise that strips bakeChain's any-typed result.
-    this.warmPromise = this.bakeChain.then(() => undefined);
-    return this.warmPromise;
-  }
-
   setEnabled(on: boolean) {
     this.enabled = on;
     if (!on && this.thrustNode) this.stopThrust();
