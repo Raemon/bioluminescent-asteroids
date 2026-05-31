@@ -1,4 +1,4 @@
-import { Vec, add, mul } from "./vec";
+import { Vec } from "./vec";
 import { drawGlow } from "./glow";
 
 export type Particle = {
@@ -19,16 +19,25 @@ export class ParticleSystem {
     this.particles.push(p);
   }
 
+  // In-place compaction + mutating integration: no per-frame array alloc, no
+  // per-particle Vec alloc. With hundreds of particles flying every frame this
+  // was a meaningful GC source.
   update(dt: number) {
-    const aliveParticles: Particle[] = [];
-    for (const p of this.particles) {
+    const arr = this.particles;
+    let write = 0;
+    for (let read = 0; read < arr.length; read++) {
+      const p = arr[read];
       p.life -= dt;
       if (p.life <= 0) continue;
-      p.pos = add(p.pos, mul(p.vel, dt));
-      p.vel = mul(p.vel, 1 - p.drag * dt);
-      aliveParticles.push(p);
+      p.pos.x += p.vel.x * dt;
+      p.pos.y += p.vel.y * dt;
+      const drag = 1 - p.drag * dt;
+      p.vel.x *= drag;
+      p.vel.y *= drag;
+      if (write !== read) arr[write] = p;
+      write++;
     }
-    this.particles = aliveParticles;
+    arr.length = write;
   }
 
   render(ctx: CanvasRenderingContext2D) {

@@ -83,10 +83,10 @@ export const targetsForReticule = (game: Game) => [
 ];
 
 // ship + reticule are the foreground; popups (combo/pickup/debug) sit above everything else.
-const paintForeground = (game: Game) => {
+const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => {
   const { ctx } = game;
   const doubletime = comboGrid(game) < BEAT_GRID;
-  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targetsForReticule(game), game.beatTime, doubletime);
+  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.beatTime, doubletime);
   renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.beatTime, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
   renderPopups(ctx, game.popups);
@@ -102,12 +102,13 @@ export const renderGame = (game: Game) => {
   paintBackgroundLayers(game);
   // pick the same focused target the reticule will draw the on-rhythm spot on, so the
   // brightness boost on the sprite and the reticule overlay agree on which target is "the one".
+  // One target gather per frame, reused by the focus pick and the reticule pass.
   const targets = targetsForReticule(game);
   const focusedTarget = pickCenterMostTargetForFocus(
     game.ship.pos, computeConeFrame(game.ship), game.w, game.h, targets,
   );
   paintEntityLayers(game, focusedTarget);
-  paintForeground(game);
+  paintForeground(game, targets);
   // bass-drop white flash has to sit above every other layer to actually wash the screen.
   game.pulsar.renderShockwaveOverlay(ctx);
   ctx.restore();

@@ -1,4 +1,4 @@
-import { Vec, v, add, mul, sub, len, rand, pick, TAU } from "./vec";
+import { Vec, v, mul, sub, len, rand, pick, TAU, addScaledMut } from "./vec";
 
 // Five powerup kinds, each with its own glyph so the player can read the
 // canister at a glance from across the screen. Keeping the list short
@@ -77,9 +77,8 @@ export class Canister {
     this.rotY += this.rotSpeedY * dt;
     this.rotZ += this.rotSpeedZ * dt;
     if (this.warpTimer === null) {
-      const step = mul(this.vel, dt);
-      this.pos = add(this.pos, step);
-      this.traveled += len(step);
+      addScaledMut(this.pos, this.vel, dt);
+      this.traveled += Math.hypot(this.vel.x, this.vel.y) * dt;
       if (this.traveled >= this.pathLength) this.warpTimer = 0;
     } else {
       this.warpTimer += dt;

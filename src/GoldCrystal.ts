@@ -1,4 +1,4 @@
-import { Vec, v, add, mul, rand, pick, TAU } from "./vec";
+import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut } from "./vec";
 import { Canister, POWERUP_KINDS } from "./Canister";
 
 // A standalone collectible left behind by a "goldCrystal" asteroid's death.
@@ -62,9 +62,9 @@ export class GoldCrystal {
     this.rotZ += this.rotSpeedZ * dt;
     // Gentle drift; the gem isn't supposed to chase or flee, it just floats
     // where the rock died.
-    this.pos = add(this.pos, mul(this.vel, dt));
+    addScaledMut(this.pos, this.vel, dt);
     // Slow the drift over time so it eventually settles near its origin.
-    this.vel = mul(this.vel, Math.max(0, 1 - dt * 0.6));
+    scaleMut(this.vel, Math.max(0, 1 - dt * 0.6));
     if (this.age >= LIFETIME) this.alive = false;
   }
 

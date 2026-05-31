@@ -1,4 +1,4 @@
-import { Vec, v, add, mul, fromAngle, wrap, rand, TAU } from "./vec";
+import { Vec, v, add, mul, fromAngle, rand, TAU, wrapMut } from "./vec";
 import { AlienBullet } from "./AlienBullet";
 import { Trail } from "./Trail";
 
@@ -279,10 +279,13 @@ export class Alien {
     // saucer-like sway without making it impossible to predict where it's
     // going to be in a couple of seconds.
     const heading = Math.atan2(this.vel.y, this.vel.x);
-    const perp = fromAngle(heading + Math.PI / 2, 1);
+    // perp = unit vector perpendicular to heading (rotated +π/2): (-sin, cos).
+    const perpX = -Math.sin(heading);
+    const perpY =  Math.cos(heading);
     const swayMag = Math.sin(this.weavePhase) * 18;
-    const drift = mul(perp, swayMag);
-    this.pos = wrap(add(add(this.pos, mul(this.vel, dt)), mul(drift, dt)), w, h);
+    this.pos.x += (this.vel.x + perpX * swayMag) * dt;
+    this.pos.y += (this.vel.y + perpY * swayMag) * dt;
+    wrapMut(this.pos, w, h);
     // Nose follows the direction of travel, with a tiny weave-driven sway so
     // the silhouette breathes instead of locking rigidly to the velocity.
     this.rotation = heading + Math.sin(this.weavePhase) * 0.12;

@@ -1,4 +1,4 @@
-import { Vec, add, mul, fromAngle, rand, TAU } from "./vec";
+import { Vec, add, fromAngle, rand, TAU, addScaledMut, scaleMut } from "./vec";
 import { Asteroid } from "./Asteroid";
 
 export class Shard {
@@ -23,8 +23,8 @@ export class Shard {
   }
 
   update(dt: number) {
-    this.pos = add(this.pos, mul(this.vel, dt));
-    this.vel = mul(this.vel, 1 - 0.5 * dt);
+    addScaledMut(this.pos, this.vel, dt);
+    scaleMut(this.vel, 1 - 0.5 * dt);
     this.rotation += this.rotSpeed * dt;
     this.life -= dt;
   }

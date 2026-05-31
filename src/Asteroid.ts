@@ -1,4 +1,4 @@
-import { Vec, v, add, mul, fromAngle, wrap, rand, TAU } from "./vec";
+import { Vec, v, fromAngle, rand, TAU, addScaledMut, wrapMut } from "./vec";
 import { Trail } from "./Trail";
 import { SoundwaveRadiator } from "./SoundwaveRadiator";
 
@@ -1020,7 +1020,8 @@ export class Asteroid {
   update(dt: number, w: number, h: number) {
     this.rotation += this.rotSpeed * dt;
     this.membranePhase += dt * 0.8;
-    this.pos = wrap(add(this.pos, mul(this.vel, dt)), w, h);
+    addScaledMut(this.pos, this.vel, dt);
+    wrapMut(this.pos, w, h);
     // Stamp/age the drone trail (gen-0 large) or radiator (fragments). Done
     // after the wrap so a screen-wrap teleport is caught by Trail's own
     // jump detector and the trail restarts cleanly on the new side. The

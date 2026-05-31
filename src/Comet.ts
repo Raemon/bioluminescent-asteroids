@@ -1,4 +1,4 @@
-import { Vec, v, add, mul, fromAngle, rand, TAU } from "./vec";
+import { Vec, v, fromAngle, rand, TAU, addScaledMut } from "./vec";
 import { Trail } from "./Trail";
 
 // Ethereal background event that wanders across the field over ~25-40 seconds
@@ -76,7 +76,7 @@ export class Comet {
 
   update(dt: number, w: number, h: number) {
     this.age += dt;
-    this.pos = add(this.pos, mul(this.vel, dt));
+    addScaledMut(this.pos, this.vel, dt);
     this.glowTrail.update(dt, this.pos.x, this.pos.y);
 
     // Sample the current position every frame so the trail is dense enough

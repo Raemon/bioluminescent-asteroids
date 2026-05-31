@@ -1,5 +1,5 @@
 import type { Ship } from "../Ship";
-import { add, mul, fromAngle, wrap } from "../vec";
+import { addScaledMut, scaleMut, wrapMut } from "../vec";
 import { Input } from "../Input";
 import { ParticleSystem } from "../Particle";
 import { Bullet } from "../Bullet";
@@ -36,7 +36,9 @@ const updateForwardThrust = (ship: Ship, input: Input, particles: ParticleSystem
   const wasThrusting = ship.thrustOn;
   ship.thrustOn = input.down("arrowup") || input.down("w");
   if (ship.thrustOn) {
-    ship.vel = add(ship.vel, mul(fromAngle(ship.heading, ship.thrustPower), dt));
+    const a = ship.thrustPower * dt;
+    ship.vel.x += Math.cos(ship.heading) * a;
+    ship.vel.y += Math.sin(ship.heading) * a;
     emitThrust(ship, particles, t);
     ship.lastThrustActiveAt = t / 1000;
     if (!wasThrusting) sound.play("thrust");
@@ -48,7 +50,10 @@ const updateReverseThrust = (ship: Ship, input: Input, particles: ParticleSystem
   const wasReversing = ship.reverseThrustOn;
   ship.reverseThrustOn = input.down("arrowdown") || input.down("s");
   if (ship.reverseThrustOn) {
-    ship.vel = add(ship.vel, mul(fromAngle(ship.heading + Math.PI, ship.thrustPower), dt));
+    const a = ship.thrustPower * dt;
+    const h = ship.heading + Math.PI;
+    ship.vel.x += Math.cos(h) * a;
+    ship.vel.y += Math.sin(h) * a;
     emitReverseThrust(ship, particles, t);
     ship.lastThrustActiveAt = t / 1000;
     if (!wasReversing) sound.play("reverseThrust");
@@ -63,12 +68,18 @@ const updateSideThrust = (ship: Ship, input: Input, particles: ParticleSystem, s
   ship.portThrustOn = enabled && input.down("z");
   ship.starboardThrustOn = enabled && input.down("x");
   if (ship.portThrustOn) {
-    ship.vel = add(ship.vel, mul(fromAngle(ship.heading - Math.PI / 2, ship.thrustPower), dt));
+    const a = ship.thrustPower * dt;
+    const h = ship.heading - Math.PI / 2;
+    ship.vel.x += Math.cos(h) * a;
+    ship.vel.y += Math.sin(h) * a;
     emitSideThrust(ship, particles, t, "port");
     ship.lastThrustActiveAt = t / 1000;
   }
   if (ship.starboardThrustOn) {
-    ship.vel = add(ship.vel, mul(fromAngle(ship.heading + Math.PI / 2, ship.thrustPower), dt));
+    const a = ship.thrustPower * dt;
+    const h = ship.heading + Math.PI / 2;
+    ship.vel.x += Math.cos(h) * a;
+    ship.vel.y += Math.sin(h) * a;
     emitSideThrust(ship, particles, t, "starboard");
     ship.lastThrustActiveAt = t / 1000;
   }
@@ -97,10 +108,11 @@ const easeComboHaloIntensity = (ship: Ship, dt: number) => {
 
 // velocity cap + screen wrap keep the ship in bounds; drag is 0 so Newtonian drift dominates.
 const integrateMotion = (ship: Ship, dt: number, w: number, h: number) => {
-  ship.vel = mul(ship.vel, 1 - ship.drag * dt);
+  scaleMut(ship.vel, 1 - ship.drag * dt);
   const speed = Math.hypot(ship.vel.x, ship.vel.y);
-  if (speed > ship.maxSpeed) ship.vel = mul(ship.vel, ship.maxSpeed / speed);
-  ship.pos = wrap(add(ship.pos, mul(ship.vel, dt)), w, h);
+  if (speed > ship.maxSpeed) scaleMut(ship.vel, ship.maxSpeed / speed);
+  addScaledMut(ship.pos, ship.vel, dt);
+  wrapMut(ship.pos, w, h);
 };
 
 // one frame's worth of player control, audio, and motion — keeps Ship.update one-line readable.

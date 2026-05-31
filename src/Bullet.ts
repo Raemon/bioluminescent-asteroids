@@ -1,4 +1,4 @@
-import { Vec, add, mul, wrap, TAU } from "./vec";
+import { Vec, addScaledMut, wrapMut, TAU } from "./vec";
 import { drawGlow } from "./glow";
 
 // Damage dealt by a non-rhythm bullet — enough to one-shot a small asteroid
@@ -77,7 +77,8 @@ export class Bullet {
     this.life -= dt;
     this.trail.push({ ...this.pos });
     if (this.trail.length > 8) this.trail.shift();
-    this.pos = wrap(add(this.pos, mul(this.vel, dt)), w, h);
+    addScaledMut(this.pos, this.vel, dt);
+    wrapMut(this.pos, w, h);
   }
 
   render(ctx: CanvasRenderingContext2D) {

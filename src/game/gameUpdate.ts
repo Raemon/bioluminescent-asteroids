@@ -2,7 +2,6 @@ import type { Game } from "../Game";
 import { dist } from "../vec";
 import { Asteroid } from "../Asteroid";
 import { Alien, ALIEN_FIRE_PATTERN_BEATS } from "../Alien";
-import { Bullet } from "../Bullet";
 import { BEAT_GRID } from "./rhythmConstants";
 import {
   isInBeatWindow,
@@ -220,24 +219,27 @@ const tickSlowMoTimer = (game: Game, dt: number): number => {
 
 // ≤1 fire event per frame, but prong emits 2 bullets — they all share one beat flag.
 const classifyNewBullets = (game: Game, firstNewIndex: number) => {
-  const newBullets = game.bullets.slice(firstNewIndex);
   const firedOnBeat = isInBeatWindow(game, game.beatTime);
-  for (const newBullet of newBullets) newBullet.firedAtBeatTime = game.beatTime;
-  logBeatEvent(game, "FIRE", game.beatTime, `bullets=${newBullets.length}`);
+  const count = game.bullets.length - firstNewIndex;
+  for (let i = firstNewIndex; i < game.bullets.length; i++) {
+    game.bullets[i].firedAtBeatTime = game.beatTime;
+  }
+  logBeatEvent(game, "FIRE", game.beatTime, `bullets=${count}`);
   spawnBeatDebugPopup(game, game.ship.pos, game.beatTime, "FIRE");
-  if (firedOnBeat) handleOnBeatFire(game, newBullets);
+  if (firedOnBeat) handleOnBeatFire(game, firstNewIndex);
   else handleOffBeatFire(game);
   // deeper fireBeat pluck reinforces "you nailed the beat"; ship no longer plays its own.
   game.sound.play(firedOnBeat ? "fireBeat" : "fire");
 };
 
 // 0→1 priming step; above 1 only on-beat hits + beat closures bump combo, not consecutive fires.
-const handleOnBeatFire = (game: Game, newBullets: Bullet[]) => {
+const handleOnBeatFire = (game: Game, firstNewIndex: number) => {
   // boosted bullets fly while the yellow halo (combo ≥ 4, tier 2) is up.
   const boosted = game.ship.comboHaloTier >= 2;
   // combo ≥ 8 promotes to the white "super-boosted" tier — bigger hitbox.
   const superBoosted = game.beatCombo >= 8;
-  for (const newBullet of newBullets) {
+  for (let i = firstNewIndex; i < game.bullets.length; i++) {
+    const newBullet = game.bullets[i];
     newBullet.onBeat = true;
     newBullet.boosted = boosted;
     newBullet.superBoosted = superBoosted;
@@ -271,6 +273,21 @@ const tickWavePhase = (game: Game, dt: number, _musicDt: number) => {
   if (game.pulsar.shockJustFired) detonateShockwave(game);
 };
 
+// Two-pointer in-place compaction: keeps surviving entries in their original
+// slots, truncates the array. Avoids the per-frame array allocation that
+// .filter() does even when nothing died.
+const compactInPlace = <T>(arr: T[], alive: (item: T) => boolean): void => {
+  let write = 0;
+  for (let read = 0; read < arr.length; read++) {
+    const item = arr[read];
+    if (alive(item)) {
+      if (write !== read) arr[write] = item;
+      write++;
+    }
+  }
+  arr.length = write;
+};
+
 // slow-mo slows the whole world via musicDt — asteroids, comets, aliens, bullets, shards, canisters.
 //   Ship stays on wall-clock dt (updated earlier) so player reactions feel responsive.
 const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
@@ -280,19 +297,19 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   for (const al of game.aliens) al.update(musicDt, game.w, game.h);
   tickAlienFire(game);
   for (const b of game.bullets) b.update(musicDt, game.w, game.h);
-  game.bullets = game.bullets.filter((b) => b.life > 0);
+  compactInPlace(game.bullets, (b) => b.life > 0);
   for (const ab of game.alienBullets) ab.update(musicDt, game.w, game.h);
-  game.alienBullets = game.alienBullets.filter((ab) => ab.life > 0);
+  compactInPlace(game.alienBullets, (ab) => ab.life > 0);
   for (const s of game.shards) s.update(musicDt);
-  game.shards = game.shards.filter((s) => s.life > 0);
+  compactInPlace(game.shards, (s) => s.life > 0);
   for (const c of game.canisters) {
     const wasWarping = c.warping;
     c.update(musicDt, game.w, game.h);
     if (!wasWarping && c.warping) game.sound.play("canisterAppear", 1, c.pos);
   }
-  game.canisters = game.canisters.filter((c) => c.alive);
+  compactInPlace(game.canisters, (c) => c.alive);
   for (const g of game.goldCrystals) g.update(musicDt, game.w, game.h);
-  game.goldCrystals = game.goldCrystals.filter((g) => g.alive);
+  compactInPlace(game.goldCrystals, (g) => g.alive);
   updatePositionalAudio(game);
 };
 
