@@ -75,6 +75,24 @@ const TRAJECTORY_ON_RHYTHM_SPOT_ALPHA_UNREACHABLE = 0.22;
 const TRAJECTORY_LOCK_CROSSHAIR_GAP = 3;
 const TRAJECTORY_LOCK_CROSSHAIR_LENGTH = 7;
 const TRAJECTORY_LOCK_CROSSHAIR_DASH: number[] = [2, 2];
+// first-beat dot crosshair — same sight visual as the lock crosshair, sized to clear the halo
+// ring so the ticks read as separate marks rather than overlapping the dashed halo.
+const TRAJECTORY_FIRST_BEAT_CROSSHAIR_INNER = TRAJECTORY_FIRST_BEAT_HALO_RADIUS + 2;
+const TRAJECTORY_FIRST_BEAT_CROSSHAIR_LENGTH = 5;
+const TRAJECTORY_FIRST_BEAT_CROSSHAIR_DASH: number[] = [2, 2];
+const TRAJECTORY_FIRST_BEAT_CROSSHAIR_LINE_WIDTH = 0.75;
+// the centermost-target's first-beat dot upgrades its halo + crosshair to bright white at full
+// alpha so the player can instantly see which target their on-beat shot is locked to.
+// Geometry matches the ship's aim disc (outer ring + crosshair from aimDisc.ts) so the focused
+// lock and the player's reticule read as the same kind of mark — kept in sync by inlining the
+// same numeric constants here rather than cross-importing.
+const FOCUSED_FIRST_DOT_HSL = "0, 0%, 100%";
+const FOCUSED_FIRST_DOT_RING_RADIUS = BULLET_HIT_RADIUS_ON_BEAT;
+const FOCUSED_FIRST_DOT_RING_LINE_WIDTH = 1;
+const FOCUSED_FIRST_DOT_RING_DASH: number[] = [4, 4];
+const FOCUSED_FIRST_DOT_CROSSHAIR_GAP = 3;
+const FOCUSED_FIRST_DOT_CROSSHAIR_LENGTH = 6;
+const FOCUSED_FIRST_DOT_CROSSHAIR_DASH: number[] = [2, 2];
 
 // every reticule element brightens on the beat and decays across it, so the player feels the
 // rhythm gate visually. Multiplier is PEAK at beat onset and decays to 1 by the next beat.
@@ -214,7 +232,7 @@ const paintOnRhythmReticule = (
 const paintFirstBeatDot = (
   ctx: CanvasRenderingContext2D, px: number, py: number,
   proximity01: number, directFlash: number, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
-  dimFactor: number = 1, tutorialHighlight: boolean = false,
+  dimFactor: number = 1, tutorialHighlight: boolean = false, focused: boolean = false,
 ) => {
   const proximityAlpha = TRAJECTORY_FIRST_BEAT_DOT_ALPHA
     + (TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA - TRAJECTORY_FIRST_BEAT_DOT_ALPHA) * proximity01;
@@ -237,8 +255,30 @@ const paintFirstBeatDot = (
   ctx.beginPath();
   ctx.arc(px, py, TRAJECTORY_FIRST_BEAT_DOT_RADIUS, 0, TAU);
   ctx.fill();
-  // faint dashed halo around the dot — uses the same alpha-modulation chain (proximity,
-  // direct flash, entry flash, beat pulse, focus boost) so it tracks the dot's brightness.
+  // for the focused (centermost) target, swap the dim halo + crosshair for a bright-white
+  // outer ring + crosshair sized to match the ship's aim disc, so the locked-on target reads
+  // as a mirror of the player's reticule. Non-focused dots keep the faint dashed halo cue.
+  if (focused) {
+    ctx.strokeStyle = `hsla(${FOCUSED_FIRST_DOT_HSL}, 1)`;
+    ctx.lineWidth = FOCUSED_FIRST_DOT_RING_LINE_WIDTH;
+    ctx.setLineDash(FOCUSED_FIRST_DOT_RING_DASH);
+    ctx.beginPath();
+    ctx.arc(px, py, FOCUSED_FIRST_DOT_RING_RADIUS, 0, TAU);
+    ctx.stroke();
+    ctx.setLineDash(FOCUSED_FIRST_DOT_CROSSHAIR_DASH);
+    const fInner = FOCUSED_FIRST_DOT_RING_RADIUS + FOCUSED_FIRST_DOT_CROSSHAIR_GAP;
+    const fOuter = fInner + FOCUSED_FIRST_DOT_CROSSHAIR_LENGTH;
+    ctx.beginPath();
+    ctx.moveTo(px - fOuter, py); ctx.lineTo(px - fInner, py);
+    ctx.moveTo(px + fInner, py); ctx.lineTo(px + fOuter, py);
+    ctx.moveTo(px, py - fOuter); ctx.lineTo(px, py - fInner);
+    ctx.moveTo(px, py + fInner); ctx.lineTo(px, py + fOuter);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.shadowBlur = prevShadowBlur;
+    ctx.shadowColor = prevShadowColor;
+    return;
+  }
   const rawHaloAlpha = TRAJECTORY_FIRST_BEAT_HALO_ALPHA
     * (1 + directFlash) * entryFlashBoost * beatPulseBoost * focusBoost * dimFactor;
   const haloAlpha = Math.min(1, tutorialHighlight ? Math.max(rawHaloAlpha, 0.6) : rawHaloAlpha);
@@ -247,6 +287,16 @@ const paintFirstBeatDot = (
   ctx.setLineDash(TRAJECTORY_FIRST_BEAT_HALO_DASH);
   ctx.beginPath();
   ctx.arc(px, py, TRAJECTORY_FIRST_BEAT_HALO_RADIUS, 0, TAU);
+  ctx.stroke();
+  ctx.lineWidth = TRAJECTORY_FIRST_BEAT_CROSSHAIR_LINE_WIDTH;
+  ctx.setLineDash(TRAJECTORY_FIRST_BEAT_CROSSHAIR_DASH);
+  const inner = TRAJECTORY_FIRST_BEAT_CROSSHAIR_INNER;
+  const outer = inner + TRAJECTORY_FIRST_BEAT_CROSSHAIR_LENGTH;
+  ctx.beginPath();
+  ctx.moveTo(px - outer, py); ctx.lineTo(px - inner, py);
+  ctx.moveTo(px + inner, py); ctx.lineTo(px + outer, py);
+  ctx.moveTo(px, py - outer); ctx.lineTo(px, py - inner);
+  ctx.moveTo(px, py + inner); ctx.lineTo(px, py + outer);
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.shadowBlur = prevShadowBlur;
@@ -616,8 +666,11 @@ const previewLiveTarget = (
 
 // drain expired fade entries and render fading-out trajectories for targets that left the cone or
 // were destroyed while in it — keeps a 2s "ghost" of the last-seen path that decays to invisible.
+// If the target is still alive, refresh the snapshot from its live pos/vel each frame so the ghost
+// animates with the target instead of freezing where the radar last saw it.
 const renderFadingTrajectories = (
   ctx: TrajectoryContext, rendered: Set<object>, flashPulse: number,
+  liveByKey: Map<object, ReticuleTarget>,
 ) => {
   for (const [key, track] of ctx.trajectoryTracks) {
     if (rendered.has(key)) continue;
@@ -625,6 +678,13 @@ const renderFadingTrajectories = (
     if (fade <= 0) {
       ctx.trajectoryTracks.delete(key);
       continue;
+    }
+    const live = liveByKey.get(key);
+    if (live) {
+      track.snapshot = {
+        posX: live.pos.x, posY: live.pos.y, velX: live.vel.x, velY: live.vel.y,
+        radius: live.radius ?? track.snapshot.radius,
+      };
     }
     paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, fade, flashPulse, false, false);
   }
@@ -672,10 +732,12 @@ export const paintTrajectoryPreviews = (
   const rendered = new Set<object>();
   const spotTarget = pickCenterMostTarget(ctx, targets);
   let overlapsReticule = false;
+  const liveByKey = new Map<object, ReticuleTarget>();
+  for (const t of targets) liveByKey.set(t as unknown as object, t);
   for (const t of targets) {
     if (previewLiveTarget(ctx, t, flashPulse, rendered, t === spotTarget)) overlapsReticule = true;
   }
-  renderFadingTrajectories(ctx, rendered, flashPulse);
+  renderFadingTrajectories(ctx, rendered, flashPulse, liveByKey);
   ctx.ctx.restore();
   return overlapsReticule;
 };

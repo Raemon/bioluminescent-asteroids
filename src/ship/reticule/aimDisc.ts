@@ -6,6 +6,11 @@ import { toroidalDelta } from "./coneGeometry";
 const RETICULE_LINE_DASH: [number, number] = [4, 4];
 const RETICULE_HITBOX_ALPHA = 0.28;
 const RETICULE_COOLDOWN_DIM = 0.3;
+// dashed crosshair sticking out past the outer disc — reads as "this is a targeting sight",
+// matching the lock-circle crosshair used on the on-rhythm aim spot.
+const RETICULE_CROSSHAIR_GAP = 3;
+const RETICULE_CROSSHAIR_LENGTH = 6;
+const RETICULE_CROSSHAIR_DASH: [number, number] = [2, 2];
 // brightness boost when the disc covers a target tells the player "this shot will land".
 const RETICULE_OVERLAP_BRIGHTNESS = 3;
 // when the disc is directly over an object (vs. just near a lock dot), add a hard flicker so
@@ -89,6 +94,15 @@ export const paintAimDiscs = (
   ctx.stroke();
   ctx.beginPath();
   ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_ON_BEAT, 0, TAU);
+  ctx.stroke();
+  ctx.setLineDash(RETICULE_CROSSHAIR_DASH);
+  const cInner = BULLET_HIT_RADIUS_ON_BEAT + RETICULE_CROSSHAIR_GAP;
+  const cOuter = cInner + RETICULE_CROSSHAIR_LENGTH;
+  ctx.beginPath();
+  ctx.moveTo(reticulePos.x - cOuter, reticulePos.y); ctx.lineTo(reticulePos.x - cInner, reticulePos.y);
+  ctx.moveTo(reticulePos.x + cInner, reticulePos.y); ctx.lineTo(reticulePos.x + cOuter, reticulePos.y);
+  ctx.moveTo(reticulePos.x, reticulePos.y - cOuter); ctx.lineTo(reticulePos.x, reticulePos.y - cInner);
+  ctx.moveTo(reticulePos.x, reticulePos.y + cInner); ctx.lineTo(reticulePos.x, reticulePos.y + cOuter);
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.shadowBlur = prevShadowBlur;

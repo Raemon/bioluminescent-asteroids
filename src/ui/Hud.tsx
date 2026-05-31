@@ -99,8 +99,7 @@ export const Hud = () => (
         aria-label="Volume"
       />
     </div>
-    <div id="debug-overlay" className="hidden">
-      <div id="debug-fps">FPS --</div>
-    </div>
+    <div id="debug-overlay" className="hidden"></div>
+    <div id="debug-fps">FPS --</div>
   </div>
 );

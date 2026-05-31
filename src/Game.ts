@@ -129,7 +129,7 @@ export class Game implements HudElements {
   leaderboardListEl: HTMLOListElement;
   debugOverlayEl: HTMLElement;
   debugFpsEl: HTMLElement;
-  // backtick (`) toggles. Starts on so the FPS readout is visible by default.
+  // backtick (`) toggles #debug-overlay. FPS readout is always visible (bottom-right).
   debugMode = false;
   // prevents a double-submit if the player mashes Enter while the POST is in flight.
   scoreSubmitState: "idle" | "submitting" | "submitted" = "idle";

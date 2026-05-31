@@ -180,6 +180,18 @@ html:has(#sound-root), body:has(> #sound-root) {
   display: none;
 }
 
+#debug-fps {
+  position: fixed;
+  left: 10px;
+  bottom: 8px;
+  pointer-events: none;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.04em;
+  z-index: 5;
+}
+
 #powerups {
   position: absolute;
   left: 50%;

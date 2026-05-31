@@ -48,10 +48,8 @@ const tick = (now: number) => {
   fpsFrames++;
   const windowElapsed = now - fpsWindowStart;
   if (windowElapsed >= FPS_WINDOW_MS) {
-    if (game.debugMode) {
-      const fps = (fpsFrames * 1000) / windowElapsed;
-      game.debugFpsEl.textContent = `FPS ${fps.toFixed(0)}`;
-    }
+    const fps = (fpsFrames * 1000) / windowElapsed;
+    game.debugFpsEl.textContent = `FPS ${fps.toFixed(0)}`;
     fpsWindowStart = now;
     fpsFrames = 0;
   }
