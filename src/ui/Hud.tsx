@@ -89,7 +89,15 @@ export const Hud = () => (
       </Powerup>
     </div>
     <div id="hud-right">
-      <button id="mute" type="button" title="Mute (M)" aria-label="Mute">♪</button>
+      <input
+        id="volume"
+        type="range"
+        min="0"
+        max="200"
+        defaultValue="200"
+        title="Volume (M to toggle)"
+        aria-label="Volume"
+      />
     </div>
     <div id="debug-overlay" className="hidden">
       <div id="debug-fps">FPS --</div>

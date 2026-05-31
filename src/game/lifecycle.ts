@@ -225,9 +225,19 @@ export const killShip = (game: Game) => {
   game.ship.alive = false;
 };
 
-// label + class must follow sound.enabled so the player can see the mute outcome.
+// Slider position is the source of truth; volumeEl.max = 200 corresponds to
+// volume multiplier 2.0. lastNonZeroVolume lets the M key restore the prior
+// level after a mute toggle instead of jumping back to max.
+let lastNonZeroVolume = 2;
+
+export const applyVolume = (game: Game, multiplier: number) => {
+  game.sound.setVolume(multiplier);
+  if (multiplier > 0) lastNonZeroVolume = multiplier;
+  game.volumeEl.value = String(Math.round(multiplier * 100));
+  game.volumeEl.classList.toggle("muted", multiplier === 0);
+};
+
 export const toggleMute = (game: Game) => {
-  game.sound.setEnabled(!game.sound.enabled);
-  game.muteEl.classList.toggle("muted", !game.sound.enabled);
-  game.muteEl.textContent = game.sound.enabled ? "♪" : "✕";
+  const next = game.sound.volume > 0 ? 0 : lastNonZeroVolume;
+  applyVolume(game, next);
 };

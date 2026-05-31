@@ -271,26 +271,48 @@ html:has(#sound-root), body:has(> #sound-root) {
   z-index: 0;
 }
 
-#mute {
-  background: rgba(106, 215, 255, 0.06);
-  border: 1px solid rgba(106, 215, 255, 0.25);
-  color: #6ad7ff;
-  font-family: inherit;
-  font-size: 14px;
-  width: 30px;
-  height: 26px;
+#volume {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 90px;
+  height: 4px;
+  background: rgba(106, 215, 255, 0.1);
+  border: 1px solid rgba(106, 215, 255, 0.15);
   border-radius: 4px;
   cursor: pointer;
   pointer-events: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-shadow: 0 0 8px rgba(106, 215, 255, 0.5);
-  transition: opacity 0.15s, color 0.15s;
+  outline: none;
+  opacity: 0.35;
+  transition: opacity 0.15s;
 }
 
-#mute:hover { color: #d8f3ff; }
-#mute.muted { color: rgba(106, 215, 255, 0.35); text-shadow: none; }
+#volume:hover,
+#volume.near { opacity: 1; }
+
+/* Speaker icon as the thumb — inline SVG so it tints with the cyan theme
+   without needing an extra asset. Identical rules for -webkit- and -moz-
+   because the two engines can't share a selector. */
+#volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236ad7ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 9 L4 15 L8 15 L13 19 L13 5 L8 9 Z'/><path d='M16 9 Q19 12 16 15'/><path d='M18.5 6.5 Q23 12 18.5 17.5'/></svg>") center / contain no-repeat;
+  border: none;
+  cursor: pointer;
+  filter: drop-shadow(0 0 4px rgba(106, 215, 255, 0.8));
+}
+
+#volume::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236ad7ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 9 L4 15 L8 15 L13 19 L13 5 L8 9 Z'/><path d='M16 9 Q19 12 16 15'/><path d='M18.5 6.5 Q23 12 18.5 17.5'/></svg>") center / contain no-repeat;
+  border: none;
+  cursor: pointer;
+  filter: drop-shadow(0 0 4px rgba(106, 215, 255, 0.8));
+}
+
+#volume.muted { opacity: 0.2; }
 
 #lives {
   display: flex;

@@ -20,7 +20,7 @@ import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
-import { showTitle, toggleMute, abortMission } from "./game/lifecycle";
+import { showTitle, toggleMute, applyVolume, abortMission } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 
@@ -104,7 +104,7 @@ export class Game implements HudElements {
   overlayEl: HTMLElement;
   overlayTitleEl: HTMLElement;
   overlayStartEl: HTMLElement;
-  muteEl: HTMLButtonElement;
+  volumeEl: HTMLInputElement;
   abortEl: HTMLButtonElement;
   killedRowEl: HTMLCanvasElement;
   scoreEntryFormEl: HTMLFormElement;
@@ -170,7 +170,7 @@ export class Game implements HudElements {
     this.overlayEl = hud.overlayEl;
     this.overlayTitleEl = hud.overlayTitleEl;
     this.overlayStartEl = hud.overlayStartEl;
-    this.muteEl = hud.muteEl;
+    this.volumeEl = hud.volumeEl;
     this.abortEl = hud.abortEl;
     this.killedRowEl = hud.killedRowEl;
     this.scoreEntryFormEl = hud.scoreEntryFormEl;
@@ -182,7 +182,19 @@ export class Game implements HudElements {
     this.debugOverlayEl = hud.debugOverlayEl;
     this.debugFpsEl = hud.debugFpsEl;
     this.debugOverlayEl.classList.toggle("hidden", !this.debugMode);
-    this.muteEl.addEventListener("click", () => toggleMute(this));
+    this.volumeEl.addEventListener("input", () => {
+      applyVolume(this, Number(this.volumeEl.value) / 100);
+    });
+    // Slider sits at low opacity by default; light it up when the cursor is
+    // within 25px of its bounding box so the player can find it without
+    // having to land directly on it.
+    window.addEventListener("mousemove", (e) => {
+      const r = this.volumeEl.getBoundingClientRect();
+      const dx = Math.max(r.left - e.clientX, 0, e.clientX - r.right);
+      const dy = Math.max(r.top - e.clientY, 0, e.clientY - r.bottom);
+      const near = Math.hypot(dx, dy) <= 25;
+      this.volumeEl.classList.toggle("near", near);
+    });
     this.abortEl.addEventListener("click", () => abortMission(this));
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();

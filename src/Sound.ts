@@ -256,6 +256,15 @@ export class Sound {
     mainGain: GainNode;
   } | null = null;
   enabled = true;
+  // Master volume multiplier. 1.0 = original baseline (master/bakedOut gains
+  // at 0.6); 2.0 = double, the slider's default max. 0 disables playback via
+  // `enabled` so per-voice early-outs still kick in.
+  volume = 2;
+  // Bumped up from 0.6 so the default (volume=2 → 1.2 effective) lands well
+  // above the old all-the-way-up calibration; the slider lets players pull
+  // back if it's too hot on their setup.
+  private static readonly MASTER_BASE_GAIN = 1.0;
+  private static readonly BAKED_BASE_GAIN = 1.0;
   // Wave-scaled intensity (0..1) for the background pulsar-approach beat.
   // 0 = silent, 1 = full ominous rumble at wave 30. Set by Game each wave;
   // read by playBgBeat when each beat fires.
@@ -365,12 +374,12 @@ export class Sound {
     if (!AC) return;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.6;
+    this.master.gain.value = Sound.MASTER_BASE_GAIN * this.volume;
     // Direct-to-destination bus for pre-baked buffers (whose tail already
     // contains the full Tone master chain). Mirrors the master gain level so
     // baked and live voices sit at a comparable loudness.
     this.bakedOut = this.ctx.createGain();
-    this.bakedOut.gain.value = 0.6;
+    this.bakedOut.gain.value = Sound.BAKED_BASE_GAIN * this.volume;
     this.bakedOut.connect(this.ctx.destination);
     // Build the Tone bus immediately so master is hot before the first
     // voice plays. ensureToneEngine wires master → voiceBusDry/Wet.
@@ -962,6 +971,16 @@ export class Sound {
     if (!on) this.stopAllCometShimmers();
     if (!on) this.stopHaloAmbient();
     if (!on) this.stopHaloMusic();
+  }
+
+  // Scales the two output buses (master for live voices, bakedOut for
+  // pre-baked buffers) by the volume multiplier. v = 0 disables playback so
+  // the per-voice early-outs gate any in-flight starts; v > 0 re-enables.
+  setVolume(v: number) {
+    this.volume = Math.max(0, Math.min(2, v));
+    if (this.master) this.master.gain.value = Sound.MASTER_BASE_GAIN * this.volume;
+    if (this.bakedOut) this.bakedOut.gain.value = Sound.BAKED_BASE_GAIN * this.volume;
+    this.setEnabled(this.volume > 0);
   }
 
   // Start a continuous theremin-ish drone for an alien. The `key` is the
@@ -2058,7 +2077,7 @@ export class Sound {
   // Routed via this.master (not bakedOut) so the music sits inside the same
   // reverb/compressor bus as live voices. The pre-rendered stems are already
   // loop-faded so the master bus's reverb tail at the seam won't click.
-  private haloMusicUrl(variation: HaloMusicVariation, layer: "ambient" | "melodic" | "percussion"): string {
+  private haloMusicUrl(variation: HaloMusicVariation, layer: "ambient" | "melodic" | "layer3"): string {
     return `/sounds/halo-music/${variation}-${layer}.mp3`;
   }
 
@@ -2076,27 +2095,27 @@ export class Sound {
       // analog pad fighting the bass field.
       case "r3-el": return 0.22;
       // r4-sb is the rhythmic flagship — pulsing arp + smooth calliope-synth
-      // melody that breathes in the gaps left by the percussion layer. Audit
-      // at gain 0.25 keeps lo-mid clean by ≥8.9 dB with all three layers
-      // stacked; same gain applied across layers so the interlock stays even.
+      // melody that breathes in the gaps left by layer 3. Audit at gain 0.25
+      // keeps lo-mid clean by ≥8.9 dB with all three layers stacked; same gain
+      // applied across layers so the interlock stays even.
       case "r4-sb": return 0.25;
       default:      return 0.30;
     }
   }
 
-  // Percussion-layer playback gain (combo ≥ 12). Calibrated per variation
-  // against the in-game-mix audit so the bass kit stays dominant by ≥6 dB
-  // in lo-mid and ≥10 dB in bass. r2-el is the exception — its "percussion"
-  // slot holds a lonely solo violin (matching the r2-el cinematic-strings
-  // aesthetic), so it gets a slightly lower gain to sit as a third voice
-  // rather than a drum hit.
-  private haloMusicPercussionGain(variation: HaloMusicVariation): number {
+  // Layer-3 playback gain (combo ≥ 12). Calibrated per variation against the
+  // in-game-mix audit so the bass kit stays dominant by ≥6 dB in lo-mid and
+  // ≥10 dB in bass. Each variation's layer 3 is a single new musical element
+  // chosen to thematically fit its existing ambient + melodic stems (lonely
+  // violin / glockenspiel / synth-bass arp / chime counter-melody — see
+  // build_layer3.py for the per-variation design).
+  private haloMusicLayer3Gain(variation: HaloMusicVariation): number {
     switch (variation) {
-      case "r2-el": return 0.45;   // lonely violin (not a kit)
-      case "r2-sb": return 0.55;   // warm-dry brushy kit
-      case "r3-el": return 0.55;   // synthwave electronic kit
-      case "r4-sb": return 0.55;   // interlocked 16th-note kit
-      default:      return 0.50;
+      case "r2-el": return 0.45;   // lonely violin (cinematic third voice)
+      case "r2-sb": return 0.40;   // warm felt-glockenspiel arpeggio
+      case "r3-el": return 0.30;   // synthwave plucked synth-bass arp
+      case "r4-sb": return 0.32;   // chime counter-melody (interlocks, low-rhythm)
+      default:      return 0.40;
     }
   }
 
@@ -2131,7 +2150,7 @@ export class Sound {
     this.ensureContext();
     void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient"));
     void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic"));
-    void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "percussion"));
+    void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3"));
   }
 
   // Start (or hot-restart) the pre-rendered halo music for a variation. If a
@@ -2149,7 +2168,7 @@ export class Sound {
   // anyway.
   async startHaloMusic(variation: HaloMusicVariation, melodicActive: boolean,
                        measureAlignDelay: number = 0,
-                       percussionActive: boolean = false): Promise<void> {
+                       layer3Active: boolean = false): Promise<void> {
     if (variation === "none") return;
     if (!this.enabled) return;
     this.ensureContext();
@@ -2157,16 +2176,16 @@ export class Sound {
     // Same variation already running — just sync the layered tiers.
     if (this.haloMusic && this.haloMusic.variation === variation) {
       this.setHaloMusicMelodicLayer(melodicActive);
-      this.setHaloMusicPercussionLayer(percussionActive);
+      this.setHaloMusicLayer3(layer3Active);
       return;
     }
     // Different variation playing — fade out the old node before swapping.
     if (this.haloMusic) this.stopHaloMusic();
 
-    const [ambientBuf, melodicBuf, percussionBuf] = await Promise.all([
+    const [ambientBuf, melodicBuf, layer3Buf] = await Promise.all([
       this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient")),
       this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic")),
-      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "percussion")),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3")),
     ]);
     if (!this.ctx || !this.master) return;
     if (!ambientBuf || !melodicBuf) return;
@@ -2183,8 +2202,8 @@ export class Sound {
 
     // Per-variation playback peak gain. See haloMusicGain — round-2 stems
     // (-12 dBFS peak) need lower gain than round-1 (-6 dBFS peak) to sit
-    // under the bass field. Percussion layer has its own gain since it lives
-    // outside the bass-melodic register and tolerates an independent mix.
+    // under the bass field. Layer 3 has its own gain since it lives outside
+    // the bass-melodic register and tolerates an independent mix.
     const peakGain = this.haloMusicGain(variation);
 
     // Fade-in starts at the *aligned* start time, not now, so the music
@@ -2208,36 +2227,36 @@ export class Sound {
     melodicGain.connect(mainGain);
     mainGain.connect(this.master);
 
-    // Percussion is optional — only wire it up if the stem actually loaded.
-    let percussionSrc: AudioBufferSourceNode | null = null;
-    let percussionGain: GainNode | null = null;
-    if (percussionBuf) {
-      const percussionPeak = this.haloMusicPercussionGain(variation);
-      percussionSrc = this.ctx.createBufferSource();
-      percussionSrc.buffer = percussionBuf;
-      percussionSrc.loop = true;
-      percussionGain = this.ctx.createGain();
-      percussionGain.gain.setValueAtTime(0.0001, startAt);
-      if (percussionActive) {
-        percussionGain.gain.exponentialRampToValueAtTime(percussionPeak, startAt + 0.5);
+    // Layer 3 is optional — only wire it up if the stem actually loaded.
+    let layer3Src: AudioBufferSourceNode | null = null;
+    let layer3Gain: GainNode | null = null;
+    if (layer3Buf) {
+      const layer3Peak = this.haloMusicLayer3Gain(variation);
+      layer3Src = this.ctx.createBufferSource();
+      layer3Src.buffer = layer3Buf;
+      layer3Src.loop = true;
+      layer3Gain = this.ctx.createGain();
+      layer3Gain.gain.setValueAtTime(0.0001, startAt);
+      if (layer3Active) {
+        layer3Gain.gain.exponentialRampToValueAtTime(layer3Peak, startAt + 0.5);
       }
-      percussionSrc.connect(percussionGain);
-      percussionGain.connect(mainGain);
+      layer3Src.connect(layer3Gain);
+      layer3Gain.connect(mainGain);
     }
 
     // All sources start at exactly the same audio time so they remain
     // phase-locked for the lifetime of the music — switching the melodic
-    // or percussion tier is then just a gain ramp, no fresh .start() that
+    // or layer-3 tier is then just a gain ramp, no fresh .start() that
     // would risk loop-phase drift between the stems.
     ambientSrc.start(startAt);
     melodicSrc.start(startAt);
-    if (percussionSrc) percussionSrc.start(startAt);
+    if (layer3Src) layer3Src.start(startAt);
 
     this.haloMusic = {
-      ambientSrc, melodicSrc, percussionSrc,
-      ambientGain, melodicGain, percussionGain, mainGain,
+      ambientSrc, melodicSrc, layer3Src,
+      ambientGain, melodicGain, layer3Gain, mainGain,
       variation, melodicActive,
-      percussionActive: percussionActive && percussionSrc !== null,
+      layer3Active: layer3Active && layer3Src !== null,
     };
   }
 
@@ -2257,22 +2276,22 @@ export class Sound {
     this.haloMusic.melodicActive = active;
   }
 
-  // Fade the percussion layer in (true) or out (false). Slightly slower
-  // fade-in than melodic (0.7s vs 0.5s) so the 12x reward blooms in rather
-  // than snapping. 1.1s fade-out cushions a combo break so the rhythm rings
-  // down instead of cutting.
-  setHaloMusicPercussionLayer(active: boolean): void {
+  // Fade layer 3 in (true) or out (false). Slightly slower fade-in than
+  // melodic (0.7s vs 0.5s) so the 12x reward blooms in rather than snapping.
+  // 1.1s fade-out cushions a combo break so the layer rings down instead of
+  // cutting.
+  setHaloMusicLayer3(active: boolean): void {
     if (!this.ctx || !this.haloMusic) return;
-    if (!this.haloMusic.percussionGain) return;
-    if (this.haloMusic.percussionActive === active) return;
+    if (!this.haloMusic.layer3Gain) return;
+    if (this.haloMusic.layer3Active === active) return;
     const t = this.ctx.currentTime;
-    const peakGain = this.haloMusicPercussionGain(this.haloMusic.variation);
+    const peakGain = this.haloMusicLayer3Gain(this.haloMusic.variation);
     const target = active ? peakGain : 0.0001;
     const ramp = active ? 0.7 : 1.1;
-    this.haloMusic.percussionGain.gain.cancelScheduledValues(t);
-    this.haloMusic.percussionGain.gain.setValueAtTime(this.haloMusic.percussionGain.gain.value, t);
-    this.haloMusic.percussionGain.gain.exponentialRampToValueAtTime(target, t + ramp);
-    this.haloMusic.percussionActive = active;
+    this.haloMusic.layer3Gain.gain.cancelScheduledValues(t);
+    this.haloMusic.layer3Gain.gain.setValueAtTime(this.haloMusic.layer3Gain.gain.value, t);
+    this.haloMusic.layer3Gain.gain.exponentialRampToValueAtTime(target, t + ramp);
+    this.haloMusic.layer3Active = active;
   }
 
   // Long fade-out + teardown. ~1.2s matches stopHaloAmbient so swapping
@@ -2288,7 +2307,7 @@ export class Sound {
     const stopAt = t + 1.3;
     node.ambientSrc.stop(stopAt);
     node.melodicSrc.stop(stopAt);
-    if (node.percussionSrc) node.percussionSrc.stop(stopAt);
+    if (node.layer3Src) node.layer3Src.stop(stopAt);
     this.haloMusic = null;
   }
 
