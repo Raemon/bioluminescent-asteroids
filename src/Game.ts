@@ -20,7 +20,7 @@ import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
-import { showTitle, toggleMute, applyVolume, abortMission } from "./game/lifecycle";
+import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 
@@ -81,6 +81,14 @@ export class Game implements HudElements {
   //   advanceWave each frame. Cleared when the summary finishes and the next
   //   wave's spawn fires.
   waveTransitioning = false;
+  // wave-1 instructional overlay. stage 1 holds until 3 on-beat fires land,
+  //   stage 2 holds until 4x rhythm, stage 3 (the score-payoff line) auto-dismisses
+  //   after a brief hold. once the player reaches 6x rhythm the tutorial is marked
+  //   complete in localStorage and won't show again. React-side <FirstWaveHint>
+  //   listens for the "first-wave-hint:stage" CustomEvent and handles the CSS
+  //   transition + auto-dismiss, so the game loop only owns the stage number.
+  firstWaveHintStage: 0 | 1 | 2 | 3 = 0;
+  firstWaveOnBeatFireCount = 0;
 
   canisters: Canister[] = [];
   goldCrystals: GoldCrystal[] = [];
@@ -210,6 +218,10 @@ export class Game implements HudElements {
       this.volumeEl.classList.toggle("near", near);
     });
     this.abortEl.addEventListener("click", () => abortMission(this));
+    // <FirstWaveHint> owns its own auto-dismiss timer; when it fades out it
+    //   asks the game to clear the stage so future triggers (e.g. 6x rhythm
+    //   guard) see the correct state.
+    window.addEventListener("first-wave-hint:dismiss", () => setFirstWaveHintStage(this, 0));
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();
       if (k === "m" && this.state !== "title") toggleMute(this);

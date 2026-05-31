@@ -24,7 +24,7 @@ import {
   handleCanisterShots,
   handleGoldCrystalPickups,
 } from "./collisions";
-import { startGame, showTitle, togglePause, respawn } from "./lifecycle";
+import { startGame, showTitle, togglePause, respawn, setFirstWaveHintStage } from "./lifecycle";
 import { targetsForReticule } from "./gameRender";
 import { syncHud, syncPowerupHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
@@ -249,6 +249,10 @@ const handleOnBeatFire = (game: Game, firstNewIndex: number) => {
     game.beatCombo = 1;
     if (game.maxCombo < 1) game.maxCombo = 1;
     syncHud(game);
+  }
+  if (game.firstWaveHintStage === 1) {
+    game.firstWaveOnBeatFireCount += 1;
+    if (game.firstWaveOnBeatFireCount >= 3) setFirstWaveHintStage(game, 2);
   }
 };
 

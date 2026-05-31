@@ -15,6 +15,33 @@ import { hideScoreEntry, showLeaderboard, showScoreEntry } from "./scoreEntry";
 import { HALO_MUSIC_POOL } from "./haloMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
 
+// once a player reaches 6x rhythm we flip this flag so future runs skip the
+//   wave-1 tutorial overlays. localStorage may be blocked (private mode) — in
+//   that case the tutorial harmlessly re-shows next session.
+const FIRST_WAVE_TUTORIAL_KEY = "pulsar.firstWaveTutorialDone.v1";
+export const isFirstWaveTutorialComplete = (): boolean => {
+  try {
+    return localStorage.getItem(FIRST_WAVE_TUTORIAL_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+export const markFirstWaveTutorialComplete = () => {
+  try {
+    localStorage.setItem(FIRST_WAVE_TUTORIAL_KEY, "1");
+  } catch {
+    // best-effort persistence; ignore quota / blocked storage.
+  }
+};
+
+// React-side <FirstWaveHint> subscribes to this so the canvas/game loop stays
+//   out of layout + transitions — CSS + a single setTimeout do the dismiss work.
+export const setFirstWaveHintStage = (game: Game, stage: 0 | 1 | 2 | 3) => {
+  if (game.firstWaveHintStage === stage) return;
+  game.firstWaveHintStage = stage;
+  window.dispatchEvent(new CustomEvent("first-wave-hint:stage", { detail: { stage } }));
+};
+
 // Fisher-Yates over Array.sort — sort's randomness is biased and varies across engines.
 const shuffled = <T,>(arr: ReadonlyArray<T>): T[] => {
   const out = arr.slice();
@@ -80,6 +107,7 @@ export const showTitle = (game: Game) => {
   hideScoreEntry(game);
   showLeaderboard(game);
   hideWaveSummary();
+  setFirstWaveHintStage(game, 0);
   game.waveTransitioning = false;
 };
 
@@ -111,6 +139,8 @@ export const startGame = (game: Game) => {
   game.pulsar.setWaveLevel(game.wave);
   updateBgBeatIntensity(game);
   spawnWave(game);
+  game.firstWaveOnBeatFireCount = 0;
+  setFirstWaveHintStage(game, isFirstWaveTutorialComplete() ? 0 : 1);
   game.overlayEl.classList.add("hidden");
   hideScoreEntry(game);
   game.leaderboardEl.classList.add("hidden");

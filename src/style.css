@@ -1297,3 +1297,77 @@ html:has(#sound-root), body:has(> #sound-root) {
   45%  { transform: scale(1.18); }
   100% { transform: scale(1);    }
 }
+
+/* Wave-1 tutorial hint — mimics the overlay-title styling (Space Grotesk
+   700, mixed case, wide tracking, horizontally squished, cyan with a blue
+   glow) at a quieter scale so it reads as a prompt, not a title. Stage 1
+   sits above the ship; stages 2 and 3 share the lower-third slot. The
+   `.visible` toggle in <FirstWaveHint> drives a 1s cinematic crossfade with
+   a small drift so the line settles in rather than snapping. */
+.first-wave-hint {
+  position: fixed;
+  left: 50%;
+  transform: translate(-50%, -8px);
+  pointer-events: none;
+  text-align: center;
+  opacity: 0;
+  transition:
+    opacity 1000ms ease-out,
+    transform 1000ms ease-out;
+  z-index: 5;
+}
+
+.first-wave-hint--top {
+  top: calc(50% - 200px);
+}
+
+.first-wave-hint--bottom {
+  top: calc(50% + 180px);
+}
+
+.first-wave-hint.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.first-wave-hint__line,
+.first-wave-hint__sub {
+  font-weight: 700;
+  color: #c8efff;
+  text-shadow:
+    0 0 14px #4cb6ff,
+    0 0 36px rgba(76, 182, 255, 0.55),
+    0 0 72px rgba(76, 182, 255, 0.25);
+  letter-spacing: 0.18em;
+  transform: scaleX(0.78);
+  transform-origin: center;
+  display: inline-block;
+  line-height: 1.3;
+}
+
+.first-wave-hint__line {
+  font-size: clamp(22px, 2.6vw, 32px);
+}
+
+.first-wave-hint__line--accent {
+  color: #ffeb96;
+  text-shadow:
+    0 0 14px rgba(255, 220, 110, 0.9),
+    0 0 36px rgba(255, 200, 80, 0.55),
+    0 0 72px rgba(255, 200, 80, 0.25);
+}
+
+.first-wave-hint__accent {
+  color: #ffeb96;
+  text-shadow:
+    0 0 12px rgba(255, 220, 110, 0.85),
+    0 0 28px rgba(255, 200, 80, 0.5);
+}
+
+.first-wave-hint__sub {
+  display: block;
+  margin-top: 16px;
+  font-size: clamp(16px, 1.8vw, 22px);
+  opacity: 0.85;
+}
+

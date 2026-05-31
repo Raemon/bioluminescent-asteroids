@@ -216,22 +216,53 @@ const escapeHtml = (s: string): string =>
 //   enough pilots to scroll through.
 const LEADERBOARD_FETCH_LIMIT = 50;
 
-// Keep only each pilot's single best row. "Best" mirrors the default sort:
-//   highest max_combo wins, score breaks ties. Case-insensitive name match
-//   so "RAEMON" and "raemon" collapse into one entry.
+// For the title-screen "Top entries only" view, keep each pilot's personal
+//   best in *each* category (score, wave, rhythm) — so a pilot whose top-score
+//   run is different from their top-wave run shows up multiple times, once
+//   per category they lead. Runs that hold more than one PB collapse to a
+//   single row via the row-id dedupe. Case-insensitive name match so
+//   "RAEMON" and "raemon" share one pilot bucket.
+const pickBest = (
+  rows: HighscoreRow[],
+  better: (a: HighscoreRow, b: HighscoreRow) => boolean,
+): HighscoreRow | null => {
+  let best: HighscoreRow | null = null;
+  for (const row of rows) {
+    if (!best || better(row, best)) best = row;
+  }
+  return best;
+};
+
 const dedupeByName = (rows: HighscoreRow[]): HighscoreRow[] => {
-  const best = new Map<string, HighscoreRow>();
+  const byPilot = new Map<string, HighscoreRow[]>();
   for (const row of rows) {
     const key = row.name.toLowerCase();
-    const prev = best.get(key);
-    if (!prev) { best.set(key, row); continue; }
-    const prevCombo = prev.max_combo ?? 0;
-    const curCombo = row.max_combo ?? 0;
-    if (curCombo > prevCombo || (curCombo === prevCombo && row.score > prev.score)) {
-      best.set(key, row);
+    const list = byPilot.get(key);
+    if (list) list.push(row);
+    else byPilot.set(key, [row]);
+  }
+  const keptIds = new Set<number>();
+  const out: HighscoreRow[] = [];
+  for (const pilotRows of byPilot.values()) {
+    const bestScore = pickBest(pilotRows, (a, b) =>
+      a.score !== b.score ? a.score > b.score : (a.max_combo ?? 0) > (b.max_combo ?? 0),
+    );
+    const bestWave = pickBest(pilotRows, (a, b) => {
+      const aw = a.wave ?? 0, bw = b.wave ?? 0;
+      return aw !== bw ? aw > bw : a.score > b.score;
+    });
+    const bestRhythm = pickBest(pilotRows, (a, b) => {
+      const ac = a.max_combo ?? 0, bc = b.max_combo ?? 0;
+      return ac !== bc ? ac > bc : a.score > b.score;
+    });
+    for (const row of [bestScore, bestWave, bestRhythm]) {
+      if (row && !keptIds.has(row.id)) {
+        keptIds.add(row.id);
+        out.push(row);
+      }
     }
   }
-  return [...best.values()];
+  return out;
 };
 
 export const showLeaderboard = (game: Game) => {
