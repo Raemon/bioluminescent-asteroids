@@ -127,10 +127,12 @@ type HaloMusicNode = {
   // three always-playing-but-silent for sample-accurate phase lock.
   ambientSrc: AudioBufferSourceNode;
   melodicSrc: AudioBufferSourceNode;
-  percussionSrc: AudioBufferSourceNode;
+  // Percussion stem may be missing (file deleted / never generated for this
+  // variation); ambient + melodic still play normally in that case.
+  percussionSrc: AudioBufferSourceNode | null;
   ambientGain: GainNode;
   melodicGain: GainNode;
-  percussionGain: GainNode;
+  percussionGain: GainNode | null;
   mainGain: GainNode;
   // Variation that's currently loaded — preserved so a 6x→4x→6x tier flick
   // doesn't trigger a reload.
@@ -2153,27 +2155,23 @@ export class Sound {
       this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "percussion")),
     ]);
     if (!this.ctx || !this.master) return;
-    if (!ambientBuf || !melodicBuf || !percussionBuf) return;
+    if (!ambientBuf || !melodicBuf) return;
     if (this.haloMusic) return;  // raced with another start
 
     const t = this.ctx.currentTime;
     const startAt = t + Math.max(0, measureAlignDelay);
     const ambientSrc = this.ctx.createBufferSource();
     const melodicSrc = this.ctx.createBufferSource();
-    const percussionSrc = this.ctx.createBufferSource();
     ambientSrc.buffer = ambientBuf;
     melodicSrc.buffer = melodicBuf;
-    percussionSrc.buffer = percussionBuf;
     ambientSrc.loop = true;
     melodicSrc.loop = true;
-    percussionSrc.loop = true;
 
     // Per-variation playback peak gain. See haloMusicGain — round-2 stems
     // (-12 dBFS peak) need lower gain than round-1 (-6 dBFS peak) to sit
     // under the bass field. Percussion layer has its own gain since it lives
     // outside the bass-melodic register and tolerates an independent mix.
     const peakGain = this.haloMusicGain(variation);
-    const percussionPeak = this.haloMusicPercussionGain(variation);
 
     // Fade-in starts at the *aligned* start time, not now, so the music
     // doesn't bleed in during the wait-for-downbeat window.
@@ -2187,35 +2185,45 @@ export class Sound {
       melodicGain.gain.exponentialRampToValueAtTime(peakGain, startAt + 0.5);
     }
 
-    const percussionGain = this.ctx.createGain();
-    percussionGain.gain.setValueAtTime(0.0001, startAt);
-    if (percussionActive) {
-      percussionGain.gain.exponentialRampToValueAtTime(percussionPeak, startAt + 0.5);
-    }
-
     const mainGain = this.ctx.createGain();
     mainGain.gain.value = 1.0;
 
     ambientSrc.connect(ambientGain);
     melodicSrc.connect(melodicGain);
-    percussionSrc.connect(percussionGain);
     ambientGain.connect(mainGain);
     melodicGain.connect(mainGain);
-    percussionGain.connect(mainGain);
     mainGain.connect(this.master);
 
-    // All three sources start at exactly the same audio time so they remain
+    // Percussion is optional — only wire it up if the stem actually loaded.
+    let percussionSrc: AudioBufferSourceNode | null = null;
+    let percussionGain: GainNode | null = null;
+    if (percussionBuf) {
+      const percussionPeak = this.haloMusicPercussionGain(variation);
+      percussionSrc = this.ctx.createBufferSource();
+      percussionSrc.buffer = percussionBuf;
+      percussionSrc.loop = true;
+      percussionGain = this.ctx.createGain();
+      percussionGain.gain.setValueAtTime(0.0001, startAt);
+      if (percussionActive) {
+        percussionGain.gain.exponentialRampToValueAtTime(percussionPeak, startAt + 0.5);
+      }
+      percussionSrc.connect(percussionGain);
+      percussionGain.connect(mainGain);
+    }
+
+    // All sources start at exactly the same audio time so they remain
     // phase-locked for the lifetime of the music — switching the melodic
     // or percussion tier is then just a gain ramp, no fresh .start() that
     // would risk loop-phase drift between the stems.
     ambientSrc.start(startAt);
     melodicSrc.start(startAt);
-    percussionSrc.start(startAt);
+    if (percussionSrc) percussionSrc.start(startAt);
 
     this.haloMusic = {
       ambientSrc, melodicSrc, percussionSrc,
       ambientGain, melodicGain, percussionGain, mainGain,
-      variation, melodicActive, percussionActive,
+      variation, melodicActive,
+      percussionActive: percussionActive && percussionSrc !== null,
     };
   }
 
@@ -2241,6 +2249,7 @@ export class Sound {
   // down instead of cutting.
   setHaloMusicPercussionLayer(active: boolean): void {
     if (!this.ctx || !this.haloMusic) return;
+    if (!this.haloMusic.percussionGain) return;
     if (this.haloMusic.percussionActive === active) return;
     const t = this.ctx.currentTime;
     const peakGain = this.haloMusicPercussionGain(this.haloMusic.variation);
@@ -2265,7 +2274,7 @@ export class Sound {
     const stopAt = t + 1.3;
     node.ambientSrc.stop(stopAt);
     node.melodicSrc.stop(stopAt);
-    node.percussionSrc.stop(stopAt);
+    if (node.percussionSrc) node.percussionSrc.stop(stopAt);
     this.haloMusic = null;
   }
 

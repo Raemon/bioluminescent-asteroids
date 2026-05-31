@@ -2,6 +2,7 @@ import type { Ship } from "../Ship";
 import { add, mul, fromAngle } from "../vec";
 import { Bullet } from "../Bullet";
 import { PowerupKind } from "../Canister";
+import { BEAT_GRID } from "../game/rhythmConstants";
 
 // prong sprays a symmetric pair per shot at a fixed spread; centred single shot otherwise.
 export const PRONG_SPREAD = 0.21;
@@ -22,6 +23,10 @@ const launchBullet = (ship: Ship, headingOffset: number, pierce: boolean, longsh
   if (longshot) life *= LONGSHOT_RANGE_MULT;
   const bullet = new Bullet(muzzle, vel, life);
   bullet.pierce = pierce;
+  // farthest reticule sits at floor(life/BEAT_GRID) beats out; anything past that
+  // can't land on a beat, so fade the bullet across the leftover tail to expiry.
+  const slotCount = Math.max(1, Math.floor(life / BEAT_GRID));
+  bullet.fadeStartLife = Math.max(0, life - slotCount * BEAT_GRID);
   return bullet;
 };
 

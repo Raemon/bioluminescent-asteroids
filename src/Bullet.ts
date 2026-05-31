@@ -42,6 +42,11 @@ export class Bullet {
   // Recorded by Game when stamping new bullets so debug logging at hit time
   // can report the original fire offset, not just the impact offset.
   firedAtBeatTime = 0;
+  // life-remaining threshold below which the bullet fades to 0 opacity. Set by
+  // shipWeapons at fire-time to the gap between maxLife and the farthest beat
+  // reticule, so the visible bullet dims out across the post-reticule tail
+  // where any hit would no longer land on a beat. 0 = no fade.
+  fadeStartLife = 0;
 
   constructor(pos: Vec, vel: Vec, life: number) {
     this.pos = { ...pos };
@@ -78,6 +83,9 @@ export class Bullet {
   render(ctx: CanvasRenderingContext2D) {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
+    const rangeAlpha = this.fadeStartLife > 0 && this.life < this.fadeStartLife
+      ? Math.max(0, this.life / this.fadeStartLife)
+      : 1;
     // Super-boosted (combo ≥ 8): white — saturation 0 makes hue irrelevant.
     // Boosted on-beat: gold (hue 45) to match the tier-2 combo halo.
     // On-beat: deep saturated blue (hue 220) — sells "weightier" rhythm shot.
@@ -95,11 +103,11 @@ export class Bullet {
       const segmentT = i / this.trail.length;
       const p = this.trail[i];
       const r = coreRadius * segmentT * 1.5 * visualScale;
-      drawGlow(ctx, p.x, p.y, r * 5, trailHue, trailAlphaScale * segmentT, this.superBoosted);
+      drawGlow(ctx, p.x, p.y, r * 5, trailHue, trailAlphaScale * segmentT * rangeAlpha, this.superBoosted);
     }
 
-    drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul * visualScale, headHue, headAlpha, this.superBoosted);
-    ctx.globalAlpha = 1;
+    drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul * visualScale, headHue, headAlpha * rangeAlpha, this.superBoosted);
+    ctx.globalAlpha = rangeAlpha;
     // Bright core dot — for on-beat use a near-white blue-tinted highlight so
     // the deep-blue halo reads as the carrier and the core still pops.
     ctx.fillStyle = this.superBoosted
