@@ -48,11 +48,11 @@ export const setFirstWaveHintStage = (game: Game, stage: 0 | 1 | 2 | 3) => {
   }
   window.dispatchEvent(new CustomEvent("first-wave-hint:stage", { detail: { stage } }));
   if (stage === 3) {
-    // seed the diamond row with the player's current rhythm (capped at 3),
-    //   then fire ready if they're already at or past 3x — otherwise the
-    //   hold waits until applyHitToCombo emits ready as they rebuild.
-    emitFirstWaveHintRhythmProgress(Math.min(game.beatCombo, 3));
-    if (game.beatCombo >= 3) emitFirstWaveHintStage3Ready();
+    // diamond N corresponds to rhythm N+1 (the 1x priming shot doesn't
+    //   count). Seed the row from current rhythm; fire ready immediately
+    //   if they're already at 4x — otherwise wait for applyHitToCombo.
+    emitFirstWaveHintRhythmProgress(Math.max(0, Math.min(game.beatCombo - 1, 3)));
+    if (game.beatCombo >= 4) emitFirstWaveHintStage3Ready();
   } else {
     // leaving stage 3 (or never entering it) clears the diamond row.
     emitFirstWaveHintRhythmProgress(0);
@@ -127,6 +127,7 @@ const clearComboSilently = (game: Game) => {
   game.beatCombo = 0;
   game.firedOffBeatSinceLastBeat = false;
   syncComboHud(game);
+  if (game.firstWaveHintStage === 3) emitFirstWaveHintRhythmProgress(0);
 };
 
 // carries the prior run's trophy lineup so a returning player still sees what they took down.

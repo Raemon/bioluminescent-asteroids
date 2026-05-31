@@ -1329,18 +1329,6 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 .first-wave-hint.visible {
   opacity: 1;
-  /* delay = entry-fade (1s) + hold (3s) so the dim begins 3s *after* the
-     line has actually settled at full opacity, not 3s after the fade-in
-     started. */
-  animation: first-wave-hint-dim 1000ms ease-out 4000ms forwards;
-}
-
-/* After the 3s hold at full brightness, ease down to 0.65 so the tooltip
-   recedes without disappearing. The container's `transition: opacity` still
-   handles the exit fade once `.visible` is removed. */
-@keyframes first-wave-hint-dim {
-  from { opacity: 1; }
-  to   { opacity: 0.65; }
 }
 
 .first-wave-hint__line,
@@ -1364,7 +1352,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 .first-wave-hint__sub {
   display: block;
-  margin-top: 28px;
+  margin-top: 20px;
   font-size: clamp(13px, 1.5vw, 18px);
   opacity: 0;
   transition: opacity 1000ms ease-out;

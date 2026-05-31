@@ -24,7 +24,7 @@ import {
   handleCanisterShots,
   handleGoldCrystalPickups,
 } from "./collisions";
-import { startGame, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress } from "./lifecycle";
+import { startGame, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress } from "./lifecycle";
 import { targetsForReticule } from "./gameRender";
 import { syncHud, syncPowerupHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
@@ -258,6 +258,10 @@ const handleOnBeatFire = (game: Game, firstNewIndex: number) => {
     // first on-beat *fire* (hit or not) reveals the targeting sub-line; the
     //   three diamonds are independently gated on on-beat *hits*.
     setFirstWaveHintSubVisible(game, true);
+  } else if (game.firstWaveHintStage === 3) {
+    // 0→1 priming step mirrors into the stage-3 row. Diamonds start at 2x
+    //   (diamond N = rhythm N+1), so priming alone leaves the row at 0.
+    emitFirstWaveHintRhythmProgress(Math.max(0, Math.min(game.beatCombo - 1, 3)));
   }
 };
 

@@ -213,16 +213,18 @@ export const FirstWaveHint = () => {
       {displayStage === 3 && (
         <>
           <div className="first-wave-hint__line">
-            Build <span className="first-wave-hint__accent">Rhythm</span>.
-            <div>Become one with the <span className="first-wave-hint__accent">Pulsar</span>.</div>
-          </div>
-          <div className="first-wave-hint__pips" aria-hidden="true">
+            <span className="first-wave-hint__accent">Build rhythm</span> without missing a beat.
+            <div className="first-wave-hint__pips" aria-hidden="true">
             {[0, 1, 2].map((i) => (
               <span
                 key={i}
                 className={`first-wave-hint__pip ${i < rhythmProgress ? "filled" : ""}`}
               />
             ))}
+          </div>
+            <div className={`first-wave-hint__sub visible`}>
+              (Use your targeting tools to help)
+            </div>
           </div>
         </>
       )}

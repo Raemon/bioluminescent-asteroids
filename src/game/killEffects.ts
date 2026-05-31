@@ -65,10 +65,12 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
       emitFirstWaveHintHitProgress(game.firstWaveOnBeatHitCount);
       if (game.firstWaveOnBeatHitCount >= 3) setFirstWaveHintStage(game, 3);
     } else if (game.firstWaveHintStage === 3) {
-      // fill the next diamond per on-beat hit until the 3-pip row is full.
-      if (game.beatCombo <= 3) emitFirstWaveHintRhythmProgress(game.beatCombo);
-      // crossed back to 3x rhythm — kick off the React-side 3s hold + fade.
-      if (game.beatCombo === 3) emitFirstWaveHintStage3Ready();
+      // diamond N corresponds to rhythm N+1: 2x lights the first, 3x the
+      //   second, 4x+ the third. A loss zeroes the row via loseCombo; this
+      //   rebuilds it as on-beat hits restore the streak.
+      emitFirstWaveHintRhythmProgress(Math.max(0, Math.min(game.beatCombo - 1, 3)));
+      // crossed to 4x rhythm — kick off the React-side 3s hold + fade.
+      if (game.beatCombo === 4) emitFirstWaveHintStage3Ready();
     }
   } else if (!isOnBeatHit && game.beatCombo !== 0) {
     loseCombo(game, hitPos);
