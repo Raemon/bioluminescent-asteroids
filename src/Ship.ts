@@ -70,6 +70,8 @@ export class Ship {
   comboLossFlash = 0;
   // per-target trajectory state — drives entry-flash phase, fade-out lingering, and pulse phase.
   private trajectoryTracks: TrajectoryTrackMap = new Map();
+  // persists across frames so the 8th-note hover ring can fill in over a continuous hover.
+  private hoverDotRingState: { hoverStartBeatTime: number | null } = { hoverStartBeatTime: null };
 
   constructor(pos: Vec) { this.pos = pos; }
 
@@ -103,9 +105,9 @@ export class Ship {
   renderReticules(
     ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number,
     targets: ReadonlyArray<ReticuleTarget> = [], beatTime: number = 0, doubletime: boolean = false,
-    tutorialHighlight: boolean = false,
+    tutorialHighlight: boolean = false, sound: Sound | null = null,
   ) {
-    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight);
+    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRing: this.hoverDotRingState }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight, sound);
   }
 
   // hull + thrust + retro + shield + combo halo all composite together in one save/restore block.

@@ -91,7 +91,7 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   const tutorialHighlight =
     (game.firstWaveHintStage === 2 && game.firstWaveHintSubVisible) ||
     game.firstWaveHintStage === 3;
-  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.beatTime, doubletime, tutorialHighlight);
+  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.beatTime, doubletime, tutorialHighlight, game.sound);
   renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.beatTime, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
   renderPopups(ctx, game.popups);

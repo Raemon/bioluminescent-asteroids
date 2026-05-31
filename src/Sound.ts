@@ -58,6 +58,23 @@ type AlienDroneNode = {
   spatial?: SpatialNodes;
 };
 
+// Soft "mmmm" hum that sustains while the reticule hovers a first-beat dot.
+// Pitched at C4 — a perfect fifth below the fireBeat pluck (G4) and one
+// octave above the fireBeat body (C3), so when the player executes the
+// on-beat shot the hum becomes the bottom voice of a C-major chord with
+// fireBeat's G4 pluck landing as the bright top. The bandpass + two
+// detuned sines give it a vowel-like "mm" character instead of a sterile
+// sine. A single voice held across hover frames; gain rides a target set
+// by the caller each frame (0 = silent, 1 = max audible-but-soft).
+type FirstDotHumNode = {
+  oscA: OscillatorNode;
+  oscB: OscillatorNode;
+  vibratoLfo: OscillatorNode;
+  vibratoDepth: GainNode;
+  filter: BiquadFilterNode;
+  mainGain: GainNode;
+};
+
 // Per-bassteroid ambient drone. Opened when a large bassteroid breaks open
 // into mediums (and again when mediums break into smalls), held for the
 // lifetime of that piece. Each (kind, size) pairs to one of 8 voices in a
@@ -268,6 +285,9 @@ export class Sound {
   // Per-alien continuous theremin drone. Keyed by the Alien instance so the
   // Game side can start/stop without us needing an ID scheme.
   alienDrones: Map<object, AlienDroneNode> = new Map();
+  // Single soft hum held while the reticule hovers the first-beat dot. Null
+  // when not hovering. Gain target rides the hover intensity each frame.
+  private firstDotHum: FirstDotHumNode | null = null;
   // Per-bassteroid ambient drone, keyed by the Asteroid instance. Only
   // populated for medium/small bass pieces (a large piece is "sealed" — it
   // hasn't been broken open yet).
@@ -1071,6 +1091,7 @@ export class Sound {
     if (!on && this.reverseThrustNode) this.stopReverseThrust();
     if (!on && this.sideThrustNode) this.stopSideThrust();
     if (!on) this.stopAllAlienDrones();
+    if (!on) this.stopFirstDotHum();
     if (!on) this.stopAllBassteroidDrones();
     if (!on) this.stopAllCometShimmers();
     if (!on) this.stopHaloAmbient();
@@ -1193,6 +1214,73 @@ export class Sound {
 
   stopAllAlienDrones() {
     for (const key of Array.from(this.alienDrones.keys())) this.stopAlienDrone(key);
+  }
+
+  // C4 hum that sustains while the reticule hovers the first-beat dot.
+  // Caller passes intensity01 every frame: 0 = silent, 1 = soft cap. The
+  // first call lazily spins up the voice; subsequent calls just ride the
+  // gain to a new target. Capped well below typical voices so it reads as
+  // a background indicator, not music.
+  private static readonly FIRST_DOT_HUM_PEAK_GAIN = 0.07;
+  // softens onset of any new target value so per-frame jitter doesn't buzz.
+  private static readonly FIRST_DOT_HUM_GAIN_TC = 0.08;
+  updateFirstDotHum(intensity01: number) {
+    if (!this.enabled) return;
+    const i = Math.max(0, Math.min(1, intensity01));
+    if (i <= 0) { this.stopFirstDotHum(); return; }
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    if (!this.firstDotHum) {
+      // C4 = 261.63 Hz. Detune partner ~6 cents apart for slow chorus beating.
+      const baseFreq = 261.63;
+      const detuneRatio = 1.0035;
+      const oscA = this.ctx.createOscillator();
+      const oscB = this.ctx.createOscillator();
+      oscA.type = "sine";
+      oscB.type = "sine";
+      oscA.frequency.value = baseFreq;
+      oscB.frequency.value = baseFreq * detuneRatio;
+      const vibratoLfo = this.ctx.createOscillator();
+      vibratoLfo.type = "sine";
+      vibratoLfo.frequency.value = 4.2;
+      const vibratoDepth = this.ctx.createGain();
+      vibratoDepth.gain.value = baseFreq * 0.004;
+      vibratoLfo.connect(vibratoDepth);
+      vibratoDepth.connect(oscA.frequency);
+      vibratoDepth.connect(oscB.frequency);
+      // bandpass near 700 Hz emphasises the "mm" first-formant region so the
+      // hum reads as a closed-mouth hum, not a bare sine.
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.value = 700;
+      filter.Q.value = 1.4;
+      const mainGain = this.ctx.createGain();
+      mainGain.gain.setValueAtTime(0.0001, t);
+      oscA.connect(filter);
+      oscB.connect(filter);
+      filter.connect(mainGain);
+      mainGain.connect(this.master);
+      oscA.start(t);
+      oscB.start(t);
+      vibratoLfo.start(t);
+      this.firstDotHum = { oscA, oscB, vibratoLfo, vibratoDepth, filter, mainGain };
+    }
+    const target = Sound.FIRST_DOT_HUM_PEAK_GAIN * i;
+    this.firstDotHum.mainGain.gain.setTargetAtTime(target, t, Sound.FIRST_DOT_HUM_GAIN_TC);
+  }
+
+  stopFirstDotHum() {
+    if (!this.ctx || !this.firstDotHum) return;
+    const node = this.firstDotHum;
+    const t = this.ctx.currentTime;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    node.oscA.stop(t + 0.16);
+    node.oscB.stop(t + 0.16);
+    node.vibratoLfo.stop(t + 0.16);
+    this.firstDotHum = null;
   }
 
   // Ambient drone played for the lifetime of a broken-open bassteroid. There

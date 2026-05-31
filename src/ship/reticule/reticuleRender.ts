@@ -1,7 +1,8 @@
 import type { Ship } from "../../Ship";
+import type { Sound } from "../../Sound";
 import { Vec, add, mul, fromAngle, wrap, TAU } from "../../vec";
 import { computeConeFrame } from "./coneGeometry";
-import { paintConeBackground, paintRangeArcs } from "./radarCone";
+import { paintConeBackground, paintRangeArcs, RETICULE_DASH_HSL } from "./radarCone";
 import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost } from "./trajectoryPreview";
 import {
   reticuleOverlapsAnyTarget,
@@ -22,7 +23,27 @@ const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
 const HALF_BEAT_FRACTION = 0.5;
 
 // bind ship state to per-target memo so trajectory previews can track entry-flash and fade across frames.
-type ReticuleState = { trajectoryTracks: TrajectoryTrackMap };
+// hoverDotRing persists the hover-start timestamp so the ring fills one dot per 8th-note across frames.
+type ReticuleState = {
+  trajectoryTracks: TrajectoryTrackMap;
+  hoverDotRing: { hoverStartBeatTime: number | null };
+};
+
+// one arc per 8th-note, full ring at 16 × eighthGrid (=4s at the default 0.5s quarter-grid).
+const HOVER_DOT_COUNT = 16;
+// each slot is TAU/16; arc fills half the slot so arc-length == gap-length around the ring.
+const HOVER_ARC_SWEEP = (TAU / HOVER_DOT_COUNT) * 0.5;
+const HOVER_ARC_LINE_WIDTH = 1.5;
+// sits just past the crosshair tips so arcs don't crowd the aim disc.
+const HOVER_DOT_RING_RADIUS = 26;
+const HOVER_DOT_BUILDING_ALPHA = 0.45;
+// short enough to feel responsive, long enough for the eye to catch the motion.
+const HOVER_ARC_FADE_IN_SEC = 0.08;
+// once complete, arcs breathe 1.0 → reticule's hovered base alpha so peak = "this shot lands".
+const HOVER_DOT_PULSE_PEAK_ALPHA = 1.0;
+const HOVER_DOT_PULSE_MIN_ALPHA = 0.28;
+const HOVER_DOT_PULSE_PERIOD_SEC = 2.0;
+const HOVER_DOT_HSL = RETICULE_DASH_HSL;
 
 // the aim circle = locus of bullet endpoints at t=beatGrid over all headings. Single source
 // of truth so the reticule painter and the gameRender red-tint check agree on geometry.
@@ -80,11 +101,50 @@ const computeReticulePositions = (
   return { positions, primaryIndex };
 };
 
+// arcs fill once per 8th-note, then pulse together; the build resets on hover-loss in the caller.
+// Each arc fades in over HOVER_ARC_FADE_IN_SEC from elapsed = i * slotDuration, so newly-born
+// arcs ease in smoothly instead of popping.
+const paintHoverDotRing = (
+  ctx: CanvasRenderingContext2D, center: Vec, elapsed: number, slotDuration: number,
+  beatTime: number,
+) => {
+  const visibleCount = Math.min(HOVER_DOT_COUNT, Math.floor(elapsed / slotDuration) + 1);
+  const fullyBuilt = visibleCount >= HOVER_DOT_COUNT
+    && (elapsed - (HOVER_DOT_COUNT - 1) * slotDuration) >= HOVER_ARC_FADE_IN_SEC;
+  const baseAlpha = fullyBuilt
+    ? cosineEnvelope(beatTime, HOVER_DOT_PULSE_PERIOD_SEC, HOVER_DOT_PULSE_MIN_ALPHA, HOVER_DOT_PULSE_PEAK_ALPHA)
+    : HOVER_DOT_BUILDING_ALPHA;
+  ctx.lineWidth = HOVER_ARC_LINE_WIDTH;
+  ctx.lineCap = "butt";
+  ctx.setLineDash([]);
+  // first arc centred at 12 o'clock, then clockwise — reads as a natural "starting point".
+  const slot = TAU / HOVER_DOT_COUNT;
+  const start = -Math.PI / 2;
+  for (let i = 0; i < visibleCount; i++) {
+    const age = elapsed - i * slotDuration;
+    const fadeIn = Math.min(1, Math.max(0, age / HOVER_ARC_FADE_IN_SEC));
+    // smoothstep ease so the fade-in has a soft start and finish, not a linear ramp.
+    const eased = fadeIn * fadeIn * (3 - 2 * fadeIn);
+    const alpha = baseAlpha * eased;
+    ctx.strokeStyle = `hsla(${HOVER_DOT_HSL}, ${alpha})`;
+    const mid = start + i * slot;
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, HOVER_DOT_RING_RADIUS, mid - HOVER_ARC_SWEEP / 2, mid + HOVER_ARC_SWEEP / 2);
+    ctx.stroke();
+  }
+};
+
 // cosine envelope between min/max produces a smooth, predictable visual pulse over time.
 const cosineEnvelope = (beatTime: number, period: number, min: number, max: number): number => {
   const v = 0.5 + 0.5 * Math.cos((beatTime / period) * TAU);
   return min + (max - min) * v;
 };
+
+// hover hum: starts at this floor on first frame of hover, rises to 1 by the time
+// the visual ring is fully built (~2s with default beat grid). Player gets immediate
+// audio feedback that they're locked on, with a gentle swell rewarding sustained aim.
+const HOVER_HUM_FLOOR = 0.35;
+const HOVER_HUM_RAMP_SEC = 2.0;
 
 // single entry point — composes background, range arcs, trajectory previews, then aim discs in order.
 export const renderShipReticules = (
@@ -92,6 +152,7 @@ export const renderShipReticules = (
   ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number,
   targets: ReadonlyArray<ReticuleTarget>, beatTime: number, doubletime: boolean,
   tutorialHighlight: boolean = false,
+  sound: Sound | null = null,
 ) => {
   if (!ship.alive) return;
   const { positions: reticulePositions, primaryIndex } = computeReticulePositions(ship, beatGrid, w, h, doubletime);
@@ -122,6 +183,24 @@ export const renderShipReticules = (
       ? true
       : reticuleOverlapsAnyTarget(pos, targets, w, h);
     paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, onFirstBeatDot, tutorialHighlight);
+  }
+  // ring rewards staying on the primary first-beat dot — the shot that actually scores on-beat.
+  const hoveringFirstDot = fromTrajectory && primaryIndex >= 0;
+  if (hoveringFirstDot) {
+    if (state.hoverDotRing.hoverStartBeatTime === null) {
+      state.hoverDotRing.hoverStartBeatTime = beatTime;
+    }
+    const elapsed = beatTime - state.hoverDotRing.hoverStartBeatTime;
+    // one arc per 16th-note (half an 8th) so the ring fills in ~2s instead of ~4s.
+    const sixteenthGrid = beatGrid / 4;
+    paintHoverDotRing(ctx, reticulePositions[primaryIndex], elapsed, sixteenthGrid, beatTime);
+    if (sound) {
+      const swell = Math.min(1, elapsed / HOVER_HUM_RAMP_SEC);
+      sound.updateFirstDotHum(HOVER_HUM_FLOOR + (1 - HOVER_HUM_FLOOR) * swell);
+    }
+  } else {
+    state.hoverDotRing.hoverStartBeatTime = null;
+    if (sound) sound.updateFirstDotHum(0);
   }
   ctx.restore();
 };
