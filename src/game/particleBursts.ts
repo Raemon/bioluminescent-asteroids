@@ -129,7 +129,8 @@ export const emitAlienExplosion = (particles: ParticleSystem, a: Alien) => {
 };
 
 // white = "wasted pod"; tints the destruction differently from the celebratory pickup burst.
-export const emitCanisterPop = (particles: ParticleSystem, c: Canister) => {
+// Also used for off-beat gem shots, so accepts any object with a position.
+export const emitCanisterPop = (particles: ParticleSystem, c: { pos: Vec }) => {
   emitBurst(particles, {
     pos: c.pos, count: 30,
     speedRange: [120, 320],

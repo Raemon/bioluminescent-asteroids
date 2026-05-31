@@ -1,5 +1,13 @@
-import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut } from "./vec";
+import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut, sub, mul, len } from "./vec";
 import { Canister, POWERUP_KINDS } from "./Canister";
+
+// Probability that a successfully-cracked gem actually contains an upgrade.
+// The remaining fraction pays out a flat score instead — same structure as
+// comet kills, so the player reads it as a "consolation jackpot" rather than
+// a miss.
+export const GOLD_CRYSTAL_UPGRADE_CHANCE = 0.4;
+// Score awarded when a cracked gem doesn't yield an upgrade.
+export const GOLD_CRYSTAL_REVEAL_SCORE = 250;
 
 // A standalone collectible left behind by a "goldCrystal" asteroid's death.
 // The asteroid's blurred interior was the visual tease — this is the payoff,
@@ -11,12 +19,6 @@ import { Canister, POWERUP_KINDS } from "./Canister";
 // Score for collecting the gem by flying through it (the "easy" interaction —
 // no rhythm skill required, just spotting the embedded crystal).
 export const GOLD_CRYSTAL_SCORE = 2500;
-
-// Score for shattering the gem with a sub-threshold or off-beat shot. The
-// player still gets *something* so an accidental clip doesn't feel like a
-// pure punishment, but it's deliberately weaker than collecting + much
-// weaker than the rhythm-cracked canister payoff.
-export const GOLD_CRYSTAL_SHATTER_SCORE = 500;
 
 // gem hangs around long enough that a player can reasonably swing back
 // for it after handling the surrounding rubble cloud, but not so long that an
@@ -194,18 +196,17 @@ export const spawnGoldCrystalAt = (pos: Vec, parentVel: Vec): GoldCrystal => {
   return new GoldCrystal({ ...pos }, drift);
 };
 
-// Drop a fresh powerup canister where the gem was, inheriting its drift so
-// the canister appears to be "ejected" from the cracked gem rather than
-// teleported in. Used when the player cracks the gem with a sufficiently
-// powerful on-rhythm shot.
-export const spawnCanisterFromGoldCrystal = (g: GoldCrystal): Canister => {
+// Drop a fresh powerup canister where the gem was. Aims at a random point on
+// the far side of the playfield and uses the standard canister drift speed so
+// the freed canister flies across the screen and eventually warps out just
+// like a normally-spawned canister — the player has to chase it.
+export const spawnCanisterFromGoldCrystal = (g: GoldCrystal, w: number, h: number): Canister => {
   const kind = pick(POWERUP_KINDS);
-  // short drift path so the freed canister settles near the crack site
-  // — the player just earned this and shouldn't have to chase it across the
-  // whole screen.
-  const pathLength = 320;
-  // Inherit gem drift + a small outward jitter so the canister visibly
-  // emerges instead of freezing in place.
-  const vel = v(g.vel.x + rand(-30, 30), g.vel.y + rand(-30, 30));
-  return new Canister({ ...g.pos }, vel, kind, pathLength);
+  const aim = v(rand(80, w - 80), rand(80, h - 80));
+  const delta = sub(aim, g.pos);
+  const fullDist = len(delta) || 1;
+  const dir = mul(delta, 1 / fullDist);
+  const driftSpeed = rand(60, 110);
+  const pathLength = fullDist * rand(0.75, 0.95);
+  return new Canister({ ...g.pos }, mul(dir, driftSpeed), kind, pathLength);
 };

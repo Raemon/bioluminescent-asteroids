@@ -83,6 +83,9 @@ export const alignSplitChildToRhythm = (game: Game, child: Asteroid, claimed?: B
 export { newBeatClaimSet };
 export type { BeatClaimSet };
 
+// when true, upgrades free-spawn during waves; when false, upgrades only come from cracking gems.
+const FEATURE_FREE_UPGRADE_SPAWNS = false;
+
 // mid-wave window means the canister can't appear at warm-up start nor wave-clear end.
 const CANISTER_FIRST_WAVE = 2;
 const CANISTER_CHANCE_PER_WAVE = 1 / 3;
@@ -103,11 +106,11 @@ const TINK_CHANCE_PER_WAVE = 1 / 3;
 
 // Gold-crystal asteroid: a "normal" rock with a faintly visible embedded
 // gold gem. Killing it drops a collectible GoldCrystal pickup plus a small
-// rubble cloud. Wave 5 is the introductory wave — exactly one gem rock
-// guaranteed so the player sees the mechanic. Wave 6+, each spawned normal
+// rubble cloud. Wave 3 is the introductory wave — exactly one gem rock
+// guaranteed so the player sees the mechanic. Wave 4+, each spawned normal
 // rock has a flat 25% chance to be a gem rock; lets the density scale with
 // wave count without further tuning.
-const GOLD_CRYSTAL_FIRST_WAVE = 5;
+const GOLD_CRYSTAL_FIRST_WAVE = 3;
 const GOLD_CRYSTAL_PER_SPAWN_CHANCE = 0.25;
 
 // foreshadow wave swells the looming planet; boss wave hides it and spawns the boss instead.
@@ -287,7 +290,7 @@ const setForeshadowState = (game: Game) => {
 // HEADLINE_EVENT_DAMPEN so a single wave rarely stacks two of them.
 // Order is randomised each wave to keep the suppression symmetric.
 const rollWaveEvents = (game: Game) => {
-  if (game.wave >= CANISTER_FIRST_WAVE) {
+  if (FEATURE_FREE_UPGRADE_SPAWNS && game.wave >= CANISTER_FIRST_WAVE) {
     maybeSchedule(game.waveEvents, CANISTER_CHANCE_PER_WAVE, CANISTER_SPAWN_WINDOW, () => {
       const c = spawnCanister(game.w, game.h, game.ship.pos);
       game.canisters.push(c);

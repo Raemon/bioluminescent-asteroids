@@ -5,7 +5,13 @@ import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
 import { AlienBullet } from "../AlienBullet";
 import { Canister } from "../Canister";
-import { GoldCrystal, GOLD_CRYSTAL_SCORE, GOLD_CRYSTAL_SHATTER_SCORE, spawnCanisterFromGoldCrystal } from "../GoldCrystal";
+import {
+  GoldCrystal,
+  GOLD_CRYSTAL_SCORE,
+  GOLD_CRYSTAL_UPGRADE_CHANCE,
+  GOLD_CRYSTAL_REVEAL_SCORE,
+  spawnCanisterFromGoldCrystal,
+} from "../GoldCrystal";
 import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebaseBeatEval } from "./rhythmGate";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
@@ -262,10 +268,11 @@ const explodeCanister = (game: Game, c: Canister) => {
 };
 
 // Two ways to resolve a gold gem on the field:
-//   1) Shoot it. Rhythm-gated: an on-beat shot dealing ≥ 4 damage cracks it
-//      open and a fresh powerup canister drifts out. Any weaker / off-beat
-//      shot shatters it for a consolation score with no canister — the
-//      player learns that the gem is a *skill* check, not a free pickup.
+//   1) Shoot it. Strictly rhythm-gated: only an on-beat shot dealing ≥ 4
+//      damage cracks it — that path may reveal an upgrade or pay out reveal
+//      score (see crackGoldCrystalForCanister). Any weaker / off-beat shot
+//      wastes it: no score, no popup, same sad sound + white burst a wasted
+//      canister gets, so the player reads "wrong tool" the same way.
 //   2) Fly through it. Slow-and-safe collect path — full GOLD_CRYSTAL_SCORE
 //      with no canister. Reasonable fallback when rhythm isn't available.
 // Shoot pass runs first so a bullet at the gem this frame can't be
@@ -280,7 +287,7 @@ export const handleGoldCrystalPickups = (game: Game) => {
       const dmg = b.damage();
       applyHitToCombo(game, onBeat, b.pos);
       if (onBeat && dmg >= 4) crackGoldCrystalForCanister(game, g);
-      else shatterGoldCrystal(game, g);
+      else wasteGoldCrystal(game, g);
       continue;
     }
     if (game.ship.alive && g.collidesWith(game.ship.pos, game.ship.radius * 0.9)) {
@@ -301,30 +308,32 @@ const collectGoldCrystal = (game: Game, g: GoldCrystal) => {
   syncHud(game);
 };
 
-// Rhythm-cracked: the gem yields its embedded canister. We still play tink
-// (the gem is reacting to the hit) but lead with the canister-appear sound
-// so the player hears "a canister just dropped in".
+// Rhythm-cracked: 40% of the time the gem yields its embedded canister, the
+// rest of the time it pays out GOLD_CRYSTAL_REVEAL_SCORE with a comet-style
+// score popup so the reveal still feels like a payoff.
 const crackGoldCrystalForCanister = (game: Game, g: GoldCrystal) => {
-  const canister = spawnCanisterFromGoldCrystal(g);
-  game.canisters.push(canister);
-  game.sound.play("canisterAppear", 1, g.pos);
   game.sound.play("tink", 1, g.pos);
   game.shake = Math.min(game.shake + 0.25, 1.2);
   emitGoldCrystalPickup(game.particles, g);
+  if (Math.random() < GOLD_CRYSTAL_UPGRADE_CHANCE) {
+    const canister = spawnCanisterFromGoldCrystal(g, game.w, game.h);
+    game.canisters.push(canister);
+    game.sound.play("canisterAppear", 1, g.pos);
+  } else {
+    game.score += GOLD_CRYSTAL_REVEAL_SCORE;
+    game.popups.push(popupScore(g.pos, GOLD_CRYSTAL_REVEAL_SCORE));
+  }
   syncHud(game);
 };
 
-// Off-beat / weak shot: gem shatters into gold dust. The player still gets a
-// small score so the gem wasn't pure punishment, but the bigger prize (the
-// canister) is gone.
-const shatterGoldCrystal = (game: Game, g: GoldCrystal) => {
-  game.sound.play("tink", 1, g.pos);
+// Off-beat / weak shot: same "wasted upgrade" feedback as shooting a canister
+// — no score, no popup, just the sad destroyed sound + white burst. Teaches
+// the player the gem is strictly a rhythm target.
+const wasteGoldCrystal = (game: Game, g: GoldCrystal) => {
   game.sound.play("explosionSmall", 1, g.pos);
-  game.score += GOLD_CRYSTAL_SHATTER_SCORE;
-  game.popups.push(popupScore(g.pos, GOLD_CRYSTAL_SHATTER_SCORE));
-  game.shake = Math.min(game.shake + 0.15, 1.0);
-  emitGoldCrystalPickup(game.particles, g);
-  syncHud(game);
+  game.sound.play("canisterDestroyed", 1, g.pos);
+  game.shake = Math.min(game.shake + 0.25, 1.2);
+  emitCanisterPop(game.particles, g);
 };
 
 // deflection burst differs from kill bursts so the player feels the shield saved them.
