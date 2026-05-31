@@ -553,6 +553,9 @@ html:has(#sound-root), body:has(> #sound-root) {
   font-weight: 300;
 }
 
+#overlay-sub { font-size: 9.1px; }
+#overlay-sub .key { font-size: 7.8px; padding: 2px 6px; }
+
 #overlay-start {
   animation: pulse 2s ease-in-out infinite;
   pointer-events: auto;

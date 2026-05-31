@@ -338,12 +338,18 @@ const drawBeatDotsAlongRay = (
   // doubletime halves the spacing and marks every other k as a half-beat (off-beat) dot.
   const step = doubletime ? dotStep * 0.5 : dotStep;
   const isHalfBeatK = (k: number): boolean => doubletime && (k % 2 === 1);
+  // first-beat dots are anchored to the target (next-beat future position), not to the wedge —
+  // letting cone clipping exclude them produces a worse "lock cue lies about position" bug than
+  // the cosmetic spill it would prevent. k=1 (on-beat) and k=1 doubletime half-beat always paint.
+  const firstOnBeatK = doubletime ? 2 : 1;
+  const firstHalfBeatK = 1;
   let drawnOnBeatDots = 0;
   let drawnHalfBeatDots = 0;
   for (let k = 1; ; k++) {
     const sK = dotOffset + step * k;
     if (sK > sMax) break;
-    if (sK < sMin) continue;
+    const isFirstBeatDot = k === firstOnBeatK || (doubletime && k === firstHalfBeatK);
+    if (sK < sMin && !isFirstBeatDot) continue;
     const px = rawStartX + ux * sK;
     const py = rawStartY + uy * sK;
     const [drawX, drawY] = wrapToCanvas(px, py, w, h);
