@@ -3940,10 +3940,12 @@ export class Sound {
   // explosion thud instead of slicing through it. Dropped an octave from the
   // original sparkle so repeated on-beat kills don't fatigue the ear; the
   // sharper original lives on as the dedicated "tink" asteroid sound.
-  private playComboSparkle() {
+  private playComboSparkle(durationScale: number = 1) {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     const partialFrequencies = [880, 1318.5]; // A5, E6 (perfect fifth)
+    const decay = 0.22 * durationScale;
+    const stop = 0.24 * durationScale;
     for (let i = 0; i < partialFrequencies.length; i++) {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
@@ -3952,13 +3954,15 @@ export class Sound {
       const peak = 0.07 / (i + 1);
       gain.gain.setValueAtTime(0.0001, t);
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
       osc.connect(gain);
       gain.connect(this.master);
       osc.start(t);
-      osc.stop(t + 0.24);
+      osc.stop(t + stop);
     }
   }
+
+  playComboSparkleShort() { this.playComboSparkle(0.5); }
 
   // Escalating melody chime — one rounded synth note per successive on-beat
   // kill. All variants open with the same three universal anchor notes on a
@@ -3972,7 +3976,7 @@ export class Sound {
   // Voice: soft sine pad — slow attack, long round decay, gentle detune for
   // analog-synth warmth. No spatial panning: a melody should sit centered in
   // the mix instead of jumping with each kill.
-  playComboChime(comboValue: number, _pos?: Pos) {
+  playComboChime(comboValue: number, _pos?: Pos, durationScale: number = 1) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
@@ -4045,8 +4049,8 @@ export class Sound {
     // → 0.22 — split across three detuned voices so combined peak ~0.22).
     const peak = 0.22;
     const attack = 0.08;
-    const sustain = 2.0;
-    const release = 3.0;
+    const sustain = 2.0 * durationScale;
+    const release = 3.0 * durationScale;
 
     const env = this.ctx.createGain();
     env.gain.setValueAtTime(0.0001, t);

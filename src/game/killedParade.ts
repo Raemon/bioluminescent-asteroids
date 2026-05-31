@@ -174,8 +174,8 @@ const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number,
       // replay the on-beat reward pair (sparkle + pitched chime) for kills that landed
       //   on rhythm, using the multiplier captured at kill time so the chime pitch matches.
       if (e.snap.rhythmHit) {
-        game.sound.play("comboSparkle");
-        game.sound.playComboChime(e.snap.rhythmHit.combo);
+        game.sound.playComboSparkleShort();
+        game.sound.playComboChime(e.snap.rhythmHit.combo, undefined, 0.5);
       }
       if (e.snap.bassDrone) {
         e.droneKey = {};
@@ -190,7 +190,13 @@ const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number,
       e.droneActive = false;
     }
     if (offscreenRight || offscreenLeft) continue;
+    const dimmed = !e.snap.rhythmHit;
+    if (dimmed) {
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+    }
     ctx.drawImage(e.snap.full, x - halfW, centreY - e.snap.full.height / 2);
+    if (dimmed) ctx.restore();
     if (e.played && e.snap.scoreEarned > 0) {
       const age = t - e.playedAtBeat;
       if (age < SCORE_FLASH_BEATS) {
