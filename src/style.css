@@ -1359,7 +1359,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 .first-wave-hint__accent {
-  color: #50a6e4;
+  color: #ffffff;
 }
 
 .first-wave-hint__sub {
@@ -1397,6 +1397,6 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 .first-wave-hint__pip.filled {
-  background: #50a6e4;
-  border-color: #8ee2ff;
+  background: #ffffff;
+  border-color: #ffffff;
 }
