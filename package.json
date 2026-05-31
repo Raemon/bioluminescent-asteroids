@@ -14,9 +14,14 @@
     "merge": "branch=$(git branch --show-current) && git checkout main && git merge \"$branch\" && git checkout \"$branch\""
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
     "@vercel/node": "^5.8.5",
+    "@vitejs/plugin-react": "^4.7.0",
     "dotenv": "^17.4.2",
     "prisma": "^7.8.0",
+    "tailwindcss": "^4.3.0",
     "tsx": "^4.22.3",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
@@ -25,6 +30,8 @@
     "@neondatabase/serverless": "^1.1.0",
     "@prisma/adapter-neon": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
     "tone": "^15.1.22"
   }
 }

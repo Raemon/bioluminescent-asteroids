@@ -1,7 +1,26 @@
+import { StrictMode } from "react";
+import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
+import { App } from "./ui/App";
+import "./style.css";
+
 import { Game } from "./Game";
 import { loadSoundConfig } from "./soundConfig";
 import { installBetaTest } from "./game/betaTest";
 import { installTutorialDemos } from "./tutorial";
+
+// Mount React first and force a synchronous commit so the HUD/Overlay
+// markup is on the page before bindHudElements() runs inside `new Game()`.
+const rootEl = document.getElementById("root");
+if (!rootEl) throw new Error("React root #root not found");
+const root = createRoot(rootEl);
+flushSync(() => {
+  root.render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+});
 
 const canvas = document.getElementById("stage") as HTMLCanvasElement | null;
 if (!canvas) throw new Error("Canvas #stage not found");

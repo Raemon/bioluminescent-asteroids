@@ -148,9 +148,11 @@ export const onAsteroidKilledByBullet = (
 ): Asteroid[] => {
   const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit);
   if (a.isBass()) game.sound.play("bassEcho", 1, a.pos);
-  game.sound.play(hitSoundFor(a), 1, a.pos);
-  // Taiko boom layered on plain on-beat kills for a deeper, resonant payoff.
-  if (isOnBeatHit && a.kind === "normal") game.sound.play("asteroidBoomBeat", 1, a.pos);
+  // On-beat plain asteroid kills get the taiko boom in place of the noise
+  // explosion — replacing rather than layering so the acoustic drum isn't
+  // masked by the broadband crash.
+  const useTaiko = isOnBeatHit && a.kind === "normal";
+  game.sound.play(useTaiko ? "asteroidBoomBeat" : hitSoundFor(a), 1, a.pos);
   return finishAsteroidKillCore(game, a, b.vel, isOnBeatHit, scoreEarned, b.pos);
 };
 

@@ -34,6 +34,11 @@ type ToneEngineNodes = {
   chimeSynth: Tone.PolySynth;
   powerupSynth: Tone.PolySynth;
   waveClearSynth: Tone.PolySynth;
+  // Taiko-style boom for on-beat plain-asteroid kills. MembraneSynth body
+  // gives the pitched thwack-into-rumble character; the MetalSynth click
+  // layers the bachi (drumstick) attack so the hit reads as wood-on-skin.
+  taikoBody: Tone.MembraneSynth;
+  taikoStick: Tone.MetalSynth;
 };
 
 type ToneCometShimmer = {
@@ -564,6 +569,32 @@ export class Sound {
       volume: -10,
     }), 0.5, 0.7);
 
+    // Taiko body. Wider pitch sweep (5 octaves) than the bass kick gives the
+    // signature high-thwack-into-low-rumble shape; longer decay (0.55) lets
+    // the wood body resonate rather than thud-and-die. Triangle oscillator
+    // (instead of sine) adds odd harmonics so the body has more bite in the
+    // mids — needed to cut through the explosion noise that fires alongside.
+    // Heavier reverb send than the bass voices to suggest a dohyo-style room.
+    const taikoBody = wireToBus(new Tone.MembraneSynth({
+      pitchDecay: 0.025,
+      octaves: 5,
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.001, decay: 0.55, sustain: 0, release: 0.7 },
+      volume: 0,
+    }), 1, 0.35);
+
+    // Bachi (stick) click. Very short metallic transient — the wooden mallet
+    // contact moment that makes a taiko read as struck rather than synthesized.
+    // High harmonicity + low octaves keeps it as a "tick" not a "crash".
+    const taikoStick = wireToBus(new Tone.MetalSynth({
+      envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.05 },
+      harmonicity: 8.5,
+      modulationIndex: 22,
+      resonance: 2800,
+      octaves: 0.5,
+      volume: -22,
+    }), 1, 0.15);
+
     this.toneEngine = {
       toneMaster,
       reverbSend,
@@ -585,6 +616,8 @@ export class Sound {
       chimeSynth,
       powerupSynth,
       waveClearSynth,
+      taikoBody,
+      taikoStick,
     };
     this.wireMasterToBus();
     // Warm the baked-buffer cache immediately so the first in-game trigger
@@ -615,6 +648,7 @@ export class Sound {
       ["bassBoom", standardPitches],
       ["bassPluck", standardPitches],
       ["bassSnap", standardPitches],
+      ["asteroidBoomBeat", [1]],
     ];
     for (const [name, pitches] of oneShots) {
       for (const p of pitches) {
@@ -745,6 +779,7 @@ export class Sound {
       chime: 2.0,
       powerup: 1.6,
       waveClear: 2.4,
+      asteroidBoomBeat: 1.6,
     };
     const dur = durations[name] ?? 1.5;
     const length = Math.ceil(sr * dur);
@@ -827,6 +862,13 @@ export class Sound {
       case "bassSnap": {
         const snap = wire(new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.1 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5, volume: -16 }), 1, 0.18);
         snap.triggerAttackRelease("C3", "16n", 0, 0.7);
+        break;
+      }
+      case "asteroidBoomBeat": {
+        const body = wire(new Tone.MembraneSynth({ pitchDecay: 0.025, octaves: 5, oscillator: { type: "triangle" }, envelope: { attack: 0.001, decay: 0.55, sustain: 0, release: 0.7 }, volume: 0 }), 1, 0.35);
+        const stick = wire(new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.05 }, harmonicity: 8.5, modulationIndex: 22, resonance: 2800, octaves: 0.5, volume: -22 }), 1, 0.15);
+        body.triggerAttackRelease(65.4, "8n", 0, 1.0);
+        stick.triggerAttackRelease("C5", "32n", 0, 0.6);
         break;
       }
       case "chime": {
@@ -3232,77 +3274,21 @@ export class Sound {
   }
 
   // Taiko-style C-pitched boom that layers on top of explosionSmall/Medium/Large
-  // when a plain asteroid is destroyed on-beat. Built to *cut through* the
-  // explosion's broadband noise rather than be masked by it:
-  //   - Saw+sine body (C3→C2) for harmonic-rich punch a pure sine can't give.
-  //   - Sub sine at C1, sustained past the explosion's noise tail so the
-  //     rumble keeps ringing after the crash has dropped off.
-  //   - Pitched-down noise transient with a midband resonance for a hard
-  //     mallet *thwack* attack that reads distinct from the explosion crack.
-  //   - Slight pre-delay (12 ms) so the attack lands just after the explosion
-  //     transient — same beat psycho-acoustically, but unmasks the boom.
+  // when a plain asteroid is destroyed on-beat. Built around Tone's
+  // MembraneSynth (the same primitive driving bassKick / bgBeat / fireBeatBody),
+  // tuned for taiko character rather than electronic kick character:
+  //   - Body fires at C2 (65.4 Hz). The 5-octave pitch decay sweeps from
+  //     ~C7 down to C2 in ~25 ms, giving the high-thwack-into-low-rumble
+  //     attack signature of a struck membrane.
+  //   - Stick layer is a short MetalSynth tick — the bachi-on-skin contact.
+  //   - Both voices route through the shared compressor + chorus + reverb
+  //     bus, which is what gives the live engine its "room" character.
   private playAsteroidBoomBeat() {
-    if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime + 0.012;
-    const duration = 0.7;
-
-    const bodySine = this.ctx.createOscillator();
-    bodySine.type = "sine";
-    bodySine.frequency.setValueAtTime(196, t);
-    bodySine.frequency.exponentialRampToValueAtTime(65.4, t + 0.11);
-    const bodySaw = this.ctx.createOscillator();
-    bodySaw.type = "sawtooth";
-    bodySaw.frequency.setValueAtTime(130.8, t);
-    bodySaw.frequency.exponentialRampToValueAtTime(65.4, t + 0.13);
-    const bodyFilter = this.ctx.createBiquadFilter();
-    bodyFilter.type = "lowpass";
-    bodyFilter.Q.value = 6;
-    bodyFilter.frequency.setValueAtTime(1400, t);
-    bodyFilter.frequency.exponentialRampToValueAtTime(160, t + duration);
-    const bodyGain = this.ctx.createGain();
-    bodyGain.gain.setValueAtTime(0.0001, t);
-    bodyGain.gain.exponentialRampToValueAtTime(1.1, t + 0.006);
-    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
-    bodySine.connect(bodyFilter);
-    bodySaw.connect(bodyFilter);
-    bodyFilter.connect(bodyGain);
-    bodyGain.connect(this.master);
-    bodySine.start(t);
-    bodySaw.start(t);
-    bodySine.stop(t + duration);
-    bodySaw.stop(t + duration);
-
-    const sub = this.ctx.createOscillator();
-    sub.type = "sine";
-    sub.frequency.setValueAtTime(65.4, t);
-    sub.frequency.exponentialRampToValueAtTime(32.7, t + 0.22);
-    const subGain = this.ctx.createGain();
-    subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(0.95, t + 0.015);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + duration + 0.15);
-    sub.connect(subGain);
-    subGain.connect(this.master);
-    sub.start(t);
-    sub.stop(t + duration + 0.15);
-
-    const noiseBuf = this.makeNoiseBuffer(0.14);
-    if (!noiseBuf) return;
-    const noise = this.ctx.createBufferSource();
-    noise.buffer = noiseBuf;
-    const noiseFilter = this.ctx.createBiquadFilter();
-    noiseFilter.type = "bandpass";
-    noiseFilter.Q.value = 3;
-    noiseFilter.frequency.setValueAtTime(420, t);
-    noiseFilter.frequency.exponentialRampToValueAtTime(140, t + 0.1);
-    const noiseGain = this.ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.0001, t);
-    noiseGain.gain.exponentialRampToValueAtTime(0.85, t + 0.003);
-    noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
-    noise.connect(noiseFilter);
-    noiseFilter.connect(noiseGain);
-    noiseGain.connect(this.master);
-    noise.start(t);
-    noise.stop(t + 0.14);
+    if (this.playBaked("asteroidBoomBeat", 1)) return;
+    const eng = this.ensureToneEngine();
+    if (!eng) return;
+    eng.taikoBody.triggerAttackRelease(65.4, "8n", undefined, 1.0);
+    eng.taikoStick.triggerAttackRelease("C5", "32n", undefined, 0.6);
   }
 
   private startThrust() {

@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import { writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { config as loadDotenv } from "dotenv";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 loadDotenv();
 
@@ -173,7 +175,7 @@ export default defineConfig({
   server: {
     host: true,
   },
-  plugins: [cleanUrls(), soundConfigWriter(), devApi()],
+  plugins: [react(), tailwindcss(), cleanUrls(), soundConfigWriter(), devApi()],
   build: {
     rollupOptions: {
       input: {
