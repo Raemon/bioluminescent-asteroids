@@ -38,6 +38,10 @@ const TRAJECTORY_FIRST_BEAT_DOT_ALPHA = 0.55;
 // peak alpha matches the disc's RETICULE_OVERLAP_BRIGHTNESS=3 boost (≈0.75) so
 // the first dot "lights up" to the same intensity as the disc when proximity is reached.
 const TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA = 0.95;
+// when the reticule sits ON the dot, alpha pulses between this floor (between beats) and 1
+// (on the beat) so the rhythm is visible even at the brightest state. Floor stays high so the
+// "this shot lands" cue never reads as dim.
+const TRAJECTORY_FIRST_BEAT_DOT_LIT_MIN_ALPHA = 0.6;
 // how far outside the on-beat hit radius the proximity glow starts ramping up — this is
 // the "near" band where the first-dot already reads as bright before a direct overlap.
 const TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD = 24;
@@ -230,7 +234,17 @@ const paintFirstBeatDot = (
 ) => {
   const proximityAlpha = TRAJECTORY_FIRST_BEAT_DOT_ALPHA
     + (TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA - TRAJECTORY_FIRST_BEAT_DOT_ALPHA) * proximity01;
-  const rawAlpha = proximityAlpha * entryFlashBoost * beatPulseBoost * focusBoost * dimFactor;
+  // multiplicative pulse is the default; on top of the dot (or on the focused target's dot,
+  // which is the bright "you're aimed at this target" cue) we'd saturate to 1 and lose the
+  // pulse, so blend toward a normalized [LIT_MIN, 1] pulse so the rhythm stays visible at the
+  // bright state with a high minimum opacity.
+  const beatPulse01 = (beatPulseBoost - 1) / (RETICULE_BEAT_PULSE_PEAK - 1);
+  const lit01 = focused ? 1 : proximity01;
+  const multiplicativeAlpha = proximityAlpha * entryFlashBoost * beatPulseBoost * focusBoost * dimFactor;
+  const litAlpha = (TRAJECTORY_FIRST_BEAT_DOT_LIT_MIN_ALPHA
+    + (1 - TRAJECTORY_FIRST_BEAT_DOT_LIT_MIN_ALPHA) * beatPulse01)
+    * entryFlashBoost * focusBoost * dimFactor;
+  const rawAlpha = multiplicativeAlpha * (1 - lit01) + litAlpha * lit01;
   const alpha = Math.min(1, tutorialHighlight ? Math.max(rawAlpha, 0.95) : rawAlpha);
   const glow01 = Math.max(0, Math.min(1, (entryFlashBoost - 1) / (TRAJECTORY_ENTRY_FLASH_PEAK_BOOST - 1)));
   const prevShadowBlur = ctx.shadowBlur;
@@ -248,7 +262,9 @@ const paintFirstBeatDot = (
   // outer ring + crosshair sized to match the ship's aim disc, so the locked-on target reads
   // as a mirror of the player's reticule. Non-focused dots keep the faint dashed halo cue.
   if (focused) {
-    ctx.strokeStyle = `hsla(${FOCUSED_FIRST_DOT_HSL}, 1)`;
+    const focusedAlpha = TRAJECTORY_FIRST_BEAT_DOT_LIT_MIN_ALPHA
+      + (1 - TRAJECTORY_FIRST_BEAT_DOT_LIT_MIN_ALPHA) * beatPulse01;
+    ctx.strokeStyle = `hsla(${FOCUSED_FIRST_DOT_HSL}, ${focusedAlpha})`;
     ctx.lineWidth = FOCUSED_FIRST_DOT_RING_LINE_WIDTH;
     ctx.setLineDash(FOCUSED_FIRST_DOT_RING_DASH);
     ctx.beginPath();
