@@ -48,6 +48,12 @@ html, body {
   z-index: 5;
 }
 
+#hud-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
 #score-block {
   display: flex;
   align-items: baseline;

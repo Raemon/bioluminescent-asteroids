@@ -21,14 +21,20 @@ const Powerup = ({ kind, title, children, withProgress = false }: {
 
 export const Hud = () => (
   <div id="hud">
-    <div id="score-block">
-      <div id="score-row">
-        <div id="score">0</div>
-        <div id="score-flash" aria-hidden="true" />
+    <div id="hud-left">
+      <div id="lives">
+        <span /><span /><span />
       </div>
-      <div id="combo" className="hidden">
-        <span id="combo-value">0</span>
-        <span id="combo-label">combo</span>
+      <div id="wave">WAVE 1</div>
+      <div id="score-block">
+        <div id="score-row">
+          <div id="score">0</div>
+          <div id="score-flash" aria-hidden="true" />
+        </div>
+        <div id="combo" className="hidden">
+          <span id="combo-value">0</span>
+          <span id="combo-label">combo</span>
+        </div>
       </div>
     </div>
     <div id="powerups">
@@ -82,12 +88,8 @@ export const Hud = () => (
         </svg>
       </Powerup>
     </div>
-    <div id="wave">WAVE 1</div>
     <div id="hud-right">
       <button id="mute" type="button" title="Mute (M)" aria-label="Mute">♪</button>
-      <div id="lives">
-        <span /><span /><span />
-      </div>
     </div>
   </div>
 );
