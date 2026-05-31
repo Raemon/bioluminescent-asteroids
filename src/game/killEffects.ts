@@ -79,8 +79,10 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
 
 // 6x marks the tutorial done forever — backstop for any case where the
 //   player blasts past the stage progression while a hint is still up.
+//   Stage 4 is the closing flourish that auto-dismisses on its own timer;
+//   don't cut it short.
 const advanceFirstWaveHintOnCombo = (game: Game) => {
-  if (game.beatCombo >= 6 && game.firstWaveHintStage !== 0) {
+  if (game.beatCombo >= 6 && game.firstWaveHintStage !== 0 && game.firstWaveHintStage !== 4) {
     setFirstWaveHintStage(game, 0);
     markFirstWaveTutorialComplete();
   }

@@ -16,18 +16,21 @@ import { useEffect, useRef, useState } from "react";
 //       tools to help" — bottom half of the screen, appears only after stage 1
 //       has fully faded out. Held until 4x rhythm.
 //   3 — "Rhythm gives you dramatically more points" — bottom half, gold;
-//       holds 2s then fades away.
+//       holds 2s then advances to stage 4.
+//   4 — "Become one with the Pulsar" — bottom half; fades in, holds 3s, fades
+//       out, then dismisses the tutorial.
 //   0 — hidden.
 //
 // Styling matches the #overlay h1 title — Space Grotesk 700, mixed case, wide
 // tracking, scaleX squish, cyan with a blue glow — sized down to a medium
 // prompt that doesn't compete with the actual title.
 
-type Stage = 0 | 1 | 2 | 3;
+type Stage = 0 | 1 | 2 | 3 | 4;
 
 const FADE_MS = 1000;
 const INTERSTITIAL_MS = 300;
 const STAGE_3_HOLD_MS = 3000;
+const STAGE_4_HOLD_MS = 3000;
 
 export const FirstWaveHint = () => {
   // `displayStage` is what's currently mounted; `targetStage` is what the
@@ -148,26 +151,42 @@ export const FirstWaveHint = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetStage]);
 
-  // stage 3 auto-dismisses 3 seconds after the game signals stage3Ready
-  //   (player at ≥3x rhythm). If they enter stage 3 already at 3x, the
-  //   signal fires immediately and the hold + fade start right away;
-  //   otherwise stage 3 hangs at full opacity until the next on-beat hit
-  //   crosses them back to 3x.
+  // stage 3 auto-advances to stage 4 ("Become one with the Pulsar") 3 seconds
+  //   after the game signals stage3Ready (player at ≥3x rhythm). If they enter
+  //   stage 3 already at 3x, the signal fires immediately and the hold + fade
+  //   start right away; otherwise stage 3 hangs at full opacity until the next
+  //   on-beat hit crosses them back to 3x.
   useEffect(() => {
     if (displayStage !== 3 || !visible || !stage3Ready) return;
     const holdId = window.setTimeout(() => setVisible(false), STAGE_3_HOLD_MS);
+    const advanceId = window.setTimeout(() => {
+      // game-side listener calls setFirstWaveHintStage(4), which keeps
+      //   game.firstWaveHintStage in sync and re-dispatches the stage event.
+      window.dispatchEvent(new CustomEvent("first-wave-hint:advance"));
+    }, STAGE_3_HOLD_MS + FADE_MS);
+    return () => {
+      window.clearTimeout(holdId);
+      window.clearTimeout(advanceId);
+    };
+  }, [displayStage, visible, stage3Ready]);
+
+  // stage 4 is the closing flourish — fades in, holds for 3s, fades out, then
+  //   dismisses the tutorial entirely.
+  useEffect(() => {
+    if (displayStage !== 4 || !visible) return;
+    const holdId = window.setTimeout(() => setVisible(false), STAGE_4_HOLD_MS);
     const clearId = window.setTimeout(() => {
       window.dispatchEvent(new CustomEvent("first-wave-hint:dismiss"));
-    }, STAGE_3_HOLD_MS + FADE_MS);
+    }, STAGE_4_HOLD_MS + FADE_MS);
     return () => {
       window.clearTimeout(holdId);
       window.clearTimeout(clearId);
     };
-  }, [displayStage, visible, stage3Ready]);
+  }, [displayStage, visible]);
 
   if (displayStage === 0) return null;
 
-  // stage 1 lives above the ship; stages 2 and 3 share the lower-third slot.
+  // stage 1 lives above the ship; stages 2, 3, and 4 share the lower-third slot.
   const slot = displayStage === 1 ? "top" : "bottom";
 
   return (
@@ -227,6 +246,11 @@ export const FirstWaveHint = () => {
             </div>
           </div>
         </>
+      )}
+      {displayStage === 4 && (
+        <div className="first-wave-hint__line">
+          Become one with the <span className="first-wave-hint__accent">Pulsar</span>
+        </div>
       )}
     </div>
   );

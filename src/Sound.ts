@@ -622,6 +622,16 @@ export class Sound {
   // each promise resolves. Safe to call repeatedly — playBaked's in-flight
   // guard de-dupes.
   private warmBakedCache() {
+    // bgBeat is the first sound the player hears every run — and unlike all
+    // other voices, its playBgBeat path *requires* a baked buffer (the live
+    // Tone fallback was removed because its scheduler lookahead made the
+    // first few beats drift before the cache caught up). Bake the early-wave
+    // downbeat buckets before anything else so the first downbeats at game
+    // start aren't dropped silently.
+    for (let bucket = 0; bucket <= 2; bucket++) {
+      const intensityBucket = bucket / 10;
+      this.queueBake("bgBeat", 1 * 100 + intensityBucket);
+    }
     // Per-sound list of pitch ratios to pre-bake. Mirrors the values Game
     // passes at runtime: bassteroid split levels use BASS_SPLIT_PITCH_RATIO
     // ([1, 1, 0.8409]); bgBeat uses 1 or 1.122 (offbeats), composited with
@@ -642,10 +652,9 @@ export class Sound {
         this.queueBake(name, p);
       }
     }
-    // bgBeat: 2 base pitches (1 = downbeat C2, 1.122 = offbeat D2) × 11
-    // intensity buckets. Encoded key is `actualPitch * 100 + intensityBucket`
-    // — matches the call-site in playBgBeat. The +1000-offset variant is the
-    // doubletime "light eighth" used at white-bullet tier (combo ≥ 8).
+    // Remaining bgBeat variants: full 11-bucket sweep × {downbeat, offbeat} ×
+    // {main, light-eighth}. The early downbeat buckets above already queued
+    // — queueBake dedupes, so re-listing them here is a no-op.
     for (const basePitch of [1, 1.122]) {
       for (let bucket = 0; bucket <= 10; bucket++) {
         const intensityBucket = bucket / 10;
@@ -656,16 +665,33 @@ export class Sound {
   }
 
   // Trigger a bake for one (sound, pitchKey) pair if it isn't cached or in
-  // flight. Bakes are serialized via bakeChain so Tone.setContext doesn't
-  // race between concurrent renders.
+  // flight. Two-tier flow: first try fetching a pre-baked MP3 from
+  // public/sounds/baked/ (no Tone.js work — runs in parallel across calls);
+  // only if that 404s do we fall through to the live Tone bake. The live
+  // bakes are still serialized via bakeChain because Tone.setContext is
+  // global, but in practice (with the MP3s committed) we never hit that
+  // path in prod and only hit it on first dev play after a synth-recipe
+  // edit. In dev the rendered buffer is POSTed back to /__bake-dump__ so
+  // the next reload is fully fetch-only.
   private queueBake(name: SoundName, pitchRatio: number) {
     const key = this.bakedKey(name, pitchRatio);
     if (this.bakedBuffers.has(key) || this.bakingInFlight.has(key)) return;
     this.bakingInFlight.add(key);
-    this.bakeChain = this.bakeChain.then(() => this.bakeSound(name, pitchRatio).then((rendered) => {
-      if (rendered) this.bakedBuffers.set(key, rendered);
-      this.bakingInFlight.delete(key);
-    }).catch(() => { this.bakingInFlight.delete(key); }));
+    void this.fetchBakedMp3(name, pitchRatio).then((fetched) => {
+      if (fetched) {
+        this.bakedBuffers.set(key, fetched);
+        this.bakingInFlight.delete(key);
+        return;
+      }
+      // Fall through to live Tone bake (serialized).
+      this.bakeChain = this.bakeChain.then(() => this.bakeSound(name, pitchRatio).then((rendered) => {
+        if (rendered) {
+          this.bakedBuffers.set(key, rendered);
+          void this.dumpBakedToDev(name, pitchRatio, rendered);
+        }
+        this.bakingInFlight.delete(key);
+      }).catch(() => { this.bakingInFlight.delete(key); }));
+    }).catch(() => { this.bakingInFlight.delete(key); });
   }
 
   // Wire Sound.master into the Tone bus. Master sums every hand-built
@@ -714,6 +740,88 @@ export class Sound {
   private bakedKey(name: SoundName, pitchRatio: number): string {
     // Quantize to 4 decimals so floating-point noise doesn't fragment the cache.
     return `${name}|${pitchRatio.toFixed(4)}`;
+  }
+
+  // Filename-safe form of bakedKey for disk storage. `|` would force a URL
+  // escape on every fetch and trips the dev plugin's path-safety regex, so we
+  // swap it for `__`. The 4-decimal quantization stays, dots are file-safe.
+  private bakedFileSlug(name: SoundName, pitchRatio: number): string {
+    return `${name}__${pitchRatio.toFixed(4)}`;
+  }
+
+  private bakedFileUrl(name: SoundName, pitchRatio: number): string {
+    return `/sounds/baked/${this.bakedFileSlug(name, pitchRatio)}.mp3`;
+  }
+
+  // Encode an AudioBuffer as a 16-bit PCM WAV in a single Uint8Array. Used to
+  // ship a freshly-rendered bake to the dev plugin for ffmpeg → MP3 conversion.
+  // Stereo interleaved; sample rate from the buffer.
+  private encodeWav(buf: AudioBuffer): Uint8Array {
+    const numCh = buf.numberOfChannels;
+    const sr = buf.sampleRate;
+    const frames = buf.length;
+    const dataBytes = frames * numCh * 2;
+    const out = new ArrayBuffer(44 + dataBytes);
+    const view = new DataView(out);
+    const writeStr = (off: number, s: string) => {
+      for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+    };
+    writeStr(0, "RIFF");
+    view.setUint32(4, 36 + dataBytes, true);
+    writeStr(8, "WAVE");
+    writeStr(12, "fmt ");
+    view.setUint32(16, 16, true);            // PCM chunk size
+    view.setUint16(20, 1, true);             // PCM format
+    view.setUint16(22, numCh, true);
+    view.setUint32(24, sr, true);
+    view.setUint32(28, sr * numCh * 2, true);
+    view.setUint16(32, numCh * 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, "data");
+    view.setUint32(40, dataBytes, true);
+    const channels: Float32Array[] = [];
+    for (let c = 0; c < numCh; c++) channels.push(buf.getChannelData(c));
+    let off = 44;
+    for (let i = 0; i < frames; i++) {
+      for (let c = 0; c < numCh; c++) {
+        const s = Math.max(-1, Math.min(1, channels[c][i]));
+        view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        off += 2;
+      }
+    }
+    return new Uint8Array(out);
+  }
+
+  // Fetch a pre-baked MP3 from public/sounds/baked/. Returns the decoded
+  // AudioBuffer on hit, null on 404 (so queueBake can fall through to a live
+  // Tone bake — which in dev also POSTs the result back for next time).
+  private async fetchBakedMp3(name: SoundName, pitchRatio: number): Promise<AudioBuffer | null> {
+    if (!this.ctx) return null;
+    try {
+      const r = await fetch(this.bakedFileUrl(name, pitchRatio));
+      if (!r.ok) return null;
+      const ab = await r.arrayBuffer();
+      return await this.ctx.decodeAudioData(ab);
+    } catch {
+      return null;
+    }
+  }
+
+  // Dev-only: POST a freshly-rendered bake to the Vite plugin so it lands in
+  // public/sounds/baked/ as MP3. The plugin no-ops if the file already exists,
+  // so this is safe to call on every bake.
+  private async dumpBakedToDev(name: SoundName, pitchRatio: number, buf: AudioBuffer): Promise<void> {
+    if (!import.meta.env.DEV) return;
+    try {
+      const wav = this.encodeWav(buf);
+      await fetch(`/__bake-dump__?key=${encodeURIComponent(this.bakedFileSlug(name, pitchRatio))}`, {
+        method: "POST",
+        headers: { "content-type": "audio/wav" },
+        body: new Blob([wav.buffer as ArrayBuffer], { type: "audio/wav" }),
+      });
+    } catch {
+      // dev convenience only; never block playback on a dump failure.
+    }
   }
 
   // Play a pre-rendered buffer through the live master bus. Returns true if
@@ -955,6 +1063,24 @@ export class Sound {
   resume() {
     this.ensureContext();
     if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
+  }
+
+  // First-user-gesture entry point. Browsers gate AudioContext creation +
+  // resume on a user gesture; main.tsx wires this to keydown/pointerdown so
+  // the heavy bake work overlaps with the title screen rather than the first
+  // few seconds of gameplay. Returns a promise that resolves when every
+  // currently-queued bake (including the bgBeat sweep in warmBakedCache) is
+  // done — startGame awaits it so the first beats land on cached buffers.
+  // Idempotent: repeated calls return the same promise.
+  private warmPromise: Promise<void> | null = null;
+  warmAudio(): Promise<void> {
+    if (this.warmPromise) return this.warmPromise;
+    this.resume();
+    // ensureToneEngine internally calls warmBakedCache; we capture bakeChain
+    // *after* that so the returned promise covers the full warm queue. Wrap
+    // in a fresh promise that strips bakeChain's any-typed result.
+    this.warmPromise = this.bakeChain.then(() => undefined);
+    return this.warmPromise;
   }
 
   setEnabled(on: boolean) {
@@ -2403,32 +2529,22 @@ export class Sound {
   // grace-note in-betweens, not as a thicker downbeat. Pitch is shifted up a
   // semitone (C#2 / D#2) so the bake cache stores it under a distinct key
   // from the main beat without re-baking on every dispatch.
+  // Baked-only — matches playBgBeat's policy (see comment there for why the
+  // live Tone fallback was removed). Light eighths only fire at combo ≥ 12,
+  // which is many seconds into a run, so the bake cache is always warm by
+  // the time this is reachable.
   playBgBeatLight(pitchRatio = 1) {
     if (!this.enabled) return;
     if (!this.ctx || !this.master) return;
     if (this.bgBeatIntensity <= 0) return;
     const intensity = Math.max(0, Math.min(1, this.bgBeatIntensity));
-    const isOffbeat = pitchRatio !== 1;
-    // Light eighths are quieter than the main beat by a fixed multiplier,
-    // on top of the standard offbeat attenuation.
-    const lightMul = 0.42;
-    const offbeatMul = isOffbeat ? 0.35 + intensity * 0.45 : 1;
-    const levelMul = (0.35 + 0.65 * intensity) * offbeatMul * lightMul;
     const intensityBucket = Math.round(intensity * 10) / 10;
     // Light variant tagged in the bake key by a +1000 sentinel offset. Stays
     // unambiguous against the main beat's `pitchRatio * 100 + bucket`
     // encoding (max ~113) so the decode in bakeSound can identify "light" by
     // simply checking key > 500.
     const bgBeatPitchKey = pitchRatio * 100 + intensityBucket + 1000;
-    if (this.playBaked("bgBeat", bgBeatPitchKey)) return;
-    const eng = this.ensureToneEngine();
-    if (!eng) return;
-    const velocity = (0.25 + intensity * 0.75) * levelMul;
-    // Shift up a semitone vs. the main beat so the in-between eighth carries
-    // its own pitch character (C#2 vs C2, D#2 vs D2) — distinct enough to
-    // hear as a grace note, close enough that the riff stays musical.
-    const note = pitchRatio === 1 ? "C#2" : "D#2";
-    eng.bgBeatKick.triggerAttackRelease(note, "8n", undefined, velocity);
+    this.playBaked("bgBeat", bgBeatPitchKey);
   }
 
   // Cached per requested duration. The samples are pure random noise — there's
@@ -3113,34 +3229,23 @@ export class Sound {
   // pitchRatio carries the on/off-beat flag from the caller: 1.0 on downbeats,
   // slightly above 1 on offbeats so the pattern reads as a heartbeat rhythm
   // rather than a flat metronome.
+  //
+  // Baked-only: the live Tone fallback was removed because its scheduler
+  // lookahead (~100ms) made the first few beats land late before the bake
+  // cache warmed up, then "snap" onto the grid mid-run — the perceptual
+  // effect was the early beats sounding clustered/faster than they should
+  // be. Dropping the fallback means the first beat or two during cache
+  // warmup may go silent — far less disorienting than late thuds, and
+  // warmBakedCache now queues the early-wave downbeat buckets first so the
+  // silent window is short. Intensity/offbeat amplitude is encoded into the
+  // baked buffer at bake time (see the bgBeat case in bakeSound).
   private playBgBeat(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
     if (this.bgBeatIntensity <= 0) return;
     const intensity = Math.max(0, Math.min(1, this.bgBeatIntensity));
-    // Offbeats (2nd/4th beat) are further attenuated so the heartbeat reads
-    // as a strong-weak pattern instead of a flat metronome. The reduction is
-    // strongest at low intensity (where the beat should feel barely-there)
-    // and eases as the pulsar gets close — at wave 30 the offbeat is only
-    // slightly softer than the downbeat.
-    const isOffbeat = pitchRatio !== 1;
-    const offbeatMul = isOffbeat ? 0.35 + intensity * 0.45 : 1;
-    // Overall level is scaled down at low intensity so the early-wave beat is
-    // much quieter than before. Quadratic intensity squashes the floor hard
-    // (0.35x at wave 1) while still reaching full level by wave 30.
-    const levelMul = (0.35 + 0.65 * intensity) * offbeatMul;
-
-    // bgBeat amplitude depends on bgBeatIntensity, which changes per wave.
-    // Quantize intensity to 0.1 buckets so we cache ~10 buffers instead of
-    // baking a new one for every float drift, but still track wave-to-wave
-    // intensity ramping.
     const intensityBucket = Math.round(intensity * 10) / 10;
     const bgBeatPitchKey = pitchRatio * 100 + intensityBucket;
-    if (this.playBaked("bgBeat", bgBeatPitchKey)) return;
-    const eng = this.ensureToneEngine();
-    if (!eng) return;
-    const velocity = (0.25 + intensity * 0.75) * levelMul;
-    const note = pitchRatio === 1 ? "C2" : "D2";
-    eng.bgBeatKick.triggerAttackRelease(note, "8n", undefined, velocity);
+    this.playBaked("bgBeat", bgBeatPitchKey);
   }
 
   // Plucked-string "pew" for non-rhythm shots — quieter and shorter than

@@ -36,7 +36,7 @@ export const markFirstWaveTutorialComplete = () => {
 
 // React-side <FirstWaveHint> subscribes to this so the canvas/game loop stays
 //   out of layout + transitions — CSS + a single setTimeout do the dismiss work.
-export const setFirstWaveHintStage = (game: Game, stage: 0 | 1 | 2 | 3) => {
+export const setFirstWaveHintStage = (game: Game, stage: 0 | 1 | 2 | 3 | 4) => {
   if (game.firstWaveHintStage === stage) return;
   game.firstWaveHintStage = stage;
   // stage transitions always reset the sub-line + the stage-2 hit pips; both

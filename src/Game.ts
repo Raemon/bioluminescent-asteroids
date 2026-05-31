@@ -87,7 +87,7 @@ export class Game implements HudElements {
   //   complete in localStorage and won't show again. React-side <FirstWaveHint>
   //   listens for the "first-wave-hint:stage" CustomEvent and handles the CSS
   //   transition + auto-dismiss, so the game loop only owns the stage number.
-  firstWaveHintStage: 0 | 1 | 2 | 3 = 0;
+  firstWaveHintStage: 0 | 1 | 2 | 3 | 4 = 0;
   firstWaveOnBeatFireCount = 0;
   // stage-2 sub-line ("Use your targeting tools to help") is gated on the
   //   player landing three on-beat hits after stage 2 opens. The diamond
@@ -230,6 +230,10 @@ export class Game implements HudElements {
     window.addEventListener("first-wave-hint:dismiss", () => {
       setFirstWaveHintStage(this, 0);
       markFirstWaveTutorialComplete();
+    });
+    // stage 3 → stage 4 ("Become one with the Pulsar") closing flourish.
+    window.addEventListener("first-wave-hint:advance", () => {
+      if (this.firstWaveHintStage === 3) setFirstWaveHintStage(this, 4);
     });
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();

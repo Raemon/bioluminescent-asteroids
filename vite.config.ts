@@ -1,6 +1,7 @@
 import { defineConfig, type ViteDevServer } from "vite";
 import { resolve } from "node:path";
-import { writeFile } from "node:fs/promises";
+import { writeFile, mkdir, access } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { config as loadDotenv } from "dotenv";
 import react from "@vitejs/plugin-react";
@@ -57,6 +58,92 @@ const soundConfigWriter = () => {
             res.end(JSON.stringify({ ok: true }));
           } catch (err) {
             res.statusCode = 400;
+            res.end(String(err));
+          }
+        });
+        req.on("error", () => {
+          res.statusCode = 500;
+          res.end("read error");
+        });
+      });
+    },
+  };
+};
+
+// Dev-only writer for offline-rendered Tone.js bake buffers. The browser POSTs
+// a WAV blob via POST /__bake-dump__?key=<name>__<pitchKey>; this plugin pipes
+// it through ffmpeg into an MP3 at public/sounds/baked/<key>.mp3. Same idea
+// as soundConfigWriter — playing the game in dev produces the static files
+// you then commit, and prod fetches them with no Tone.js bake at all.
+//
+// "Existing file wins": we skip the write if the file is already on disk so
+// regular gameplay doesn't churn already-good bakes. Delete the file (or the
+// whole baked/ dir) to force a re-bake on next play.
+const bakeDumpWriter = () => {
+  const dir = resolve(__dirname, "public/sounds/baked");
+  // Path-traversal guard: a malicious key like "../../etc/foo" would escape
+  // the baked/ dir. Allow only the alphabet our bakedKey() function emits.
+  const safeKey = (k: string) => /^[A-Za-z0-9_.\-]+$/.test(k);
+  const fileExists = async (p: string) => {
+    try {
+      await access(p);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const encodeWavToMp3 = (wav: Buffer, outPath: string): Promise<void> =>
+    new Promise((resolveEncode, rejectEncode) => {
+      // -y overwrite, -i pipe:0 WAV in, -codec:a libmp3lame, -q:a 4 (~165kbps VBR)
+      // -loglevel error keeps the dev console quiet on success.
+      const ff = spawn("ffmpeg", ["-y", "-loglevel", "error", "-i", "pipe:0", "-codec:a", "libmp3lame", "-q:a", "4", outPath]);
+      let stderr = "";
+      ff.stderr.on("data", (c: Buffer) => { stderr += c.toString(); });
+      ff.on("error", rejectEncode);
+      ff.on("close", (code: number) => {
+        if (code === 0) resolveEncode();
+        else rejectEncode(new Error(`ffmpeg exited ${code}: ${stderr}`));
+      });
+      ff.stdin.end(wav);
+    });
+  return {
+    name: "bake-dump-writer",
+    configureServer(server: {
+      middlewares: { use: (fn: (req: IncomingMessage, res: ServerResponse, next: () => void) => void) => void };
+    }) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url ?? "";
+        if (!url.startsWith("/__bake-dump__") || req.method !== "POST") {
+          next();
+          return;
+        }
+        const [, search = ""] = url.split("?");
+        const key = new URLSearchParams(search).get("key") ?? "";
+        if (!key || !safeKey(key)) {
+          res.statusCode = 400;
+          res.end("invalid key");
+          return;
+        }
+        const chunks: Buffer[] = [];
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", async () => {
+          const out = resolve(dir, `${key}.mp3`);
+          try {
+            await mkdir(dir, { recursive: true });
+            if (await fileExists(out)) {
+              // Existing file wins — don't overwrite on every replay.
+              res.statusCode = 200;
+              res.end(JSON.stringify({ ok: true, skipped: true }));
+              return;
+            }
+            const wav = Buffer.concat(chunks);
+            await encodeWavToMp3(wav, out);
+            res.statusCode = 200;
+            res.end(JSON.stringify({ ok: true, wrote: out }));
+            // eslint-disable-next-line no-console
+            console.log(`[bake-dump] wrote ${out}`);
+          } catch (err) {
+            res.statusCode = 500;
             res.end(String(err));
           }
         });
@@ -175,7 +262,7 @@ export default defineConfig({
   server: {
     host: true,
   },
-  plugins: [react(), tailwindcss(), cleanUrls(), soundConfigWriter(), devApi()],
+  plugins: [react(), tailwindcss(), cleanUrls(), soundConfigWriter(), bakeDumpWriter(), devApi()],
   build: {
     rollupOptions: {
       input: {
