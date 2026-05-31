@@ -125,22 +125,11 @@ export const saveCachedHighscores = (rows: HighscoreRow[]) => {
   }
 };
 
-const TOP_ENTRIES_ONLY_KEY = "pulsar.leaderboardTopOnly";
+// Every fresh page load defaults the leaderboard to "top entries only" so
+//   first impressions show one row per pilot. The toggle still flips it
+//   within a session, but it is not persisted across reloads.
+export const getTopEntriesOnly = (): boolean => true;
 
-export const getTopEntriesOnly = (): boolean => {
-  try {
-    const raw = localStorage.getItem(TOP_ENTRIES_ONLY_KEY);
-    if (raw === null) return true;
-    return raw === "1";
-  } catch {
-    return true;
-  }
-};
-
-export const saveTopEntriesOnly = (on: boolean) => {
-  try {
-    localStorage.setItem(TOP_ENTRIES_ONLY_KEY, on ? "1" : "0");
-  } catch {
-    // localStorage may be blocked; preference resets next session.
-  }
+export const saveTopEntriesOnly = (_on: boolean) => {
+  // Intentionally no-op — see getTopEntriesOnly for the rationale.
 };

@@ -868,15 +868,25 @@ html:has(#sound-root), body:has(> #sound-root) {
   pointer-events: auto;
   width: 100%;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
   margin-top: 4px;
   padding: 0 6px;
   font-size: 10px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: #6ad7ff;
+}
+
+#leaderboard-show-more {
+  order: 0;
+  margin-right: auto;
+}
+
+#leaderboard-top-only {
+  order: 1;
 }
 
 #leaderboard-footer.hidden { display: none; }
