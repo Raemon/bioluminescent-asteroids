@@ -367,7 +367,9 @@ const firstDotProximity01 = (px: number, py: number, retX: number, retY: number)
   return t * t * (3 - 2 * t);
 };
 
-type DotWalkResult = { overlapsReticule: boolean };
+// overlapsReticule = strict hit (powers reticule lock-on visuals); firstDotProximity = soft
+// 0..1 from firstDotProximity01, used by the hover-commit ring so its threshold is more forgiving.
+type DotWalkResult = { overlapsReticule: boolean; firstDotProximity: number };
 
 // the cone is computed in the apex's "virtual" frame (toroidalDelta-remapped), so dot
 // positions can land outside [0,w)×[0,h). Wrapping back into the canvas before painting makes
@@ -390,6 +392,7 @@ const drawBeatDotsAlongRay = (
   w: number, h: number, doubletime: boolean, tutorialHighlight: boolean, focused: boolean,
 ): DotWalkResult => {
   let overlapsReticule = false;
+  let firstDotProximity = 0;
   // doubletime halves the spacing and marks every other k as a half-beat (off-beat) dot.
   const step = doubletime ? dotStep * 0.5 : dotStep;
   const isHalfBeatK = (k: number): boolean => doubletime && (k % 2 === 1);
@@ -426,18 +429,19 @@ const drawBeatDotsAlongRay = (
     } else {
       if (drawnOnBeatDots === 0) {
         const overlap = firstDotOverlapsReticule(px, py, retX, retY);
+        const proximity01 = firstDotProximity01(px, py, retX, retY);
         if (SHOW_FIRST_BEAT_DOT) {
-          const proximity01 = firstDotProximity01(px, py, retX, retY);
           paintFirstBeatDot(ctx, drawX, drawY, proximity01, entryFlashBoost, beatPulseBoost, focusBoost, 1, tutorialHighlight, focused);
         }
         if (overlap) overlapsReticule = true;
+        if (proximity01 > firstDotProximity) firstDotProximity = proximity01;
       } else {
         paintBeatDot(ctx, drawX, drawY, entryFlashBoost, focusBoost);
       }
       drawnOnBeatDots++;
     }
   }
-  return { overlapsReticule };
+  return { overlapsReticule, firstDotProximity };
 };
 
 const drawAimIntersectionsAlongRay = (
@@ -532,13 +536,15 @@ const computeOnBeatAim = (
 // core trajectory renderer — operates on a position/velocity snapshot, with optional cone clipping.
 // alphaMultiplier folds in entry-flash boost and exit-fade decay; clipToCone is false during fade so the
 // lingering ghost remains visible even after the target has left the radar wedge.
+const EMPTY_DOT_WALK_RESULT: DotWalkResult = { overlapsReticule: false, firstDotProximity: 0 };
+
 const paintTrajectoryFromSnapshot = (
   ctx: TrajectoryContext, snap: TrajectorySnapshot, firstSeen: number,
   alphaMultiplier: number, clipToCone: boolean,
   showOnRhythmSpot: boolean,
-): boolean => {
+): DotWalkResult => {
   const speed = Math.hypot(snap.velX, snap.velY);
-  if (speed < 1) return false;
+  if (speed < 1) return EMPTY_DOT_WALK_RESULT;
   const [dx, dy] = toroidalDelta(snap.posX - ctx.apex.x, snap.posY - ctx.apex.y, ctx.w, ctx.h);
   const cx = ctx.apex.x + dx;
   const cy = ctx.apex.y + dy;
@@ -552,7 +558,7 @@ const paintTrajectoryFromSnapshot = (
   let sMax: number;
   if (clipToCone) {
     const clip = clipRayToCone(rawStartX - ctx.apex.x, rawStartY - ctx.apex.y, ux, uy, ctx.frame);
-    if (clip.sMax <= clip.sMin) return false;
+    if (clip.sMax <= clip.sMin) return EMPTY_DOT_WALK_RESULT;
     sMin = clip.sMin;
     sMax = clip.sMax;
   } else {
@@ -599,7 +605,7 @@ const paintTrajectoryFromSnapshot = (
     paintOnRhythmSpot(ctx.ctx, aimDrawX, aimDrawY, aim.willHitOnBeat, aim.reachable, entryFlashBoost, beatPulseBoost, focusBoost);
   }
   ctx.ctx.restore();
-  return result.overlapsReticule;
+  return result;
 };
 
 // refresh the track for an in-cone target — entry flash starts when no track existed, or when the
@@ -647,12 +653,12 @@ const trajectoryRayOverlapsCone = (
 const previewLiveTarget = (
   ctx: TrajectoryContext, t: ReticuleTarget, rendered: Set<object>,
   showSpot: boolean,
-): boolean => {
+): DotWalkResult => {
   const [dx, dy] = toroidalDelta(t.pos.x - ctx.apex.x, t.pos.y - ctx.apex.y, ctx.w, ctx.h);
   const tr = t.radius ?? 0;
   const targetInCone = targetIsInsideCone(dx, dy, tr, ctx.frame);
   const rayInCone = !targetInCone && trajectoryRayOverlapsCone(dx, dy, t, ctx.frame);
-  if (!targetInCone && !rayInCone) return false;
+  if (!targetInCone && !rayInCone) return EMPTY_DOT_WALK_RESULT;
   const track = refreshTrack(ctx.trajectoryTracks, t, ctx.beatTime);
   rendered.add(t as unknown as object);
   // when only the ray (not the target itself) is in the cone, disable cone clipping so the
@@ -716,11 +722,14 @@ const pickCenterMostTarget = (
 ): ReticuleTarget | null =>
   pickCenterMostTargetForFocus(ctx.apex, ctx.frame, ctx.w, ctx.h, targets);
 
-// walks every visible target and accumulates whether any of their lock dots touched the aim disc.
+// walks every visible target; returns strict overlap (for reticule lock) and the max soft
+// proximity (0..1, for the hover-commit ring's more forgiving trigger).
+export type TrajectoryPreviewResult = { overlapsReticule: boolean; firstDotProximity: number };
+
 export const paintTrajectoryPreviews = (
   ctx: TrajectoryContext, targets: ReadonlyArray<ReticuleTarget>,
-): boolean => {
-  if (ctx.frame.length <= 0) return false;
+): TrajectoryPreviewResult => {
+  if (ctx.frame.length <= 0) return { overlapsReticule: false, firstDotProximity: 0 };
   ctx.ctx.save();
   ctx.ctx.setLineDash([]);
   ctx.ctx.lineWidth = 1.5;
@@ -728,12 +737,15 @@ export const paintTrajectoryPreviews = (
   const rendered = new Set<object>();
   const spotTarget = pickCenterMostTarget(ctx, targets);
   let overlapsReticule = false;
+  let firstDotProximity = 0;
   const liveByKey = new Map<object, ReticuleTarget>();
   for (const t of targets) liveByKey.set(t as unknown as object, t);
   for (const t of targets) {
-    if (previewLiveTarget(ctx, t, rendered, t === spotTarget)) overlapsReticule = true;
+    const r = previewLiveTarget(ctx, t, rendered, t === spotTarget);
+    if (r.overlapsReticule) overlapsReticule = true;
+    if (r.firstDotProximity > firstDotProximity) firstDotProximity = r.firstDotProximity;
   }
   renderFadingTrajectories(ctx, rendered, liveByKey);
   ctx.ctx.restore();
-  return overlapsReticule;
+  return { overlapsReticule, firstDotProximity };
 };

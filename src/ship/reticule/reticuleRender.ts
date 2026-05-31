@@ -172,10 +172,11 @@ export const renderShipReticules = (
   paintConeBackground(ctx, ship, apex, beatTime, beatGrid);
   paintRangeArcs(ctx, ship, apex, beatTime, radarPulse);
   const frame = computeConeFrame(ship);
-  const fromTrajectory = paintTrajectoryPreviews({
+  const trajectoryResult = paintTrajectoryPreviews({
     ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule, aimCircleCenter, aimCircleRadius,
     trajectoryTracks: state.trajectoryTracks, doubletime, tutorialHighlight,
   }, targets);
+  const fromTrajectory = trajectoryResult.overlapsReticule;
   for (let i = 0; i < reticulePositions.length; i++) {
     const pos = reticulePositions[i];
     const onFirstBeatDot = fromTrajectory && i === primaryIndex;
@@ -184,8 +185,9 @@ export const renderShipReticules = (
       : reticuleOverlapsAnyTarget(pos, targets, w, h);
     paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, onFirstBeatDot, tutorialHighlight);
   }
-  // ring rewards staying on the primary first-beat dot — the shot that actually scores on-beat.
-  const hoveringFirstDot = fromTrajectory && primaryIndex >= 0;
+  // ring uses the softer proximity halo (>0 anywhere in the first-dot glow ramp) so the player
+  // gets feedback the moment the reticule grazes the visible first circle, not just on strict hit.
+  const hoveringFirstDot = trajectoryResult.firstDotProximity > 0 && primaryIndex >= 0;
   if (hoveringFirstDot) {
     if (state.hoverDotRing.hoverStartBeatTime === null) {
       state.hoverDotRing.hoverStartBeatTime = beatTime;
