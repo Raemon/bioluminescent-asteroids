@@ -103,8 +103,9 @@ export class Ship {
   renderReticules(
     ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number,
     targets: ReadonlyArray<ReticuleTarget> = [], beatTime: number = 0, doubletime: boolean = false,
+    tutorialHighlight: boolean = false,
   ) {
-    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks }, ctx, beatGrid, w, h, targets, beatTime, doubletime);
+    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight);
   }
 
   // hull + thrust + retro + shield + combo halo all composite together in one save/restore block.

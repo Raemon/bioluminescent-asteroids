@@ -17,6 +17,13 @@ const RETICULE_DIRECT_FLASH_LINE_WIDTH_BOOST = 1.5;
 const RETICULE_DIRECT_FLASH_GLOW_MAX_BLUR = 24;
 const RETICULE_DIRECT_FLASH_GLOW_ALPHA = 0.9;
 
+// tutorial highlight ("Use your targeting tools to aim.") — repaints the dashed ring
+// in white with a steady yellow shadow-blur halo so the player's eye is pulled to it.
+const TUTORIAL_HIGHLIGHT_HSL = "0, 0%, 100%";
+const TUTORIAL_HIGHLIGHT_GLOW_HSL = "52, 100%, 60%";
+const TUTORIAL_HIGHLIGHT_GLOW_BLUR = 18;
+const TUTORIAL_HIGHLIGHT_GLOW_ALPHA = 0.9;
+
 // pre-check whether any target's silhouette overlaps the on-beat disc before painting anything.
 export const reticuleOverlapsAnyTarget = (
   reticulePos: Vec, targets: ReadonlyArray<ReticuleTarget>, w: number, h: number,
@@ -58,7 +65,7 @@ export const computeBaseHitAlpha = (onCooldown: boolean, hitboxPulse: number): n
 // shadow-blur halo so it reads as a glow rather than just a brightness bump.
 export const paintAimDiscs = (
   ctx: CanvasRenderingContext2D, reticulePos: Vec, baseAlpha: number,
-  overlapsTarget: boolean, directFlash: number,
+  overlapsTarget: boolean, directFlash: number, tutorialHighlight: boolean = false,
 ) => {
   const overlapBoost = overlapsTarget ? RETICULE_OVERLAP_BRIGHTNESS : 1;
   const hitAlpha = Math.min(1, baseAlpha * overlapBoost * (1 + directFlash));
@@ -66,11 +73,15 @@ export const paintAimDiscs = (
   ctx.globalAlpha = 1;
   const prevShadowBlur = ctx.shadowBlur;
   const prevShadowColor = ctx.shadowColor;
-  if (flash01 > 0) {
+  if (tutorialHighlight) {
+    ctx.shadowBlur = TUTORIAL_HIGHLIGHT_GLOW_BLUR;
+    ctx.shadowColor = `hsla(${TUTORIAL_HIGHLIGHT_GLOW_HSL}, ${TUTORIAL_HIGHLIGHT_GLOW_ALPHA})`;
+  } else if (flash01 > 0) {
     ctx.shadowBlur = RETICULE_DIRECT_FLASH_GLOW_MAX_BLUR * flash01;
     ctx.shadowColor = `hsla(${RETICULE_DASH_HSL}, ${RETICULE_DIRECT_FLASH_GLOW_ALPHA * flash01})`;
   }
-  ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${hitAlpha})`;
+  const dashHsl = tutorialHighlight ? TUTORIAL_HIGHLIGHT_HSL : RETICULE_DASH_HSL;
+  ctx.strokeStyle = `hsla(${dashHsl}, ${tutorialHighlight ? Math.max(hitAlpha, 0.85) : hitAlpha})`;
   ctx.lineWidth = 1 + directFlash * RETICULE_DIRECT_FLASH_LINE_WIDTH_BOOST;
   ctx.setLineDash(RETICULE_LINE_DASH);
   ctx.beginPath();

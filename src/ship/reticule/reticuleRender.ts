@@ -91,6 +91,7 @@ export const renderShipReticules = (
   ship: Ship, state: ReticuleState,
   ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number,
   targets: ReadonlyArray<ReticuleTarget>, beatTime: number, doubletime: boolean,
+  tutorialHighlight: boolean = false,
 ) => {
   if (!ship.alive) return;
   const { positions: reticulePositions, primaryIndex } = computeReticulePositions(ship, beatGrid, w, h, doubletime);
@@ -112,7 +113,7 @@ export const renderShipReticules = (
   const frame = computeConeFrame(ship);
   const fromTrajectory = paintTrajectoryPreviews({
     ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule, aimCircleCenter, aimCircleRadius,
-    trajectoryTracks: state.trajectoryTracks, doubletime,
+    trajectoryTracks: state.trajectoryTracks, doubletime, tutorialHighlight,
   }, targets);
   const flashPulse = computeDirectFlashPulse(beatTime);
   for (let i = 0; i < reticulePositions.length; i++) {
@@ -121,7 +122,7 @@ export const renderShipReticules = (
       ? true
       : reticuleOverlapsAnyTarget(pos, targets, w, h);
     const directlyOn = reticuleDirectlyOnTarget(pos, targets, w, h);
-    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, directlyOn ? flashPulse : 0);
+    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, directlyOn ? flashPulse : 0, tutorialHighlight);
   }
   ctx.restore();
 };

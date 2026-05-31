@@ -50,6 +50,12 @@ const TRAJECTORY_FIRST_BEAT_HALO_DASH: number[] = [2, 2];
 // 6Hz flicker when directly on a target reads as an unmistakeable "shot will land" cue.
 const TRAJECTORY_DIRECT_FLASH_HZ = 6;
 const TRAJECTORY_DIRECT_FLASH_DEPTH = 0.55;
+// tutorial highlight ("Use your targeting tools to aim.") repaints the first-beat dot
+// in white with a yellow shadow-blur halo so it reads as the focal point of the cue.
+const TUTORIAL_FIRST_DOT_HSL = "0, 0%, 100%";
+const TUTORIAL_FIRST_DOT_GLOW_HSL = "52, 100%, 60%";
+const TUTORIAL_FIRST_DOT_GLOW_BLUR = 14;
+const TUTORIAL_FIRST_DOT_GLOW_ALPHA = 0.95;
 // shadow blur halo so the flash reads as a soft glow rather than just a brightness bump.
 const TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR = 18;
 const TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA = 0.85;
@@ -118,6 +124,7 @@ export type TrajectoryContext = {
   aimCircleRadius: number;
   trajectoryTracks: TrajectoryTrackMap;
   doubletime: boolean;
+  tutorialHighlight: boolean;
 };
 
 // dots pulse from 0→1 the first beat, then sinusoidally — gives a "lock-on" feel as targets enter.
@@ -207,29 +214,35 @@ const paintOnRhythmReticule = (
 const paintFirstBeatDot = (
   ctx: CanvasRenderingContext2D, px: number, py: number,
   proximity01: number, directFlash: number, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
-  dimFactor: number = 1,
+  dimFactor: number = 1, tutorialHighlight: boolean = false,
 ) => {
   const proximityAlpha = TRAJECTORY_FIRST_BEAT_DOT_ALPHA
     + (TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA - TRAJECTORY_FIRST_BEAT_DOT_ALPHA) * proximity01;
-  const alpha = Math.min(1, proximityAlpha * (1 + directFlash) * entryFlashBoost * beatPulseBoost * focusBoost * dimFactor);
+  const rawAlpha = proximityAlpha * (1 + directFlash) * entryFlashBoost * beatPulseBoost * focusBoost * dimFactor;
+  const alpha = Math.min(1, tutorialHighlight ? Math.max(rawAlpha, 0.95) : rawAlpha);
   const flash01 = directFlash > 0 ? directFlash / TRAJECTORY_DIRECT_FLASH_DEPTH : 0;
   const entryGlow01 = Math.max(0, Math.min(1, (entryFlashBoost - 1) / (TRAJECTORY_ENTRY_FLASH_PEAK_BOOST - 1)));
   const glow01 = Math.max(flash01, entryGlow01);
   const prevShadowBlur = ctx.shadowBlur;
   const prevShadowColor = ctx.shadowColor;
-  if (glow01 > 0) {
+  const dotHsl = tutorialHighlight ? TUTORIAL_FIRST_DOT_HSL : RETICULE_DASH_HSL;
+  if (tutorialHighlight) {
+    ctx.shadowBlur = TUTORIAL_FIRST_DOT_GLOW_BLUR;
+    ctx.shadowColor = `hsla(${TUTORIAL_FIRST_DOT_GLOW_HSL}, ${TUTORIAL_FIRST_DOT_GLOW_ALPHA})`;
+  } else if (glow01 > 0) {
     ctx.shadowBlur = TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR * glow01;
     ctx.shadowColor = `hsla(${RETICULE_DASH_HSL}, ${TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA * glow01})`;
   }
-  ctx.fillStyle = `hsla(${RETICULE_DASH_HSL}, ${alpha})`;
+  ctx.fillStyle = `hsla(${dotHsl}, ${alpha})`;
   ctx.beginPath();
   ctx.arc(px, py, TRAJECTORY_FIRST_BEAT_DOT_RADIUS, 0, TAU);
   ctx.fill();
   // faint dashed halo around the dot — uses the same alpha-modulation chain (proximity,
   // direct flash, entry flash, beat pulse, focus boost) so it tracks the dot's brightness.
-  const haloAlpha = Math.min(1, TRAJECTORY_FIRST_BEAT_HALO_ALPHA
-    * (1 + directFlash) * entryFlashBoost * beatPulseBoost * focusBoost * dimFactor);
-  ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${haloAlpha})`;
+  const rawHaloAlpha = TRAJECTORY_FIRST_BEAT_HALO_ALPHA
+    * (1 + directFlash) * entryFlashBoost * beatPulseBoost * focusBoost * dimFactor;
+  const haloAlpha = Math.min(1, tutorialHighlight ? Math.max(rawHaloAlpha, 0.6) : rawHaloAlpha);
+  ctx.strokeStyle = `hsla(${dotHsl}, ${haloAlpha})`;
   ctx.lineWidth = TRAJECTORY_FIRST_BEAT_HALO_LINE_WIDTH;
   ctx.setLineDash(TRAJECTORY_FIRST_BEAT_HALO_DASH);
   ctx.beginPath();
@@ -319,7 +332,7 @@ const drawBeatDotsAlongRay = (
   retX: number, retY: number,
   sMin: number, sMax: number, dotStep: number, dotOffset: number,
   flashPulse: number, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
-  w: number, h: number, doubletime: boolean,
+  w: number, h: number, doubletime: boolean, tutorialHighlight: boolean,
 ): DotWalkResult => {
   let overlapsReticule = false;
   // doubletime halves the spacing and marks every other k as a half-beat (off-beat) dot.
@@ -355,7 +368,7 @@ const drawBeatDotsAlongRay = (
         if (SHOW_FIRST_BEAT_DOT) {
           const proximity01 = firstDotProximity01(px, py, retX, retY);
           const directFlash = overlap ? flashPulse : 0;
-          paintFirstBeatDot(ctx, drawX, drawY, proximity01, directFlash, entryFlashBoost, beatPulseBoost, focusBoost);
+          paintFirstBeatDot(ctx, drawX, drawY, proximity01, directFlash, entryFlashBoost, beatPulseBoost, focusBoost, 1, tutorialHighlight);
         }
         if (overlap) overlapsReticule = true;
       } else {
@@ -522,7 +535,7 @@ const paintTrajectoryFromSnapshot = (
   const result = drawBeatDotsAlongRay(
     ctx.ctx, rawStartX, rawStartY, ux, uy, retX, retY,
     sMin, sMax, dotStep, dotOffset, flashPulse, entryFlashBoost, beatPulseBoost, focusBoost,
-    ctx.w, ctx.h, ctx.doubletime,
+    ctx.w, ctx.h, ctx.doubletime, ctx.tutorialHighlight,
   );
   if (SHOW_ON_RHYTHM_RETICULE && showOnRhythmSpot) {
     const aim = computeOnBeatAim(
