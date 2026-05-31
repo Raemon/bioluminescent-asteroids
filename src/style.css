@@ -404,6 +404,46 @@ html:has(#sound-root), body:has(> #sound-root) {
   padding-top: 75px;
 }
 
+#overlay-subtitle {
+  font-size: 17px;
+  letter-spacing: 0.55em;
+  color: #6ad7ff;
+  text-transform: uppercase;
+  font-weight: 300;
+  margin: 0;
+  padding-left: 0.55em;
+}
+
+.tutorial-controls-hint {
+  position: fixed;
+  left: 50%;
+  top: calc(50% + 180px);
+  transform: translateX(-50%) translateZ(0);
+  pointer-events: none;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 1000ms ease-out;
+  z-index: 5;
+  will-change: opacity;
+  isolation: isolate;
+}
+
+.tutorial-controls-hint.visible { opacity: 1; }
+
+.tutorial-controls-hint #tutorial-controls-hint-sub {
+  font-size: 14px;
+  letter-spacing: 0.2em;
+  color: #6ad7ff;
+  text-transform: uppercase;
+  font-weight: 300;
+  margin: 0;
+}
+
+.tutorial-controls-hint .key {
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
 #overlay.hidden { display: none; }
 
 #sound-link,

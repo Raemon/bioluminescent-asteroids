@@ -26,6 +26,13 @@ export const SettingsDialog = () => {
     setTutorial(isStartTutorialEnabled());
     setCallsign(getRecentName());
     setOpen(true);
+    // freezes the sim if a run is in progress (see Game / updateGame).
+    window.dispatchEvent(new CustomEvent("settings:opened"));
+  };
+
+  const closeDialog = () => {
+    setOpen(false);
+    window.dispatchEvent(new CustomEvent("settings:closed"));
   };
 
   // While open, swallow keys at capture so the game behind doesn't act on them
@@ -36,7 +43,7 @@ export const SettingsDialog = () => {
       e.stopPropagation();
       if (e.key === "Escape") {
         e.preventDefault();
-        setOpen(false);
+        closeDialog();
       }
     };
     document.addEventListener("keydown", onKey, true);
@@ -50,8 +57,10 @@ export const SettingsDialog = () => {
   };
 
   const resync = () => {
-    setOpen(false);
+    // dispatch the request first so `calibrating` latches before `settings:closed`
+    //   clears `settingsOpen` — the sim stays frozen across the hand-off mid-run.
     window.dispatchEvent(new CustomEvent("beat-calibrator:request"));
+    closeDialog();
   };
 
   const toggleTutorial = (enabled: boolean) => {
@@ -74,7 +83,7 @@ export const SettingsDialog = () => {
         </svg>
       </button>
       {open && (
-    <div id="settings-dialog" onClick={() => setOpen(false)}>
+    <div id="settings-dialog" onClick={closeDialog}>
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
         <h2 className="settings-title">Settings</h2>
 
@@ -122,7 +131,7 @@ export const SettingsDialog = () => {
           </label>
         </section>
 
-        <button type="button" className="settings-done" onClick={() => setOpen(false)}>Done</button>
+        <button type="button" className="settings-done" onClick={closeDialog}>Done</button>
       </div>
     </div>
       )}

@@ -60,13 +60,8 @@ export const Overlay = () => {
         sound →
       </a>
       <div id="overlay-title-group">
-        <h1 id="overlay-title">Pulsar</h1>
-        <p id="overlay-sub">
-          <span className="key">←</span> <span className="key">→</span> rotate &nbsp;·&nbsp;
-          <span className="key">↑</span> <span className="key">↓</span> thrust &nbsp;·&nbsp;
-          <span className="key">space</span> fire &nbsp;·&nbsp;
-          <span className="key">esc</span> pause
-        </p>
+        <h1 id="overlay-title">Pulsar Drift</h1>
+        <h3 id="overlay-subtitle">A meditative rhythm journey</h3>
       </div>
       <button id="overlay-start" type="button">
         Begin

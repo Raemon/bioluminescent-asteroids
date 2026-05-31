@@ -149,7 +149,7 @@ const clearComboSilently = (game: Game) => {
 export const showTitle = (game: Game) => {
   game.betaMode = false;
   game.state = "title";
-  game.overlayTitleEl.textContent = "Pulsar";
+  game.overlayTitleEl.textContent = "Pulsar Drift";
   game.overlayStartEl.textContent = "Begin";
   game.overlayEl.classList.remove("hidden");
   renderKilledRow(game);
