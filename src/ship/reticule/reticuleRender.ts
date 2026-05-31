@@ -112,7 +112,7 @@ export const renderShipReticules = (
   const frame = computeConeFrame(ship);
   const fromTrajectory = paintTrajectoryPreviews({
     ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule, aimCircleCenter, aimCircleRadius,
-    trajectoryTracks: state.trajectoryTracks,
+    trajectoryTracks: state.trajectoryTracks, doubletime,
   }, targets);
   const flashPulse = computeDirectFlashPulse(beatTime);
   for (let i = 0; i < reticulePositions.length; i++) {

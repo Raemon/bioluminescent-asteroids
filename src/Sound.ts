@@ -114,33 +114,33 @@ type HaloAmbientNode = {
 export type HaloMusicVariation =
   | "r2-el"   // ElevenLabs 32-second C-pedal cinematic bed + sustained-tone piano
   | "r2-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
-  | "r3-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + percussion layer
-  | "r4-sb"   // Self-built 32-second C-pedal flagship — pulsing arp + smooth calliope melody + percussion layer (rhythmic, interlocked)
+  | "r3-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + layer 3
+  | "r4-sb"   // Self-built 32-second C-pedal flagship — pulsing arp + smooth calliope melody + layer 3 (rhythmic, interlocked)
   | "none";   // Legacy synthesized pad (the original startHaloAmbient)
 
 type HaloMusicNode = {
   // Three looping AudioBufferSourceNodes — ambient runs whenever music is
-  // active; melodic + percussion run continuously but their gains are ducked to
+  // active; melodic + layer3 run continuously but their gains are ducked to
   // 0 until their respective tiers are requested (melodic at combo ≥ 6,
-  // percussion at combo ≥ 12). Starting a layer only when its tier first hits
+  // layer3 at combo ≥ 12). Starting a layer only when its tier first hits
   // would risk a phase-misalignment with the ambient loop, so we keep all
   // three always-playing-but-silent for sample-accurate phase lock.
   ambientSrc: AudioBufferSourceNode;
   melodicSrc: AudioBufferSourceNode;
-  // Percussion stem may be missing (file deleted / never generated for this
+  // Layer-3 stem may be missing (file deleted / never generated for this
   // variation); ambient + melodic still play normally in that case.
-  percussionSrc: AudioBufferSourceNode | null;
+  layer3Src: AudioBufferSourceNode | null;
   ambientGain: GainNode;
   melodicGain: GainNode;
-  percussionGain: GainNode | null;
+  layer3Gain: GainNode | null;
   mainGain: GainNode;
   // Variation that's currently loaded — preserved so a 6x→4x→6x tier flick
   // doesn't trigger a reload.
   variation: HaloMusicVariation;
   // Whether the melodic layer is currently ducked-up (combo ≥ 6) or down.
   melodicActive: boolean;
-  // Whether the percussion layer is currently ducked-up (combo ≥ 12) or down.
-  percussionActive: boolean;
+  // Whether layer 3 is currently ducked-up (combo ≥ 12) or down.
+  layer3Active: boolean;
 };
 
 // Optional pan + distance-falloff splice. When a sound (one-shot or drone)
