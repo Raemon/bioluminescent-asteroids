@@ -140,11 +140,11 @@ const cosineEnvelope = (beatTime: number, period: number, min: number, max: numb
   return min + (max - min) * v;
 };
 
-// hover hum: starts at this floor on first frame of hover, rises to 1 by the time
-// the visual ring is fully built (~2s with default beat grid). Player gets immediate
-// audio feedback that they're locked on, with a gentle swell rewarding sustained aim.
-const HOVER_HUM_FLOOR = 0.35;
-const HOVER_HUM_RAMP_SEC = 2.0;
+// hover hum: holds silent for DELAY (so a passing graze doesn't ping audio), then eases from
+// 0 to 1 with a smoothstep so the entrance feels like a swell rising in rather than a switch
+// flipping on. The two-stage release is handled inside Sound.stopFirstDotHum.
+const HOVER_HUM_DELAY_SEC = 0.15;
+const HOVER_HUM_RAMP_SEC = 2.5;
 
 // single entry point — composes background, range arcs, trajectory previews, then aim discs in order.
 export const renderShipReticules = (
@@ -153,6 +153,10 @@ export const renderShipReticules = (
   targets: ReadonlyArray<ReticuleTarget>, beatTime: number, doubletime: boolean,
   tutorialHighlight: boolean = false,
   sound: Sound | null = null,
+  // beatTime here is the latency-shifted (perceived) clock that all the visuals ride.
+  //   The hum's accent, by contrast, is *audio* and must land with the rest of the
+  //   heard mix on the true grid, so the caller passes the raw clock separately.
+  audioBeatTime: number = beatTime,
 ) => {
   if (!ship.alive) return;
   const { positions: reticulePositions, primaryIndex } = computeReticulePositions(ship, beatGrid, w, h, doubletime);
@@ -197,8 +201,12 @@ export const renderShipReticules = (
     const sixteenthGrid = beatGrid / 4;
     paintHoverDotRing(ctx, reticulePositions[primaryIndex], elapsed, sixteenthGrid, beatTime);
     if (sound) {
-      const swell = Math.min(1, elapsed / HOVER_HUM_RAMP_SEC);
-      sound.updateFirstDotHum(HOVER_HUM_FLOOR + (1 - HOVER_HUM_FLOOR) * swell);
+      const afterDelay = Math.max(0, elapsed - HOVER_HUM_DELAY_SEC);
+      const swellLinear = Math.min(1, afterDelay / HOVER_HUM_RAMP_SEC);
+      // smoothstep so the swell eases in instead of climbing linearly off the silence.
+      const intensity = swellLinear * swellLinear * (3 - 2 * swellLinear);
+      const beatPhase01 = ((audioBeatTime % beatGrid) + beatGrid) % beatGrid / beatGrid;
+      sound.updateFirstDotHum(intensity, beatPhase01, beatGrid);
     }
   } else {
     state.hoverDotRing.hoverStartBeatTime = null;

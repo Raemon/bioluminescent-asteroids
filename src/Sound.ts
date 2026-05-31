@@ -66,13 +66,24 @@ type AlienDroneNode = {
 // detuned sines give it a vowel-like "mm" character instead of a sterile
 // sine. A single voice held across hover frames; gain rides a target set
 // by the caller each frame (0 = silent, 1 = max audible-but-soft).
+// pulseGain pumps amplitude on the beat (peak at beat onset, decays across the beat); mainGain
+// rides the slow hover-swell. Output = mainGain × pulseGain so the two envelopes compose cleanly.
+// lastScheduledBeatAudioTime tracks the most recent beat-onset audio-clock time we've already
+// scheduled an envelope for, so each beat onset only gets one pulse even though the caller fires
+// updateFirstDotHum every frame.
+// releaseCleanupTimer holds a setTimeout id that tears down the oscillators after the two-stage
+// release tail finishes — kept on the node so re-hovering mid-release can cancel it and resume.
 type FirstDotHumNode = {
   oscA: OscillatorNode;
   oscB: OscillatorNode;
   vibratoLfo: OscillatorNode;
   vibratoDepth: GainNode;
   filter: BiquadFilterNode;
+  pulseGain: GainNode;
   mainGain: GainNode;
+  lastScheduledBeatAudioTime: number;
+  releasing: boolean;
+  releaseCleanupTimer: ReturnType<typeof setTimeout> | null;
 };
 
 // Per-bassteroid ambient drone. Opened when a large bassteroid breaks open
@@ -1085,6 +1096,48 @@ export class Sound {
     if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
   }
 
+  // Audio-clock "now" in seconds. The latency calibrator reads this the instant a
+  //   key is pressed and compares it to the scheduled click times — the difference
+  //   is the player's timing offset, which includes output (speaker/Bluetooth)
+  //   latency. ensureContext so the very first read (inside the Begin gesture)
+  //   creates + unlocks the context.
+  currentAudioTime(): number {
+    this.ensureContext();
+    return this.ctx ? this.ctx.currentTime : 0;
+  }
+
+  // The calibrator's metronome is the game's own bgBeat pulse, so the screen
+  //   feels like the run is already easing in rather than a separate UI bleep.
+  //   A clearly-audible intensity (vs the near-silent 0.08 of wave 1) is baked
+  //   into the buffer at this bucket.
+  private static readonly CALIBRATION_BEAT_INTENSITY = 0.6;
+
+  // Schedule the baked bgBeat at a precise audio-clock time, alternating
+  //   downbeat / offbeat pitch like the in-game groove. Returns false if the
+  //   buffer is still baking — the calibrator holds the intro until it's ready
+  //   so the first beats are steady, not clustered. Routed through bakedOut so
+  //   it tracks master volume + mute.
+  scheduleCalibrationBeat(atTime: number, offbeat: boolean): boolean {
+    this.ensureContext();
+    if (!this.ctx || !this.bakedOut) return false;
+    const pitchRatio = offbeat ? 1.122 : 1;
+    const bucket = Math.round(Sound.CALIBRATION_BEAT_INTENSITY * 10) / 10;
+    const pitchKey = pitchRatio * 100 + bucket;
+    const buf = this.bakedBuffers.get(this.bakedKey("bgBeat", pitchKey));
+    if (!buf) { this.queueBake("bgBeat", pitchKey); return false; }
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(this.bakedOut);
+    src.start(Math.max(atTime, this.ctx.currentTime));
+    return true;
+  }
+
+  // Soft confirmation pluck the calibrator fires on each tap — the game's
+  //   untimed-fire voice, so tapping already sounds like shooting.
+  playCalibrationTap() {
+    this.play("fire");
+  }
+
   setEnabled(on: boolean) {
     this.enabled = on;
     if (!on && this.thrustNode) this.stopThrust();
@@ -1224,7 +1277,20 @@ export class Sound {
   private static readonly FIRST_DOT_HUM_PEAK_GAIN = 0.07;
   // softens onset of any new target value so per-frame jitter doesn't buzz.
   private static readonly FIRST_DOT_HUM_GAIN_TC = 0.08;
-  updateFirstDotHum(intensity01: number) {
+  // beat pulse shape: percussive-style sharp attack landing on the beat, exponential decay
+  // back into the steady tone. Narrow swing (0.78 → 1.0) keeps the hum reading as one
+  // continuous voice; the attack supplies the rhythmic accent, not the depth of modulation.
+  private static readonly FIRST_DOT_HUM_PULSE_PEAK = 1.0;
+  private static readonly FIRST_DOT_HUM_PULSE_TROUGH = 0.78;
+  // 12ms attack — fast enough to read as a transient, slow enough that it doesn't click.
+  private static readonly FIRST_DOT_HUM_PULSE_ATTACK_SEC = 0.012;
+  // decay TC as a fraction of the beat: ~15% means 63% settled in ~75ms at default 0.5s grid,
+  // mostly back to trough by next beat. Long natural tail blends into the hum.
+  private static readonly FIRST_DOT_HUM_PULSE_DECAY_TC_FRAC = 0.15;
+  // filter sweep adds a touch of "ah" vowel on the beat, settling back to "mm" — colour, not gain.
+  private static readonly FIRST_DOT_HUM_FILTER_TROUGH_HZ = 700;
+  private static readonly FIRST_DOT_HUM_FILTER_PEAK_HZ = 950;
+  updateFirstDotHum(intensity01: number, beatPhase01: number = 0, beatGrid: number = 0) {
     if (!this.enabled) return;
     const i = Math.max(0, Math.min(1, intensity01));
     if (i <= 0) { this.stopFirstDotHum(); return; }
@@ -1255,32 +1321,105 @@ export class Sound {
       filter.type = "bandpass";
       filter.frequency.value = 700;
       filter.Q.value = 1.4;
+      const pulseGain = this.ctx.createGain();
+      pulseGain.gain.setValueAtTime(Sound.FIRST_DOT_HUM_PULSE_TROUGH, t);
+      // start filter at trough freq so the first attack opens the formant noticeably.
+      filter.frequency.setValueAtTime(Sound.FIRST_DOT_HUM_FILTER_TROUGH_HZ, t);
       const mainGain = this.ctx.createGain();
       mainGain.gain.setValueAtTime(0.0001, t);
       oscA.connect(filter);
       oscB.connect(filter);
-      filter.connect(mainGain);
+      filter.connect(pulseGain);
+      pulseGain.connect(mainGain);
       mainGain.connect(this.master);
       oscA.start(t);
       oscB.start(t);
       vibratoLfo.start(t);
-      this.firstDotHum = { oscA, oscB, vibratoLfo, vibratoDepth, filter, mainGain };
+      this.firstDotHum = {
+        oscA, oscB, vibratoLfo, vibratoDepth, filter, pulseGain, mainGain,
+        lastScheduledBeatAudioTime: -Infinity,
+        releasing: false,
+        releaseCleanupTimer: null,
+      };
+    }
+    // re-hover during a two-stage release: cancel the scheduled fade-out and resume the swell
+    // from whatever gain we'd faded to, so a brief mouse-off doesn't pop back to full volume.
+    const node = this.firstDotHum;
+    if (node.releasing) {
+      if (node.releaseCleanupTimer !== null) {
+        clearTimeout(node.releaseCleanupTimer);
+        node.releaseCleanupTimer = null;
+      }
+      node.mainGain.gain.cancelScheduledValues(t);
+      node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+      node.releasing = false;
     }
     const target = Sound.FIRST_DOT_HUM_PEAK_GAIN * i;
-    this.firstDotHum.mainGain.gain.setTargetAtTime(target, t, Sound.FIRST_DOT_HUM_GAIN_TC);
+    node.mainGain.gain.setTargetAtTime(target, t, Sound.FIRST_DOT_HUM_GAIN_TC);
+    if (beatGrid > 0) this.scheduleFirstDotHumBeatPulse(node, t, beatPhase01, beatGrid);
   }
 
+  // schedule one percussive envelope per beat on pulseGain (and a matching filter sweep): fast
+  // linear attack that LANDS on the beat onset, then exponential decay back to trough. Caller
+  // passes beatPhase01 (0 = on the beat, 1 = right before next); we translate to audio-clock and
+  // only re-schedule once per beat so the in-flight decay isn't restarted every frame.
+  private scheduleFirstDotHumBeatPulse(
+    node: FirstDotHumNode, audioNow: number, beatPhase01: number, beatGrid: number,
+  ) {
+    const secondsUntilNextBeat = (1 - beatPhase01) * beatGrid;
+    const nextBeatAudioTime = audioNow + secondsUntilNextBeat;
+    // tolerance of half a beat prevents re-schedule across frames within the same beat slot;
+    // when phase wraps past 0 the next-beat time jumps forward by ~beatGrid → triggers re-sched.
+    if (nextBeatAudioTime <= node.lastScheduledBeatAudioTime + beatGrid * 0.5) return;
+    // attack ends exactly on the beat; start it ATTACK_SEC earlier (or clamp to now if we're
+    // already inside that window so the ramp still resolves at the onset, just shorter).
+    const attackStart = Math.max(audioNow, nextBeatAudioTime - Sound.FIRST_DOT_HUM_PULSE_ATTACK_SEC);
+    const decayTC = Math.max(0.01, beatGrid * Sound.FIRST_DOT_HUM_PULSE_DECAY_TC_FRAC);
+    const gainParam = node.pulseGain.gain;
+    gainParam.cancelScheduledValues(audioNow);
+    gainParam.setValueAtTime(gainParam.value, audioNow);
+    gainParam.setValueAtTime(gainParam.value, attackStart);
+    gainParam.linearRampToValueAtTime(Sound.FIRST_DOT_HUM_PULSE_PEAK, nextBeatAudioTime);
+    gainParam.setTargetAtTime(Sound.FIRST_DOT_HUM_PULSE_TROUGH, nextBeatAudioTime, decayTC);
+    // same envelope shape on the bandpass — opens the formant on the beat, closes during decay.
+    // Adds a touch of "ah" colour to the accent without changing perceived loudness much.
+    const freqParam = node.filter.frequency;
+    freqParam.cancelScheduledValues(audioNow);
+    freqParam.setValueAtTime(freqParam.value, audioNow);
+    freqParam.setValueAtTime(freqParam.value, attackStart);
+    freqParam.linearRampToValueAtTime(Sound.FIRST_DOT_HUM_FILTER_PEAK_HZ, nextBeatAudioTime);
+    freqParam.setTargetAtTime(Sound.FIRST_DOT_HUM_FILTER_TROUGH_HZ, nextBeatAudioTime, decayTC);
+    node.lastScheduledBeatAudioTime = nextBeatAudioTime;
+  }
+
+  // two-stage release: fast drop to RELEASE_LOW reads as "you lost it", then a slow tail to 0
+  // smooths over flicker so repeatedly grazing the first-dot doesn't feel jarring. Oscillators
+  // are torn down via setTimeout (not osc.stop) so a re-hover during the tail can resume cleanly.
+  private static readonly FIRST_DOT_HUM_RELEASE_DROP_SEC = 0.12;
+  private static readonly FIRST_DOT_HUM_RELEASE_DROP_LEVEL = 0.18;
+  private static readonly FIRST_DOT_HUM_RELEASE_TAIL_SEC = 0.6;
   stopFirstDotHum() {
     if (!this.ctx || !this.firstDotHum) return;
     const node = this.firstDotHum;
+    if (node.releasing) return;
     const t = this.ctx.currentTime;
+    const dropEnd = t + Sound.FIRST_DOT_HUM_RELEASE_DROP_SEC;
+    const tailEnd = dropEnd + Sound.FIRST_DOT_HUM_RELEASE_TAIL_SEC;
+    const dropLevel = Sound.FIRST_DOT_HUM_PEAK_GAIN * Sound.FIRST_DOT_HUM_RELEASE_DROP_LEVEL;
     node.mainGain.gain.cancelScheduledValues(t);
     node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
-    node.mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
-    node.oscA.stop(t + 0.16);
-    node.oscB.stop(t + 0.16);
-    node.vibratoLfo.stop(t + 0.16);
-    this.firstDotHum = null;
+    node.mainGain.gain.linearRampToValueAtTime(dropLevel, dropEnd);
+    node.mainGain.gain.exponentialRampToValueAtTime(0.0001, tailEnd);
+    node.releasing = true;
+    const me = node;
+    node.releaseCleanupTimer = setTimeout(() => {
+      if (this.firstDotHum !== me) return;
+      const stopAt = this.ctx ? this.ctx.currentTime + 0.02 : 0;
+      try { me.oscA.stop(stopAt); } catch {}
+      try { me.oscB.stop(stopAt); } catch {}
+      try { me.vibratoLfo.stop(stopAt); } catch {}
+      this.firstDotHum = null;
+    }, Math.ceil((Sound.FIRST_DOT_HUM_RELEASE_DROP_SEC + Sound.FIRST_DOT_HUM_RELEASE_TAIL_SEC) * 1000) + 30);
   }
 
   // Ambient drone played for the lifetime of a broken-open bassteroid. There

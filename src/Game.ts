@@ -20,9 +20,10 @@ import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
-import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, markFirstWaveTutorialComplete, triggerOverlayStart } from "./game/lifecycle";
+import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, markFirstWaveTutorialComplete, triggerOverlayStart, startGame, openBeatCalibrator } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
+import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
 
 // re-export so existing external imports (Ship.ts) keep working without touching their imports.
 export { BEAT_GRID } from "./game/rhythmConstants";
@@ -56,6 +57,13 @@ export class Game implements HudElements {
   time = 0;
   // shared bass-beat clock — bass voices, on-beat detection and the visual pulsar all read this one source.
   beatTime = 0;
+  // player-measured latency offset (seconds), loaded in the constructor. Raw audio
+  //   fires on `beatTime`; everything the player reacts to (scoring window + visual
+  //   beat cues) reads `perceivedBeatTime` so it lands on the beat they actually hear.
+  beatOffset = 0;
+  // latched while the tap-to-beat calibrator overlay is open so the title loop
+  //   doesn't keep re-firing the start request behind it.
+  calibrating = false;
   lastBgBeatIndex = -1;
   nextBeatToEvaluate = 0;
   beatCombo = 0;
@@ -223,8 +231,22 @@ export class Game implements HudElements {
       const near = Math.hypot(dx, dy) <= 25;
       this.volumeEl.classList.toggle("near", near);
     });
+    this.beatOffset = loadBeatOffset() ?? 0;
     this.abortEl.addEventListener("click", () => abortMission(this));
     this.overlayStartEl.addEventListener("click", () => triggerOverlayStart(this));
+    // <BeatCalibrator> (React) owns the tap-to-beat UI; the game owns the audio
+    //   context it schedules clicks on, plus persistence of the result. These
+    //   three events are the contract between them.
+    window.addEventListener("beat-calibrator:request", () => openBeatCalibrator(this, false));
+    window.addEventListener("beat-calibrator:done", (e) => {
+      const { offsetSec, startAfter } = (e as CustomEvent).detail;
+      applyBeatOffset(this, offsetSec);
+      this.calibrating = false;
+      if (startAfter) startGame(this);
+    });
+    window.addEventListener("beat-calibrator:cancel", () => {
+      this.calibrating = false;
+    });
     // <FirstWaveHint> owns its own stage-3 auto-dismiss timer; when it fades
     //   out it asks the game to clear the stage. The tutorial is marked
     //   complete here so future runs skip the overlay entirely.
@@ -260,6 +282,10 @@ export class Game implements HudElements {
     if (this.starfield) this.starfield.resize(this.w, this.h);
     if (this.pulsar) this.pulsar.resize(this.w, this.h);
   }
+
+  // raw audio plays on `beatTime`; scoring + visual beat cues read this shifted
+  //   clock so they coincide with the beat the player actually hears (see beatCalibration.ts).
+  get perceivedBeatTime(): number { return this.beatTime - this.beatOffset; }
 
   update(dt: number) { updateGame(this, dt); }
   render() { renderGame(this); }

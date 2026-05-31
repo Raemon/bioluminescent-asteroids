@@ -24,7 +24,7 @@ import {
   handleCanisterShots,
   handleGoldCrystalPickups,
 } from "./collisions";
-import { startGame, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress } from "./lifecycle";
+import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress } from "./lifecycle";
 import { syncHud, syncPowerupHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
 import { updatePopups } from "./popups";
@@ -39,7 +39,7 @@ export const updateGame = (game: Game, dt: number) => {
   if (game.state === "paused") { game.input.endFrame(); return; }
   game.time += dt * 1000;
   // title/gameover/paused freeze beatTime; playing+dying defer pulsar to after tickBassBeats.
-  if (game.state !== "playing" && game.state !== "dying") game.pulsar.update(dt, game.beatTime, BEAT_GRID);
+  if (game.state !== "playing" && game.state !== "dying") game.pulsar.update(dt, game.perceivedBeatTime, BEAT_GRID);
   routeStateUpdate(game, dt);
   if (game.shake > 0) game.shake = Math.max(0, game.shake - dt * 3);
   game.input.endFrame();
@@ -58,7 +58,7 @@ const pressedStart = (game: Game): boolean =>
 
 // title needs cosmetic motion + enter-to-start; nothing else fires here.
 const updateTitle = (game: Game, dt: number) => {
-  if (pressedStart(game)) startGame(game);
+  if (pressedStart(game)) requestStart(game);
   tickLeaderboardKeyRepeat(game, dt);
   for (const a of game.asteroids) a.update(dt, game.w, game.h);
   game.particles.update(dt);
@@ -199,8 +199,8 @@ const updatePlaying = (game: Game, dt: number) => {
   game.ship.update(dt, game.input, game.particles, game.bullets, game.w, game.h, game.time, game.sound);
   const musicDt = tickSlowMoTimer(game, dt);
   tickBassBeats(game, musicDt);
-  // pulsar runs against freshly-advanced beatTime so its flash lands with the bass voices.
-  game.pulsar.update(dt, game.beatTime, BEAT_GRID);
+  // pulsar runs against perceivedBeatTime so its flash lands with the *heard* bass voices.
+  game.pulsar.update(dt, game.perceivedBeatTime, BEAT_GRID);
   game.ship.tickComboHalo(musicDt, currentBeatPulse(game));
   if (game.bullets.length > bulletsBeforeShipUpdate) classifyNewBullets(game, bulletsBeforeShipUpdate);
   graceFrameNearAsteroids(game);
@@ -222,13 +222,16 @@ const tickSlowMoTimer = (game: Game, dt: number): number => {
 
 // ≤1 fire event per frame, but prong emits 2 bullets — they all share one beat flag.
 const classifyNewBullets = (game: Game, firstNewIndex: number) => {
-  const firedOnBeat = isInBeatWindow(game, game.beatTime);
+  // perceivedBeatTime = beatTime shifted by the player's calibrated latency, so a
+  //   press timed to the heard beat scores even when output latency makes it land
+  //   late on the raw audio grid.
+  const firedOnBeat = isInBeatWindow(game, game.perceivedBeatTime);
   const count = game.bullets.length - firstNewIndex;
   for (let i = firstNewIndex; i < game.bullets.length; i++) {
-    game.bullets[i].firedAtBeatTime = game.beatTime;
+    game.bullets[i].firedAtBeatTime = game.perceivedBeatTime;
   }
-  logBeatEvent(game, "FIRE", game.beatTime, `bullets=${count}`);
-  spawnBeatDebugPopup(game, game.ship.pos, game.beatTime, "FIRE");
+  logBeatEvent(game, "FIRE", game.perceivedBeatTime, `bullets=${count}`);
+  spawnBeatDebugPopup(game, game.ship.pos, game.perceivedBeatTime, "FIRE");
   if (firedOnBeat) handleOnBeatFire(game, firstNewIndex);
   else handleOffBeatFire(game);
   // deeper fireBeat pluck reinforces "you nailed the beat"; ship no longer plays its own.

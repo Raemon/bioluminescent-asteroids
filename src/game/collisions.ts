@@ -35,14 +35,15 @@ const logBulletHit = (game: Game, kind: string, b: Bullet) => {
   logBeatEvent(
     game,
     kind,
-    game.beatTime,
+    game.perceivedBeatTime,
     `firedAt=${b.firedAtBeatTime.toFixed(4)}s fireOffset=${fireOffsetMs}ms bulletOnBeat=${b.onBeat}`,
   );
-  spawnBeatDebugPopup(game, b.pos, game.beatTime, "HIT");
+  spawnBeatDebugPopup(game, b.pos, game.perceivedBeatTime, "HIT");
 };
 
 // strict on both ends — a bullet drifting out of the window between fire and hit doesn't count.
-const isHitOnBeat = (game: Game, b: Bullet) => isInBeatWindow(game, game.beatTime) && b.onBeat;
+//   Judged on perceivedBeatTime (latency-shifted) to match the fire-time classification.
+const isHitOnBeat = (game: Game, b: Bullet) => isInBeatWindow(game, game.perceivedBeatTime) && b.onBeat;
 
 // single-hit targets (comets/canisters) share this shape; multi-hit targets bookkeep separately.
 type CollidableTarget = { collidesWith: (pos: { x: number; y: number }, r: number) => boolean };

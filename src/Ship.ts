@@ -24,6 +24,7 @@ export class Ship {
   rotSpeed = 4.6;
   rotRamp = 0;
   thrustPower = 420;
+  thrustRamp = 0;
   // drag is 0 so the ship coasts; thrust + retro are the only velocity inputs (Newtonian feel).
   drag = 0;
   maxSpeed = 460;
@@ -105,9 +106,9 @@ export class Ship {
   renderReticules(
     ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number,
     targets: ReadonlyArray<ReticuleTarget> = [], beatTime: number = 0, doubletime: boolean = false,
-    tutorialHighlight: boolean = false, sound: Sound | null = null,
+    tutorialHighlight: boolean = false, sound: Sound | null = null, audioBeatTime: number = beatTime,
   ) {
-    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRing: this.hoverDotRingState }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight, sound);
+    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRing: this.hoverDotRingState }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight, sound, audioBeatTime);
   }
 
   // hull + thrust + retro + shield + combo halo all composite together in one save/restore block.

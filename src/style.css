@@ -370,7 +370,8 @@ html:has(#sound-root), body:has(> #sound-root) {
 #overlay.hidden { display: none; }
 
 #sound-link,
-#tutorial-link {
+#tutorial-link,
+#calibrate-link {
   position: absolute;
   top: 22px;
   pointer-events: auto;
@@ -390,11 +391,13 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 #sound-link { left: 28px; }
 #tutorial-link { right: 28px; }
+#calibrate-link { right: 28px; top: 60px; }
 
 #sound-link.hidden { display: none; }
 
 #sound-link:hover,
-#tutorial-link:hover {
+#tutorial-link:hover,
+#calibrate-link:hover {
   color: #6ad7ff;
   border-color: rgba(106, 215, 255, 0.6);
 }
@@ -969,6 +972,216 @@ html:has(#sound-root), body:has(> #sound-root) {
   margin: 0;
   cursor: pointer;
 }
+
+#beat-calibrator {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  background: radial-gradient(ellipse at 50% 50%, rgba(0, 8, 24, 0.88) 0%, rgba(0, 0, 5, 0.97) 70%);
+  backdrop-filter: blur(6px);
+}
+
+.cal-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+  text-align: center;
+}
+
+.cal-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: clamp(20px, 3.2vw, 32px);
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  text-transform: uppercase;
+  color: #c8efff;
+  text-shadow: 0 0 18px #4cb6ff, 0 0 48px rgba(76, 182, 255, 0.45);
+}
+
+.cal-ring-wrap {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  /* soft nebula behind the ring system for depth */
+  background: radial-gradient(circle at 50% 50%, rgba(76, 182, 255, 0.14) 0%, rgba(76, 182, 255, 0.04) 38%, transparent 68%);
+}
+
+/* steady reference ring the ping expands past */
+.cal-guide {
+  position: absolute;
+  inset: 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(106, 215, 255, 0.32);
+  box-shadow: inset 0 0 26px rgba(76, 182, 255, 0.12);
+  transition: border-color 0.5s ease, box-shadow 0.5s ease;
+}
+
+/* the expanding sonar pulse — scale + opacity driven per-frame from JS */
+.cal-ping {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(140, 224, 255, 0.85);
+  box-shadow: 0 0 30px rgba(76, 182, 255, 0.55), inset 0 0 18px rgba(76, 182, 255, 0.25);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* glowing centre — flashes on each beat */
+.cal-core {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #eafaff, #4cb6ff 72%);
+  box-shadow: 0 0 16px rgba(140, 224, 255, 0.9), 0 0 34px rgba(76, 182, 255, 0.5);
+  will-change: transform, opacity;
+}
+
+.cal-ring-wrap.is-done .cal-guide {
+  border-color: rgba(140, 224, 255, 0.7);
+  box-shadow: 0 0 26px rgba(76, 182, 255, 0.4), inset 0 0 30px rgba(76, 182, 255, 0.25);
+  animation: cal-breathe 2.6s ease-in-out infinite;
+}
+
+.cal-countin {
+  position: absolute;
+  font-weight: 700;
+  font-size: 60px;
+  color: #eafaff;
+  text-shadow: 0 0 24px rgba(76, 182, 255, 0.75);
+  animation: cal-countin-pop 0.5s ease-out;
+}
+
+.cal-result-ms {
+  position: absolute;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 40px;
+  font-weight: 500;
+  color: #eafaff;
+  text-shadow: 0 0 20px rgba(76, 182, 255, 0.6);
+  animation: cal-result-in 0.45s ease-out;
+}
+
+.cal-result-ms small { font-size: 15px; opacity: 0.55; margin-left: 3px; letter-spacing: 0.05em; }
+
+@keyframes cal-breathe {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+@keyframes cal-countin-pop {
+  0% { opacity: 0; transform: scale(1.5); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes cal-result-in {
+  0% { opacity: 0; transform: scale(0.7); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.cal-instruction {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.2em;
+  color: #6ad7ff;
+  text-transform: uppercase;
+  font-weight: 300;
+}
+
+.cal-sub {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: rgba(150, 210, 245, 0.65);
+  text-transform: uppercase;
+  max-width: 360px;
+}
+
+.cal-progress {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 320px;
+}
+
+.cal-pip {
+  width: 8px;
+  height: 8px;
+  transform: rotate(45deg);
+  background: rgba(106, 215, 255, 0.15);
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.cal-pip.on {
+  background: #6ad7ff;
+  box-shadow: 0 0 8px rgba(106, 215, 255, 0.8);
+}
+
+.cal-skip {
+  margin-top: 4px;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(150, 200, 235, 0.45);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.cal-skip:hover { color: rgba(180, 220, 245, 0.8); }
+
+.cal-actions {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.cal-primary {
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #d8f3ff;
+  background: rgba(106, 215, 255, 0.1);
+  border: 1px solid rgba(106, 215, 255, 0.45);
+  border-radius: 4px;
+  padding: 11px 32px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.cal-primary:hover {
+  background: rgba(106, 215, 255, 0.22);
+  color: #fff;
+  border-color: rgba(180, 235, 255, 0.8);
+}
+
+.cal-redo {
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(150, 200, 235, 0.55);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.cal-redo:hover { color: rgba(180, 220, 245, 0.85); }
 
 @keyframes pulse {
   0%, 100% { opacity: 0.5; }

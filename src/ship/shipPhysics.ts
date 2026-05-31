@@ -7,23 +7,31 @@ import { Sound } from "../Sound";
 import { emitThrust, emitReverseThrust, emitSideThrust } from "./shipParticles";
 import { fireBullets } from "./shipWeapons";
 
-// tap-to-nudge feel; rotation ramps in over ~0.35s so a tap turns finely and a hold turns fast.
+// tap-to-nudge feel; rotation ramps in over ~0.15s so a tap turns finely and a hold turns fast.
 const updateTurning = (ship: Ship, input: Input, dt: number) => {
   const turnLeft = input.down("arrowleft") || input.down("a");
   const turnRight = input.down("arrowright") || input.down("d");
-  if (turnLeft || turnRight) ship.rotRamp = Math.min(1, ship.rotRamp + dt / 0.35);
+  if (turnLeft || turnRight) ship.rotRamp = Math.min(1, ship.rotRamp + dt / 0.15);
   else ship.rotRamp = 0;
-  const turnScale = 0.08 + 0.92 * ship.rotRamp;
+  const turnScale = 0.02 + 0.98 * ship.rotRamp;
   if (turnLeft) ship.heading -= ship.rotSpeed * turnScale * dt;
   if (turnRight) ship.heading += ship.rotSpeed * turnScale * dt;
 };
+
+// tap-to-nudge feel; thrust ramps in over ~0.15s so a tap barely budges and a hold accelerates fully.
+const updateThrustRamp = (ship: Ship, input: Input, dt: number) => {
+  const active = input.down("arrowup") || input.down("w") || input.down("arrowdown") || input.down("s");
+  if (active) ship.thrustRamp = Math.min(1, ship.thrustRamp + dt / 0.15);
+  else ship.thrustRamp = 0;
+};
+const thrustScale = (ship: Ship) => 0.02 + 0.98 * ship.thrustRamp;
 
 // thruster has to gate sound start/stop on the edge so the loop doesn't restart every frame.
 const updateForwardThrust = (ship: Ship, input: Input, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasThrusting = ship.thrustOn;
   ship.thrustOn = input.down("arrowup") || input.down("w");
   if (ship.thrustOn) {
-    const a = ship.thrustPower * dt;
+    const a = ship.thrustPower * thrustScale(ship) * dt;
     ship.vel.x += Math.cos(ship.heading) * a;
     ship.vel.y += Math.sin(ship.heading) * a;
     emitThrust(ship, particles, t);
@@ -37,7 +45,7 @@ const updateReverseThrust = (ship: Ship, input: Input, particles: ParticleSystem
   const wasReversing = ship.reverseThrustOn;
   ship.reverseThrustOn = input.down("arrowdown") || input.down("s");
   if (ship.reverseThrustOn) {
-    const a = ship.thrustPower * dt;
+    const a = ship.thrustPower * thrustScale(ship) * dt;
     const h = ship.heading + Math.PI;
     ship.vel.x += Math.cos(h) * a;
     ship.vel.y += Math.sin(h) * a;
@@ -113,6 +121,7 @@ export const tickShip = (
   if (ship.fireCooldown > 0) ship.fireCooldown -= dt;
   easeComboHaloIntensity(ship, dt);
   updateTurning(ship, input, dt);
+  updateThrustRamp(ship, input, dt);
   updateForwardThrust(ship, input, particles, sound, dt, t);
   updateReverseThrust(ship, input, particles, sound, dt, t);
   updateSideThrust(ship, input, particles, sound, dt, t);

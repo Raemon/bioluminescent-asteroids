@@ -91,8 +91,10 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   const tutorialHighlight =
     (game.firstWaveHintStage === 2 && game.firstWaveHintSubVisible) ||
     game.firstWaveHintStage === 3;
-  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.beatTime, doubletime, tutorialHighlight, game.sound);
-  renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.beatTime, game.w, game.h);
+  // perceivedBeatTime: the reticule pulse + first-beat dots cue when to fire, so they
+  //   ride the latency-shifted clock and peak on the beat the player hears.
+  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime);
+  renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.perceivedBeatTime, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
   renderPopups(ctx, game.popups);
 };

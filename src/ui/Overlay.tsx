@@ -42,6 +42,13 @@ export const Overlay = () => {
     window.dispatchEvent(new CustomEvent("tutorial-open"));
   };
 
+  // re-run the latency calibrator on demand; the game owns the audio context it
+  //   needs, so we just ask via an event (mirrors how it's opened on first play).
+  const openCalibrate = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent("beat-calibrator:request"));
+  };
+
   const closeTutorial = () => {
     setTutorialOpen(false);
     window.dispatchEvent(new CustomEvent("tutorial-close"));
@@ -51,6 +58,9 @@ export const Overlay = () => {
     <div id="overlay" className="hidden">
       <button id="tutorial-link" type="button" onClick={openTutorial}>
         tutorial
+      </button>
+      <button id="calibrate-link" type="button" onClick={openCalibrate}>
+        calibrate
       </button>
       <a
         id="sound-link"

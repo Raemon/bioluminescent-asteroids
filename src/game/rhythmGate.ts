@@ -36,10 +36,12 @@ const beatPulseEnvelope = (normalized: number): number => {
 };
 
 // ship's visual pulse is a literal preview of the rhythm window so the player can time shots.
+//   Reads perceivedBeatTime so the pulse peaks on the beat the player *hears* (latency-shifted),
+//   matching the judged window rather than the raw audio grid.
 export const currentBeatPulse = (game: Game): number => {
   if (game.state !== "playing" && game.state !== "dying") return 0;
   const grid = comboGrid(game);
-  const beatPhase = game.beatTime / grid;
+  const beatPhase = game.perceivedBeatTime / grid;
   const signedBeatsFromNearestBeat = beatPhase - Math.round(beatPhase);
   const windowFractionOfGrid = BEAT_WINDOW / grid;
   return beatPulseEnvelope(signedBeatsFromNearestBeat / windowFractionOfGrid);
@@ -96,7 +98,7 @@ export const loseCombo = (game: Game, sourcePos?: Vec) => {
 //   ship pos is the source for off-beat fires — that's the shot the player got wrong.
 export const evaluateClosedBeats = (game: Game) => {
   const grid = comboGrid(game);
-  while (game.nextBeatToEvaluate * grid + BEAT_WINDOW <= game.beatTime) {
+  while (game.nextBeatToEvaluate * grid + BEAT_WINDOW <= game.perceivedBeatTime) {
     if (game.firedOffBeatSinceLastBeat && game.beatCombo !== 0) loseCombo(game, game.ship.pos);
     game.firedOffBeatSinceLastBeat = false;
     game.nextBeatToEvaluate += 1;
@@ -107,5 +109,5 @@ export const evaluateClosedBeats = (game: Game) => {
 // loss) so the evaluator index keeps marching forward against the new grid instead of either
 // stalling (grid grew) or firing a burst of phantom closures (grid shrank).
 export const rebaseBeatEval = (game: Game) => {
-  game.nextBeatToEvaluate = Math.max(0, Math.floor((game.beatTime - BEAT_WINDOW) / comboGrid(game)) + 1);
+  game.nextBeatToEvaluate = Math.max(0, Math.floor((game.perceivedBeatTime - BEAT_WINDOW) / comboGrid(game)) + 1);
 };

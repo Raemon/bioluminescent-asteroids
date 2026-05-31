@@ -14,6 +14,7 @@ import { emitShipDebris } from "./particleBursts";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showLeaderboard, showScoreEntry } from "./scoreEntry";
 import { HALO_MUSIC_POOL } from "./haloMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
+import { hasCalibrated } from "./beatCalibration";
 
 // once a player reaches 6x rhythm we flip this flag so future runs skip the
 //   wave-1 tutorial overlays. localStorage may be blocked (private mode) — in
@@ -165,6 +166,26 @@ export const showTitle = (game: Game) => {
   game.waveTransitioning = false;
 };
 
+// First run gates on the latency calibrator: rhythm scoring is meaningless if the
+//   player's "on the beat" presses are landing 150ms late through a Bluetooth
+//   speaker and they've no idea where the beat even is. Once they've calibrated
+//   (or skipped) the result persists, so every later run goes straight in.
+export const requestStart = (game: Game) => {
+  if (game.calibrating) return;
+  if (hasCalibrated()) { startGame(game); return; }
+  openBeatCalibrator(game, true);
+};
+
+// Hands the React <BeatCalibrator> the audio context it schedules clicks on.
+//   startAfter distinguishes the first-run gate (true → start the game when the
+//   player finishes) from the title-screen "calibrate" link (false → just close).
+export const openBeatCalibrator = (game: Game, startAfter: boolean) => {
+  if (game.calibrating) return;
+  game.calibrating = true;
+  game.sound.resume();
+  window.dispatchEvent(new CustomEvent("beat-calibrator:open", { detail: { sound: game.sound, startAfter } }));
+};
+
 // per-run randomised bass intro order means the wave-2/3 picks vary between runs.
 export const startGame = (game: Game) => {
   game.sound.resume();
@@ -247,7 +268,7 @@ export const togglePause = (game: Game) => {
 
 // Click-equivalent of pressing Enter on whichever overlay is showing.
 export const triggerOverlayStart = (game: Game) => {
-  if (game.state === "title") startGame(game);
+  if (game.state === "title") requestStart(game);
   else if (game.state === "paused") leavePause(game);
   else if (game.state === "gameover") {
     if (isScoreEntryBlockingEnter(game)) return;
@@ -305,7 +326,7 @@ export const abortMission = (game: Game) => {
 export const respawn = (game: Game) => {
   game.ship = new Ship(v(game.w / 2, game.h / 2));
   game.ship.invuln = 2.2;
-  game.nextBeatToEvaluate = Math.max(0, Math.floor((game.beatTime - BEAT_WINDOW) / comboGrid(game)) + 1);
+  game.nextBeatToEvaluate = Math.max(0, Math.floor((game.perceivedBeatTime - BEAT_WINDOW) / comboGrid(game)) + 1);
   game.state = "playing";
   syncHud(game);
 };
