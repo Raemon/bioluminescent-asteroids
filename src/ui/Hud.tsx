@@ -22,10 +22,10 @@ const Powerup = ({ kind, title, children, withProgress = false }: {
 export const Hud = () => (
   <div id="hud">
     <div id="hud-left">
+      <div id="wave">WAVE 1</div>
       <div id="lives">
         <span /><span /><span />
       </div>
-      <div id="wave">WAVE 1</div>
       <div id="score-block">
         <div id="score-row">
           <div id="score">0</div>

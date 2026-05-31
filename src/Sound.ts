@@ -3253,73 +3253,167 @@ export class Sound {
   // All four start at exactly ctx.currentTime — no pre-delay, no pitch
   // ramp that lags the perceived peak. Peak alignment with the explosion's
   // 10 ms attack is the key fix from the previous iteration.
+  private boomConvolverIR: AudioBuffer | null = null;
+  private getBoomReverbIR(): AudioBuffer | null {
+    if (!this.ctx) return null;
+    if (this.boomConvolverIR) return this.boomConvolverIR;
+    const sr = this.ctx.sampleRate;
+    const len = Math.floor(sr * 2.6);
+    const buf = this.ctx.createBuffer(2, len, sr);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buf.getChannelData(ch);
+      for (let i = 0; i < len; i++) {
+        const x = i / len;
+        // Early reflections in the first ~80ms, then long exponential tail
+        // weighted toward low-mids so it feels like a wood-paneled hall.
+        const env = Math.pow(1 - x, 2.4);
+        const lowBias = 0.6 + 0.4 * Math.sin(i * 0.0009 + ch);
+        data[i] = (Math.random() * 2 - 1) * env * lowBias;
+      }
+    }
+    this.boomConvolverIR = buf;
+    return buf;
+  }
+
+  private makeBoomSaturator(amount: number): WaveShaperNode | null {
+    if (!this.ctx) return null;
+    const ws = this.ctx.createWaveShaper();
+    const n = 1024;
+    const curve = new Float32Array(n);
+    const k = amount;
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(k * x) / Math.tanh(k);
+    }
+    ws.curve = curve;
+    ws.oversample = "4x";
+    return ws;
+  }
+
   private playAsteroidBoomBeat() {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    const tail = 0.95;
+    const tail = 1.8;
 
+    // Per-hit pitch jitter so repeats don't feel like a UI blip.
+    const jitter = 1 + (Math.random() - 0.5) * 0.06;
+
+    // Big-hall convolver tail. Wet bus is parallel; dry layers still reach
+    // master directly so the transient stays punchy.
+    const convolver = this.ctx.createConvolver();
+    const ir = this.getBoomReverbIR();
+    if (ir) convolver.buffer = ir;
+    const wetGain = this.ctx.createGain();
+    wetGain.gain.value = 0.55;
+    convolver.connect(wetGain);
+    wetGain.connect(this.master);
+
+    // Low shelf to push the whole hit lower; bone-feel lives below 120 Hz.
+    const lowShelf = this.ctx.createBiquadFilter();
+    lowShelf.type = "lowshelf";
+    lowShelf.frequency.value = 140;
+    lowShelf.gain.value = 6;
+    lowShelf.connect(this.master);
+    lowShelf.connect(convolver);
+
+    // Body (sine, with saturation for harmonics).
     const body = this.ctx.createOscillator();
     body.type = "sine";
-    body.frequency.setValueAtTime(90, t);
-    body.frequency.exponentialRampToValueAtTime(55, t + 0.18);
+    body.frequency.setValueAtTime(110 * jitter, t);
+    body.frequency.exponentialRampToValueAtTime(58 * jitter, t + 0.22);
     const bodyGain = this.ctx.createGain();
     bodyGain.gain.setValueAtTime(0.0001, t);
-    bodyGain.gain.exponentialRampToValueAtTime(1.6, t + 0.0015);
+    bodyGain.gain.exponentialRampToValueAtTime(1.8, t + 0.002);
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
+    const bodySat = this.makeBoomSaturator(3.0);
     body.connect(bodyGain);
-    bodyGain.connect(this.master);
+    if (bodySat) {
+      bodyGain.connect(bodySat);
+      bodySat.connect(lowShelf);
+    } else {
+      bodyGain.connect(lowShelf);
+    }
     body.start(t);
     body.stop(t + tail);
 
+    // Deep sub — longer, slower decay so the chest-thump lingers.
     const sub = this.ctx.createOscillator();
     sub.type = "sine";
-    sub.frequency.setValueAtTime(50, t);
-    sub.frequency.exponentialRampToValueAtTime(32, t + 0.22);
+    sub.frequency.setValueAtTime(55 * jitter, t);
+    sub.frequency.exponentialRampToValueAtTime(30 * jitter, t + 0.5);
     const subGain = this.ctx.createGain();
     subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(1.4, t + 0.002);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + tail + 0.1);
+    subGain.gain.exponentialRampToValueAtTime(2.2, t + 0.004);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + tail + 0.6);
     sub.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(lowShelf);
     sub.start(t);
-    sub.stop(t + tail + 0.1);
+    sub.stop(t + tail + 0.6);
 
-    const clickBuf = this.makeNoiseBuffer(0.012);
-    if (!clickBuf) return;
-    const click = this.ctx.createBufferSource();
-    click.buffer = clickBuf;
-    const clickFilter = this.ctx.createBiquadFilter();
-    clickFilter.type = "bandpass";
-    clickFilter.Q.value = 1.4;
-    clickFilter.frequency.value = 600;
-    const clickGain = this.ctx.createGain();
-    clickGain.gain.setValueAtTime(0.0001, t);
-    clickGain.gain.exponentialRampToValueAtTime(1.0, t + 0.0008);
-    clickGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.012);
-    click.connect(clickFilter);
-    clickFilter.connect(clickGain);
-    clickGain.connect(this.master);
-    click.start(t);
-    click.stop(t + 0.012);
+    // Low-mid thump layer — adds weight around 180 Hz that small speakers
+    // can actually reproduce, so the hit reads as "big" not just "deep".
+    const thumpBuf = this.makeNoiseBuffer(0.18);
+    if (thumpBuf) {
+      const thump = this.ctx.createBufferSource();
+      thump.buffer = thumpBuf;
+      const thumpFilter = this.ctx.createBiquadFilter();
+      thumpFilter.type = "bandpass";
+      thumpFilter.Q.value = 1.0;
+      thumpFilter.frequency.setValueAtTime(220, t);
+      thumpFilter.frequency.exponentialRampToValueAtTime(140, t + 0.18);
+      const thumpGain = this.ctx.createGain();
+      thumpGain.gain.setValueAtTime(0.0001, t);
+      thumpGain.gain.exponentialRampToValueAtTime(1.1, t + 0.003);
+      thumpGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+      thump.connect(thumpFilter);
+      thumpFilter.connect(thumpGain);
+      thumpGain.connect(lowShelf);
+      thump.start(t);
+      thump.stop(t + 0.2);
+    }
 
-    const shellBuf = this.makeNoiseBuffer(0.6);
-    if (!shellBuf) return;
-    const shell = this.ctx.createBufferSource();
-    shell.buffer = shellBuf;
-    const shellFilter = this.ctx.createBiquadFilter();
-    shellFilter.type = "bandpass";
-    shellFilter.Q.value = 2.2;
-    shellFilter.frequency.setValueAtTime(220, t);
-    shellFilter.frequency.exponentialRampToValueAtTime(110, t + 0.5);
-    const shellGain = this.ctx.createGain();
-    shellGain.gain.setValueAtTime(0.0001, t);
-    shellGain.gain.exponentialRampToValueAtTime(0.55, t + 0.003);
-    shellGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
-    shell.connect(shellFilter);
-    shellFilter.connect(shellGain);
-    shellGain.connect(this.master);
-    shell.start(t);
-    shell.stop(t + 0.6);
+    // Mallet transient — broader band than before (180-700 Hz), so it has
+    // both thwack and thump, not just tinny click.
+    const clickBuf = this.makeNoiseBuffer(0.02);
+    if (clickBuf) {
+      const click = this.ctx.createBufferSource();
+      click.buffer = clickBuf;
+      const clickFilter = this.ctx.createBiquadFilter();
+      clickFilter.type = "bandpass";
+      clickFilter.Q.value = 0.9;
+      clickFilter.frequency.value = 320;
+      const clickGain = this.ctx.createGain();
+      clickGain.gain.setValueAtTime(0.0001, t);
+      clickGain.gain.exponentialRampToValueAtTime(0.9, t + 0.001);
+      clickGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.02);
+      click.connect(clickFilter);
+      clickFilter.connect(clickGain);
+      clickGain.connect(this.master);
+      clickGain.connect(convolver);
+      click.start(t);
+      click.stop(t + 0.02);
+    }
+
+    // Wood shell ring — louder, longer, broader than the previous version.
+    const shellBuf = this.makeNoiseBuffer(1.0);
+    if (shellBuf) {
+      const shell = this.ctx.createBufferSource();
+      shell.buffer = shellBuf;
+      const shellFilter = this.ctx.createBiquadFilter();
+      shellFilter.type = "bandpass";
+      shellFilter.Q.value = 1.6;
+      shellFilter.frequency.setValueAtTime(260, t);
+      shellFilter.frequency.exponentialRampToValueAtTime(95, t + 0.9);
+      const shellGain = this.ctx.createGain();
+      shellGain.gain.setValueAtTime(0.0001, t);
+      shellGain.gain.exponentialRampToValueAtTime(0.85, t + 0.005);
+      shellGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.0);
+      shell.connect(shellFilter);
+      shellFilter.connect(shellGain);
+      shellGain.connect(lowShelf);
+      shell.start(t);
+      shell.stop(t + 1.0);
+    }
   }
 
   private startThrust() {
@@ -3876,6 +3970,63 @@ export class Sound {
       gain.connect(this.master);
       osc.start(t);
       osc.stop(t + 0.24);
+    }
+  }
+
+  // Escalating melody chime — one note per successive combo kill. The 16-note
+  // C-major-pentatonic climb fits the C-pedal halo music: combo 2 plays note 0
+  // (C5), combo 3 → D5, … combo 17 → C7; beyond that the index wraps mod 16
+  // so a long streak loops the same ascending motif. Bell-like FM-ish voice
+  // (fundamental + octave + twelfth sine partials) sits just below sparkle so
+  // the two layer cleanly when both fire on the same on-beat kill.
+  playComboChime(comboValue: number, pos?: Pos) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    if (comboValue < 2) return;
+    // C-major pentatonic over three octaves (C5..C7) — 16 ascending steps.
+    const SCALE_HZ = [
+      523.25,  // C5
+      587.33,  // D5
+      659.25,  // E5
+      783.99,  // G5
+      880.00,  // A5
+      1046.50, // C6
+      1174.66, // D6
+      1318.51, // E6
+      1567.98, // G6
+      1760.00, // A6
+      2093.00, // C7
+      2349.32, // D7
+      2637.02, // E7
+      3135.96, // G7
+      3520.00, // A7
+      4186.01, // C8
+    ];
+    const idx = (comboValue - 2) % SCALE_HZ.length;
+    const fundamental = SCALE_HZ[idx];
+    const t = this.ctx.currentTime;
+    const spatial = pos ? this.makeSpatial(pos, this.master) : null;
+    const sink: AudioNode = spatial ? spatial.panner : this.master;
+    // Partials: fundamental, octave, twelfth. Inharmonic 12th (×3.01) gives a
+    // touch of bell glint without going full FM-metallic.
+    const partials: Array<{ ratio: number; peak: number; decay: number }> = [
+      { ratio: 1,    peak: 0.085, decay: 0.40 },
+      { ratio: 2,    peak: 0.030, decay: 0.24 },
+      { ratio: 3.01, peak: 0.012, decay: 0.14 },
+    ];
+    for (const { ratio, peak, decay } of partials) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = fundamental * ratio;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+      osc.connect(gain);
+      gain.connect(sink);
+      osc.start(t);
+      osc.stop(t + decay + 0.02);
     }
   }
 

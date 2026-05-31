@@ -71,6 +71,7 @@ const awardScoreForKill = (game: Game, hitPos: Vec, baseScore: number, isOnBeatH
     const multiplier = game.beatCombo;
     scoreEarned = Math.round(scoreEarned * multiplier);
     game.sound.play("comboSparkle", 1, hitPos);
+    game.sound.playComboChime(multiplier, hitPos);
     if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
   }
   game.score += scoreEarned;
