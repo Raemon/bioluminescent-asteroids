@@ -49,12 +49,15 @@ const sanitizeKillSummary = (raw: unknown): KillSummary => {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === "GET") {
     const limitRaw = req.query.limit;
+    const offsetRaw = req.query.offset;
     const requested = sanitizeInt(Array.isArray(limitRaw) ? limitRaw[0] : limitRaw, 1, MAX_LIMIT);
     const limit = requested ?? DEFAULT_LIMIT;
+    const offset = sanitizeInt(Array.isArray(offsetRaw) ? offsetRaw[0] : offsetRaw, 0, 1_000_000) ?? 0;
     try {
       const rows = await prisma.highscore.findMany({
         orderBy: [{ score: "desc" }, { createdAt: "desc" }],
         take: limit,
+        skip: offset,
       });
       res.setHeader("Cache-Control", "no-store");
       res.status(200).json({

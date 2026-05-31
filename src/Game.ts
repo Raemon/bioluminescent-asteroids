@@ -128,8 +128,22 @@ export class Game implements HudElements {
   //   slot of the 11-row window first; once centred, further presses scroll the
   //   underlying list. See game/scoreEntry.ts.
   leaderboardRows: HighscoreRow[] = [];
+  // Unfiltered top-50 from the server; leaderboardRows is the rendered view
+  //   after applying the top-entries-only filter and current sort.
+  leaderboardAllRows: HighscoreRow[] = [];
   leaderboardSelection = 0;
   leaderboardActive = false;
+  // When true the rendered list dedupes by name, keeping each pilot's best
+  //   row only. Persisted across sessions via localStorage.
+  leaderboardTopOnly = true;
+  // "show more" expands past the 7-row title window to render every loaded row.
+  leaderboardExpanded = false;
+  // True when the last fetch returned a full page, meaning more rows may exist
+  //   on the server. Drives whether "show more" stays visible after expansion.
+  leaderboardHasMore = false;
+  // True while a "show more" page fetch is in flight; used to debounce clicks
+  //   and to swap the button label to "loading…".
+  leaderboardLoadingMore = false;
   // clickable column headers re-sort; rhythm is the default with score as
   //   the tiebreaker so the headline streak stat leads the board.
   leaderboardSort: "rhythm" | "score" | "wave" | "name" = "rhythm";

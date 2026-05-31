@@ -1,8 +1,12 @@
 import type { Game } from "../Game";
 import {
   fetchHighscores,
+  getCachedHighscores,
   getRecentName,
+  getTopEntriesOnly,
+  saveCachedHighscores,
   saveRecentName,
+  saveTopEntriesOnly,
   submitHighscore,
   type HighscoreRow,
 } from "./highscores";
@@ -168,9 +172,10 @@ const renderLeaderboard = (game: Game) => {
       '<li class="leaderboard-status">No scores yet — be the first pilot on the board.</li>';
     return;
   }
-  const windowSize = visibleWindowSize(game);
-  const start = windowStart(game.leaderboardSelection, rows.length, windowSize);
-  const end = Math.min(rows.length, start + windowSize);
+  const expanded = game.leaderboardExpanded && game.lastRunScoreId === null;
+  const windowSize = expanded ? rows.length : visibleWindowSize(game);
+  const start = expanded ? 0 : windowStart(game.leaderboardSelection, rows.length, windowSize);
+  const end = expanded ? rows.length : Math.min(rows.length, start + windowSize);
   const sortKey = game.leaderboardSort;
   const sortCls = (k: Game["leaderboardSort"]) => (sortKey === k ? " lb-sort-active" : "");
   const header = `<li class="lb-header">
@@ -211,16 +216,53 @@ const escapeHtml = (s: string): string =>
 //   enough pilots to scroll through.
 const LEADERBOARD_FETCH_LIMIT = 50;
 
+// Keep only each pilot's single best row. "Best" mirrors the default sort:
+//   highest max_combo wins, score breaks ties. Case-insensitive name match
+//   so "RAEMON" and "raemon" collapse into one entry.
+const dedupeByName = (rows: HighscoreRow[]): HighscoreRow[] => {
+  const best = new Map<string, HighscoreRow>();
+  for (const row of rows) {
+    const key = row.name.toLowerCase();
+    const prev = best.get(key);
+    if (!prev) { best.set(key, row); continue; }
+    const prevCombo = prev.max_combo ?? 0;
+    const curCombo = row.max_combo ?? 0;
+    if (curCombo > prevCombo || (curCombo === prevCombo && row.score > prev.score)) {
+      best.set(key, row);
+    }
+  }
+  return [...best.values()];
+};
+
 export const showLeaderboard = (game: Game) => {
   bindLeaderboardClicks(game);
+  bindLeaderboardFooter(game);
   game.leaderboardEl.classList.remove("hidden");
   const showNeighborhood = game.lastRunScoreId !== null;
-  game.leaderboardListEl.innerHTML =
-    `<li class="leaderboard-status">${showNeighborhood ? "Loading your standing…" : "Loading top pilots…"}</li>`;
-  game.leaderboardRows = [];
-  game.leaderboardSelection = 0;
-  game.leaderboardActive = false;
+  // Post-run "your standing" view always shows the raw top-50 so the player
+  //   sees their actual row even if a previous run by them ranks higher.
+  game.leaderboardTopOnly = showNeighborhood ? false : getTopEntriesOnly();
+  game.leaderboardExpanded = false;
+  game.leaderboardLoadingMore = false;
+  syncOverlayExpansion(false);
+  syncShowMoreVisibility(game);
+  syncFooterUi(game);
+  syncFooterVisibility(showNeighborhood);
   game.leaderboardSort = "rhythm";
+  // Paint cached rows immediately so the title screen is never blank on reload;
+  //   the in-flight fetch will swap them out with fresh data when it lands.
+  const cached = getCachedHighscores();
+  if (cached.length > 0) {
+    game.leaderboardAllRows = cached;
+    applySort(game, cached, game.lastRunScoreId);
+  } else {
+    game.leaderboardListEl.innerHTML =
+      `<li class="leaderboard-status">${showNeighborhood ? "Loading your standing…" : "Loading top pilots…"}</li>`;
+    game.leaderboardAllRows = [];
+    game.leaderboardRows = [];
+    game.leaderboardSelection = 0;
+    game.leaderboardActive = false;
+  }
   void refreshLeaderboard(game);
 };
 
@@ -228,16 +270,46 @@ export const refreshLeaderboard = async (game: Game) => {
   const selfId = game.lastRunScoreId;
   try {
     const rows = await fetchHighscores(LEADERBOARD_FETCH_LIMIT);
+    saveCachedHighscores(rows);
+    game.leaderboardAllRows = rows;
+    game.leaderboardHasMore = rows.length >= LEADERBOARD_FETCH_LIMIT;
     applySort(game, rows, selfId);
+    syncShowMoreVisibility(game);
   } catch {
-    game.leaderboardListEl.innerHTML =
-      '<li class="leaderboard-status">Leaderboard unavailable.</li>';
-    game.leaderboardActive = false;
+    if (game.leaderboardAllRows.length === 0) {
+      game.leaderboardListEl.innerHTML =
+        '<li class="leaderboard-status">Leaderboard unavailable.</li>';
+      game.leaderboardActive = false;
+    }
+  }
+};
+
+// Fetches the next page of rows past what's already loaded, dedupes by id
+//   against the in-memory rows (in case new submissions shifted offsets), and
+//   appends. Updates hasMore based on whether the page was full.
+const loadMoreLeaderboard = async (game: Game) => {
+  if (game.leaderboardLoadingMore || !game.leaderboardHasMore) return;
+  game.leaderboardLoadingMore = true;
+  syncShowMoreVisibility(game);
+  try {
+    const offset = game.leaderboardAllRows.length;
+    const rows = await fetchHighscores(LEADERBOARD_FETCH_LIMIT, offset);
+    const existingIds = new Set(game.leaderboardAllRows.map((r) => r.id));
+    const fresh = rows.filter((r) => !existingIds.has(r.id));
+    game.leaderboardAllRows = [...game.leaderboardAllRows, ...fresh];
+    game.leaderboardHasMore = rows.length >= LEADERBOARD_FETCH_LIMIT;
+    applySort(game, game.leaderboardAllRows, game.lastRunScoreId);
+  } catch {
+    // leave the existing list intact; user can retry by clicking again.
+  } finally {
+    game.leaderboardLoadingMore = false;
+    syncShowMoreVisibility(game);
   }
 };
 
 const applySort = (game: Game, rows: HighscoreRow[], selfId: number | null) => {
-  const sorted = sortRows(rows, game.leaderboardSort);
+  const filtered = game.leaderboardTopOnly ? dedupeByName(rows) : rows;
+  const sorted = sortRows(filtered, game.leaderboardSort);
   game.leaderboardRows = sorted;
   if (selfId !== null) {
     const selfIdx = sorted.findIndex((r) => r.id === selfId);
@@ -247,6 +319,68 @@ const applySort = (game: Game, rows: HighscoreRow[], selfId: number | null) => {
   }
   game.leaderboardActive = sorted.length > 0;
   renderLeaderboard(game);
+};
+
+const syncFooterUi = (game: Game) => {
+  const checkbox = document.getElementById("leaderboard-top-only-input") as HTMLInputElement | null;
+  if (checkbox) checkbox.checked = game.leaderboardTopOnly;
+};
+
+// Hide the filter controls on the post-run "your standing" view; the player
+//   wants to see their actual rank there, not a deduped global view.
+const syncFooterVisibility = (hide: boolean) => {
+  const footer = document.getElementById("leaderboard-footer");
+  if (footer) footer.classList.toggle("hidden", hide);
+};
+
+let leaderboardFooterBound = false;
+const bindLeaderboardFooter = (game: Game) => {
+  if (leaderboardFooterBound) return;
+  const checkbox = document.getElementById("leaderboard-top-only-input") as HTMLInputElement | null;
+  const showMore = document.getElementById("leaderboard-show-more");
+  if (!checkbox || !showMore) return;
+  leaderboardFooterBound = true;
+  checkbox.addEventListener("change", () => {
+    game.leaderboardTopOnly = checkbox.checked;
+    saveTopEntriesOnly(checkbox.checked);
+    applySort(game, game.leaderboardAllRows, game.lastRunScoreId);
+  });
+  showMore.addEventListener("click", () => {
+    if (game.leaderboardLoadingMore) return;
+    if (game.leaderboardTopOnly) {
+      game.leaderboardTopOnly = false;
+      saveTopEntriesOnly(false);
+      syncFooterUi(game);
+    }
+    // First click expands the rendered window to show every loaded row.
+    //   Subsequent clicks page the next 50 from the server and append.
+    const justExpanded = !game.leaderboardExpanded;
+    if (justExpanded) {
+      game.leaderboardExpanded = true;
+      syncOverlayExpansion(true);
+      applySort(game, game.leaderboardAllRows, game.lastRunScoreId);
+      syncShowMoreVisibility(game);
+      return;
+    }
+    void loadMoreLeaderboard(game);
+  });
+};
+
+const syncOverlayExpansion = (expanded: boolean) => {
+  const overlay = document.getElementById("overlay");
+  if (overlay) overlay.classList.toggle("leaderboard-expanded", expanded);
+};
+
+const syncShowMoreVisibility = (game: Game) => {
+  const btn = document.getElementById("leaderboard-show-more");
+  if (!btn) return;
+  // Hide once we've expanded AND there's nothing more the server could give us.
+  //   Otherwise the button persists in the bottom-left so the player can keep
+  //   loading more pages.
+  const nothingToShow = game.leaderboardExpanded && !game.leaderboardHasMore;
+  btn.classList.toggle("hidden", nothingToShow);
+  btn.textContent = game.leaderboardLoadingMore ? "loading…" : "show more";
+  (btn as HTMLButtonElement).disabled = game.leaderboardLoadingMore;
 };
 
 let leaderboardClicksBound = false;

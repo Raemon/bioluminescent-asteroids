@@ -61,8 +61,9 @@ export const submitHighscore = async (
   return body.score;
 };
 
-export const fetchHighscores = async (limit = 10): Promise<HighscoreRow[]> => {
-  const res = await fetch(`/api/highscores?limit=${limit}`, { method: "GET" });
+export const fetchHighscores = async (limit = 10, offset = 0): Promise<HighscoreRow[]> => {
+  const url = `/api/highscores?limit=${limit}&offset=${offset}`;
+  const res = await fetch(url, { method: "GET" });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
   const body = (await res.json()) as { scores: HighscoreRow[] };
   return body.scores;
@@ -97,5 +98,49 @@ export const saveRecentName = (name: string) => {
     localStorage.setItem(RECENT_NAME_KEY, name);
   } catch {
     // localStorage may be blocked (private mode); the leaderboard still works without it.
+  }
+};
+
+// Cached top-50 from the last fetch so the title screen renders instantly on
+// reload while the network call refreshes in the background.
+const CACHED_ROWS_KEY = "pulsar.leaderboardCache";
+
+export const getCachedHighscores = (): HighscoreRow[] => {
+  try {
+    const raw = localStorage.getItem(CACHED_ROWS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed as HighscoreRow[];
+  } catch {
+    return [];
+  }
+};
+
+export const saveCachedHighscores = (rows: HighscoreRow[]) => {
+  try {
+    localStorage.setItem(CACHED_ROWS_KEY, JSON.stringify(rows));
+  } catch {
+    // localStorage may be blocked (private mode); leaderboard still works without cache.
+  }
+};
+
+const TOP_ENTRIES_ONLY_KEY = "pulsar.leaderboardTopOnly";
+
+export const getTopEntriesOnly = (): boolean => {
+  try {
+    const raw = localStorage.getItem(TOP_ENTRIES_ONLY_KEY);
+    if (raw === null) return true;
+    return raw === "1";
+  } catch {
+    return true;
+  }
+};
+
+export const saveTopEntriesOnly = (on: boolean) => {
+  try {
+    localStorage.setItem(TOP_ENTRIES_ONLY_KEY, on ? "1" : "0");
+  } catch {
+    // localStorage may be blocked; preference resets next session.
   }
 };

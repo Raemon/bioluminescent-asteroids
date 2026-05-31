@@ -87,6 +87,13 @@ export const Overlay = () => {
       </form>
       <div id="leaderboard" className="hidden">
         <ol id="leaderboard-list" />
+        <div id="leaderboard-footer">
+          <label id="leaderboard-top-only">
+            <input id="leaderboard-top-only-input" type="checkbox" defaultChecked />
+            <span>Top entries only</span>
+          </label>
+          <button id="leaderboard-show-more" type="button">show more</button>
+        </div>
       </div>
       <button id="abort-mission" type="button" className="hidden">
         Abort Mission
