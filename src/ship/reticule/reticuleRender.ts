@@ -7,6 +7,7 @@ import {
   reticuleOverlapsAnyTarget, reticuleDirectlyOnTarget,
   computeBaseHitAlpha, paintAimDiscs, computeDirectFlashPulse,
 } from "./aimDisc";
+import { PRONG_SPREAD } from "../shipWeapons";
 
 // hitbox alpha breathes slowly so the disc feels alive even when no target is in range.
 const RETICULE_HITBOX_PULSE_MAX = 1.0;
@@ -16,8 +17,6 @@ const RETICULE_RADAR_PULSE_MAX = 1;
 const RETICULE_RADAR_PULSE_MIN = 0.4;
 const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
 
-// matches TRIDENT_SPREAD in shipWeapons.ts — three bullets fan at ±this angle.
-const TRIDENT_SPREAD = 0.21;
 // rapid fires every half-beat, so the off-beat bullet only travels half as far before the next beat.
 const RAPID_HALF_BEAT_FRACTION = 0.5;
 
@@ -51,29 +50,28 @@ const effectiveBulletLife = (ship: Ship): number => {
   return life;
 };
 
-// trident fans the aim into three angles; rapid adds a half-beat preview at half distance;
-// integer-k reticules mark every beat-slot the bullet actually crosses (t = beatGrid*k < life),
-// so the count adapts to longshot/pierce range and to the rhythm-gate tempo (eighth-grid at
-// combo ≥ 12 or under rapid). Returns { positions, primaryIndex } so the caller can identify
-// the centred 1-beat reticule (the anchor for the trajectory's first-dot overlap check).
+// prong fans the aim into two angles (no centred shot); rapid adds a half-beat preview at half
+// distance; integer-k reticules mark every beat-slot the bullet actually crosses (t = beatGrid*k
+// < life), so the count adapts to longshot/pierce range and to the rhythm-gate tempo (eighth-grid
+// at combo ≥ 12 or under rapid). primaryIndex points at the centred 1-beat reticule (anchor for
+// the trajectory's first-dot overlap check), or -1 when prong is active — there's no centred shot
+// to anchor on, so the trajectory uses the standalone centred position for previews instead.
 type ReticulePositions = { positions: Vec[]; primaryIndex: number };
 const computeReticulePositions = (
   ship: Ship, beatGrid: number, w: number, h: number,
 ): ReticulePositions => {
-  const angleOffsets = ship.tridentActive ? [-TRIDENT_SPREAD, 0, TRIDENT_SPREAD] : [0];
+  const angleOffsets = ship.prongActive ? [-PRONG_SPREAD, PRONG_SPREAD] : [0];
   const bulletLife = effectiveBulletLife(ship);
   const slotCount = Math.max(1, Math.floor(bulletLife / beatGrid));
   const integerFractions: number[] = [];
   for (let k = 1; k <= slotCount; k++) integerFractions.push(k);
   const beatFractions = ship.rapidActive ? [RAPID_HALF_BEAT_FRACTION, ...integerFractions] : integerFractions;
   const positions: Vec[] = [];
-  let primaryIndex = 0;
+  let primaryIndex = -1;
   for (const frac of beatFractions) {
     for (const off of angleOffsets) {
       const idx = positions.length;
       positions.push(computeReticulePosition(ship, beatGrid, w, h, off, frac));
-      // primary = centred (off==0) shot landing at exactly 1 beat — the "shoot now to hit next beat"
-      // reticule. With longshot active that's not the last entry, so explicitly capture the index.
       if (off === 0 && frac === 1) primaryIndex = idx;
     }
   }
@@ -94,7 +92,11 @@ export const renderShipReticules = (
 ) => {
   if (!ship.alive) return;
   const { positions: reticulePositions, primaryIndex } = computeReticulePositions(ship, beatGrid, w, h);
-  const primaryReticule = reticulePositions[primaryIndex];
+  // trajectory preview anchors on the centred "shoot now to hit next beat" spot. With prong
+  // active there's no drawn reticule there, so compute the anchor directly from ship heading.
+  const primaryReticule = primaryIndex >= 0
+    ? reticulePositions[primaryIndex]
+    : computeReticulePosition(ship, beatGrid, w, h, 0, 1);
   const apex = ship.pos;
   const { center: aimCircleCenter, radius: aimCircleRadius } = computeAimCircle(ship, beatGrid);
   ctx.save();

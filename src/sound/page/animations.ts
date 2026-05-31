@@ -41,7 +41,7 @@ export type ObjectId =
   | "ship-death"
   | "bullet-weak"
   | "bullet-rhythm"
-  | "bullet-trident"
+  | "bullet-prong"
   | "asteroid-normal"
   | "asteroid-bassA"
   | "asteroid-bassB"
@@ -119,7 +119,7 @@ function drawShip(opts: { thrust?: boolean; reverse?: boolean; shield?: boolean;
 }
 
 function drawBullet(opts: { onBeat: boolean; boosted: boolean; count: number }): Animator {
-  const lanes = opts.count === 3 ? [-0.35, 0, 0.35] : [0];
+  const lanes = opts.count === 2 ? [-0.3, 0.3] : opts.count === 3 ? [-0.35, 0, 0.35] : [0];
   type Tracked = { bullet: Bullet; vx: number; vy: number };
   let tracked: Tracked[] = [];
   let lastFiredAt = -1;
@@ -373,7 +373,7 @@ export const ANIMATIONS: Record<ObjectId, () => Animator> = {
   "ship-death": () => drawShip({ death: true }),
   "bullet-weak": () => drawBullet({ onBeat: false, boosted: false, count: 1 }),
   "bullet-rhythm": () => drawBullet({ onBeat: true, boosted: false, count: 1 }),
-  "bullet-trident": () => drawBullet({ onBeat: true, boosted: true, count: 3 }),
+  "bullet-prong": () => drawBullet({ onBeat: true, boosted: true, count: 2 }),
   "asteroid-normal": () => drawAsteroid("normal", "chip"),
   "asteroid-bassA": () => drawAsteroid("bassA", "chip"),
   "asteroid-bassB": () => drawAsteroid("bassB", "chip"),

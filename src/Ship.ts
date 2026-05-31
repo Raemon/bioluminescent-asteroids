@@ -55,8 +55,8 @@ export class Ship {
   fireRate = BEAT_GRID;
   bulletSpeed = 620;
   bulletLife = 0.85;
-  // trident/rapid/pierce/radar/longshot persist for the run; shield is one-shot.
-  tridentActive = false;
+  // prong/rapid/pierce/radar/longshot persist for the run; shield is one-shot.
+  prongActive = false;
   rapidActive = false;
   pierceActive = false;
   shieldActive = false;
@@ -99,7 +99,7 @@ export class Ship {
     tickShip(this, dt, input, particles, bullets, w, h, t, sound, targets);
   }
 
-  // trident spreads + on-beat tagging happens in Game; the ship just emits the right bullet count.
+  // prong spreads + on-beat tagging happens in Game; the ship just emits the right bullet count.
   fire(bullets: Bullet[]) { fireBullets(this, bullets); }
 
   // powerup pickup goes through one entry point so the active-flag rules stay in one file.

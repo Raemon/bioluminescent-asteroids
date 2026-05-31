@@ -217,7 +217,7 @@ const tickSlowMoTimer = (game: Game, dt: number): number => {
   return musicDtForFrame(dt, game.slowMoTimer);
 };
 
-// ≤1 fire event per frame, but trident emits 3 bullets — they all share one beat flag.
+// ≤1 fire event per frame, but prong emits 2 bullets — they all share one beat flag.
 const classifyNewBullets = (game: Game, firstNewIndex: number) => {
   const newBullets = game.bullets.slice(firstNewIndex);
   const firedOnBeat = isInBeatWindow(game, game.beatTime);

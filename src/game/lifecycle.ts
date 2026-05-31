@@ -69,7 +69,7 @@ export const showTitle = (game: Game) => {
   game.sound.bgBeatIntensity = 0;
   game.pulsar.setBossPlanetState("idle");
   spawnTitleDecorativeAsteroids(game);
-  game.ship.tridentActive = false;
+  game.ship.prongActive = false;
   game.ship.rapidActive = false;
   game.ship.pierceActive = false;
   game.ship.shieldActive = false;

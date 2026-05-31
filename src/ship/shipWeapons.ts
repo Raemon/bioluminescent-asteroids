@@ -3,8 +3,8 @@ import { add, mul, fromAngle } from "../vec";
 import { Bullet } from "../Bullet";
 import { PowerupKind } from "../Canister";
 
-// trident sprays a symmetric pair per shot at a fixed spread; centred single shot otherwise.
-const TRIDENT_SPREAD = 0.21;
+// prong sprays a symmetric pair per shot at a fixed spread; centred single shot otherwise.
+export const PRONG_SPREAD = 0.21;
 
 // pierce extends bullet lifetime so the punch-through shot also reaches farther,
 // making the powerup feel like a true "penetrating" upgrade and not just multi-hit.
@@ -25,15 +25,15 @@ const launchBullet = (ship: Ship, headingOffset: number, pierce: boolean, longsh
   return bullet;
 };
 
-// single fire event yields 1 or 2 bullets; trident must share its on-beat flag across both.
+// single fire event yields 1 or 2 bullets; prong must share its on-beat flag across both.
 export const fireBullets = (ship: Ship, bullets: Bullet[]) => {
-  const offsets = ship.tridentActive ? [-TRIDENT_SPREAD, TRIDENT_SPREAD] : [0];
+  const offsets = ship.prongActive ? [-PRONG_SPREAD, PRONG_SPREAD] : [0];
   for (const offset of offsets) bullets.push(launchBullet(ship, offset, ship.pierceActive, ship.longshotActive));
 };
 
 // powerup flags are simple bool latches; shield is one-shot, the rest persist for the run.
 export const applyPowerup = (ship: Ship, kind: PowerupKind) => {
-  if (kind === "trident") ship.tridentActive = true;
+  if (kind === "prong") ship.prongActive = true;
   else if (kind === "rapid") ship.rapidActive = true;
   else if (kind === "pierce") ship.pierceActive = true;
   else if (kind === "shield") ship.shieldActive = true;

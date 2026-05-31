@@ -29,7 +29,7 @@ const BEAT_DEBUG_POPUP_LIFE = 1.2;
 const SCORE_POPUP_LIFE = 1.0;
 
 const POWERUP_LABEL: Record<PowerupKind, string> = {
-  trident: "TRIDENT",
+  prong: "PRONG",
   rapid: "RAPID FIRE",
   pierce: "PIERCE",
   shield: "SHIELD",

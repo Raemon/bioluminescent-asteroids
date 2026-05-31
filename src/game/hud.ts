@@ -116,7 +116,7 @@ export const syncHud = (game: Game) => {
 
 // persistent flags drive on/off; slow-mo also shows a bottom-up timer bar of remaining duration.
 export const syncPowerupHud = (game: Game) => {
-  setSlotActive("trident", game.ship.tridentActive);
+  setSlotActive("prong", game.ship.prongActive);
   setSlotActive("rapid", game.ship.rapidActive);
   setSlotActive("pierce", game.ship.pierceActive);
   setSlotActive("shield", game.ship.shieldActive);

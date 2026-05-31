@@ -38,9 +38,9 @@ export const Hud = () => (
       </div>
     </div>
     <div id="powerups">
-      <Powerup kind="trident" title="Trident — three-bullet spread">
+      <Powerup kind="prong" title="Prong — two-bullet spread">
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 4 L5 11 L7 13 M12 4 L12 14 M19 4 L19 11 L17 13 M7 13 L17 13 M12 14 L12 21 M9 19 L15 19" />
+          <path d="M7 4 L7 11 L9 13 M17 4 L17 11 L15 13 M9 13 L15 13 M12 13 L12 21 M9 19 L15 19" />
         </svg>
       </Powerup>
       <Powerup kind="rapid" title="Rapid Fire — eighth-note cadence">

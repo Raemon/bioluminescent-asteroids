@@ -207,7 +207,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   z-index: 1;
 }
 
-.powerup-slot[data-kind="trident"] { color: hsl(180, 90%, 70%); }
+.powerup-slot[data-kind="prong"] { color: hsl(180, 90%, 70%); }
 .powerup-slot[data-kind="rapid"]   { color: hsl(300, 90%, 75%); }
 .powerup-slot[data-kind="pierce"]  { color: hsl(60, 95%, 70%); }
 .powerup-slot[data-kind="shield"]  { color: hsl(200, 90%, 72%); }

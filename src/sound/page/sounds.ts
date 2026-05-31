@@ -115,13 +115,13 @@ export const OBJECTS: GameObject[] = [
     ],
   },
   {
-    id: "bullet-trident",
-    label: "trident bullets",
-    about: "rapid+trident powerup spread",
+    id: "bullet-prong",
+    label: "prong bullets",
+    about: "rapid+prong powerup spread",
     actions: [
       // No unique sound — it's still fireBeat — but the visual difference
-      // earns its own row so the page covers the trident variant explicitly.
-      { verb: "fires triple volley", sound: "fireBeat", trigger: beat(1) },
+      // earns its own row so the page covers the prong variant explicitly.
+      { verb: "fires double volley", sound: "fireBeat", trigger: beat(1) },
     ],
   },
 
