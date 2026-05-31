@@ -38,6 +38,12 @@ html:has(.soundeditor-body) {
   letter-spacing: 0.18em;
   color: #6ad7ff;
   text-shadow: 0 0 12px rgba(106, 215, 255, 0.55);
+  text-decoration: none;
+}
+
+.se-logo:hover {
+  color: #b8ecff;
+  text-shadow: 0 0 16px rgba(184, 236, 255, 0.7);
 }
 
 .se-sep { color: rgba(214, 236, 255, 0.35); }

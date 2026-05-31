@@ -146,9 +146,23 @@ html, body {
 }
 
 #powerups {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* On narrow screens the absolutely-centered powerups would overlap the
+   left/right HUD groups. Fall back to inline flow so the flexbox
+   space-between pushes them clear. */
+@media (max-width: 900px) {
+  #powerups {
+    position: static;
+    transform: none;
+  }
 }
 
 .powerup-slot {
@@ -703,7 +717,7 @@ html, body {
   opacity: 1;
 }
 
-#leaderboard-list .lb-sort-active {
+#leaderboard-list li.lb-header .lb-sort-active {
   color: #ffffff;
   opacity: 1;
 }
