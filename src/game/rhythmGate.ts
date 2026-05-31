@@ -84,6 +84,12 @@ export const loseCombo = (game: Game, sourcePos?: Vec) => {
   // nextBeatToEvaluate against the wider grid so the next closure lands cleanly.
   if (!game.ship.rapidActive) rebaseBeatEval(game);
   syncComboHud(game);
+  // stage-3 diamond row mirrors live rhythm; an off-beat fire wipes both.
+  //   Dispatched inline (no lifecycle.ts import) to avoid the cycle between
+  //   rhythmGate.ts and lifecycle.ts.
+  if (game.firstWaveHintStage === 3) {
+    window.dispatchEvent(new CustomEvent("first-wave-hint:rhythmProgress", { detail: { count: 0 } }));
+  }
 };
 
 // silence holds combo; only an off-beat fire latched during the closing beat drops it to 0.

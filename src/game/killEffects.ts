@@ -7,7 +7,7 @@ import { Vec } from "../vec";
 import { spawnGoldCrystalAt } from "../GoldCrystal";
 import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
-import { markFirstWaveTutorialComplete, setFirstWaveHintStage } from "./lifecycle";
+import { markFirstWaveTutorialComplete, setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
 import { popupCombo, popupScore } from "./popups";
 import {
@@ -60,20 +60,27 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
     tryUnlockPilotLog1(game);
     tryUnlockPilotLog3(game);
     advanceFirstWaveHintOnCombo(game);
+    if (game.firstWaveHintStage === 2 && game.firstWaveOnBeatHitCount < 3) {
+      game.firstWaveOnBeatHitCount += 1;
+      emitFirstWaveHintHitProgress(game.firstWaveOnBeatHitCount);
+      if (game.firstWaveOnBeatHitCount >= 3) setFirstWaveHintStage(game, 3);
+    } else if (game.firstWaveHintStage === 3) {
+      // fill the next diamond per on-beat hit until the 3-pip row is full.
+      if (game.beatCombo <= 3) emitFirstWaveHintRhythmProgress(game.beatCombo);
+      // crossed back to 3x rhythm — kick off the React-side 3s hold + fade.
+      if (game.beatCombo === 3) emitFirstWaveHintStage3Ready();
+    }
   } else if (!isOnBeatHit && game.beatCombo !== 0) {
     loseCombo(game, hitPos);
   }
 };
 
-// 4x rhythm reveals the score-payoff line; 6x marks the tutorial done forever.
+// 6x marks the tutorial done forever — backstop for any case where the
+//   player blasts past the stage progression while a hint is still up.
 const advanceFirstWaveHintOnCombo = (game: Game) => {
   if (game.beatCombo >= 6 && game.firstWaveHintStage !== 0) {
     setFirstWaveHintStage(game, 0);
     markFirstWaveTutorialComplete();
-    return;
-  }
-  if (game.beatCombo >= 4 && (game.firstWaveHintStage === 1 || game.firstWaveHintStage === 2)) {
-    setFirstWaveHintStage(game, 3);
   }
 };
 

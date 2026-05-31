@@ -39,8 +39,61 @@ export const markFirstWaveTutorialComplete = () => {
 export const setFirstWaveHintStage = (game: Game, stage: 0 | 1 | 2 | 3) => {
   if (game.firstWaveHintStage === stage) return;
   game.firstWaveHintStage = stage;
+  // stage transitions always reset the sub-line + the stage-2 hit pips; both
+  //   re-open only when the player's on-beat hits during stage 2 fill them.
+  if (game.firstWaveHintSubVisible) setFirstWaveHintSubVisible(game, false);
+  if (game.firstWaveOnBeatHitCount !== 0) {
+    game.firstWaveOnBeatHitCount = 0;
+    emitFirstWaveHintHitProgress(0);
+  }
   window.dispatchEvent(new CustomEvent("first-wave-hint:stage", { detail: { stage } }));
+  if (stage === 3) {
+    // seed the diamond row with the player's current rhythm (capped at 3),
+    //   then fire ready if they're already at or past 3x — otherwise the
+    //   hold waits until applyHitToCombo emits ready as they rebuild.
+    emitFirstWaveHintRhythmProgress(Math.min(game.beatCombo, 3));
+    if (game.beatCombo >= 3) emitFirstWaveHintStage3Ready();
+  } else {
+    // leaving stage 3 (or never entering it) clears the diamond row.
+    emitFirstWaveHintRhythmProgress(0);
+  }
 };
+
+export const setFirstWaveHintSubVisible = (game: Game, visible: boolean) => {
+  if (game.firstWaveHintSubVisible === visible) return;
+  game.firstWaveHintSubVisible = visible;
+  window.dispatchEvent(new CustomEvent("first-wave-hint:sub", { detail: { visible } }));
+};
+
+// stage-1 progress diamonds (3 of them) light up as the player banks on-beat
+//   fires; React redraws when this fires.
+export const emitFirstWaveHintProgress = (count: number) => {
+  window.dispatchEvent(new CustomEvent("first-wave-hint:progress", { detail: { count } }));
+};
+
+// stage-2 progress diamonds (3 of them) light up as the player banks on-beat
+//   hits; on the third one, the sub-line ("Use your targeting tools to help")
+//   reveals via setFirstWaveHintSubVisible.
+export const emitFirstWaveHintHitProgress = (count: number) => {
+  window.dispatchEvent(new CustomEvent("first-wave-hint:hitProgress", { detail: { count } }));
+};
+
+// stage-3 ready: fires once `beatCombo` reaches 3 while stage 3 is showing.
+//   Until then, the React component holds stage 3 at full opacity instead of
+//   starting its 3s dismissal timer. If the player is already past 3x rhythm
+//   at stage-3 entry (the usual case), this fires immediately.
+export const emitFirstWaveHintStage3Ready = () => {
+  window.dispatchEvent(new CustomEvent("first-wave-hint:stage3Ready"));
+};
+
+// stage-3 diamonds (3 of them) mirror the player's current rhythm count
+//   (capped at 3). When the player enters stage 3 below 3x, the row fills
+//   as on-beat hits land; when they enter at 3x or higher, all three are
+//   already filled.
+export const emitFirstWaveHintRhythmProgress = (count: number) => {
+  window.dispatchEvent(new CustomEvent("first-wave-hint:rhythmProgress", { detail: { count } }));
+};
+
 
 // Fisher-Yates over Array.sort — sort's randomness is biased and varies across engines.
 const shuffled = <T,>(arr: ReadonlyArray<T>): T[] => {
@@ -140,6 +193,10 @@ export const startGame = (game: Game) => {
   updateBgBeatIntensity(game);
   spawnWave(game);
   game.firstWaveOnBeatFireCount = 0;
+  game.firstWaveOnBeatHitCount = 0;
+  emitFirstWaveHintProgress(0);
+  emitFirstWaveHintHitProgress(0);
+  emitFirstWaveHintRhythmProgress(0);
   setFirstWaveHintStage(game, isFirstWaveTutorialComplete() ? 0 : 1);
   game.overlayEl.classList.add("hidden");
   hideScoreEntry(game);

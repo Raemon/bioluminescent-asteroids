@@ -20,7 +20,7 @@ import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
-import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage } from "./game/lifecycle";
+import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, markFirstWaveTutorialComplete } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 
@@ -89,6 +89,12 @@ export class Game implements HudElements {
   //   transition + auto-dismiss, so the game loop only owns the stage number.
   firstWaveHintStage: 0 | 1 | 2 | 3 = 0;
   firstWaveOnBeatFireCount = 0;
+  // stage-2 sub-line ("Use your targeting tools to help") is gated on the
+  //   player landing three on-beat hits after stage 2 opens. The diamond
+  //   row under stage 2's main line fills one pip per hit, and the sub-line
+  //   reveals once all three are lit.
+  firstWaveHintSubVisible = false;
+  firstWaveOnBeatHitCount = 0;
 
   canisters: Canister[] = [];
   goldCrystals: GoldCrystal[] = [];
@@ -218,10 +224,13 @@ export class Game implements HudElements {
       this.volumeEl.classList.toggle("near", near);
     });
     this.abortEl.addEventListener("click", () => abortMission(this));
-    // <FirstWaveHint> owns its own auto-dismiss timer; when it fades out it
-    //   asks the game to clear the stage so future triggers (e.g. 6x rhythm
-    //   guard) see the correct state.
-    window.addEventListener("first-wave-hint:dismiss", () => setFirstWaveHintStage(this, 0));
+    // <FirstWaveHint> owns its own stage-3 auto-dismiss timer; when it fades
+    //   out it asks the game to clear the stage. The tutorial is marked
+    //   complete here so future runs skip the overlay entirely.
+    window.addEventListener("first-wave-hint:dismiss", () => {
+      setFirstWaveHintStage(this, 0);
+      markFirstWaveTutorialComplete();
+    });
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();
       if (k === "m" && this.state !== "title") toggleMute(this);
