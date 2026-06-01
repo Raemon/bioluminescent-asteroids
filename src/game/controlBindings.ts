@@ -34,12 +34,12 @@ export const DEFAULT_BINDINGS: Bindings = {
 
 export const ACTION_ORDER: ControlAction[] = [
   "rotateLeft",
-  "rotateRight",
   "thrust",
+  "rotateRight",
   "reverse",
   "sidePort",
-  "sideStarboard",
   "fire",
+  "sideStarboard",
   "pause",
   "precisionTurn",
 ];
