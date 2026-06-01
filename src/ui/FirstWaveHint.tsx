@@ -178,7 +178,7 @@ export const FirstWaveHint = () => {
           </div>
           {subMounted && (
             <div className={`mt-8 first-wave-hint__sub ${subVisible ? "visible" : ""}`}>
-              Use your targeting tools to aim.
+              Aim for the asteroid target.
             </div>
           )}
         </>

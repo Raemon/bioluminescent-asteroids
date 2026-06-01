@@ -236,7 +236,6 @@ export const startCalibrationIntro = (game: Game) => {
   game.waveTransitioning = false;
   resetRunTimers(game);
   resetRunCollections(game);
-  game.asteroids = []; // clear the title's decorative rocks; the wave spawns at finish
   game.bassOrder = shuffled(BASS_KINDS);
   game.particles = new ParticleSystem();
   game.ship = new Ship(v(game.w / 2, game.h / 2));
@@ -357,6 +356,7 @@ const resetRunTimers = (game: Game) => {
 
 // parade + drones from the previous title screen must be torn down before the new run runs.
 const resetRunCollections = (game: Game) => {
+  game.asteroids = [];
   game.bullets = [];
   game.popups = [];
   game.shards = [];
