@@ -227,7 +227,6 @@ export const SettingsDialog = () => {
               );
             })}
           </div>
-          <span className="settings-hint">click to rebind · right-click to clear</span>
         </section>
 
         <button type="button" className="settings-done" onClick={closeDialog}>Done</button>

@@ -208,6 +208,7 @@ export class Game implements HudElements {
   paradeTotalBeats = 0;
   paradeCanvasW = 0;
   paradeCanvasH = 0;
+  paradeOrientation: "horizontal" | "vertical" = "horizontal";
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;

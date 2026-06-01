@@ -69,12 +69,21 @@ export const Overlay = () => {
       </a>
       <div id="overlay-title-group">
         <h1 id="overlay-title">Pulsar Drift</h1>
-        <h3 id="overlay-subtitle">A meditative rhythm journey</h3>
       </div>
       <button id="overlay-start" type="button">
         Begin
       </button>
       {paused && <ControlInfo id="overlay-pause-controls" className="overlay-pause-controls" />}
+      <div id="gameover-stack" className="hidden">
+        <div id="gameover-text-column">
+          <div id="gameover-wave" className="go-line go-wave" />
+          <div id="gameover-peak" className="go-line go-peak">
+            <span id="gameover-peak-label">Peak Rhythm</span>
+            <span id="gameover-peak-value" />
+          </div>
+          <div id="gameover-score" className="go-line go-score" />
+        </div>
+      </div>
       <canvas id="killed-row" className="hidden" width={0} height={0} />
       <form id="score-entry" className="hidden" autoComplete="off" noValidate>
         <label htmlFor="score-entry-name">Enter callsign</label>

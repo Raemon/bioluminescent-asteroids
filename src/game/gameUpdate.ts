@@ -31,6 +31,7 @@ import { updatePopups } from "./popups";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderboardKeyRepeat } from "./scoreEntry";
+import { showGameOverIntro } from "./gameOverIntro";
 import { isDown, wasPressed } from "./controlBindings";
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
@@ -153,10 +154,12 @@ const transitionToGameOver = (game: Game) => {
   game.comets = [];
   game.lastRunScore = game.score;
   game.lastRunScoreId = null;
-  game.overlayTitleEl.textContent = `Game Over — ${String(game.score).padStart(6, "0")}`;
+  game.overlayTitleEl.textContent = "";
   game.overlayStartEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
-  renderKilledRow(game);
+  game.overlayEl.classList.add("gameover-layout");
+  renderKilledRow(game, "vertical");
+  showGameOverIntro(game, "gameover");
   showScoreEntry(game);
   emitGameState(game);
 };

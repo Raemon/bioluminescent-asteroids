@@ -273,9 +273,12 @@ export const showLeaderboard = (game: Game) => {
   // Post-run "your standing" view always shows the raw top-50 so the player
   //   sees their actual row even if a previous run by them ranks higher.
   game.leaderboardTopOnly = showNeighborhood ? false : getTopEntriesOnly();
-  game.leaderboardExpanded = false;
+  // Title screen defaults to fully-expanded: the deduped top-50 reads as a
+  //   hall of fame, not a 7-row peek-window. Post-run keeps the scrolling
+  //   window so the yellow self-row stays centred.
+  game.leaderboardExpanded = !showNeighborhood;
   game.leaderboardLoadingMore = false;
-  syncOverlayExpansion(false);
+  syncOverlayExpansion(!showNeighborhood);
   syncShowMoreVisibility(game);
   syncFooterUi(game);
   syncFooterVisibility(showNeighborhood);

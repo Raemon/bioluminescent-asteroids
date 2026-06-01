@@ -7,6 +7,10 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Hide scrollbars everywhere while still allowing scroll. */
+* { scrollbar-width: none; -ms-overflow-style: none; }
+*::-webkit-scrollbar { display: none; }
+
 html, body {
   width: 100%;
   height: 100%;
@@ -462,17 +466,6 @@ html:has(#sound-root), body:has(> #sound-root) {
   padding-top: 75px;
 }
 
-#overlay-subtitle {
-  font-size: 17px;
-  letter-spacing: 0.55em;
-  color: #6ad7ff;
-  text-transform: uppercase;
-  font-weight: 300;
-  margin: 0;
-  margin-left: -8px;
-  padding-left: 0.55em;
-}
-
 .tutorial-controls-hint {
   position: fixed;
   left: 50%;
@@ -782,6 +775,136 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 #killed-row.hidden { display: none; }
+
+/* Game-over layout: text column on the left (60vw), parade column on the
+   right (40vw). The parade canvas is fixed-positioned in the right column
+   so the left-column flow (gameover-stack + callsign form) stays a normal
+   vertical flex stack centered within the 60vw band. */
+#overlay.gameover-layout {
+  justify-content: flex-start;
+  padding: 18vh 0 32px;
+  gap: 28px;
+}
+
+#overlay.gameover-layout #overlay-title-group { display: none; }
+
+#overlay.gameover-layout #gameover-stack {
+  width: 60vw;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+}
+
+#overlay.gameover-layout #score-entry {
+  width: 60vw;
+  margin: 0;
+}
+
+#overlay.gameover-layout #killed-row {
+  position: fixed;
+  top: 50%;
+  left: 80vw;
+  transform: translate(-50%, -50%);
+  width: auto;
+  max-width: 40vw;
+  margin: 0;
+  pointer-events: none;
+}
+
+/* Hide the in-flow gameover-stack everywhere except the gameover layout —
+   the same DOM node is used to host the staged text, but only the gameover
+   transition reveals it. */
+#gameover-stack.hidden { display: none; }
+#gameover-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+#gameover-text-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  width: 100%;
+}
+
+/* Each line starts invisible and slides in a few pixels — the JS toggles
+   .in after a per-line delay. .splash gives the peak headline a slightly
+   bigger glow on entrance. */
+.go-line {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 700ms ease-out, transform 700ms ease-out;
+}
+.go-line.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.go-wave,
+.go-score {
+  font-size: 17px;
+  letter-spacing: 0.45em;
+  color: #6ad7ff;
+  text-transform: uppercase;
+  font-weight: 300;
+  padding-left: 0.45em;
+}
+
+.go-score { opacity: 0; }
+.go-score.in { opacity: 0.95; }
+
+.go-peak {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 1000ms ease-out, transform 1000ms ease-out;
+}
+
+#gameover-peak-label {
+  font-size: 12px;
+  letter-spacing: 0.55em;
+  color: #6ad7ff;
+  text-transform: uppercase;
+  font-weight: 300;
+  opacity: 0.75;
+  padding-left: 0.55em;
+}
+
+#gameover-peak-value {
+  font-weight: 700;
+  font-size: clamp(56px, 9vw, 128px);
+  letter-spacing: 0.18em;
+  color: #fff8c8;
+  text-transform: uppercase;
+  text-shadow:
+    0 0 24px rgba(255, 226, 140, 0.85),
+    0 0 60px rgba(255, 200, 100, 0.55),
+    0 0 120px rgba(255, 180, 80, 0.3);
+  transform: scaleX(0.92);
+  transform-origin: center;
+  display: inline-block;
+  line-height: 1;
+  padding-left: 0.18em;
+}
+
+.go-peak.splash #gameover-peak-value {
+  animation: gameoverPeakBloom 1200ms ease-out 1;
+}
+
+@keyframes gameoverPeakBloom {
+  0%   { text-shadow: 0 0 0 rgba(255, 226, 140, 0), 0 0 0 rgba(255, 200, 100, 0); transform: scaleX(0.92) scale(0.96); }
+  35%  { text-shadow: 0 0 36px rgba(255, 245, 200, 0.95), 0 0 100px rgba(255, 210, 130, 0.7); transform: scaleX(0.92) scale(1.03); }
+  100% { text-shadow:
+           0 0 24px rgba(255, 226, 140, 0.85),
+           0 0 60px rgba(255, 200, 100, 0.55),
+           0 0 120px rgba(255, 180, 80, 0.3); transform: scaleX(0.92) scale(1); }
+}
 
 #score-entry {
   pointer-events: auto;

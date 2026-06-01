@@ -14,6 +14,7 @@ import { emitShipDebris } from "./particleBursts";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showLeaderboard, showScoreEntry } from "./scoreEntry";
 import { HALO_MUSIC_POOL } from "./haloMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
+import { hideGameOverIntro, showGameOverIntro } from "./gameOverIntro";
 import { hasCalibrated, CALIBRATION_BEAT_INTENSITY } from "./beatCalibration";
 
 // once a player reaches 6x rhythm we flip this flag so future runs skip the
@@ -168,6 +169,8 @@ export const showTitle = (game: Game) => {
   game.overlayStartEl.textContent = "Begin";
   game.overlayStartEl.classList.remove("hidden");
   game.overlayEl.classList.remove("hidden");
+  game.overlayEl.classList.remove("gameover-layout");
+  hideGameOverIntro();
   renderKilledRow(game);
   clearComboSilently(game);
   game.asteroids = [];
@@ -404,6 +407,8 @@ const enterPause = (game: Game) => {
   game.overlayStartEl.classList.remove("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("paused");
+  game.overlayEl.classList.remove("gameover-layout");
+  hideGameOverIntro();
   game.abortEl.classList.remove("hidden");
   emitGameState(game);
 };
@@ -437,10 +442,12 @@ export const abortMission = (game: Game) => {
   game.lastRunScore = game.score;
   game.lastRunScoreId = null;
   game.abortEl.classList.add("hidden");
-  game.overlayTitleEl.textContent = `Mission Aborted — ${String(game.score).padStart(6, "0")}`;
+  game.overlayTitleEl.textContent = "";
   game.overlayStartEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
-  renderKilledRow(game);
+  game.overlayEl.classList.add("gameover-layout");
+  renderKilledRow(game, "vertical");
+  showGameOverIntro(game, "aborted");
   showScoreEntry(game);
   emitGameState(game);
 };

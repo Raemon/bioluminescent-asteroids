@@ -21,13 +21,18 @@ const SOUND_PRE_ROLL_SECONDS: Partial<Record<SoundName, number>> = {
   bgBeat: 0.04,
 };
 
-// canvas height grows to fit the tallest snap (+padding) so a boss-large with its
-//   additive glow halo isn't clipped at the top/bottom of the row.
-const PARADE_MIN_H = 220;
-// bottom pad must fit the 22px "+N" score flash (drawn 6px under the sprite, top baseline)
-//   plus its 14px shadow blur — 48px keeps the tallest sprite's flash unclipped.
-const PARADE_VPAD = 48;
-const PARADE_MIN_W = 320;
+// horizontal-layout canvas height fits the tallest snap (+vpad) so a boss-large
+//   with its additive glow halo isn't clipped at the top/bottom of the row.
+const PARADE_HORIZ_MIN_H = 220;
+// bottom pad fits the 22px "+N" score flash (drawn 6px under the sprite) plus its
+//   14px shadow blur — 48px keeps the tallest sprite's flash unclipped.
+const PARADE_HORIZ_VPAD = 48;
+const PARADE_HORIZ_MIN_W = 320;
+// vertical-layout canvas width fits the widest snap (+hpad) so the side-mounted
+//   "+N" score flash has breathing room (22px font + 14px shadow blur).
+const PARADE_VERT_MIN_W = 220;
+const PARADE_VERT_HPAD = 56;
+const PARADE_VERT_MIN_H = 320;
 // bgBeat fires on every whole BEAT_GRID tick (alternating downbeat/offbeat pitch), so
 //   snapping offsets to integer beats guarantees the kill-sound trigger lands on a bg beat.
 const PARADE_BEAT_SUBDIV = 1.0;
@@ -47,12 +52,15 @@ export type ParadeEntry = {
 };
 
 // maxHp/4 spacing = on-rhythm shots needed — paces the parade by kill difficulty.
-export const renderKilledRow = (game: Game) => {
+//   orientation: "horizontal" on the title screen (full-width banner), "vertical"
+//   on the gameover layout (narrow right-column column-of-march).
+export const renderKilledRow = (game: Game, orientation: "horizontal" | "vertical" = "horizontal") => {
   stopParade(game);
   if (game.killedSnapshots.length === 0) {
     game.killedRowEl.classList.add("hidden");
     return;
   }
+  game.paradeOrientation = orientation;
   layOutParade(game);
   configureParadeCanvas(game);
   startParadeLoop(game);
@@ -79,14 +87,23 @@ const layOutParade = (game: Game) => {
 };
 
 // DPR-aware backing store needed so the parade looks crisp at high-density display ratios.
-// height is sized to the tallest captured snap (which already includes its glow margin)
-//   plus a small vpad — fixed-360 used to crop the boss-large halo.
+//   Horizontal: canvas spans the viewport, height fits the tallest snap.
+//   Vertical: canvas spans the viewport height, width fits the widest snap.
 const configureParadeCanvas = (game: Game) => {
   const canvas = game.killedRowEl;
-  const cssW = Math.max(PARADE_MIN_W, window.innerWidth);
-  let tallest = 0;
-  for (const e of game.paradeEntries) tallest = Math.max(tallest, e.snap.full.height);
-  const cssH = Math.max(PARADE_MIN_H, tallest + PARADE_VPAD * 2);
+  let cssW: number;
+  let cssH: number;
+  if (game.paradeOrientation === "vertical") {
+    let widest = 0;
+    for (const e of game.paradeEntries) widest = Math.max(widest, e.snap.full.width);
+    cssW = Math.max(PARADE_VERT_MIN_W, widest + PARADE_VERT_HPAD * 2);
+    cssH = Math.max(PARADE_VERT_MIN_H, window.innerHeight);
+  } else {
+    let tallest = 0;
+    for (const e of game.paradeEntries) tallest = Math.max(tallest, e.snap.full.height);
+    cssW = Math.max(PARADE_HORIZ_MIN_W, window.innerWidth);
+    cssH = Math.max(PARADE_HORIZ_MIN_H, tallest + PARADE_HORIZ_VPAD * 2);
+  }
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(cssW * dpr);
   canvas.height = Math.round(cssH * dpr);
@@ -137,16 +154,18 @@ const tickParade = (game: Game, ctx: CanvasRenderingContext2D) => {
   const cssW = game.paradeCanvasW;
   const cssH = game.paradeCanvasH;
   ctx.clearRect(0, 0, cssW, cssH);
-  const t = currentParadeBeat(game, cssW);
+  // travel axis is width for horizontal, height for vertical.
+  const travelDim = game.paradeOrientation === "vertical" ? cssH : cssW;
+  const t = currentParadeBeat(game, travelDim);
   drawParadeSprites(game, ctx, t, cssW, cssH);
-  maybeEndParade(game, t, cssW);
+  maybeEndParade(game, t, travelDim);
 };
 
 // pre-roll itself is snapped to BEAT_GRID so the first sprite still reaches centre on a beat
-//   even though the canvas-width-derived pre-roll would otherwise land on a fractional beat.
-const currentParadeBeat = (game: Game, cssW: number): number => {
+//   even though the canvas-derived pre-roll would otherwise land on a fractional beat.
+const currentParadeBeat = (game: Game, travelDim: number): number => {
   const elapsedBeats = (game.beatTime - game.paradeStartBeatTime) / BEAT_GRID;
-  const rawPreRoll = cssW / (2 * PARADE_PX_PER_BEAT);
+  const rawPreRoll = travelDim / (2 * PARADE_PX_PER_BEAT);
   const preRollBeats = Math.ceil(rawPreRoll / PARADE_BEAT_SUBDIV) * PARADE_BEAT_SUBDIV;
   return elapsedBeats - preRollBeats;
 };
@@ -158,12 +177,18 @@ const SCORE_FLASH_BEATS = 1.5;
 // cull offscreen sprites before drawImage; trigger kill sound when sprite crosses centre.
 //   Bassteroid entries also light up their drone for the duration the sprite is on screen, so
 //   the parade carries the continuous bed as well as the per-beat hit voice.
+//   Horizontal: sprites march right-to-left, meeting at centreX on the beat.
+//   Vertical:   sprites march bottom-to-top, meeting at centreY on the beat.
 const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number, cssW: number, cssH: number) => {
   const centreX = cssW / 2;
   const centreY = cssH / 2;
+  const vertical = game.paradeOrientation === "vertical";
   for (const e of game.paradeEntries) {
-    const x = centreX + (e.beatOffset - t) * PARADE_PX_PER_BEAT;
     const halfW = e.snap.full.width / 2;
+    const halfH = e.snap.full.height / 2;
+    const travel = (e.beatOffset - t) * PARADE_PX_PER_BEAT;
+    const x = vertical ? centreX : centreX + travel;
+    const y = vertical ? centreY + travel : centreY;
     // lead bass/percussive triggers by their perceptual-onset delay so the audible "hit"
     //   lands on centre, not after the sprite has already passed it. See SOUND_PRE_ROLL_SECONDS.
     const preRollBeats = (SOUND_PRE_ROLL_SECONDS[e.snap.killSound] ?? 0) / BEAT_GRID;
@@ -171,8 +196,6 @@ const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number,
       e.played = true;
       e.playedAtBeat = t;
       game.sound.play(e.snap.killSound);
-      // replay the on-beat reward pair (sparkle + pitched chime) for kills that landed
-      //   on rhythm, using the multiplier captured at kill time so the chime pitch matches.
       if (e.snap.rhythmHit) {
         game.sound.playComboSparkleShort();
         game.sound.playComboChime(e.snap.rhythmHit.combo, undefined, 0.5);
@@ -183,24 +206,27 @@ const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number,
         e.droneActive = true;
       }
     }
-    const offscreenRight = x - halfW > cssW;
-    const offscreenLeft = x + halfW < 0;
-    if (e.droneActive && offscreenLeft && e.droneKey) {
+    const offscreenEnter = vertical ? y - halfH > cssH : x - halfW > cssW;
+    const offscreenExit = vertical ? y + halfH < 0 : x + halfW < 0;
+    if (e.droneActive && offscreenExit && e.droneKey) {
       game.sound.stopBassteroidDrone(e.droneKey);
       e.droneActive = false;
     }
-    if (offscreenRight || offscreenLeft) continue;
+    if (offscreenEnter || offscreenExit) continue;
     const dimmed = !e.snap.rhythmHit;
     if (dimmed) {
       ctx.save();
       ctx.globalAlpha = 0.6;
     }
-    ctx.drawImage(e.snap.full, x - halfW, centreY - e.snap.full.height / 2);
+    ctx.drawImage(e.snap.full, x - halfW, y - halfH);
     if (dimmed) ctx.restore();
     if (e.played && e.snap.scoreEarned > 0) {
       const age = t - e.playedAtBeat;
       if (age < SCORE_FLASH_BEATS) {
-        drawScoreFlash(ctx, x, centreY + e.snap.full.height / 2, e.snap.scoreEarned, age);
+        // Horizontal: flash sits beneath the sprite, top-anchored.
+        // Vertical:   flash sits to the right of the sprite, vertically centred.
+        if (vertical) drawScoreFlashSide(ctx, x + halfW + 6, y, e.snap.scoreEarned, age);
+        else drawScoreFlashUnder(ctx, x, y + halfH, e.snap.scoreEarned, age);
       }
     }
   }
@@ -208,29 +234,44 @@ const drawParadeSprites = (game: Game, ctx: CanvasRenderingContext2D, t: number,
 
 // matches popupScore's in-game look (pale blue, soft glow, brief pop-in) so the parade
 //   feedback reads as a replay of the same "+N" the player saw at the kill site.
-const drawScoreFlash = (ctx: CanvasRenderingContext2D, x: number, y: number, points: number, ageBeats: number) => {
+const drawScoreFlashUnder = (ctx: CanvasRenderingContext2D, x: number, y: number, points: number, ageBeats: number) => {
+  beginScoreFlash(ctx, ageBeats, "center", "top");
+  ctx.translate(x, y + 6);
+  finishScoreFlash(ctx, points, ageBeats);
+};
+
+const drawScoreFlashSide = (ctx: CanvasRenderingContext2D, x: number, y: number, points: number, ageBeats: number) => {
+  beginScoreFlash(ctx, ageBeats, "left", "middle");
+  ctx.translate(x, y);
+  finishScoreFlash(ctx, points, ageBeats);
+};
+
+const beginScoreFlash = (ctx: CanvasRenderingContext2D, ageBeats: number, align: CanvasTextAlign, baseline: CanvasTextBaseline) => {
   const t = ageBeats / SCORE_FLASH_BEATS;
-  const popIn = Math.min(1, ageBeats / 0.25);
-  const scale = 1 + (1 - popIn) * 0.6;
   const alpha = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
   ctx.save();
   ctx.globalAlpha = Math.max(0, alpha);
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
+  ctx.textAlign = align;
+  ctx.textBaseline = baseline;
   ctx.font = "600 22px 'Space Grotesk', system-ui, sans-serif";
   ctx.fillStyle = "#e6f4ff";
   ctx.shadowColor = "rgba(200, 230, 255, 0.85)";
   ctx.shadowBlur = 14;
-  ctx.translate(x, y + 6);
+};
+
+const finishScoreFlash = (ctx: CanvasRenderingContext2D, points: number, ageBeats: number) => {
+  const popIn = Math.min(1, ageBeats / 0.25);
+  const scale = 1 + (1 - popIn) * 0.6;
   ctx.scale(scale, scale);
   ctx.fillText(`+${points}`, 0, 0);
   ctx.restore();
 };
 
-// stop the rAF once the last sprite is offscreen — no point burning frames on blank.
-const maybeEndParade = (game: Game, t: number, cssW: number) => {
+// stop the rAF once the last sprite has cleared the travel axis — no point burning frames on blank.
+const maybeEndParade = (game: Game, t: number, travelDim: number) => {
   const last = game.paradeEntries[game.paradeEntries.length - 1];
   if (!last) return;
-  const lastX = cssW / 2 + (last.beatOffset - t) * PARADE_PX_PER_BEAT;
-  if (lastX + last.snap.full.width / 2 < 0) game.paradeActive = false;
+  const lastPos = travelDim / 2 + (last.beatOffset - t) * PARADE_PX_PER_BEAT;
+  const halfExtent = (game.paradeOrientation === "vertical" ? last.snap.full.height : last.snap.full.width) / 2;
+  if (lastPos + halfExtent < 0) game.paradeActive = false;
 };
