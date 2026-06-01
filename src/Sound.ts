@@ -17,34 +17,6 @@ async function loadTone(): Promise<ToneModule> {
 // reverbSend → chorus → reverb → toneMaster, then toneMaster → compressor
 // → limiter → destination. Hand-built voices connect via Sound.master,
 // which routes into voiceBusDry/Wet.
-type ToneEngineNodes = {
-  toneMaster: Tone.Gain;
-  reverbSend: Tone.Gain;
-  reverb: Tone.Reverb;
-  chorus: Tone.Chorus;
-  compressor: Tone.Compressor;
-  limiter: Tone.Limiter;
-  // Input nodes for the hand-built WebAudio voices. Sound.master connects
-  // into both: dry for presence, wet for shared reverb tail polish.
-  voiceBusDry: Tone.Gain;
-  voiceBusWet: Tone.Gain;
-  cometMelodySynth: Tone.PolySynth;
-  // Per-voice synths for the highest-impact sounds — the ones the player
-  // hears most often or that most differentiate "polished" from "raw
-  // oscillators". Lower-traffic sounds still use the hand-built WebAudio
-  // code, routed through the same master bus.
-  bgBeatKick: Tone.MembraneSynth;
-  bassKick: Tone.MembraneSynth;
-  bassBoom: Tone.MembraneSynth;
-  bassPluck: Tone.MonoSynth;
-  bassSnap: Tone.MetalSynth;
-  fireBeatBody: Tone.MembraneSynth;
-  fireBeatPluck: Tone.PluckSynth;
-  chimeSynth: Tone.PolySynth;
-  powerupSynth: Tone.PolySynth;
-  waveClearSynth: Tone.PolySynth;
-};
-
 // Per-alien drone voice. Two detuned sines through a slow-sweeping lowpass,
 // modulated by an LFO on amplitude for the theremin pulse. Held open for the
 // lifetime of an alien; torn down on death or mute.
@@ -408,11 +380,26 @@ export class Sound {
     this.ctx = new AC();
     this.master = this.ctx.createGain();
     this.master.gain.value = Sound.MASTER_BASE_GAIN * this.volume;
-    // Default-connect master direct to destination so hand-built WebAudio
-    // voices stay audible even if Tone init throws (Firefox w/ RFP, some
-    // privacy extensions). wireMasterToBus swaps this for the Tone chain
-    // routing on browsers where the engine builds cleanly.
-    this.master.connect(this.ctx.destination);
+    // Native compressor + brick-wall limiter mirroring Tone's master chain
+    // (Compressor: -18/3/0.01/0.18/12; Limiter: -1/20/0.003/0.01). Used in
+    // prod where Tone isn't loaded and as a fallback in dev before the Tone
+    // engine resolves. wireMasterToBus disconnects master from this path
+    // when Tone takes over.
+    const masterCompressor = this.ctx.createDynamicsCompressor();
+    masterCompressor.threshold.value = -18;
+    masterCompressor.ratio.value = 3;
+    masterCompressor.attack.value = 0.01;
+    masterCompressor.release.value = 0.18;
+    masterCompressor.knee.value = 12;
+    const masterLimiter = this.ctx.createDynamicsCompressor();
+    masterLimiter.threshold.value = -1;
+    masterLimiter.ratio.value = 20;
+    masterLimiter.attack.value = 0.003;
+    masterLimiter.release.value = 0.01;
+    masterLimiter.knee.value = 0;
+    this.master.connect(masterCompressor);
+    masterCompressor.connect(masterLimiter);
+    masterLimiter.connect(this.ctx.destination);
     // Direct-to-destination bus for pre-baked buffers (whose tail already
     // contains the full Tone master chain). Mirrors the master gain level so
     // baked and live voices sit at a comparable loudness.
