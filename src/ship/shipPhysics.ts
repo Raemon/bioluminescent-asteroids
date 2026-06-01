@@ -15,7 +15,7 @@ const updateTurning = (ship: Ship, input: Input, dt: number) => {
   if (turnLeft || turnRight) ship.rotRamp = Math.min(1, ship.rotRamp + dt / 0.15);
   else ship.rotRamp = 0;
   const turnScale = 0.02 + 0.98 * ship.rotRamp;
-  const precision = input.down("shift") ? 0.2 : 1;
+  const precision = isDown(input, "precisionTurn") ? 0.2 : 1;
   if (turnLeft) ship.heading -= ship.rotSpeed * turnScale * precision * dt;
   if (turnRight) ship.heading += ship.rotSpeed * turnScale * precision * dt;
 };

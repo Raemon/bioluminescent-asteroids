@@ -7,6 +7,7 @@ import type { Input } from "../Input";
 export type ControlAction =
   | "rotateLeft"
   | "rotateRight"
+  | "precisionTurn"
   | "thrust"
   | "reverse"
   | "sidePort"
@@ -22,6 +23,7 @@ const STORAGE_KEY = "pulsar.controls.v1";
 export const DEFAULT_BINDINGS: Bindings = {
   rotateLeft: ["arrowleft"],
   rotateRight: ["arrowright"],
+  precisionTurn: ["shift"],
   thrust: ["arrowup"],
   reverse: ["arrowdown"],
   sidePort: ["z"],
@@ -33,6 +35,7 @@ export const DEFAULT_BINDINGS: Bindings = {
 export const ACTION_ORDER: ControlAction[] = [
   "rotateLeft",
   "rotateRight",
+  "precisionTurn",
   "thrust",
   "reverse",
   "sidePort",
@@ -44,6 +47,7 @@ export const ACTION_ORDER: ControlAction[] = [
 export const ACTION_LABELS: Record<ControlAction, string> = {
   rotateLeft: "Rotate left",
   rotateRight: "Rotate right",
+  precisionTurn: "Precision turn (hold)",
   thrust: "Thrust",
   reverse: "Reverse thrust",
   sidePort: "Side thrust ←",
@@ -57,6 +61,7 @@ let cached: Bindings | null = null;
 const cloneDefaults = (): Bindings => ({
   rotateLeft: [...DEFAULT_BINDINGS.rotateLeft],
   rotateRight: [...DEFAULT_BINDINGS.rotateRight],
+  precisionTurn: [...DEFAULT_BINDINGS.precisionTurn],
   thrust: [...DEFAULT_BINDINGS.thrust],
   reverse: [...DEFAULT_BINDINGS.reverse],
   sidePort: [...DEFAULT_BINDINGS.sidePort],
