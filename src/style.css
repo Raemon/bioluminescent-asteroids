@@ -466,11 +466,11 @@ html:has(#sound-root), body:has(> #sound-root) {
   padding-top: 75px;
 }
 
-#overlay-subtitle {
+#overlay p#overlay-subtitle {
   margin: 0;
-  padding-left: 0.55em;
-  font-size: 17px;
-  letter-spacing: 0.55em;
+  font-size: clamp(13px, 1.4vw, 17px);
+  letter-spacing: 0.3em;
+  word-spacing: 0.5em;
   color: #6ad7ff;
   text-transform: uppercase;
   font-weight: 300;
@@ -1025,11 +1025,11 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 #leaderboard-list li {
   display: grid;
-  grid-template-columns: 28px 1fr 60px 64px 56px;
+  grid-template-columns: 28px 1fr 60px 64px 28px;
   gap: 14px;
   column-gap: 28px;
   align-items: center;
-  padding: 8px 12px;
+  padding: 8px 24px 8px 12px;
   font-size: 12px;
   letter-spacing: 0.15em;
   text-transform: uppercase;
