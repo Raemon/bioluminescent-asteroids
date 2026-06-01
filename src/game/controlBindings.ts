@@ -35,25 +35,25 @@ export const DEFAULT_BINDINGS: Bindings = {
 export const ACTION_ORDER: ControlAction[] = [
   "rotateLeft",
   "rotateRight",
-  "precisionTurn",
   "thrust",
   "reverse",
   "sidePort",
   "sideStarboard",
   "fire",
   "pause",
+  "precisionTurn",
 ];
 
 export const ACTION_LABELS: Record<ControlAction, string> = {
-  rotateLeft: "Rotate left",
-  rotateRight: "Rotate right",
-  precisionTurn: "Precision turn (hold)",
+  rotateLeft: "Turn left",
+  rotateRight: "Turn right",
   thrust: "Thrust",
   reverse: "Reverse thrust",
   sidePort: "Side thrust ←",
   sideStarboard: "Side thrust →",
   fire: "Fire",
   pause: "Pause",
+  precisionTurn: "Precise turn (hold)",
 };
 
 let cached: Bindings | null = null;

@@ -98,30 +98,32 @@ const ROW_SOUNDS: Array<{ name: "chime" | "bell"; pitch: number }> = [
   { name: "bell", pitch: C_BELL },
 ];
 
-// 16-step natural-minor melody for the drain. Downbeats (positions 0/4/8/12)
-//   land on the chord roots of a rotating i — VI — III — VII progression
-//   (A minor → F → C → G), which the summaryDownbeat chord voicing mirrors.
-//   Between downbeats the line wanders through neighbor tones of the current
-//   chord, with the contour drifting downward into the VI before climbing
-//   back through III and VII — gives the drain a haunting circular feel
-//   rather than a triumphant ascent.
+// 16-step haunting line for the drain. Downbeats (positions 0/4/8/12) land
+//   on chord roots of the rotating i — VI — III — VII progression (A minor →
+//   F → C → G) so the melody interlocks with the summaryDownbeat chord pad.
+//   Between downbeats the line drifts through tritones, suspended fourths,
+//   and unresolved seconds — every off-beat is a color tone, not a chord
+//   tone, so the line never sits comfortably. The overall contour falls and
+//   circles back rather than climbing to an octave-up resolution, so the
+//   phrase reads as haunted/searching rather than chipper.
 const DRAIN_PITCHES = [
-  1.0,    // A  (i root, downbeat)
-  1.189,  // C  (b3)
-  1.122,  // B  (2)
-  1.0,    // A
-  1.682,  // F  (VI root, downbeat — drops below for haunting lift)
-  1.587,  // E
-  1.498,  // Eb tritone color
-  1.682,  // F
-  1.189,  // C  (III root, downbeat)
-  1.335,  // D
-  1.498,  // Eb leading-tone tension
-  1.682,  // F
-  1.782,  // G  (VII root, downbeat)
-  2.0,    // A  octave
-  1.782,  // G
-  1.682,  // F  (resolves into next phrase's drop to A)
+  1.0,    // A   (i root, downbeat)
+  1.498,  // Eb  (b5 tritone — eerie immediately after the root)
+  1.335,  // D   (sus4 — suspended, doesn't resolve)
+  1.189,  // C   (b3, lands soft into next downbeat)
+  1.682,  // F   (VI root, downbeat — lift up to the new chord)
+  1.587,  // E   (maj7 of F — half-step rub against the chord root)
+  1.498,  // Eb  (tritone-of-A held over — drags the harmony backward)
+  1.335,  // D   (suspended into III)
+  1.189,  // C   (III root, downbeat — lands on the C anchor of the game)
+  1.122,  // B   (maj7 of C — bell-like rub, refuses to resolve cleanly)
+  1.0,    // A   (6th of C — drops below the tonic for unease)
+  1.122,  // B   (suspended into VII)
+  1.189,  // C   (chord pad plays G here; melody holds C as sus4 over it —
+  //   an unresolved tension exactly when the ear wants the cadence)
+  1.335,  // D   (5th of G chord — finally a chord tone, brief stability)
+  1.122,  // B   (3rd of G — descending toward tonic)
+  1.0,    // A   (9th of G — leans back into the next loop's downbeat)
 ];
 
 export const showWaveSummary = (

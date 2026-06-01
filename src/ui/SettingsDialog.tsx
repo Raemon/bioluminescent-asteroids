@@ -149,9 +149,6 @@ export const SettingsDialog = () => {
         <h2 className="settings-title">Settings</h2>
 
         <section className="settings-section">
-          <div className="settings-section-head">
-            <span className="settings-section-title">Pilot</span>
-          </div>
           <label className="settings-field">
             <span>Callsign</span>
             <input
@@ -189,14 +186,10 @@ export const SettingsDialog = () => {
         </section>
 
         <section className="settings-section">
-          <div className="settings-section-head">
-            <span className="settings-section-title">Tutorial</span>
-          </div>
           <label className="settings-check">
             <input type="checkbox" checked={tutorial} onChange={(e) => toggleTutorial(e.target.checked)} />
             <span>Show the rhythm tutorial at the start</span>
           </label>
-          <span className="settings-hint">turns itself off once you reach 6× rhythm</span>
         </section>
 
         <section className="settings-section">

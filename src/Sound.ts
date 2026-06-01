@@ -4590,13 +4590,17 @@ export class Sound {
   private playScoreBlip(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    const root = 330 * pitchRatio; // E4
+    // Dropped an octave (E4 → E3) so the drain line sits in a baritone /
+    //   cello register instead of music-box height. Upper-harmonic peaks
+    //   pulled down so the bright triangle partial doesn't reintroduce the
+    //   chipperness we just removed by lowering the root.
+    const root = 165 * pitchRatio;
     const layers: Array<{ freq: number; peak: number; decay: number; type: OscillatorType }> = [
-      { freq: root * 0.5,    peak: 0.050, decay: 0.40, type: "sine" },
-      { freq: root,          peak: 0.070, decay: 0.32, type: "sine" },
-      { freq: root * 1.003,  peak: 0.060, decay: 0.32, type: "sine" }, // detune wobble
-      { freq: root * 2,      peak: 0.022, decay: 0.18, type: "sine" },
-      { freq: root * 3,      peak: 0.010, decay: 0.10, type: "triangle" },
+      { freq: root * 0.5,    peak: 0.060, decay: 0.45, type: "sine" },
+      { freq: root,          peak: 0.080, decay: 0.36, type: "sine" },
+      { freq: root * 1.003,  peak: 0.070, decay: 0.36, type: "sine" }, // detune wobble
+      { freq: root * 2,      peak: 0.012, decay: 0.16, type: "sine" },
+      { freq: root * 3,      peak: 0.003, decay: 0.08, type: "triangle" },
     ];
     for (const { freq, peak, decay, type } of layers) {
       const osc = this.ctx.createOscillator();
