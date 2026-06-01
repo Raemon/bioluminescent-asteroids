@@ -57,7 +57,6 @@ export const TutorialControlsHint = () => {
   if (!mounted) return null;
   return (
     <div className={`tutorial-controls-hint${visible ? " visible" : ""}`}>
-      <p className="tutorial-controls-hint__title">Get a feel for the controls</p>
       <div className="tutorial-controls-hint__keys">
         <span className={`tch-ctrl${used.rotate ? " used" : ""}`}>
           <span className="key">←</span> <span className="key">→</span> rotate
