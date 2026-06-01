@@ -1,19 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 
-// Controls hint shown at the start of every run. In tutorial mode it sticks
-//   until rotate+thrust+back are all used (the game advances to stage 2 then);
-//   in normal mode it fades in on game start and auto-dismisses on a timer.
-// The fade-as-used keys are driven by the game's `tutorial:controls` event,
-//   which only fires during the tutorial controls gate.
+// Controls hint shown at the start of every run. Each key fades to low opacity as
+//   the player uses it (driven by the game's `tutorial:controls` event); the whole
+//   hint fades out once rotate/thrust/reverse are all used. Tutorial mode advances
+//   to stage 2 then; normal mode just dismisses via `controls-hint:dismiss`.
 
-type Controls = { rotate: boolean; thrust: boolean; back: boolean };
+type Controls = { rotate: boolean; thrust: boolean; back: boolean; side: boolean };
 const FADE_MS = 800;
-const AUTO_DISMISS_MS = 6500;
 
 export const TutorialControlsHint = () => {
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [used, setUsed] = useState<Controls>({ rotate: false, thrust: false, back: false });
+  const [used, setUsed] = useState<Controls>({ rotate: false, thrust: false, back: false, side: false });
   const timeoutsRef = useRef<number[]>([]);
 
   useEffect(() => {
@@ -25,15 +23,11 @@ export const TutorialControlsHint = () => {
       for (const id of timeoutsRef.current) window.clearTimeout(id);
       timeoutsRef.current = [];
     };
-    const show = (autoDismiss: boolean) => {
+    const show = () => {
       clearAll();
-      setUsed({ rotate: false, thrust: false, back: false });
+      setUsed({ rotate: false, thrust: false, back: false, side: false });
       setMounted(true);
       schedule(() => setVisible(true), 32);
-      if (autoDismiss) {
-        schedule(() => setVisible(false), AUTO_DISMISS_MS);
-        schedule(() => setMounted(false), AUTO_DISMISS_MS + FADE_MS);
-      }
     };
     const hide = () => {
       setVisible(false);
@@ -41,17 +35,20 @@ export const TutorialControlsHint = () => {
     };
     const onStage = (e: Event) => {
       const stage = (e as CustomEvent<{ stage: number }>).detail.stage;
-      if (stage === 1) show(false);
+      if (stage === 1) show();
       else hide();
     };
-    const onShow = () => show(true);
+    const onShow = () => show();
+    const onDismiss = () => hide();
     const onControls = (e: Event) => setUsed((e as CustomEvent<Controls>).detail);
     window.addEventListener("first-wave-hint:stage", onStage as EventListener);
     window.addEventListener("controls-hint:show", onShow as EventListener);
+    window.addEventListener("controls-hint:dismiss", onDismiss as EventListener);
     window.addEventListener("tutorial:controls", onControls as EventListener);
     return () => {
       window.removeEventListener("first-wave-hint:stage", onStage as EventListener);
       window.removeEventListener("controls-hint:show", onShow as EventListener);
+      window.removeEventListener("controls-hint:dismiss", onDismiss as EventListener);
       window.removeEventListener("tutorial:controls", onControls as EventListener);
       clearAll();
     };
@@ -70,9 +67,6 @@ export const TutorialControlsHint = () => {
         </span>
         <span className={`tch-ctrl${used.back ? " used" : ""}`}>
           <span className="key">↓</span> reverse
-        </span>
-        <span className="tch-ctrl">
-          <span className="key">Z</span> <span className="key">X</span> side thrust
         </span>
       </div>
     </div>

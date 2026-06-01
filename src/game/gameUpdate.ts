@@ -156,7 +156,7 @@ const transitionToGameOver = (game: Game) => {
   game.lastRunScoreId = null;
   game.overlayTitleEl.textContent = "";
   game.overlayStartEl.classList.add("hidden");
-  game.overlayStartTutorialEl.classList.add("hidden");
+  // game.overlayStartTutorialEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
   renderKilledRow(game, "vertical");
@@ -258,16 +258,24 @@ const tickTutorialSpawn = (game: Game) => {
   if (game.asteroids.length === 0) spawnTutorialSmall(game);
 };
 
-// controls gate (stage 1): clears once the player has used rotate, forward-thrust,
-//   and back-thrust each at least once. Emits usage so the keys fade as they're learned.
+// controls gate: tracks rotate/thrust/reverse usage so the keys fade individually
+//   in the hint. Tutorial mode (stage 1) advances to stage 2 once all three are
+//   used; normal mode just dismisses the start-of-run hint.
 const tickControlsGate = (game: Game) => {
   const used = game.tutorialControlsUsed;
   let changed = false;
   if (!used.rotate && (isDown(game.input, "rotateLeft") || isDown(game.input, "rotateRight"))) { used.rotate = true; changed = true; }
   if (!used.thrust && isDown(game.input, "thrust")) { used.thrust = true; changed = true; }
   if (!used.back && isDown(game.input, "reverse")) { used.back = true; changed = true; }
-  if (changed) emitTutorialControls(used.rotate, used.thrust, used.back);
-  if (used.rotate && used.thrust && used.back) setFirstWaveHintStage(game, 2);
+  if (changed) emitTutorialControls(used.rotate, used.thrust, used.back, used.side);
+  if (used.rotate && used.thrust && used.back) {
+    if (game.tutorialActive && game.firstWaveHintStage === 1) {
+      setFirstWaveHintStage(game, 2);
+    } else if (game.controlsHintActive) {
+      game.controlsHintActive = false;
+      window.dispatchEvent(new CustomEvent("controls-hint:dismiss"));
+    }
+  }
 };
 
 // eases bgBeat loudness from the calibration practice level down to the wave
@@ -285,6 +293,7 @@ const tickBeatIntensityRamp = (game: Game, dt: number) => {
 const updatePlaying = (game: Game, dt: number) => {
   tickBeatIntensityRamp(game, dt);
   tickTutorialSpawn(game);
+  if (game.controlsHintActive) tickControlsGate(game);
   const bulletsBeforeShipUpdate = game.bullets.length;
   game.ship.setCombo(game.beatCombo);
   syncHaloAmbient(game);

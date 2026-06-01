@@ -46,8 +46,7 @@ export const Overlay = () => {
 
   const openInstructions = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setInstructionsOpen(true);
-    window.dispatchEvent(new CustomEvent("instructions-open"));
+    document.getElementById("overlay-start-tutorial")?.click();
   };
 
   const closeInstructions = () => {
@@ -58,7 +57,7 @@ export const Overlay = () => {
   return (
     <div id="overlay" className="hidden">
       <button id="instructions-link" type="button" onClick={openInstructions}>
-        instructions
+        tutorial
       </button>
       <a
         id="sound-link"
@@ -74,9 +73,6 @@ export const Overlay = () => {
       <div id="overlay-start-group">
         <button id="overlay-start" type="button">
           Start
-        </button>
-        <button id="overlay-start-tutorial" type="button">
-          Tutorial
         </button>
       </div>
       {paused && <ControlInfo id="overlay-pause-controls" className="overlay-pause-controls" />}

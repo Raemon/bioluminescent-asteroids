@@ -80,9 +80,10 @@ export const emitFirstWaveHintRhythmProgress = (count: number) => {
 export const emitTutorialHoverProgress = (value: number) => {
   window.dispatchEvent(new CustomEvent("tutorial:hoverProgress", { detail: { value } }));
 };
-// controls-phase usage (stage 1) — drives the fade-as-used keys in <TutorialControlsHint>.
-export const emitTutorialControls = (rotate: boolean, thrust: boolean, back: boolean) => {
-  window.dispatchEvent(new CustomEvent("tutorial:controls", { detail: { rotate, thrust, back } }));
+// controls-phase usage (stage 1 + normal-mode start-of-run hint) — drives the
+//   fade-as-used keys in <TutorialControlsHint>.
+export const emitTutorialControls = (rotate: boolean, thrust: boolean, back: boolean, side: boolean) => {
+  window.dispatchEvent(new CustomEvent("tutorial:controls", { detail: { rotate, thrust, back, side } }));
 };
 export const emitTutorialHoverDone = () => {
   window.dispatchEvent(new CustomEvent("tutorial:hoverDone"));
@@ -134,7 +135,7 @@ export const showTitle = (game: Game) => {
   game.overlayTitleEl.textContent = "Pulsar Drift";
   game.overlayStartEl.textContent = "Start";
   game.overlayStartEl.classList.remove("hidden");
-  game.overlayStartTutorialEl.classList.remove("hidden");
+  // game.overlayStartTutorialEl.classList.remove("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.remove("gameover-layout");
   hideGameOverIntro();
@@ -252,14 +253,15 @@ export const finishCalibrationIntro = (game: Game) => {
 //   Start button → skips straight to Wave 1's single-asteroid warm-up. Used at both
 //   calibration hand-off and the direct startGame path so the two stay in sync.
 const beginFirstWaveByTutorialFlag = (game: Game) => {
+  game.tutorialControlsUsed = { rotate: false, thrust: false, back: false, side: false };
   if (game.tutorialRequested) {
-    game.tutorialControlsUsed = { rotate: false, thrust: false, back: false };
     game.tutorialActive = true;
     spawnTutorialSmall(game);
     setFirstWaveHintStage(game, 1);
   } else {
     setFirstWaveHintStage(game, 0);
     spawnWave(game);
+    game.controlsHintActive = true;
     window.dispatchEvent(new CustomEvent("controls-hint:show"));
   }
 };
@@ -324,6 +326,7 @@ const resetRunTimers = (game: Game) => {
   game.tutorialActive = false;
   game.tutorialHoverDone = false;
   game.tutorialFireHitDone = false;
+  game.controlsHintActive = false;
   game.beatIntensityRamp = null;
 };
 
@@ -376,7 +379,7 @@ const enterPause = (game: Game) => {
   game.overlayTitleEl.textContent = "Paused";
   game.overlayStartEl.textContent = "Resume";
   game.overlayStartEl.classList.remove("hidden");
-  game.overlayStartTutorialEl.classList.add("hidden");
+  // game.overlayStartTutorialEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("paused");
   game.overlayEl.classList.remove("gameover-layout");
@@ -416,7 +419,7 @@ export const abortMission = (game: Game) => {
   game.abortEl.classList.add("hidden");
   game.overlayTitleEl.textContent = "";
   game.overlayStartEl.classList.add("hidden");
-  game.overlayStartTutorialEl.classList.add("hidden");
+  // game.overlayStartTutorialEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
   renderKilledRow(game, "vertical");

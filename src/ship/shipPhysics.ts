@@ -64,12 +64,14 @@ const updateReverseThrust = (ship: Ship, input: Input, particles: ParticleSystem
   } else if (wasReversing) sound.stopReverseThrust();
 };
 
-// z/x lateral thrust — Z pushes port (left of heading), X pushes starboard.
+// Lateral thrust — port pushes left of heading, starboard pushes right.
+// Gated on the sideEngines powerup; bindings are empty by default so the
+// keys only do anything once the player has picked one up (and bound them).
 // Shares one audio loop that runs while either key is held.
 const updateSideThrust = (ship: Ship, input: Input, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasActive = ship.portThrustOn || ship.starboardThrustOn;
-  ship.portThrustOn = isDown(input, "sidePort");
-  ship.starboardThrustOn = isDown(input, "sideStarboard");
+  ship.portThrustOn = ship.sideEnginesActive && isDown(input, "sidePort");
+  ship.starboardThrustOn = ship.sideEnginesActive && isDown(input, "sideStarboard");
   if (ship.portThrustOn) {
     const a = ship.thrustPower * dt;
     const h = ship.heading - Math.PI / 2;

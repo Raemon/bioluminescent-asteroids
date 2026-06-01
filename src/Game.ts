@@ -130,8 +130,13 @@ export class Game implements HudElements {
   //   by <TutorialControlsHint>; 2–6 by <FirstWaveHint>.
   firstWaveHintStage: 0 | 1 | 2 | 3 | 4 | 5 | 6 = 0;
   firstWaveOnBeatFireCount = 0;
-  // controls-phase (stage 1) usage tracker; cleared each used → advance to stage 2.
-  tutorialControlsUsed: { rotate: boolean; thrust: boolean; back: boolean } = { rotate: false, thrust: false, back: false };
+  // controls-phase (stage 1, and the normal-mode start-of-run controls hint) usage
+  //   tracker. In tutorial mode all four used → advance to stage 2; in normal mode
+  //   all four used → dismiss the hint.
+  tutorialControlsUsed: { rotate: boolean; thrust: boolean; back: boolean; side: boolean } = { rotate: false, thrust: false, back: false, side: false };
+  // True while the normal-mode start-of-run controls hint is visible. Tutorial mode
+  //   uses firstWaveHintStage === 1 instead, since the stage already gates that hint.
+  controlsHintActive = false;
   // stage-2 sub-line ("Use your targeting tools to help") is gated on the
   //   player landing three on-beat hits after stage 2 opens. The diamond
   //   row under stage 2's main line fills one pip per hit, and the sub-line
@@ -277,11 +282,11 @@ export class Game implements HudElements {
       if (this.state === "title") this.tutorialRequested = false;
       triggerOverlayStart(this);
     });
-    this.overlayStartTutorialEl.addEventListener("click", () => {
-      if (this.state !== "title") return;
-      this.tutorialRequested = true;
-      triggerOverlayStart(this);
-    });
+    // this.overlayStartTutorialEl.addEventListener("click", () => {
+    //   if (this.state !== "title") return;
+    //   this.tutorialRequested = true;
+    //   triggerOverlayStart(this);
+    // });
     // <BeatCalibrator> (React) owns the tap-to-beat UI; the game owns the audio
     //   context it schedules clicks on, plus persistence of the result. These
     //   three events are the contract between them.
