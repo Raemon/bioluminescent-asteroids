@@ -857,7 +857,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   margin-bottom: 20px;
 }
 
-.go-score { opacity: 0; }
+.go-score { opacity: 0; color: #ffffff; }
 .go-score.in { opacity: 0.95; }
 
 .go-peak {
@@ -942,7 +942,8 @@ html:has(#sound-root), body:has(> #sound-root) {
   border-radius: 6px;
   outline: none;
   caret-color: #6ad7ff;
-  margin-top: 20px;
+  margin-top: 6px;
+  margin-bottom: 12px;
   text-shadow: 0 0 12px rgba(140, 220, 255, 0.55);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }

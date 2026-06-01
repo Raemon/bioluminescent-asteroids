@@ -205,10 +205,11 @@ export const showWaveSummary = (
         activeTimers.push(id);
       } else {
         bonusValueEl.classList.remove("ws-draining");
-        // C-tuned bell caps the drain on the game's tonal anchor — closes
-        //   the phrase on the same C the bass field is grounded in, so the
-        //   silence reads as an earned ending rather than a bright sparkle.
-        game.sound.play("bell", C_BELL);
+        // Cap the drain with the same C6+G6 chime the row sequence climbed
+        //   to. Chime is harmonic (FM, C+G dyad) so it lands clean against
+        //   the still-ringing G-major pad — root + fifth of C resolves the
+        //   phrase to the game's tonal anchor instead of clanging.
+        game.sound.play("chime", CHIME_C6);
         scheduleFadeOut(root, onFadeComplete);
       }
     };
