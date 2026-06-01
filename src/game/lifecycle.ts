@@ -166,6 +166,7 @@ export const showTitle = (game: Game) => {
   game.state = "title";
   game.overlayTitleEl.textContent = "Pulsar Drift";
   game.overlayStartEl.textContent = "Begin";
+  game.overlayStartEl.classList.remove("hidden");
   game.overlayEl.classList.remove("hidden");
   renderKilledRow(game);
   clearComboSilently(game);
@@ -400,6 +401,7 @@ const enterPause = (game: Game) => {
   game.sound.stopSideThrust();
   game.overlayTitleEl.textContent = "Paused";
   game.overlayStartEl.textContent = "Resume";
+  game.overlayStartEl.classList.remove("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("paused");
   game.abortEl.classList.remove("hidden");
@@ -436,7 +438,7 @@ export const abortMission = (game: Game) => {
   game.lastRunScoreId = null;
   game.abortEl.classList.add("hidden");
   game.overlayTitleEl.textContent = `Mission Aborted — ${String(game.score).padStart(6, "0")}`;
-  game.overlayStartEl.textContent = "Restart";
+  game.overlayStartEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   renderKilledRow(game);
   showScoreEntry(game);

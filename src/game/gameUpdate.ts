@@ -154,7 +154,7 @@ const transitionToGameOver = (game: Game) => {
   game.lastRunScore = game.score;
   game.lastRunScoreId = null;
   game.overlayTitleEl.textContent = `Game Over — ${String(game.score).padStart(6, "0")}`;
-  game.overlayStartEl.textContent = "Restart";
+  game.overlayStartEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   renderKilledRow(game);
   showScoreEntry(game);

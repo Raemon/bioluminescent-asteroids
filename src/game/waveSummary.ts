@@ -84,16 +84,18 @@ const pulseScore = (el: HTMLElement) => {
   el.classList.add("ws-pulse");
 };
 
-// the title row gets the "chime" — it's the loudest, longest-tailed of
-//   the row sounds, marking the start of the report. The four data rows use
-//   "tink" with a slow upward pitch climb so the ear hears each line land
-//   one step higher, like a ledger being filled in.
-const ROW_SOUNDS: Array<{ name: "chime" | "tink"; pitch: number }> = [
-  { name: "chime", pitch: 1 },
-  { name: "tink", pitch: 1.0 },
-  { name: "tink", pitch: 1.122 }, // ~whole step up
-  { name: "tink", pitch: 1.26 },  // ~major third up
-  { name: "tink", pitch: 1.498 }, // ~perfect fifth up
+// All row sounds use "bell" pitched to C4 (220 Hz * 1.189 ≈ 261.6 Hz) —
+//   inharmonic temple bell on the game's C tonal anchor (same C the bass
+//   field and halo pad sit on). Five tolling bells reads as haunting and
+//   ceremonial without the chirpy-major-ascent of the previous chime+tink
+//   ladder. The pitched bell also gets a softer peak (see playBell).
+const C_BELL = 1.189;
+const ROW_SOUNDS: Array<{ name: "chime" | "bell"; pitch: number }> = [
+  { name: "bell", pitch: C_BELL },
+  { name: "bell", pitch: C_BELL },
+  { name: "bell", pitch: C_BELL },
+  { name: "bell", pitch: C_BELL },
+  { name: "bell", pitch: C_BELL },
 ];
 
 // 16-step natural-minor melody for the drain. Downbeats (positions 0/4/8/12)
@@ -195,9 +197,10 @@ export const showWaveSummary = (
         activeTimers.push(id);
       } else {
         bonusValueEl.classList.remove("ws-draining");
-        // a soft chime caps the drain — closes the musical phrase so
-        //   the silence that follows reads as an ending, not a dropout.
-        game.sound.play("chime", 1.26);
+        // C-tuned bell caps the drain on the game's tonal anchor — closes
+        //   the phrase on the same C the bass field is grounded in, so the
+        //   silence reads as an earned ending rather than a bright sparkle.
+        game.sound.play("bell", C_BELL);
         scheduleFadeOut(root, onFadeComplete);
       }
     };

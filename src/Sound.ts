@@ -2959,7 +2959,7 @@ export class Sound {
       case "bassHit": this.playBassHit(); break;
       case "bassEcho": this.playBassEcho(); break;
       case "chime": this.playChime(); break;
-      case "bell": this.playBell(); break;
+      case "bell": this.playBell(effectivePitch); break;
       case "warble": this.playWarble(); break;
       case "comboTick": this.playComboTick(); break;
       case "comboSparkle": this.playComboSparkle(); break;
@@ -4340,11 +4340,14 @@ export class Sound {
 
   // Lower bell with inharmonic partials — feels like a temple bell rather
   // than a wind-chime.
-  private playBell() {
+  private playBell(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    const fundamentalFreq = cfgN("bell", "fundamentalHz", 220);
-    const peakBase = cfgN("bell", "peak", 0.22);
+    const fundamentalFreq = cfgN("bell", "fundamentalHz", 220) * pitchRatio;
+    // when pitched (i.e. wave-summary use at C4), scale peak down so the
+    //   tolling bell sits under the drain melody instead of overpowering it.
+    const peakScale = pitchRatio === 1 ? 1 : 0.55;
+    const peakBase = cfgN("bell", "peak", 0.22) * peakScale;
     const decayBase = cfgN("bell", "decay", 1.4);
     const partialRatios = [
       1,
