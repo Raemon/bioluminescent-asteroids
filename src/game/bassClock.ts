@@ -19,7 +19,7 @@ export const BASS_SPLIT_PITCH_RATIO = [1, 1, 0.8409] as const;
 // the heavy beat, with lighter "and" eighth-note hits half-way between them. The in-between
 // eighths use playBgBeatLight, which routes the same kick voice at ~40% velocity (and a
 // semitone up) so the riff reads as "downbeat / and / offbeat / and" rather than four equal
-// kicks. At combo ≥ 12 the rhythm gate also doubles (comboGrid in rhythmGate.ts), so the
+// kicks. At combo ≥ 16 the rhythm gate also doubles (comboGrid in rhythmGate.ts), so the
 // player can hear *and* play to the halfbeats — sound and gameplay stay aligned.
 // We walk an eighth-note grid (BEAT_GRID/2). Even eighths = the existing quarter beats;
 // odd eighths = the new in-between "and" hits, only fired while the sparkle tier is active.
@@ -38,7 +38,7 @@ const tickBgBeats = (game: Game) => {
       // 1.122 = whole-step lift (E1→F#1) — distinct from the downbeat, mood intact.
       const pitchRatio = isOffbeat ? 1.122 : 1;
       game.sound.play("bgBeat", pitchRatio);
-    } else if (game.beatCombo >= 12) {
+    } else if (game.beatCombo >= 16) {
       // Doubletime "and": land on the eighth between quarter beats. The next
       // quarter slot's parity determines pitch — alternating C#/D# so the
       // syncopation oscillates rather than stutters on a single pitch.

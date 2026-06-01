@@ -3,9 +3,8 @@ import { Ship } from "../Ship";
 import { spawnAsteroidAtEdge, BASS_KINDS } from "../Asteroid";
 import { ParticleSystem } from "../Particle";
 import { v } from "../vec";
-import { BEAT_WINDOW } from "./rhythmConstants";
 import { syncHud, syncComboHud, syncPowerupHud } from "./hud";
-import { comboGrid } from "./rhythmGate";
+import { comboGrid, beatWindow } from "./rhythmGate";
 import { spawnWave, updateBgBeatIntensity, spawnTutorialSmall } from "./waveDirector";
 import { newWaveEventSchedule } from "./waveEvents";
 import { stopParade } from "./killedParade";
@@ -459,7 +458,7 @@ export const abortMission = (game: Game) => {
 export const respawn = (game: Game) => {
   game.ship = new Ship(v(game.w / 2, game.h / 2));
   game.ship.invuln = 2.2;
-  game.nextBeatToEvaluate = Math.max(0, Math.floor((game.perceivedBeatTime - BEAT_WINDOW) / comboGrid(game)) + 1);
+  game.nextBeatToEvaluate = Math.max(0, Math.floor((game.perceivedBeatTime - beatWindow(game)) / comboGrid(game)) + 1);
   game.state = "playing";
   syncHud(game);
   emitGameState(game);

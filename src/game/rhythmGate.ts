@@ -5,13 +5,18 @@ import { syncComboHud } from "./hud";
 import { popupBeatDebug, popupComboLost } from "./popups";
 
 // Two grid tiers, measured as the period between on-beat slots:
-//   combo 0–11       → quarter-notes (BEAT_GRID): the default groove.
-//   combo ≥ 12, or   → eighth-notes (BEAT_GRID/2): rapid-fire pulls each land on a beat;
+//   combo 0–15       → quarter-notes (BEAT_GRID): the default groove.
+//   combo ≥ 16, or   → eighth-notes (BEAT_GRID/2): rapid-fire pulls each land on a beat;
 //   rapid powerup     at the sparkle tier the in-between bg-beat is audible (see
 //                     bassClock.ts), so the player can hear and play the eighths too.
 export const comboGrid = (game: Game): number => {
-  if (game.ship.rapidActive || game.beatCombo >= 12) return BEAT_GRID / 2;
+  if (game.ship.rapidActive || game.beatCombo >= 16) return BEAT_GRID / 2;
   return BEAT_GRID;
+};
+
+// 16x tightens the on-beat window by 40ms — earning doubletime also raises the bar.
+export const beatWindow = (game: Game): number => {
+  return game.beatCombo >= 16 ? BEAT_WINDOW - 0.04 : BEAT_WINDOW;
 };
 
 // pure predicate — classifies fire / hit as on-beat without side effects on combo state.
@@ -19,7 +24,7 @@ export const isInBeatWindow = (game: Game, time: number): boolean => {
   const grid = comboGrid(game);
   const beatIndex = Math.round(time / grid);
   const beatCenter = beatIndex * grid;
-  return Math.abs(time - beatCenter) <= BEAT_WINDOW;
+  return Math.abs(time - beatCenter) <= beatWindow(game);
 };
 
 // debug logging needs the signed offset even when the event sits outside the on-beat window.
@@ -43,7 +48,7 @@ export const currentBeatPulse = (game: Game): number => {
   const grid = comboGrid(game);
   const beatPhase = game.perceivedBeatTime / grid;
   const signedBeatsFromNearestBeat = beatPhase - Math.round(beatPhase);
-  const windowFractionOfGrid = BEAT_WINDOW / grid;
+  const windowFractionOfGrid = beatWindow(game) / grid;
   return beatPulseEnvelope(signedBeatsFromNearestBeat / windowFractionOfGrid);
 };
 
@@ -73,7 +78,9 @@ export const loseCombo = (game: Game, sourcePos?: Vec) => {
   const prev = game.beatCombo;
   const wasMeaningful = prev >= 2;
   const haloActive = game.ship.comboHaloTier >= 2;
-  game.beatCombo = 0;
+  // Reaching doubletime is a real achievement — a single off-beat doesn't wipe it,
+  // it drops back to the 4x halo tier so the player keeps the yellow halo and music bed.
+  game.beatCombo = prev >= 16 ? 4 : 0;
   if (wasMeaningful) {
     game.sound.play("comboLost");
     game.ship.comboLossFlash = 1;
@@ -98,16 +105,17 @@ export const loseCombo = (game: Game, sourcePos?: Vec) => {
 //   ship pos is the source for off-beat fires — that's the shot the player got wrong.
 export const evaluateClosedBeats = (game: Game) => {
   const grid = comboGrid(game);
-  while (game.nextBeatToEvaluate * grid + BEAT_WINDOW <= game.perceivedBeatTime) {
+  const window = beatWindow(game);
+  while (game.nextBeatToEvaluate * grid + window <= game.perceivedBeatTime) {
     if (game.firedOffBeatSinceLastBeat && game.beatCombo !== 0) loseCombo(game, game.ship.pos);
     game.firedOffBeatSinceLastBeat = false;
     game.nextBeatToEvaluate += 1;
   }
 };
 
-// call after any state change that flips comboGrid (rapid powerup, combo crossing 12, combo
+// call after any state change that flips comboGrid (rapid powerup, combo crossing 16, combo
 // loss) so the evaluator index keeps marching forward against the new grid instead of either
 // stalling (grid grew) or firing a burst of phantom closures (grid shrank).
 export const rebaseBeatEval = (game: Game) => {
-  game.nextBeatToEvaluate = Math.max(0, Math.floor((game.perceivedBeatTime - BEAT_WINDOW) / comboGrid(game)) + 1);
+  game.nextBeatToEvaluate = Math.max(0, Math.floor((game.perceivedBeatTime - beatWindow(game)) / comboGrid(game)) + 1);
 };

@@ -253,8 +253,8 @@ const collectCanister = (game: Game, c: Canister) => {
     game.slowMoTimer = SLOW_MO_DURATION;
   } else {
     // rapid flips grid quarters→eighths; rebase against the new grid so closures keep
-    // marching forward. (skip if combo is already ≥ 12 — grid was already on eighths.)
-    const willChangeGrid = c.kind === "rapid" && !game.ship.rapidActive && game.beatCombo < 12;
+    // marching forward. (skip if combo is already ≥ 16 — grid was already on eighths.)
+    const willChangeGrid = c.kind === "rapid" && !game.ship.rapidActive && game.beatCombo < 16;
     game.ship.applyPowerup(c.kind);
     if (willChangeGrid) rebaseBeatEval(game);
   }
