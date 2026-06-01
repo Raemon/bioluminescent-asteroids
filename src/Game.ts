@@ -263,14 +263,16 @@ export class Game implements HudElements {
     //   three events are the contract between them.
     window.addEventListener("beat-calibrator:request", () => openBeatCalibrator(this));
     window.addEventListener("beat-calibrator:done", (e) => {
-      const { offsetSec } = (e as CustomEvent).detail;
+      const { offsetSec, origin } = (e as CustomEvent).detail;
       applyBeatOffset(this, offsetSec);
       // First-run intro folds straight into live play on the same beat; standalone
-      //   recalibration just applies the offset and unfreezes whatever was behind it.
+      //   recalibration just applies the offset and re-opens settings if that's where we came from.
       if (this.calibrationIntro) finishCalibrationIntro(this);
       this.calibrating = false;
+      if (origin === "settings") window.dispatchEvent(new CustomEvent("settings:open-request"));
     });
-    window.addEventListener("beat-calibrator:cancel", () => {
+    window.addEventListener("beat-calibrator:cancel", (e) => {
+      const { origin } = (e as CustomEvent).detail ?? {};
       // Bailing out of the first-run warm-up abandons the nascent run back to the title.
       if (this.calibrationIntro) {
         this.calibrationIntro = false;
@@ -279,6 +281,7 @@ export class Game implements HudElements {
         showTitle(this);
       }
       this.calibrating = false;
+      if (origin === "settings") window.dispatchEvent(new CustomEvent("settings:open-request"));
     });
     // Settings dialog's manual latency slider — applies live (and persists) so a
     //   nudge takes effect immediately, even mid-run.

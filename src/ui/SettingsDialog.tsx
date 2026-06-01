@@ -60,6 +60,13 @@ export const SettingsDialog = () => {
   //   When a binding capture is active, the next key press becomes the binding
   //   instead of acting on the dialog.
   useEffect(() => {
+    const onReopen = () => openDialog();
+    window.addEventListener("settings:open-request", onReopen);
+    return () => window.removeEventListener("settings:open-request", onReopen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       e.stopPropagation();

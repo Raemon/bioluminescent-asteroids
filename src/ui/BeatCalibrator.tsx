@@ -40,6 +40,7 @@ export const BeatCalibrator = () => {
 
   const soundRef = useRef<Sound | null>(null);
   const introRef = useRef(false);
+  const originRef = useRef<"intro" | "settings">("intro");
   const streakRef = useRef<number[]>([]);
   const lastTapRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -172,14 +173,14 @@ export const BeatCalibrator = () => {
     runningRef.current = false;
     const offsetSec = median(streakRef.current);
     // hand off immediately so the world comes alive on the same beat while we fade.
-    window.dispatchEvent(new CustomEvent("beat-calibrator:done", { detail: { offsetSec } }));
+    window.dispatchEvent(new CustomEvent("beat-calibrator:done", { detail: { offsetSec, origin: originRef.current } }));
     goPhase("fading");
     window.setTimeout(() => { stopLoop(); goPhase("idle"); }, FADE_MS);
   };
 
   const cancel = () => {
     runningRef.current = false;
-    window.dispatchEvent(new CustomEvent("beat-calibrator:cancel"));
+    window.dispatchEvent(new CustomEvent("beat-calibrator:cancel", { detail: { origin: originRef.current } }));
     stopLoop();
     goPhase("idle");
   };
@@ -189,6 +190,7 @@ export const BeatCalibrator = () => {
       const detail = (e as CustomEvent).detail as { sound: Sound; intro?: boolean };
       soundRef.current = detail.sound;
       introRef.current = !!detail.intro;
+      originRef.current = detail.intro ? "intro" : "settings";
       beginRun();
     };
     const onKey = (e: KeyboardEvent) => {
