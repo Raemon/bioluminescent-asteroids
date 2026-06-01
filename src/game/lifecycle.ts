@@ -172,10 +172,20 @@ export const showTitle = (game: Game) => {
 //   player's "on the beat" presses are landing 150ms late through a Bluetooth
 //   speaker and they've no idea where the beat even is. Once they've calibrated
 //   (or skipped) the result persists, so every later run goes straight in.
+//
+// Resumes the AudioContext on the user gesture and awaits the baked-mp3 cache
+//   before kicking off the run, so the first sounds always play from cache and
+//   the live Tone fallback (which crashes on some browsers' stubbed Web Audio)
+//   is never exercised during gameplay.
 export const requestStart = (game: Game) => {
-  if (game.calibrating || game.calibrationIntro) return;
-  if (hasCalibrated()) { startGame(game); return; }
-  startCalibrationIntro(game);
+  if (game.calibrating || game.calibrationIntro || game.startPending) return;
+  game.sound.resume();
+  game.startPending = true;
+  void game.sound.bakedCacheReady().then(() => {
+    game.startPending = false;
+    if (hasCalibrated()) startGame(game);
+    else startCalibrationIntro(game);
+  });
 };
 
 // Recalibration only (settings "Resync the beat"): the standalone calibrator

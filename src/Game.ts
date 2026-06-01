@@ -70,6 +70,10 @@ export class Game implements HudElements {
   // latched while the tap-to-beat calibrator overlay is open so the title loop
   //   doesn't keep re-firing the start request behind it.
   calibrating = false;
+  // latched between the player's title-screen start press and the moment the
+  //   baked-mp3 cache finishes loading. Suppresses re-entrant start requests so
+  //   the player can't double-trigger or get stuck while audio warms.
+  startPending = false;
   // true while the settings dialog is open. Together with `calibrating`, this
   //   freezes the sim during play (see updateGame) so the ship can't drift or
   //   die behind a full-screen menu.
@@ -179,7 +183,9 @@ export class Game implements HudElements {
   debugOverlayEl: HTMLElement;
   debugFpsEl: HTMLElement;
   // backtick (`) toggles #debug-overlay. FPS readout is always visible (bottom-right).
-  debugMode = false;
+  // ?debug=true in the URL forces debug-on from page load (handy for triaging
+  // production issues where the player can't easily hit backtick on mobile).
+  debugMode = new URLSearchParams(window.location.search).get("debug") === "true";
   // prevents a double-submit if the player mashes Enter while the POST is in flight.
   scoreSubmitState: "idle" | "submitting" | "submitted" = "idle";
   // lets the title screen after a game-over show a score-neighborhood (±5) around the
@@ -360,5 +366,48 @@ export class Game implements HudElements {
   get perceivedBeatTime(): number { return this.beatTime - this.beatOffset; }
 
   update(dt: number) { updateGame(this, dt); }
-  render() { renderGame(this); }
+  render() {
+    renderGame(this);
+    if (this.debugMode) this.renderDebugOverlay();
+  }
+
+  // Renders a per-frame snapshot of the baked-mp3 cache into #debug-overlay.
+  // Groups keys by sound name with one row per group; trailing summary shows
+  // overall loaded-vs-expected count so partial states are obvious at a glance.
+  private renderDebugOverlay() {
+    const states = this.sound.bakedLoadStates;
+    if (states.size === 0) {
+      this.debugOverlayEl.textContent = "audio cache: (waiting for first user gesture)";
+      return;
+    }
+    const groups = new Map<string, { loaded: number; fetching: number; queued: number; failed: number; total: number }>();
+    for (const [key, state] of states) {
+      const name = key.split("|")[0];
+      const g = groups.get(name) ?? { loaded: 0, fetching: 0, queued: 0, failed: 0, total: 0 };
+      g.total++;
+      g[state]++;
+      groups.set(name, g);
+    }
+    const lines: string[] = ["audio cache:"];
+    const sortedNames = Array.from(groups.keys()).sort();
+    let totalLoaded = 0;
+    let totalCount = 0;
+    let anyFailed = false;
+    for (const name of sortedNames) {
+      const g = groups.get(name)!;
+      totalLoaded += g.loaded;
+      totalCount += g.total;
+      if (g.failed > 0) anyFailed = true;
+      const status = g.loaded === g.total
+        ? "✓"
+        : g.failed > 0
+          ? `${g.loaded}/${g.total} (${g.failed} failed)`
+          : `${g.loaded}/${g.total}`;
+      lines.push(`  ${name.padEnd(10)} ${status}`);
+    }
+    const allDone = totalLoaded === totalCount && !anyFailed;
+    lines.push(`  ────────────────`);
+    lines.push(`  total      ${totalLoaded}/${totalCount}${allDone ? " ✓ ready" : anyFailed ? " ⚠ failures" : " …loading"}`);
+    this.debugOverlayEl.textContent = lines.join("\n");
+  }
 }

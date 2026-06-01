@@ -414,12 +414,20 @@ export class Sound {
     this.bakedOut.connect(this.ctx.destination);
     // Build the Tone bus immediately so master is hot before the first
     // voice plays. ensureToneEngine wires master → voiceBusDry/Wet.
+    // Wrapped because some browsers (Firefox w/ resistFingerprinting and
+    // similar privacy modes) stub Web Audio in ways that crash Tone's
+    // destination init — we still want the rest of audio to work.
     this.ensureToneEngine();
     // Pre-fill the noise-buffer cache so the first bassteroid/comet spawn
     // doesn't pay the 6-8s buffer allocation mid-gameplay. AudioBuffers can't
     // be created before the context exists, so this is the earliest we can do
     // it — runs once, on first user interaction.
     this.prewarmNoiseBuffers();
+    // Kick off the baked-mp3 fetch + decode for every Tone-engine sound. The
+    // title screen awaits bakedCacheReady() before letting the player start
+    // so playBaked is guaranteed to hit cache. Independent of the Tone-engine
+    // boot above so it still runs on browsers where Tone init failed.
+    this.warmBakedCache();
   }
 
   // Every duration ever passed to makeNoiseBuffer across the codebase. Grep
@@ -436,7 +444,24 @@ export class Sound {
   // (browsers cap how many AudioContexts you can have open).
   ensureToneEngine(): ToneEngineNodes | null {
     if (this.toneEngine) return this.toneEngine;
+    if (this.toneEngineFailed) return null;
     this.ensureContext();
+    if (!this.ctx) return null;
+    try {
+      return this.buildToneEngine();
+    } catch {
+      // Browser stubbed Web Audio or Tone setup threw — disable further
+      // attempts so we don't retry on every fire. Baked-mp3 playback still
+      // works because it doesn't touch the Tone graph.
+      this.toneEngineFailed = true;
+      this.toneEngine = null;
+      return null;
+    }
+  }
+
+  private toneEngineFailed = false;
+
+  private buildToneEngine(): ToneEngineNodes | null {
     if (!this.ctx) return null;
 
     // Adopt our existing AudioContext. Tone wraps it; Tone destination ===
@@ -643,12 +668,6 @@ export class Sound {
       waveClearSynth,
     };
     this.wireMasterToBus();
-    // Warm the baked-buffer cache immediately so the first in-game trigger
-    // hits the cache instead of paying for live synthesis. Bakes run async
-    // in parallel; total wall time is dominated by the longest single recipe
-    // (waveClear/chime ~50ms on desktop). Sounds that fire before their bake
-    // lands still fall back to live Tone synthesis transparently.
-    this.warmBakedCache();
     return this.toneEngine;
   }
 
@@ -663,9 +682,17 @@ export class Sound {
     // first few beats drift before the cache caught up). Bake the early-wave
     // downbeat buckets before anything else so the first downbeats at game
     // start aren't dropped silently.
+    const fetches: Promise<unknown>[] = [];
+    const enqueue = (name: SoundName, pitchRatio: number) => {
+      const key = this.bakedKey(name, pitchRatio);
+      // Seed the debug map so the overlay shows "queued" before each fetch
+      // actually starts — queueBake will flip it to "fetching" → "loaded".
+      if (!this.bakedLoadStates.has(key)) this.bakedLoadStates.set(key, "queued");
+      fetches.push(this.queueBake(name, pitchRatio));
+    };
     for (let bucket = 0; bucket <= 2; bucket++) {
       const intensityBucket = bucket / 10;
-      this.queueBake("bgBeat", 1 * 100 + intensityBucket);
+      enqueue("bgBeat", 1 * 100 + intensityBucket);
     }
     // Per-sound list of pitch ratios to pre-bake. Mirrors the values Game
     // passes at runtime: bassteroid split levels use BASS_SPLIT_PITCH_RATIO
@@ -684,7 +711,7 @@ export class Sound {
     ];
     for (const [name, pitches] of oneShots) {
       for (const p of pitches) {
-        this.queueBake(name, p);
+        enqueue(name, p);
       }
     }
     // Remaining bgBeat variants: full 11-bucket sweep × {downbeat, offbeat} ×
@@ -693,10 +720,21 @@ export class Sound {
     for (const basePitch of [1, 1.122]) {
       for (let bucket = 0; bucket <= 10; bucket++) {
         const intensityBucket = bucket / 10;
-        this.queueBake("bgBeat", basePitch * 100 + intensityBucket);
-        this.queueBake("bgBeat", basePitch * 100 + intensityBucket + 1000);
+        enqueue("bgBeat", basePitch * 100 + intensityBucket);
+        enqueue("bgBeat", basePitch * 100 + intensityBucket + 1000);
       }
     }
+    // Single promise the title screen can await before letting the player
+    // start. Tolerant of individual fetch failures — a missing mp3 just means
+    // that one voice will silent-miss in-game rather than blocking the run.
+    this.bakedCacheReadyPromise = Promise.allSettled(fetches).then(() => undefined);
+  }
+
+  // Promise resolves once warmBakedCache's first-pass fetches all complete.
+  // Returns an already-resolved promise if warming hasn't started yet (e.g.
+  // audio API unavailable) so callers don't hang on the title screen.
+  bakedCacheReady(): Promise<void> {
+    return this.bakedCacheReadyPromise ?? Promise.resolve();
   }
 
   // Trigger a bake for one (sound, pitchKey) pair if it isn't cached or in
@@ -708,25 +746,35 @@ export class Sound {
   // path in prod and only hit it on first dev play after a synth-recipe
   // edit. In dev the rendered buffer is POSTed back to /__bake-dump__ so
   // the next reload is fully fetch-only.
-  private queueBake(name: SoundName, pitchRatio: number) {
+  private queueBake(name: SoundName, pitchRatio: number): Promise<void> {
     const key = this.bakedKey(name, pitchRatio);
-    if (this.bakedBuffers.has(key) || this.bakingInFlight.has(key)) return;
+    if (this.bakedBuffers.has(key) || this.bakingInFlight.has(key)) return Promise.resolve();
     this.bakingInFlight.add(key);
-    void this.fetchBakedMp3(name, pitchRatio).then((fetched) => {
+    this.bakedLoadStates.set(key, "fetching");
+    return this.fetchBakedMp3(name, pitchRatio).then((fetched) => {
       if (fetched) {
         this.bakedBuffers.set(key, fetched);
         this.bakingInFlight.delete(key);
+        this.bakedLoadStates.set(key, "loaded");
         return;
       }
-      // Fall through to live Tone bake (serialized).
+      this.bakedLoadStates.set(key, "failed");
+      // Fall through to live Tone bake (serialized). Fire-and-forget — the
+      // returned promise from queueBake resolves on fetch outcome, not on the
+      // optional live-bake fallback, because the title-screen gate only cares
+      // that the mp3 path has settled.
       this.bakeChain = this.bakeChain.then(() => this.bakeSound(name, pitchRatio).then((rendered) => {
         if (rendered) {
           this.bakedBuffers.set(key, rendered);
           void this.dumpBakedToDev(name, pitchRatio, rendered);
+          this.bakedLoadStates.set(key, "loaded");
         }
         this.bakingInFlight.delete(key);
       }).catch(() => { this.bakingInFlight.delete(key); }));
-    }).catch(() => { this.bakingInFlight.delete(key); });
+    }).catch(() => {
+      this.bakingInFlight.delete(key);
+      this.bakedLoadStates.set(key, "failed");
+    });
   }
 
   // Wire Sound.master into the Tone bus. Master sums every hand-built
@@ -755,6 +803,17 @@ export class Sound {
   // Sounds we're currently baking — guards against double-bake when the same
   // sound fires several times before the first bake completes.
   bakingInFlight: Set<string> = new Set();
+  // Resolves once every Tone-engine sound's baked mp3 is fetched + decoded.
+  // The title screen awaits this before letting the player start so we never
+  // need the live Tone fallback during gameplay — which is critical because
+  // some browsers (Firefox w/ resistFingerprinting and similar privacy
+  // setups) stub Web Audio in ways that crash Tone's destination init.
+  private bakedCacheReadyPromise: Promise<void> | null = null;
+  // Per-key load state for the ?debug=true overlay. "queued" = warmBakedCache
+  // listed it but the fetch hasn't started; "fetching" = fetch in flight;
+  // "loaded" = decoded AudioBuffer in bakedBuffers; "failed" = fetch returned
+  // null or threw (live Tone bake may still be running as a fallback).
+  bakedLoadStates: Map<string, "queued" | "fetching" | "loaded" | "failed"> = new Map();
   // Serialized bake queue. bakeSound swaps Tone's global context to the
   // OfflineAudioContext for the duration of the render, so running two
   // bakes concurrently would race on Tone.setContext. We chain promises
@@ -1782,7 +1841,11 @@ export class Sound {
     const isGrace = idx === 7;
     const velocity = isPhraseDownbeat ? 0.7 : isLift ? 0.64 : isGrace ? 0.3 : 0.5;
     const duration = isPhraseDownbeat || isLift ? "1n" : isGrace ? "4n" : "2n";
-    eng.cometMelodySynth.triggerAttackRelease(freq, duration, undefined, velocity);
+    try {
+      eng.cometMelodySynth.triggerAttackRelease(freq, duration, undefined, velocity);
+    } catch {
+      // Tone trigger crashed mid-game (e.g. browser stub) — skip the note.
+    }
   }
 
   // Ominous voice held under the comet's entire lifetime. Begins with a
@@ -3645,11 +3708,10 @@ export class Sound {
   // rather than a tight zing. Louder + longer tail than playFire so the
   // player can feel the weight of a timed shot.
   private playFireBeat() {
-    if (this.playBaked("fireBeat", 1)) return;
-    const eng = this.ensureToneEngine();
-    if (!eng) return;
-    eng.fireBeatBody.triggerAttackRelease("C3", "16n", undefined, 0.9);
-    eng.fireBeatPluck.triggerAttack("G4");
+    // Baked-only — see bakedCacheReadyPromise. The live Tone fallback was
+    // removed because some browsers stub Web Audio in ways that crash Tone's
+    // destination init; silent-miss is preferable to a frozen game.
+    this.playBaked("fireBeat", 1);
   }
 
   private playExplosion(volume: number, lowpassStart: number, duration: number) {
@@ -4179,25 +4241,14 @@ export class Sound {
   }
 
   private playWaveClear() {
-    if (this.playBaked("waveClear", 1)) return;
-    const eng = this.ensureToneEngine();
-    if (!eng) return;
-    const notes = ["E4", "G#4", "B4", "Eb5"];
-    const now = Tone.now();
-    for (let i = 0; i < notes.length; i++) {
-      eng.waveClearSynth.triggerAttackRelease(notes[i], "4n", now + i * 0.06, 0.7);
-    }
+    this.playBaked("waveClear", 1);
   }
 
   // Deep punchy kick on C2. Sine sweep + a tiny click for definition.
   // `pitchRatio` scales the tonal sweep so split-children of a bassteroid
   // can sound a fourth/octave below the parent (see Game.bassPitchRatio).
   private playBassKick(pitchRatio = 1) {
-    if (this.playBaked("bassKick", pitchRatio)) return;
-    const eng = this.ensureToneEngine();
-    if (!eng) return;
-    const note = 65.4 * pitchRatio;
-    eng.bassKick.triggerAttackRelease(note, "16n", undefined, 0.95);
+    this.playBaked("bassKick", pitchRatio);
   }
 
   // Sub-bass "boom" on F2 (the IV of C major). Sine body with a brief
@@ -4206,11 +4257,7 @@ export class Sound {
   // and stays inside the C-F-G chord pocket so layering with kick/pluck
   // reads as a I/IV/V bassline rather than a dissonant pile.
   private playBassBoom(pitchRatio = 1) {
-    if (this.playBaked("bassBoom", pitchRatio)) return;
-    const eng = this.ensureToneEngine();
-    if (!eng) return;
-    const note = 87.3 * pitchRatio;
-    eng.bassBoom.triggerAttackRelease(note, "8n", undefined, 0.9);
+    this.playBaked("bassBoom", pitchRatio);
   }
 
   // Percussive "snap" — a snare-leaning hybrid that gives beat 4 a sharp
@@ -4219,20 +4266,13 @@ export class Sound {
   // body. Sits an octave above the kick/pluck/boom region so the four-voice
   // pattern reads as kick-pluck-boom-snap rather than a wall of low end.
   private playBassSnap(pitchRatio = 1) {
-    if (this.playBaked("bassSnap", pitchRatio)) return;
-    const eng = this.ensureToneEngine();
-    if (!eng) return;
-    eng.bassSnap.triggerAttackRelease("C3", "16n", undefined, 0.7 + pitchRatio * 0.0);
+    this.playBaked("bassSnap", pitchRatio);
   }
 
   // Plucked sub-bass at G2 with a closing lowpass filter — distinct timbre
   // from the kick so the two layer rather than mask each other.
   private playBassPluck(pitchRatio = 1) {
-    if (this.playBaked("bassPluck", pitchRatio)) return;
-    const eng = this.ensureToneEngine();
-    if (!eng) return;
-    const note = 98 * pitchRatio;
-    eng.bassPluck.triggerAttackRelease(note, "8n", undefined, 0.85);
+    this.playBaked("bassPluck", pitchRatio);
   }
 
   // Crunch played when a bassteroid is shot. Deep, gravelly, sub-200 Hz —
@@ -4335,31 +4375,24 @@ export class Sound {
   // the buffer (e.g. 0.5 = C5+G5) without forcing a new bake.
   private playChime(pitchRatio = 1) {
     if (pitchRatio === 1) {
-      if (this.playBaked("chime", 1)) return;
-    } else if (this.ctx && this.bakedOut) {
-      const buf = this.bakedBuffers.get(this.bakedKey("chime", 1));
-      if (buf) {
-        const src = this.ctx.createBufferSource();
-        src.buffer = buf;
-        src.playbackRate.value = pitchRatio;
-        const pos = this.spatialPosForCall;
-        if (pos) {
-          const spatial = this.makeSpatial(pos, this.bakedOut);
-          if (spatial) src.connect(spatial.panner);
-          else src.connect(this.bakedOut);
-        } else {
-          src.connect(this.bakedOut);
-        }
-        src.start();
-        return;
-      }
-      this.queueBake("chime", 1);
+      this.playBaked("chime", 1);
+      return;
     }
-    const eng = this.ensureToneEngine();
-    if (!eng) return;
-    const c6 = 1046.5 * pitchRatio;
-    const g6 = 1568.0 * pitchRatio;
-    eng.chimeSynth.triggerAttackRelease([c6, g6], "8n", undefined, 0.65);
+    if (!this.ctx || !this.bakedOut) return;
+    const buf = this.bakedBuffers.get(this.bakedKey("chime", 1));
+    if (!buf) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = pitchRatio;
+    const pos = this.spatialPosForCall;
+    if (pos) {
+      const spatial = this.makeSpatial(pos, this.bakedOut);
+      if (spatial) src.connect(spatial.panner);
+      else src.connect(this.bakedOut);
+    } else {
+      src.connect(this.bakedOut);
+    }
+    src.start();
   }
 
   // Lower bell with inharmonic partials — feels like a temple bell rather
@@ -4723,14 +4756,7 @@ export class Sound {
   // Ascending sine arpeggio with a sparkle overlay — the "you got something
   // good" jingle that plays when the ship flies over a canister.
   private playPowerup() {
-    if (this.playBaked("powerup", 1)) return;
-    const eng = this.ensureToneEngine();
-    if (!eng) return;
-    const notes = ["C5", "E5", "G5", "C6"];
-    const now = Tone.now();
-    for (let i = 0; i < notes.length; i++) {
-      eng.powerupSynth.triggerAttackRelease(notes[i], "16n", now + i * 0.06, 0.7);
-    }
+    this.playBaked("powerup", 1);
   }
 
   // Canister-appear: gentle ascending wind-chime sparkle. Three soft sine

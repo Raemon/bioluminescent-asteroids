@@ -93,9 +93,30 @@ const CANISTER_CHANCE_PER_WAVE = 1 / 3;
 const CANISTER_SPAWN_WINDOW: [number, number] = [8, 24];
 
 // wave 4+ ~1/3 chance so the saucer feels like an "event", not a fixed wave fixture.
+//   Each alien size now rolls independently — see rollHeadlineEvents — so this is
+//   the *summed* base chance, split across sizes by the current wave's size distribution.
 const ALIEN_FIRST_WAVE = 4;
 const ALIEN_CHANCE_PER_WAVE = 1 / 3;
 const ALIEN_SPAWN_WINDOW: [number, number] = [5, 22];
+
+// Rhythm (beatCombo) bumps headline-event spawn chances additively.
+//   +1% per rhythm, applied to each alien size's roll and to the shockwave roll.
+const RHYTHM_SPAWN_CHANCE_PER_COMBO = 0.01;
+// Rhythm also multiplies the spawn speed of created world objects (asteroids,
+//   aliens, comets, canisters) by +5% per rhythm. Player ship + bullets exempt.
+const RHYTHM_SPAWN_SPEED_PER_COMBO = 0.05;
+const rhythmSpeedMul = (game: Game): number => 1 + game.beatCombo * RHYTHM_SPAWN_SPEED_PER_COMBO;
+const rhythmChanceBonus = (game: Game): number => game.beatCombo * RHYTHM_SPAWN_CHANCE_PER_COMBO;
+
+// per-wave share of each alien size — early waves bias to small/medium so
+//   the player isn't crushed by a 4-HP saucer's debut. Each size rolls
+//   independently in rollHeadlineEvents, so the share scales the *base*
+//   chance before the rhythm bonus is added.
+const alienSizeShare = (wave: number, size: AlienSize): number => {
+  if (wave < 6) return size === "small" ? 0.7 : size === "medium" ? 0.3 : 0;
+  if (wave < 10) return size === "small" ? 0.45 : size === "medium" ? 0.4 : 0.15;
+  return size === "small" ? 0.3 : size === "medium" ? 0.35 : 0.35;
+};
 
 // shockwave / comet / alien are the three "headline" wave events. When one rolls,
 // the remaining ones are dampened so a single wave rarely stacks two of them.
@@ -151,21 +172,6 @@ export const alignBassBeat = (game: Game, asteroid: Asteroid) => {
   asteroid.nextBeatAt = Math.round(raw / BEAT_GRID) * BEAT_GRID;
 };
 
-// early waves bias to small/medium so the player isn't crushed by a 4-HP saucer's debut.
-export const rollAlienSize = (wave: number): AlienSize => {
-  if (wave < 6) return Math.random() < 0.7 ? "small" : "medium";
-  if (wave < 10) {
-    const r = Math.random();
-    if (r < 0.45) return "small";
-    if (r < 0.85) return "medium";
-    return "big";
-  }
-  const r = Math.random();
-  if (r < 0.3) return "small";
-  if (r < 0.65) return "medium";
-  return "big";
-};
-
 // paired-wave intro (one bass, then both, then decorators) trains the player gradually.
 export const activeSpecialsForWave = (game: Game, wave: number): AsteroidKind[] => {
   if (wave < 3) return [];
@@ -177,6 +183,17 @@ export const activeSpecialsForWave = (game: Game, wave: number): AsteroidKind[] 
   const lateCount = Math.max(0, Math.min(lateUnlockOrder.length, Math.floor((wave - 5) / 2)));
   for (let i = 0; i < lateCount; i++) specials.push(lateUnlockOrder[i]);
   return specials;
+};
+
+// boost velocity in place by the current rhythm-speed multiplier; called
+//   *after* rhythm alignment so the alignment math (which works in the
+//   unscaled SIZE_SPAWN_SPEED band) stays valid — the speedup just makes the
+//   target arrive a touch earlier than its assigned beat slot.
+const applyRhythmSpeed = (game: Game, vel: { x: number; y: number }) => {
+  const k = rhythmSpeedMul(game);
+  if (k === 1) return;
+  vel.x *= k;
+  vel.y *= k;
 };
 
 // shared retry helper keeps the "no rock on top of the ship" rule in one place.
@@ -193,6 +210,7 @@ const spawnAsteroidAway = (
 ) => {
   const a = spawnAwayFromShip(() => spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size), game.ship.pos, minDist);
   alignIncomingToRhythm(game, a, claimed);
+  applyRhythmSpeed(game, a.vel);
   return a;
 };
 
@@ -212,6 +230,7 @@ const spawnTink = (game: Game, claimed?: BeatClaimSet): Asteroid =>
 // fire pattern (see ALIEN_FIRE_PATTERN_BEATS in Alien.ts).
 export const spawnAlien = (game: Game, size: AlienSize) => {
   const a = spawnAwayFromShip(() => spawnAlienAtEdge(game.w, game.h, size), game.ship.pos, 260, 6);
+  applyRhythmSpeed(game, a.vel);
   a.nextFireAt = Math.ceil((game.beatTime + 0.5) / BEAT_GRID) * BEAT_GRID;
   a.firePatternIndex = 0;
   game.aliens.push(a);
@@ -246,6 +265,7 @@ export const spawnComet = (game: Game) => {
       maxBeats: 24,
     });
   }
+  applyRhythmSpeed(game, c.vel);
   game.comets.push(c);
   game.sound.startCometShimmer(c, c.pos);
 };
@@ -314,6 +334,7 @@ const rollWaveEvents = (game: Game) => {
   if (FEATURE_FREE_UPGRADE_SPAWNS && game.wave >= CANISTER_FIRST_WAVE) {
     maybeSchedule(game.waveEvents, CANISTER_CHANCE_PER_WAVE, CANISTER_SPAWN_WINDOW, () => {
       const c = spawnCanister(game.w, game.h, game.ship.pos);
+      applyRhythmSpeed(game, c.vel);
       game.canisters.push(c);
       game.sound.play("canisterAppear", 1, c.pos);
     });
@@ -324,10 +345,23 @@ const rollWaveEvents = (game: Game) => {
 type HeadlineRoll = { gate: boolean; baseChance: number; fire: () => boolean };
 
 const rollHeadlineEvents = (game: Game) => {
+  // Rhythm additively boosts the alien-size rolls and the shockwave roll.
+  //   Comet is left on its existing curve — only aliens + shockwave were asked for.
+  const bonus = rhythmChanceBonus(game);
+  const alienGate = game.wave >= ALIEN_FIRST_WAVE;
+  const alienSizeRoll = (size: AlienSize): HeadlineRoll => ({
+    gate: alienGate && alienSizeShare(game.wave, size) > 0,
+    baseChance: ALIEN_CHANCE_PER_WAVE * alienSizeShare(game.wave, size) + bonus,
+    fire: () => {
+      maybeSchedule(game.waveEvents, 1, ALIEN_SPAWN_WINDOW, () => spawnAlien(game, size));
+      return true;
+    },
+  });
+
   const rolls: HeadlineRoll[] = [
     {
       gate: game.wave >= SHOCKWAVE_FIRST_WAVE,
-      baseChance: SHOCKWAVE_CHANCE_PER_WAVE,
+      baseChance: SHOCKWAVE_CHANCE_PER_WAVE + bonus,
       fire: () => {
         maybeSchedule(game.waveEvents, 1, SHOCKWAVE_SPAWN_WINDOW, () => startShockwave(game));
         return true;
@@ -341,15 +375,9 @@ const rollHeadlineEvents = (game: Game) => {
         return true;
       },
     },
-    {
-      gate: game.wave >= ALIEN_FIRST_WAVE,
-      baseChance: ALIEN_CHANCE_PER_WAVE,
-      fire: () => {
-        const size = rollAlienSize(game.wave);
-        maybeSchedule(game.waveEvents, 1, ALIEN_SPAWN_WINDOW, () => spawnAlien(game, size));
-        return true;
-      },
-    },
+    alienSizeRoll("small"),
+    alienSizeRoll("medium"),
+    alienSizeRoll("big"),
   ];
 
   // randomise order so no single event always gets the un-dampened first roll.
