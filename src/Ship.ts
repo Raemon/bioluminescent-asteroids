@@ -23,6 +23,7 @@ export class Ship {
   heading = -Math.PI / 2;
   rotSpeed = 4.6;
   rotRamp = 0;
+  rotHoldTime = 0;
   thrustPower = 420;
   thrustRamp = 0;
   // drag is 0 so the ship coasts; thrust + retro are the only velocity inputs (Newtonian feel).

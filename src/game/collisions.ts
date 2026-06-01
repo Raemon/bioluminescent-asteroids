@@ -17,6 +17,7 @@ import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup } from "./particleBursts";
 import { popupPickup, popupScore, popupSideEnginesPickup } from "./popups";
+import { checkBonusLife } from "./bonusLife";
 import {
   applyHitToCombo,
   onAsteroidKilledByBullet,
@@ -307,6 +308,7 @@ const collectGoldCrystal = (game: Game, g: GoldCrystal) => {
   game.popups.push(popupScore(g.pos, GOLD_CRYSTAL_SCORE));
   emitGoldCrystalPickup(game.particles, g);
   syncHud(game);
+  checkBonusLife(game);
 };
 
 // Rhythm-cracked: 40% of the time the gem yields its embedded canister, the
@@ -325,6 +327,7 @@ const crackGoldCrystalForCanister = (game: Game, g: GoldCrystal) => {
     game.popups.push(popupScore(g.pos, GOLD_CRYSTAL_REVEAL_SCORE));
   }
   syncHud(game);
+  checkBonusLife(game);
 };
 
 // Off-beat / weak shot: same "wasted upgrade" feedback as shooting a canister

@@ -1,6 +1,7 @@
 import type { Game } from "../Game";
 import { syncHud } from "./hud";
 import { BEAT_GRID } from "./rhythmConstants";
+import { checkBonusLife } from "./bonusLife";
 
 // end-of-wave summary text — one row appears per beat with a paired
 //   sound, then the bonus drains into the score at four ticks per beat with
@@ -186,6 +187,7 @@ export const showWaveSummary = (
       scoreValueEl.textContent = String(displayedScore);
       pulseScore(scoreValueEl);
       syncHud(game);
+      checkBonusLife(game);
 
       // Play the next note in the haunting minor melody. Every 4th tick is
       //   a downbeat — summaryDownbeat layers a rotating i-VI-III-VII chord

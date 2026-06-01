@@ -69,6 +69,7 @@ export const Overlay = () => {
       </a>
       <div id="overlay-title-group">
         <h1 id="overlay-title">Pulsar Drift</h1>
+        <p id="overlay-subtitle">A Meditative Rhythm Journey</p>
       </div>
       <button id="overlay-start" type="button">
         Begin

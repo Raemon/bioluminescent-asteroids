@@ -8,13 +8,20 @@ import { emitThrust, emitReverseThrust, emitSideThrust } from "./shipParticles";
 import { fireBullets } from "./shipWeapons";
 import { isDown } from "../game/controlBindings";
 
-// tap-to-nudge feel; rotation ramps in over ~0.15s so a tap turns finely and a hold turns fast.
+// initial 1/4 speed nudge, then hold for TURN_RAMP_DELAY before ramping to full over ~0.15s.
+const TURN_RAMP_DELAY = 0;
+const TURN_INITIAL_SCALE = 0.01;
 const updateTurning = (ship: Ship, input: Input, dt: number) => {
   const turnLeft = isDown(input, "rotateLeft");
   const turnRight = isDown(input, "rotateRight");
-  if (turnLeft || turnRight) ship.rotRamp = Math.min(1, ship.rotRamp + dt / 0.15);
-  else ship.rotRamp = 0;
-  const turnScale = 0.02 + 0.98 * ship.rotRamp;
+  if (turnLeft || turnRight) {
+    ship.rotHoldTime += dt;
+    if (ship.rotHoldTime > TURN_RAMP_DELAY) ship.rotRamp = Math.min(1, ship.rotRamp + dt / 0.15);
+  } else {
+    ship.rotRamp = 0;
+    ship.rotHoldTime = 0;
+  }
+  const turnScale = TURN_INITIAL_SCALE + (1 - TURN_INITIAL_SCALE) * ship.rotRamp;
   const precision = isDown(input, "precisionTurn") ? 0.2 : 1;
   if (turnLeft) ship.heading -= ship.rotSpeed * turnScale * precision * dt;
   if (turnRight) ship.heading += ship.rotSpeed * turnScale * precision * dt;

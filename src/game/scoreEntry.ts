@@ -145,10 +145,10 @@ const sortRows = (rows: HighscoreRow[], key: Game["leaderboardSort"]): Highscore
   }
 };
 
-// gameover "Your Standing" view: 11-row window (5 above + selected + 5 below).
+// gameover "Your Standing" view: 51-row window (25 above + selected + 25 below).
 // title screen: 7-row window so the opening reads as a hall of fame but arrows
 //   still scroll through the full top-50.
-const GAMEOVER_WINDOW_SIZE = 11;
+const GAMEOVER_WINDOW_SIZE = 51;
 const TITLE_WINDOW_SIZE = 7;
 
 const visibleWindowSize = (game: Game): number =>

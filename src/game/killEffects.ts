@@ -10,6 +10,8 @@ import { syncComboHud, syncHud, flashScoreGain } from "./hud";
 import { markFirstWaveTutorialComplete, setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
 import { popupCombo, popupScore } from "./popups";
+import { checkBonusLife } from "./bonusLife";
+import { BEAT_GRID } from "./rhythmConstants";
 import {
   emitExplosion,
   emitCrackParticles,
@@ -103,9 +105,18 @@ const awardScoreForKill = (game: Game, hitPos: Vec, baseScore: number, isOnBeatH
     game.sound.play("comboSparkle", 1, hitPos);
     game.sound.playComboChime(multiplier, hitPos);
     if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
+    // Drift Bonus: on-beat hit while the first-dot hover ring is fully locked queues
+    //   a +1-rhythm reward 1 beat later. Cancelled if the streak breaks in the meantime.
+    if (game.ship.hoverDotRingState.completionBeatTime !== null) {
+      game.pendingDriftBonuses.push({
+        fireAt: game.perceivedBeatTime + BEAT_GRID,
+        pos: { x: hitPos.x, y: hitPos.y },
+      });
+    }
   }
   game.score += scoreEarned;
   flashScoreGain(game, scoreEarned);
+  checkBonusLife(game);
   return scoreEarned;
 };
 
@@ -250,6 +261,7 @@ export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: bool
   const scoreEarned = isOnBeatHit ? Math.round(1000 * game.beatCombo) : 500;
   game.score += scoreEarned;
   flashScoreGain(game, scoreEarned);
+  checkBonusLife(game);
   game.popups.push(popupScore(b.pos, scoreEarned));
   if (isOnBeatHit) {
     game.sound.play("comboSparkle", 1, b.pos);

@@ -44,9 +44,15 @@ export class Game implements HudElements {
   asteroids: Asteroid[] = [];
   bullets: Bullet[] = [];
   popups: Popup[] = [];
+  // on-beat hits while the first-dot hover ring is fully locked queue a +1-beat
+  //   bonus increment here. Each tick fires (or cancels) the entries whose moment has come.
+  pendingDriftBonuses: Array<{ fireAt: number; pos: { x: number; y: number } }> = [];
   score = 0;
   wave = 1;
   lives = 3;
+  // Next score threshold at which the player earns a bonus life. Advances
+  //   by BONUS_LIFE_INTERVAL each time it's crossed.
+  nextBonusLifeScore = 50000;
   state: GameState = "title";
   dyingTimer = 0;
   shake = 0;

@@ -27,6 +27,7 @@ const COMBO_POPUP_LIFE = 0.9;
 const PICKUP_POPUP_LIFE = 1.6;
 const BEAT_DEBUG_POPUP_LIFE = 1.2;
 const SCORE_POPUP_LIFE = 1.0;
+const BONUS_LIFE_POPUP_LIFE = 2.2;
 
 const POWERUP_LABEL: Record<PowerupKind, string> = {
   prong: "PRONG",
@@ -52,6 +53,23 @@ export const popupCombo = (pos: Vec, multiplier: number): Popup => ({
   shadowBlur: 14,
   decayX: 0.94, decayY: 0.94,
   popPeak: 0.375, popDuration: 0.15,
+  holdUntil: 0, fadeGain: 1.4,
+});
+
+// +1-beat reward for landing an on-beat hit while the first-dot hover ring is locked.
+//   Cyan to read distinctly from the gold multiplier popup it follows.
+export const popupDriftBonus = (pos: Vec): Popup => ({
+  pos: { x: pos.x, y: pos.y - 18 },
+  vel: { x: rand(-10, 10), y: -65 },
+  life: COMBO_POPUP_LIFE,
+  maxLife: COMBO_POPUP_LIFE,
+  text: "DRIFT BONUS",
+  font: "700 18px 'Space Grotesk', system-ui, sans-serif",
+  fill: "#9be8ff",
+  shadowColor: "rgba(120, 220, 255, 0.85)",
+  shadowBlur: 14,
+  decayX: 0.94, decayY: 0.94,
+  popPeak: 0.4, popDuration: 0.15,
   holdUntil: 0, fadeGain: 1.4,
 });
 
@@ -85,6 +103,23 @@ export const popupScore = (pos: Vec, points: number): Popup => ({
   decayX: 0.94, decayY: 0.94,
   popPeak: 0.3, popDuration: 0.15,
   holdUntil: 0, fadeGain: 1.4,
+});
+
+// "Bonus Life" floats off the ship every 50k points — white so it reads as a
+// bright milestone against the cyan/gold of the combat HUD.
+export const popupBonusLife = (pos: Vec): Popup => ({
+  pos: { x: pos.x + 26, y: pos.y - 4 },
+  vel: { x: 18, y: -28 },
+  life: BONUS_LIFE_POPUP_LIFE,
+  maxLife: BONUS_LIFE_POPUP_LIFE,
+  text: "Bonus Life",
+  font: "700 18px 'Space Grotesk', system-ui, sans-serif",
+  fill: "#ffffff",
+  shadowColor: "rgba(255, 255, 255, 0.9)",
+  shadowBlur: 16,
+  decayX: 0.96, decayY: 0.96,
+  popPeak: 0.5, popDuration: 0.2,
+  holdUntil: 0.5, fadeGain: 1,
 });
 
 // name-tag lets the player read what they grabbed even after the pickup burst clears.

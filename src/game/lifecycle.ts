@@ -235,6 +235,7 @@ export const startCalibrationIntro = (game: Game) => {
   game.score = 0;
   game.wave = 1;
   game.lives = 3;
+  game.nextBonusLifeScore = 50000;
   game.waveTransitioning = false;
   resetRunTimers(game);
   resetRunCollections(game);
@@ -312,6 +313,7 @@ export const startGame = (game: Game) => {
   game.score = 0;
   game.wave = 1;
   game.lives = 3;
+  game.nextBonusLifeScore = 50000;
   game.waveTransitioning = false;
   resetRunTimers(game);
   resetRunCollections(game);
@@ -346,6 +348,7 @@ const resetRunTimers = (game: Game) => {
   game.maxCombo = 0;
   game.maxComboThisWave = 0;
   game.firedOffBeatSinceLastBeat = false;
+  game.pendingDriftBonuses = [];
   game.slowMoTimer = 0;
   game.hasLostComboEver = false;
   game.pilotLog1Unlocked = false;

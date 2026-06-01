@@ -466,6 +466,18 @@ html:has(#sound-root), body:has(> #sound-root) {
   padding-top: 75px;
 }
 
+#overlay-subtitle {
+  margin: 0;
+  padding-left: 0.55em;
+  font-size: 17px;
+  letter-spacing: 0.55em;
+  color: #6ad7ff;
+  text-transform: uppercase;
+  font-weight: 300;
+}
+
+#overlay.paused #overlay-subtitle { display: none; }
+
 .tutorial-controls-hint {
   position: fixed;
   left: 50%;

@@ -25,9 +25,9 @@ import {
   handleGoldCrystalPickups,
 } from "./collisions";
 import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState } from "./lifecycle";
-import { syncHud, syncPowerupHud } from "./hud";
+import { syncHud, syncPowerupHud, syncComboHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
-import { updatePopups } from "./popups";
+import { updatePopups, popupDriftBonus } from "./popups";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderboardKeyRepeat } from "./scoreEntry";
@@ -299,10 +299,30 @@ const updatePlaying = (game: Game, dt: number) => {
   tickWorldEntities(game, dt, musicDt);
   game.particles.update(musicDt);
   game.popups = updatePopups(game.popups, dt);
+  tickPendingDriftBonuses(game);
   runCollisionPasses(game);
   evaluateClosedBeats(game);
   syncPowerupHud(game);
   if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning && !game.tutorialActive) advanceWave(game);
+};
+
+// Drift Bonus queue: on-beat hits made under a fully-locked first-dot hover ring
+//   schedule a +1-rhythm reward for 1 beat later. If the streak broke before the
+//   moment arrives, drop the entry — the bonus is tied to a live streak.
+const tickPendingDriftBonuses = (game: Game) => {
+  if (game.pendingDriftBonuses.length === 0) return;
+  const keep: typeof game.pendingDriftBonuses = [];
+  for (const entry of game.pendingDriftBonuses) {
+    if (game.perceivedBeatTime < entry.fireAt) { keep.push(entry); continue; }
+    if (game.beatCombo === 0) continue;
+    game.beatCombo += 1;
+    if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
+    if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
+    syncComboHud(game);
+    game.sound.playComboChime(game.beatCombo, entry.pos);
+    game.popups.push(popupDriftBonus(entry.pos));
+  }
+  game.pendingDriftBonuses = keep;
 };
 
 // slow-mo timer ticks in wall-clock so its lifespan isn't extended by its own effect.
