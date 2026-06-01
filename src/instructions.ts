@@ -1,9 +1,9 @@
-// Self-contained tutorial demo animations. Two looping canvas demos that
+// Self-contained instructions demo animations. Two looping canvas demos that
 // teach: (a) basic move-and-shoot, (b) the rhythm + trajectory-reticule
 // alignment idea. Visuals mimic the in-game style (cyan ship, hue-tinted
 // asteroids, dashed reticule, dotted trajectory) without depending on the
 // game engine — so the demos never touch live game state and can run
-// independently while the tutorial panel is open.
+// independently while the instructions panel is open.
 
 const TAU = Math.PI * 2;
 const SHIP_HUE = 195;
@@ -762,19 +762,19 @@ const makeDemo = <S>(
   };
 };
 
-export const installTutorialDemos = () => {
-  const basicsCanvas = document.getElementById("tutorial-demo-basics") as HTMLCanvasElement | null;
-  const rhythmCanvas = document.getElementById("tutorial-demo-rhythm") as HTMLCanvasElement | null;
+export const installInstructionsDemos = () => {
+  const basicsCanvas = document.getElementById("instructions-demo-basics") as HTMLCanvasElement | null;
+  const rhythmCanvas = document.getElementById("instructions-demo-rhythm") as HTMLCanvasElement | null;
   if (!basicsCanvas || !rhythmCanvas) return;
 
   const basics = makeDemo(basicsCanvas, 360, 200, initBasics, updateBasics, renderBasics);
   const rhythm = makeDemo(rhythmCanvas, 360, 220, initRhythm, updateRhythm, renderRhythm);
 
-  window.addEventListener("tutorial-open", () => {
+  window.addEventListener("instructions-open", () => {
     basics.start();
     rhythm.start();
   });
-  window.addEventListener("tutorial-close", () => {
+  window.addEventListener("instructions-close", () => {
     basics.stop();
     rhythm.stop();
   });

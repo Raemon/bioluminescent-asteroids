@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { loadBeatOffset, clampBeatOffset } from "../game/beatCalibration";
-import { isStartTutorialEnabled, setStartTutorialEnabled } from "../game/lifecycle";
 import { getRecentName, saveRecentName } from "../game/highscores";
 import {
   ACTION_LABELS,
@@ -16,9 +15,9 @@ import {
 
 // Settings panel opened by the HUD gear. Everything here is persisted player
 //   state: the rhythm-latency offset (also editable via the tap calibrator),
-//   whether the wave-1 tutorial plays, the pilot callsign, and the keyboard
-//   bindings. It talks to the game through events (so the running offset
-//   updates live) and reads the stored values directly when it opens.
+//   the pilot callsign, and the keyboard bindings. It talks to the game
+//   through events (so the running offset updates live) and reads the stored
+//   values directly when it opens.
 
 const OFFSET_MIN_MS = -200;
 const OFFSET_MAX_MS = 350;
@@ -29,18 +28,15 @@ type CaptureTarget = { action: ControlAction } | null;
 export const SettingsDialog = () => {
   const [open, setOpen] = useState(false);
   const [offsetMs, setOffsetMs] = useState(0);
-  const [tutorial, setTutorial] = useState(true);
   const [callsign, setCallsign] = useState("");
   const [bindings, setBindings] = useState<Bindings>(() => getBindings());
   const [capture, setCapture] = useState<CaptureTarget>(null);
   const captureRef = useRef<CaptureTarget>(null);
   captureRef.current = capture;
 
-  // Snapshot the persisted values each time we open so the controls reflect
-  //   reality (e.g. the tutorial flag may have flipped off at 6x rhythm).
+  // Snapshot the persisted values each time we open so the controls reflect reality.
   const openDialog = () => {
     setOffsetMs(Math.round((loadBeatOffset() ?? 0) * 1000));
-    setTutorial(isStartTutorialEnabled());
     setCallsign(getRecentName());
     setBindings(getBindings());
     setCapture(null);
@@ -98,11 +94,6 @@ export const SettingsDialog = () => {
     //   clears `settingsOpen` — the sim stays frozen across the hand-off mid-run.
     window.dispatchEvent(new CustomEvent("beat-calibrator:request"));
     closeDialog();
-  };
-
-  const toggleTutorial = (enabled: boolean) => {
-    setTutorial(enabled);
-    setStartTutorialEnabled(enabled);
   };
 
   const updateCallsign = (name: string) => {
@@ -183,13 +174,6 @@ export const SettingsDialog = () => {
               <span className="settings-ms">{offsetMs >= 0 ? "+" : "−"}{Math.abs(offsetMs)} ms</span>
             </div>
           </div>
-        </section>
-
-        <section className="settings-section">
-          <label className="settings-check">
-            <input type="checkbox" checked={tutorial} onChange={(e) => toggleTutorial(e.target.checked)} />
-            <span>Show the rhythm tutorial at the start</span>
-          </label>
         </section>
 
         <section className="settings-section">

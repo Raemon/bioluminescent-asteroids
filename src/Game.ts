@@ -20,7 +20,7 @@ import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
-import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, markFirstWaveTutorialComplete, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro, togglePause } from "./game/lifecycle";
+import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro, togglePause } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
@@ -90,6 +90,10 @@ export class Game implements HudElements {
   tutorialActive = false;
   tutorialHoverDone = false;
   tutorialFireHitDone = false;
+  // chosen at the title screen: Start button → false, Tutorial button → true.
+  //   beginFirstWaveByTutorialFlag reads this to decide whether to spawn the
+  //   guided practice rock or the regular wave 1.
+  tutorialRequested = false;
   lastBgBeatIndex = -1;
   nextBeatToEvaluate = 0;
   beatCombo = 0;
@@ -157,6 +161,7 @@ export class Game implements HudElements {
   overlayEl: HTMLElement;
   overlayTitleEl: HTMLElement;
   overlayStartEl: HTMLElement;
+  overlayStartTutorialEl: HTMLElement;
   volumeEl: HTMLInputElement;
   abortEl: HTMLButtonElement;
   killedRowEl: HTMLCanvasElement;
@@ -238,6 +243,7 @@ export class Game implements HudElements {
     this.overlayEl = hud.overlayEl;
     this.overlayTitleEl = hud.overlayTitleEl;
     this.overlayStartEl = hud.overlayStartEl;
+    this.overlayStartTutorialEl = hud.overlayStartTutorialEl;
     this.volumeEl = hud.volumeEl;
     this.abortEl = hud.abortEl;
     this.killedRowEl = hud.killedRowEl;
@@ -265,7 +271,17 @@ export class Game implements HudElements {
     });
     this.beatOffset = loadBeatOffset() ?? 0;
     this.abortEl.addEventListener("click", () => abortMission(this));
-    this.overlayStartEl.addEventListener("click", () => triggerOverlayStart(this));
+    this.overlayStartEl.addEventListener("click", () => {
+      // Start button on the title screen launches Wave 1 directly, no tutorial.
+      //   In other states (paused/gameover) triggerOverlayStart routes correctly.
+      if (this.state === "title") this.tutorialRequested = false;
+      triggerOverlayStart(this);
+    });
+    this.overlayStartTutorialEl.addEventListener("click", () => {
+      if (this.state !== "title") return;
+      this.tutorialRequested = true;
+      triggerOverlayStart(this);
+    });
     // <BeatCalibrator> (React) owns the tap-to-beat UI; the game owns the audio
     //   context it schedules clicks on, plus persistence of the result. These
     //   three events are the contract between them.
@@ -301,11 +317,9 @@ export class Game implements HudElements {
     window.addEventListener("settings:closed", () => { this.settingsOpen = false; });
     window.addEventListener("game:togglePause", () => togglePause(this));
     // <FirstWaveHint> owns its own stage-3 auto-dismiss timer; when it fades
-    //   out it asks the game to clear the stage. The tutorial is marked
-    //   complete here so future runs skip the overlay entirely.
+    //   out it asks the game to clear the stage.
     window.addEventListener("first-wave-hint:dismiss", () => {
       setFirstWaveHintStage(this, 0);
-      markFirstWaveTutorialComplete();
     });
     // stage 5 (build-to-4x) → stage 6 ("Become one with the Pulsar") closing flourish.
     window.addEventListener("first-wave-hint:advance", () => {

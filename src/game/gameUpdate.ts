@@ -156,6 +156,7 @@ const transitionToGameOver = (game: Game) => {
   game.lastRunScoreId = null;
   game.overlayTitleEl.textContent = "";
   game.overlayStartEl.classList.add("hidden");
+  game.overlayStartTutorialEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
   renderKilledRow(game, "vertical");

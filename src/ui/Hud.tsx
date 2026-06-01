@@ -81,12 +81,6 @@ export const Hud = () => (
           <path d="M2 12 L22 12 M19 9 L22 12 L19 15" />
         </svg>
       </Powerup>
-      <Powerup kind="sideEngines" title="Side Engines — Z thrusts port, X thrusts starboard">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 4 L8 10 L12 8 L16 10 Z" />
-          <path d="M2 12 L8 12 M22 12 L16 12 M5 9 L2 12 L5 15 M19 9 L22 12 L19 15" />
-        </svg>
-      </Powerup>
     </div>
     <div id="hud-right">
       <input

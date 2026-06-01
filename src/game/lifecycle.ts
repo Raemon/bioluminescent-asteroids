@@ -16,39 +16,6 @@ import { hideWaveSummary } from "./waveSummary";
 import { hideGameOverIntro, showGameOverIntro } from "./gameOverIntro";
 import { hasCalibrated, CALIBRATION_BEAT_INTENSITY } from "./beatCalibration";
 
-// once a player reaches 6x rhythm we flip this flag so future runs skip the
-//   wave-1 tutorial overlays. localStorage may be blocked (private mode) — in
-//   that case the tutorial harmlessly re-shows next session.
-const FIRST_WAVE_TUTORIAL_KEY = "pulsar.firstWaveTutorialDone.v1";
-export const isFirstWaveTutorialComplete = (): boolean => {
-  try {
-    return localStorage.getItem(FIRST_WAVE_TUTORIAL_KEY) === "1";
-  } catch {
-    return false;
-  }
-};
-export const markFirstWaveTutorialComplete = () => {
-  try {
-    localStorage.setItem(FIRST_WAVE_TUTORIAL_KEY, "1");
-  } catch {
-    // best-effort persistence; ignore quota / blocked storage.
-  }
-};
-
-// Settings-dialog mirror of the same flag: "enabled" means the wave-1 tutorial
-//   will still play on the next run. Reaching 6x rhythm calls
-//   markFirstWaveTutorialComplete(), so this naturally reads back as disabled
-//   once a pilot has graduated.
-export const isStartTutorialEnabled = (): boolean => !isFirstWaveTutorialComplete();
-export const setStartTutorialEnabled = (enabled: boolean) => {
-  try {
-    if (enabled) localStorage.removeItem(FIRST_WAVE_TUTORIAL_KEY);
-    else localStorage.setItem(FIRST_WAVE_TUTORIAL_KEY, "1");
-  } catch {
-    // best-effort persistence; ignore quota / blocked storage.
-  }
-};
-
 // React-side <FirstWaveHint> subscribes to this so the canvas/game loop stays
 //   out of layout + transitions — CSS + a single setTimeout do the dismiss work.
 export const setFirstWaveHintStage = (game: Game, stage: 0 | 1 | 2 | 3 | 4 | 5 | 6) => {
@@ -165,8 +132,9 @@ export const showTitle = (game: Game) => {
   game.betaMode = false;
   game.state = "title";
   game.overlayTitleEl.textContent = "Pulsar Drift";
-  game.overlayStartEl.textContent = "Begin";
+  game.overlayStartEl.textContent = "Start";
   game.overlayStartEl.classList.remove("hidden");
+  game.overlayStartTutorialEl.classList.remove("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.remove("gameover-layout");
   hideGameOverIntro();
@@ -280,18 +248,19 @@ export const finishCalibrationIntro = (game: Game) => {
   syncHud(game);
 };
 
-// Rookies enter the guided tutorial (single practice rock + stage 1 controls hint);
-//   veterans skip straight to the normal 3-asteroid wave. Used at both calibration
-//   hand-off and the direct startGame path so the two stay in sync.
+// Tutorial button → guided tutorial (single practice rock + stage 1 controls hint);
+//   Start button → skips straight to Wave 1's single-asteroid warm-up. Used at both
+//   calibration hand-off and the direct startGame path so the two stay in sync.
 const beginFirstWaveByTutorialFlag = (game: Game) => {
-  if (isFirstWaveTutorialComplete()) {
-    setFirstWaveHintStage(game, 0);
-    spawnWave(game);
-  } else {
+  if (game.tutorialRequested) {
     game.tutorialControlsUsed = { rotate: false, thrust: false, back: false };
     game.tutorialActive = true;
     spawnTutorialSmall(game);
     setFirstWaveHintStage(game, 1);
+  } else {
+    setFirstWaveHintStage(game, 0);
+    spawnWave(game);
+    window.dispatchEvent(new CustomEvent("controls-hint:show"));
   }
 };
 
@@ -407,6 +376,7 @@ const enterPause = (game: Game) => {
   game.overlayTitleEl.textContent = "Paused";
   game.overlayStartEl.textContent = "Resume";
   game.overlayStartEl.classList.remove("hidden");
+  game.overlayStartTutorialEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("paused");
   game.overlayEl.classList.remove("gameover-layout");
@@ -446,6 +416,7 @@ export const abortMission = (game: Game) => {
   game.abortEl.classList.add("hidden");
   game.overlayTitleEl.textContent = "";
   game.overlayStartEl.classList.add("hidden");
+  game.overlayStartTutorialEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
   renderKilledRow(game, "vertical");

@@ -7,7 +7,7 @@ import "./style.css";
 import { Game } from "./Game";
 import { loadSoundConfig } from "./soundConfig";
 import { installBetaTest } from "./game/betaTest";
-import { installTutorialDemos } from "./tutorial";
+import { installInstructionsDemos } from "./instructions";
 
 // Globally disable canvas shadowBlur — it's one of the most expensive 2D-canvas
 // operations and was hurting FPS across the game. Swallow writes on the prototype
@@ -45,7 +45,7 @@ loadSoundConfig();
 const game = new Game(canvas);
 (window as any).__game = game;
 installBetaTest(game);
-installTutorialDemos();
+installInstructionsDemos();
 
 let last = performance.now();
 // Rolling FPS — count frames over a window then publish; cheaper than smoothing per-frame dts.

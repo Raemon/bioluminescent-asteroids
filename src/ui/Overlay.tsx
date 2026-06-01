@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { TutorialPanel } from "./TutorialPanel";
+import { InstructionsPanel } from "./InstructionsPanel";
 import { ControlInfo } from "./ControlInfo";
 
 // Overlay shell: title, instructions, leaderboard, score-entry, abort-mission.
@@ -12,53 +12,53 @@ const isLocalhost = () =>
   ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
 
 export const Overlay = () => {
-  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [paused, setPaused] = useState(false);
 
   useEffect(() => {
-    const onOpen = () => setTutorialOpen(true);
-    const onClose = () => setTutorialOpen(false);
+    const onOpen = () => setInstructionsOpen(true);
+    const onClose = () => setInstructionsOpen(false);
     const onState = (e: Event) => {
       const detail = (e as CustomEvent<{ state: string }>).detail;
       setPaused(detail.state === "paused");
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && tutorialOpen) {
+      if (e.key === "Escape" && instructionsOpen) {
         e.stopPropagation();
-        closeTutorial();
+        closeInstructions();
       }
     };
-    const closeTutorial = () => {
-      setTutorialOpen(false);
-      window.dispatchEvent(new CustomEvent("tutorial-close"));
+    const closeInstructions = () => {
+      setInstructionsOpen(false);
+      window.dispatchEvent(new CustomEvent("instructions-close"));
     };
     document.addEventListener("keydown", onKey, true);
-    window.addEventListener("tutorial-open-request", onOpen);
-    window.addEventListener("tutorial-close-request", onClose);
+    window.addEventListener("instructions-open-request", onOpen);
+    window.addEventListener("instructions-close-request", onClose);
     window.addEventListener("game:state", onState as EventListener);
     return () => {
       document.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("tutorial-open-request", onOpen);
-      window.removeEventListener("tutorial-close-request", onClose);
+      window.removeEventListener("instructions-open-request", onOpen);
+      window.removeEventListener("instructions-close-request", onClose);
       window.removeEventListener("game:state", onState as EventListener);
     };
-  }, [tutorialOpen]);
+  }, [instructionsOpen]);
 
-  const openTutorial = (e: React.MouseEvent) => {
+  const openInstructions = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setTutorialOpen(true);
-    window.dispatchEvent(new CustomEvent("tutorial-open"));
+    setInstructionsOpen(true);
+    window.dispatchEvent(new CustomEvent("instructions-open"));
   };
 
-  const closeTutorial = () => {
-    setTutorialOpen(false);
-    window.dispatchEvent(new CustomEvent("tutorial-close"));
+  const closeInstructions = () => {
+    setInstructionsOpen(false);
+    window.dispatchEvent(new CustomEvent("instructions-close"));
   };
 
   return (
     <div id="overlay" className="hidden">
-      <button id="tutorial-link" type="button" onClick={openTutorial}>
-        tutorial
+      <button id="instructions-link" type="button" onClick={openInstructions}>
+        instructions
       </button>
       <a
         id="sound-link"
@@ -71,9 +71,14 @@ export const Overlay = () => {
         <h1 id="overlay-title">Pulsar Drift</h1>
         <p id="overlay-subtitle">A Meditative Rhythm Journey</p>
       </div>
-      <button id="overlay-start" type="button">
-        Begin
-      </button>
+      <div id="overlay-start-group">
+        <button id="overlay-start" type="button">
+          Start
+        </button>
+        <button id="overlay-start-tutorial" type="button">
+          Tutorial
+        </button>
+      </div>
       {paused && <ControlInfo id="overlay-pause-controls" className="overlay-pause-controls" />}
       <div id="gameover-stack" className="hidden">
         <div id="gameover-text-column">
@@ -112,7 +117,7 @@ export const Overlay = () => {
       <button id="abort-mission" type="button" className="hidden">
         Abort Mission
       </button>
-      <TutorialPanel open={tutorialOpen} onClose={closeTutorial} />
+      <InstructionsPanel open={instructionsOpen} onClose={closeInstructions} />
     </div>
   );
 };

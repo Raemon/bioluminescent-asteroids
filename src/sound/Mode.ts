@@ -46,11 +46,11 @@ const MODE_DEGREES: Record<ModeName, number[]> = {
 // opening waves and Phrygian only arrives when the pulsar is genuinely
 // close. Boundaries are inclusive low, exclusive high.
 const WAVE_MODE_THRESHOLDS: Array<{ untilWave: number; mode: ModeName }> = [
-  { untilWave: 5,  mode: "lydian" },
-  { untilWave: 12, mode: "ionian" },
-  { untilWave: 18, mode: "mixolydian" },
-  { untilWave: 24, mode: "dorian" },
-  { untilWave: 28, mode: "aeolian" },
+  { untilWave: 6,  mode: "lydian" },
+  { untilWave: 13, mode: "ionian" },
+  { untilWave: 19, mode: "mixolydian" },
+  { untilWave: 25, mode: "dorian" },
+  { untilWave: 29, mode: "aeolian" },
   { untilWave: 999, mode: "phrygian" },
 ];
 

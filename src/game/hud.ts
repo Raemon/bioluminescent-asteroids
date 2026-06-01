@@ -12,6 +12,7 @@ export type HudElements = {
   overlayEl: HTMLElement;
   overlayTitleEl: HTMLElement;
   overlayStartEl: HTMLElement;
+  overlayStartTutorialEl: HTMLElement;
   volumeEl: HTMLInputElement;
   abortEl: HTMLButtonElement;
   killedRowEl: HTMLCanvasElement;
@@ -47,6 +48,7 @@ export const bindHudElements = (): HudElements => {
     overlayEl: document.getElementById("overlay")!,
     overlayTitleEl: document.getElementById("overlay-title")!,
     overlayStartEl: document.getElementById("overlay-start")!,
+    overlayStartTutorialEl: document.getElementById("overlay-start-tutorial")!,
     volumeEl: document.getElementById("volume") as HTMLInputElement,
     abortEl: document.getElementById("abort-mission") as HTMLButtonElement,
     killedRowEl: document.getElementById("killed-row") as HTMLCanvasElement,
@@ -126,7 +128,6 @@ export const syncPowerupHud = (game: Game) => {
   setSlotActive("shield", game.ship.shieldActive);
   setSlotActive("radar", game.ship.radarActive);
   setSlotActive("longshot", game.ship.longshotActive);
-  setSlotActive("sideEngines", game.ship.sideEnginesActive);
   const slowOn = game.slowMoTimer > 0;
   setSlotActive("slow", slowOn);
   if (slowProgressEl) {

@@ -88,12 +88,12 @@ export type { BeatClaimSet };
 const FEATURE_FREE_UPGRADE_SPAWNS = false;
 
 // mid-wave window means the canister can't appear at warm-up start nor wave-clear end.
-const CANISTER_FIRST_WAVE = 2;
+const CANISTER_FIRST_WAVE = 3;
 const CANISTER_CHANCE_PER_WAVE = 1 / 3;
 const CANISTER_SPAWN_WINDOW: [number, number] = [8, 24];
 
-// wave 3+ ~1/3 chance so the saucer feels like an "event", not a fixed wave fixture.
-const ALIEN_FIRST_WAVE = 3;
+// wave 4+ ~1/3 chance so the saucer feels like an "event", not a fixed wave fixture.
+const ALIEN_FIRST_WAVE = 4;
 const ALIEN_CHANCE_PER_WAVE = 1 / 3;
 const ALIEN_SPAWN_WINDOW: [number, number] = [5, 22];
 
@@ -102,30 +102,30 @@ const ALIEN_SPAWN_WINDOW: [number, number] = [5, 22];
 const HEADLINE_EVENT_DAMPEN = 0.35;
 
 // tink stays off the unlock order so it reads as a treat, not a guaranteed sound.
-const TINK_FIRST_WAVE = 3;
+const TINK_FIRST_WAVE = 4;
 const TINK_CHANCE_PER_WAVE = 1 / 3;
 
 // Gold-crystal asteroid: a "normal" rock with a faintly visible embedded
 // gold gem. Killing it drops a collectible GoldCrystal pickup plus a small
-// rubble cloud. Wave 3 is the introductory wave — exactly one gem rock
-// guaranteed so the player sees the mechanic. Wave 4+, each spawned normal
+// rubble cloud. Wave 4 is the introductory wave — exactly one gem rock
+// guaranteed so the player sees the mechanic. Wave 5+, each spawned normal
 // rock has a flat 25% chance to be a gem rock; lets the density scale with
 // wave count without further tuning.
-const GOLD_CRYSTAL_FIRST_WAVE = 3;
+const GOLD_CRYSTAL_FIRST_WAVE = 4;
 const GOLD_CRYSTAL_PER_SPAWN_CHANCE = 0.25;
 
 // foreshadow wave swells the looming planet; boss wave hides it and spawns the boss instead.
-const BOSS_WAVES = [10] as const;
-const BOSS_FORESHADOW_WAVES = [9] as const;
+const BOSS_WAVES = [11] as const;
+const BOSS_FORESHADOW_WAVES = [10] as const;
 
-// comet enters at wave 2 (alongside bassteroids) so its melody always weaves over a bass bed.
-const COMET_FIRST_WAVE = 2;
+// comet enters at wave 3 (alongside bassteroids) so its melody always weaves over a bass bed.
+const COMET_FIRST_WAVE = 3;
 const COMET_CHANCE_PER_WAVE = 0.6;
 const COMET_SPAWN_WINDOW: [number, number] = [4, 16];
 const COMET_LIFETIME: [number, number] = [22, 30];
 
-// gated to wave 3+ so early-game stays focused on core mechanics before the field reshapes.
-const SHOCKWAVE_FIRST_WAVE = 3;
+// gated to wave 4+ so early-game stays focused on core mechanics before the field reshapes.
+const SHOCKWAVE_FIRST_WAVE = 4;
 const SHOCKWAVE_CHANCE_PER_WAVE = 1 / 20;
 const SHOCKWAVE_SPAWN_WINDOW: [number, number] = [6, 22];
 
@@ -133,11 +133,11 @@ const SHOCKWAVE_SPAWN_WINDOW: [number, number] = [6, 22];
 export const isBossWave = (wave: number): boolean => (BOSS_WAVES as readonly number[]).includes(wave);
 export const isBossForeshadowWave = (wave: number): boolean => (BOSS_FORESHADOW_WAVES as readonly number[]).includes(wave);
 
-// ramp 0.08 → 1.0 across waves 1–30; player reaches the pulsar by wave 30 so rumble peaks.
+// ramp 0.08 → 1.0 across waves 1–31; player reaches the pulsar by wave 31 so rumble peaks.
 export const updateBgBeatIntensity = (game: Game) => {
   // a deliberate per-wave set wins over any in-flight calibration→play loudness ramp.
   game.beatIntensityRamp = null;
-  const ramp = Math.max(0, Math.min(1, (game.wave - 1) / 29));
+  const ramp = Math.max(0, Math.min(1, (game.wave - 1) / 30));
   game.sound.bgBeatIntensity = 0.08 + ramp * 0.92;
 };
 
@@ -153,8 +153,8 @@ export const alignBassBeat = (game: Game, asteroid: Asteroid) => {
 
 // early waves bias to small/medium so the player isn't crushed by a 4-HP saucer's debut.
 export const rollAlienSize = (wave: number): AlienSize => {
-  if (wave < 5) return Math.random() < 0.7 ? "small" : "medium";
-  if (wave < 9) {
+  if (wave < 6) return Math.random() < 0.7 ? "small" : "medium";
+  if (wave < 10) {
     const r = Math.random();
     if (r < 0.45) return "small";
     if (r < 0.85) return "medium";
@@ -168,13 +168,13 @@ export const rollAlienSize = (wave: number): AlienSize => {
 
 // paired-wave intro (one bass, then both, then decorators) trains the player gradually.
 export const activeSpecialsForWave = (game: Game, wave: number): AsteroidKind[] => {
-  if (wave < 2) return [];
-  if (wave === 2) return [game.bassOrder[0]];
-  if (wave === 3) return [game.bassOrder[1]];
+  if (wave < 3) return [];
+  if (wave === 3) return [game.bassOrder[0]];
+  if (wave === 4) return [game.bassOrder[1]];
   const specials: AsteroidKind[] = [game.bassOrder[0], game.bassOrder[1]];
   const lateUnlockOrder: AsteroidKind[] = ["chime", "bell", "warble", game.bassOrder[2], game.bassOrder[3]];
   // pair waves hold each new sound steady so the player has time to learn it before the next.
-  const lateCount = Math.max(0, Math.min(lateUnlockOrder.length, Math.floor((wave - 4) / 2)));
+  const lateCount = Math.max(0, Math.min(lateUnlockOrder.length, Math.floor((wave - 5) / 2)));
   for (let i = 0; i < lateCount; i++) specials.push(lateUnlockOrder[i]);
   return specials;
 };
@@ -367,12 +367,13 @@ const rollHeadlineEvents = (game: Game) => {
   }
 };
 
-// 3, 3, 4, 4, 5, 5... per-wave count gives the player a wave to consolidate before density bumps.
+// Wave 1: a single large rock — a gentle warm-up before density ramps.
+// Waves 2+: 3, 3, 4, 4, 5, 5... per-wave count gives the player a wave to consolidate before density bumps.
 //   A single `claimed` set is shared across the wave's spawns (including the
 //   tink roll below — see spawnWave) so each rock targets a distinct beat
 //   slot, giving the player a sustainable beat-by-beat target procession.
 const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet) => {
-  const totalCount = 3 + Math.floor((game.wave - 1) / 2);
+  const totalCount = game.wave === 1 ? 1 : 3 + Math.floor((game.wave - 2) / 2);
   const activeSpecials = activeSpecialsForWave(game, game.wave);
   const normalCount = Math.max(0, totalCount - activeSpecials.length);
 

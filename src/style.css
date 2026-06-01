@@ -511,7 +511,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 #overlay.hidden { display: none; }
 
 #sound-link,
-#tutorial-link {
+#instructions-link {
   position: absolute;
   top: 22px;
   pointer-events: auto;
@@ -529,18 +529,18 @@ html:has(#sound-root), body:has(> #sound-root) {
   cursor: pointer;
 }
 
-#tutorial-link { left: 28px; }
+#instructions-link { left: 28px; }
 #sound-link { left: 135px; }
 
 #sound-link.hidden { display: none; }
 
 #sound-link:hover,
-#tutorial-link:hover {
+#instructions-link:hover {
   color: #6ad7ff;
   border-color: rgba(106, 215, 255, 0.6);
 }
 
-#tutorial-panel {
+#instructions-panel {
   position: fixed;
   inset: 0;
   z-index: 20;
@@ -555,9 +555,9 @@ html:has(#sound-root), body:has(> #sound-root) {
   overflow-y: auto;
 }
 
-#tutorial-panel.hidden { display: none; }
+#instructions-panel.hidden { display: none; }
 
-#tutorial-scroll {
+#instructions-scroll {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -567,7 +567,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   padding-bottom: 24px;
 }
 
-.tutorial-demo {
+.instructions-demo {
   display: block;
   width: 360px;
   height: 200px;
@@ -577,12 +577,12 @@ html:has(#sound-root), body:has(> #sound-root) {
   background: transparent;
 }
 
-#tutorial-demo-rhythm { height: 220px; }
+#instructions-demo-rhythm { height: 220px; }
 
 /* 2x2 layout: text on one side, animation on the other. Sections alternate
    sides so the eye zig-zags down the panel. */
-.tutorial-section--text-left,
-.tutorial-section--text-right {
+.instructions-section--text-left,
+.instructions-section--text-right {
   display: flex;
   align-items: center;
   gap: 28px;
@@ -590,30 +590,30 @@ html:has(#sound-root), body:has(> #sound-root) {
   text-align: left;
 }
 
-.tutorial-section .tutorial-text {
+.instructions-section .instructions-text {
   flex: 1;
   min-width: 0;
 }
 
-.tutorial-section--text-left  .tutorial-text { text-align: right; }
-.tutorial-section--text-right .tutorial-text { text-align: left; }
+.instructions-section--text-left  .instructions-text { text-align: right; }
+.instructions-section--text-right .instructions-text { text-align: left; }
 
-.tutorial-section--text-left  h3,
-.tutorial-section--text-right h3 { margin-bottom: 10px; }
+.instructions-section--text-left  h3,
+.instructions-section--text-right h3 { margin-bottom: 10px; }
 
 @media (max-width: 720px) {
-  .tutorial-section--text-left,
-  .tutorial-section--text-right {
+  .instructions-section--text-left,
+  .instructions-section--text-right {
     flex-direction: column;
     text-align: center;
   }
-  .tutorial-section--text-left  .tutorial-text,
-  .tutorial-section--text-right .tutorial-text { text-align: center; }
-  .tutorial-demo { width: 100%; max-width: 360px; height: auto; aspect-ratio: 360 / 200; }
-  #tutorial-demo-rhythm { aspect-ratio: 360 / 220; }
+  .instructions-section--text-left  .instructions-text,
+  .instructions-section--text-right .instructions-text { text-align: center; }
+  .instructions-demo { width: 100%; max-width: 360px; height: auto; aspect-ratio: 360 / 200; }
+  #instructions-demo-rhythm { aspect-ratio: 360 / 220; }
 }
 
-#tutorial-panel h2 {
+#instructions-panel h2 {
   font-weight: 700;
   font-size: clamp(22px, 3.5vw, 36px);
   letter-spacing: 0.3em;
@@ -623,12 +623,12 @@ html:has(#sound-root), body:has(> #sound-root) {
   margin: 0 0 8px;
 }
 
-.tutorial-section {
+.instructions-section {
   max-width: 620px;
   text-align: center;
 }
 
-.tutorial-section h3 {
+.instructions-section h3 {
   font-size: 13px;
   letter-spacing: 0.32em;
   color: #6ad7ff;
@@ -637,7 +637,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   font-weight: 500;
 }
 
-.tutorial-section p {
+.instructions-section p {
   font-size: 14px;
   line-height: 1.6;
   letter-spacing: 0.06em;
@@ -647,7 +647,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   margin: 0;
 }
 
-.tutorial-section em {
+.instructions-section em {
   font-style: normal;
   color: #d8f3ff;
   letter-spacing: 0.12em;
@@ -655,14 +655,14 @@ html:has(#sound-root), body:has(> #sound-root) {
   font-size: 12px;
 }
 
-#tutorial-dismiss {
+#instructions-dismiss {
   margin-top: 18px;
   font-size: 11px !important;
   letter-spacing: 0.28em !important;
   color: rgba(106, 215, 255, 0.55) !important;
 }
 
-#tutorial-close {
+#instructions-close {
   position: absolute;
   top: 22px;
   right: 28px;
@@ -679,7 +679,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   transition: color 0.15s ease, border-color 0.15s ease;
 }
 
-#tutorial-close:hover {
+#instructions-close:hover {
   color: #6ad7ff;
   border-color: rgba(106, 215, 255, 0.6);
 }
@@ -717,10 +717,18 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 .overlay-pause-controls .key { font-size: 11px; padding: 3px 8px; }
 
+#overlay-start-group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 60px;
+}
+
 #overlay-start {
   animation: pulse 2s ease-in-out infinite;
   pointer-events: auto;
-  margin-top: 60px;
   cursor: pointer;
   padding: 12px 36px;
   font: inherit;
@@ -740,6 +748,29 @@ html:has(#sound-root), body:has(> #sound-root) {
   color: #fff;
   border-color: rgba(180, 235, 255, 0.8);
 }
+
+#overlay-start-tutorial {
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 12px 28px;
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(216, 243, 255, 0.7);
+  background: transparent;
+  border: 1px solid rgba(106, 215, 255, 0.25);
+  border-radius: 4px;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+#overlay-start-tutorial:hover {
+  background: rgba(106, 215, 255, 0.1);
+  color: #fff;
+  border-color: rgba(180, 235, 255, 0.6);
+}
+
+#overlay-start-tutorial.hidden { display: none; }
 
 .key {
   display: inline-block;

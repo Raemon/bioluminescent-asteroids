@@ -7,7 +7,7 @@ import { Vec } from "../vec";
 import { spawnGoldCrystalAt } from "../GoldCrystal";
 import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
-import { markFirstWaveTutorialComplete, setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
+import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
 import { popupCombo, popupScore } from "./popups";
 import { checkBonusLife } from "./bonusLife";
@@ -84,14 +84,12 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
   }
 };
 
-// 6x marks the tutorial done forever — backstop for any case where the
-//   player blasts past the stage progression while a hint is still up.
-//   Stage 4 is the closing flourish that auto-dismisses on its own timer;
-//   don't cut it short.
+// 6x is the backstop for the case where the player blasts past the stage
+//   progression while a hint is still up. Stage 6 is the closing flourish
+//   that auto-dismisses on its own timer; don't cut it short.
 const advanceFirstWaveHintOnCombo = (game: Game) => {
   if (game.beatCombo >= 6 && game.firstWaveHintStage !== 0 && game.firstWaveHintStage !== 6) {
     setFirstWaveHintStage(game, 0);
-    markFirstWaveTutorialComplete();
   }
 };
 
