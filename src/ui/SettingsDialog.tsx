@@ -143,39 +143,6 @@ export const SettingsDialog = () => {
 
         <section className="settings-section">
           <div className="settings-section-head">
-            <span className="settings-section-title">Rhythm</span>
-            <button type="button" className="settings-link" onClick={resync}>Resync the beat ▸</button>
-          </div>
-          <div className="settings-row">
-            <div className="settings-label">
-              Latency
-              <span className="settings-hint">how late your taps land vs. the beat you hear</span>
-            </div>
-            <div className="settings-latency">
-              <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs - OFFSET_STEP_MS)}>−</button>
-              <input
-                type="range"
-                min={OFFSET_MIN_MS}
-                max={OFFSET_MAX_MS}
-                step={OFFSET_STEP_MS}
-                value={offsetMs}
-                onChange={(e) => applyOffset(Number(e.target.value))}
-              />
-              <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs + OFFSET_STEP_MS)}>+</button>
-              <span className="settings-ms">{offsetMs >= 0 ? "+" : "−"}{Math.abs(offsetMs)} ms</span>
-            </div>
-          </div>
-          <label className="settings-check">
-            <input type="checkbox" checked={tutorial} onChange={(e) => toggleTutorial(e.target.checked)} />
-            <span>Show the rhythm tutorial at the start</span>
-            <span className="settings-hint settings-hint--inline">turns itself off once you reach 6× rhythm</span>
-          </label>
-        </section>
-
-        <div className="settings-divider" />
-
-        <section className="settings-section">
-          <div className="settings-section-head">
             <span className="settings-section-title">Pilot</span>
           </div>
           <label className="settings-field">
@@ -192,7 +159,38 @@ export const SettingsDialog = () => {
           </label>
         </section>
 
-        <div className="settings-divider" />
+        <section className="settings-section">
+          <div className="settings-section-head">
+            <span className="settings-section-title">Rhythm Latency Calibration</span>
+            <button type="button" className="settings-link" onClick={resync}>Resync the beat ▸</button>
+          </div>
+          <div className="settings-row">
+            <div className="settings-latency">
+              <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs - OFFSET_STEP_MS)}>−</button>
+              <input
+                type="range"
+                min={OFFSET_MIN_MS}
+                max={OFFSET_MAX_MS}
+                step={OFFSET_STEP_MS}
+                value={offsetMs}
+                onChange={(e) => applyOffset(Number(e.target.value))}
+              />
+              <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs + OFFSET_STEP_MS)}>+</button>
+              <span className="settings-ms">{offsetMs >= 0 ? "+" : "−"}{Math.abs(offsetMs)} ms</span>
+            </div>
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <div className="settings-section-head">
+            <span className="settings-section-title">Tutorial</span>
+          </div>
+          <label className="settings-check">
+            <input type="checkbox" checked={tutorial} onChange={(e) => toggleTutorial(e.target.checked)} />
+            <span>Show the rhythm tutorial at the start</span>
+          </label>
+          <span className="settings-hint">turns itself off once you reach 6× rhythm</span>
+        </section>
 
         <section className="settings-section">
           <div className="settings-section-head">
