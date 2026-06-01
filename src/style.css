@@ -524,9 +524,8 @@ html:has(#sound-root), body:has(> #sound-root) {
   cursor: pointer;
 }
 
-#sound-link { left: 28px; }
-/* shifted left of the fixed settings gear in the corner */
-#tutorial-link { right: 72px; }
+#tutorial-link { left: 28px; }
+#sound-link { left: 135px; }
 
 #sound-link.hidden { display: none; }
 
@@ -2153,4 +2152,4 @@ html:has(#sound-root), body:has(> #sound-root) {
   transition: opacity 500ms ease;
 }
 
-.tch-ctrl.used { opacity: 0.2; }
+.tch-ctrl.used { opacity: 0.35; }
