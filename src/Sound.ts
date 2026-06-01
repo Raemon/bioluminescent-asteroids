@@ -299,8 +299,6 @@ export class Sound {
   // reused across all start/stop cycles for a given variation.
   haloMusicBuffers: Map<string, AudioBuffer> = new Map();
   private haloMusicLoading: Map<string, Promise<AudioBuffer | null>> = new Map();
-  toneEngine: ToneEngineNodes | null = null;
-
   // Pilot's Log vocal one-shots. Decoded once on first play, cached forever.
   // Voiced (ElevenLabs) + post-processed to scratchy astronaut-radio character;
   // mixed dry to bakedOut so the comp/limiter/reverb master chain doesn't
@@ -380,11 +378,10 @@ export class Sound {
     this.ctx = new AC();
     this.master = this.ctx.createGain();
     this.master.gain.value = Sound.MASTER_BASE_GAIN * this.volume;
-    // Native compressor + brick-wall limiter mirroring Tone's master chain
-    // (Compressor: -18/3/0.01/0.18/12; Limiter: -1/20/0.003/0.01). Used in
-    // prod where Tone isn't loaded and as a fallback in dev before the Tone
-    // engine resolves. wireMasterToBus disconnects master from this path
-    // when Tone takes over.
+    // Native compressor + brick-wall limiter mirroring the settings Tone's
+    // master chain used to apply (Compressor: -18/3/0.01/0.18/12; Limiter:
+    // -1/20/0.003/0.01). Runtime is identical in dev and prod — Tone is only
+    // loaded during the dev-only bake render in bakeSound.
     const masterCompressor = this.ctx.createDynamicsCompressor();
     masterCompressor.threshold.value = -18;
     masterCompressor.ratio.value = 3;
@@ -406,19 +403,16 @@ export class Sound {
     this.bakedOut = this.ctx.createGain();
     this.bakedOut.gain.value = Sound.BAKED_BASE_GAIN * this.volume;
     this.bakedOut.connect(this.ctx.destination);
-    // Dev-only: build the Tone master bus + per-voice synths so the live
-    // bake fallback works when an MP3 isn't on disk. In prod ensureToneEngine
-    // early-returns and Tone is never imported (dynamic import is tree-shaken).
-    void this.ensureToneEngine();
     // Pre-fill the noise-buffer cache so the first bassteroid/comet spawn
     // doesn't pay the 6-8s buffer allocation mid-gameplay. AudioBuffers can't
     // be created before the context exists, so this is the earliest we can do
     // it — runs once, on first user interaction.
     this.prewarmNoiseBuffers();
-    // Kick off the baked-mp3 fetch + decode for every Tone-engine sound. The
-    // title screen awaits bakedCacheReady() before letting the player start
-    // so playBaked is guaranteed to hit cache. Independent of the Tone-engine
-    // boot above so it still runs on browsers where Tone init failed.
+    // Kick off the baked-mp3 fetch + decode for every voice that has a baked
+    // recipe. The title screen awaits bakedCacheReady() before letting the
+    // player start so playBaked is guaranteed to hit cache. In dev, missing
+    // mp3s fall through to a live Tone render via bakeSound and are POSTed
+    // back to disk so prod fetches stay 200-only.
     this.warmBakedCache();
   }
 
@@ -431,238 +425,11 @@ export class Sound {
     for (const d of durations) this.makeNoiseBuffer(d);
   }
 
-  // Lazy-build the Tone.js master bus and shared synths. Dev-only — in prod
-  // every sound plays from the baked-mp3 cache, so Tone is dynamic-imported
-  // and never pulled into the prod bundle.
-  async ensureToneEngine(): Promise<ToneEngineNodes | null> {
-    if (this.toneEngine) return this.toneEngine;
-    if (this.toneEngineFailed) return null;
-    if (!import.meta.env.DEV) return null;
-    this.ensureContext();
-    if (!this.ctx) return null;
-    try {
-      const Tone = await loadTone();
-      return this.buildToneEngine(Tone);
-    } catch {
-      // Browser stubbed Web Audio or Tone setup threw — disable further
-      // attempts so we don't retry on every fire. Baked-mp3 playback still
-      // works because it doesn't touch the Tone graph.
-      this.toneEngineFailed = true;
-      this.toneEngine = null;
-      return null;
-    }
-  }
-
-  private toneEngineFailed = false;
-
-  private buildToneEngine(Tone: ToneModule): ToneEngineNodes | null {
-    if (!this.ctx) return null;
-
-    // Adopt our existing AudioContext. Tone wraps it; Tone destination ===
-    // ctx.destination so we can either route through Tone or stay on the
-    // raw WebAudio path within the same session.
-    Tone.setContext(this.ctx as unknown as BaseAudioContext as never);
-
-    // Master chain: dry + wet fx, summed → compressor → limiter → out.
-    // Compressor glues transients together; limiter is a brick-wall safety
-    // net so layered hits never clip even when many sources fire at once.
-    const toneMaster = new Tone.Gain(0.7);
-    const compressor = new Tone.Compressor({
-      threshold: -18,
-      ratio: 3,
-      attack: 0.01,
-      release: 0.18,
-      knee: 12,
-    });
-    const limiter = new Tone.Limiter(-1);
-    toneMaster.connect(compressor);
-    compressor.connect(limiter);
-    limiter.toDestination();
-
-    // Shared fx send. Voices either connect dry to toneMaster or wet via
-    // reverbSend → chorus → reverb → toneMaster. Decay shortened from 3.5s to
-    // 1.5s — convolution cost scales linearly with decay length, and 1.5s
-    // still gives comet bells a clear tail without the smear on rhythmic
-    // bass-grid hits. Wet level controlled at reverbSend so the reverb itself
-    // doesn't convolve the full signal at unity.
-    const reverbSend = new Tone.Gain(0.5);
-    const chorus = new Tone.Chorus({
-      frequency: 0.6,
-      delayTime: 3.5,
-      depth: 0.6,
-      type: "sine",
-      spread: 180,
-      wet: 0.5,
-    }).start();
-    const reverb = new Tone.Reverb({ decay: 1.5, preDelay: 0.02, wet: 1 });
-    reverbSend.connect(chorus);
-    chorus.connect(reverb);
-    reverb.connect(toneMaster);
-
-    // Hand-built voice bus inputs. Sound.master (the WebAudio GainNode every
-    // hand-built voice writes into) connects to both: dry sums straight into
-    // toneMaster for presence; wet sends to the fx bus. The wet level is
-    // intentionally subtle (~25%) so the percussion family (bass kit, bg-beat)
-    // doesn't get washed out in reverb. Comet voices already have a heavier
-    // wet send via their own dedicated Tone synth path.
-    const voiceBusDry = new Tone.Gain(0.95);
-    const voiceBusWet = new Tone.Gain(0.25);
-    voiceBusDry.connect(toneMaster);
-    voiceBusWet.connect(reverbSend);
-
-    // Comet melody voice: FM synth tuned for an unsettling, hollow timbre.
-    // Inharmonic harmonicity (2.41 ≈ a sour just-out-of-tune interval) plus
-    // a sawtooth modulator give every note a slight metallic warble that
-    // reads as "not quite right" against the bass kit's clean tonal bed.
-    // Slow attack and long release let notes overlap into a fog rather than
-    // landing as discrete bells.
-    const cometMelodySynth = new Tone.PolySynth(Tone.FMSynth, {
-      harmonicity: 2.41,
-      modulationIndex: 11,
-      oscillator: { type: "sine" },
-      modulation: { type: "sawtooth" },
-      envelope: { attack: 0.05, decay: 0.6, sustain: 0.35, release: 3.4 },
-      modulationEnvelope: { attack: 0.04, decay: 0.5, sustain: 0.1, release: 2.0 },
-      volume: -12,
-    });
-    // Dry path (small amount, for presence) and wet (lush tail).
-    const cometDry = new Tone.Gain(0.35);
-    const cometWet = new Tone.Gain(0.9);
-    cometMelodySynth.connect(cometDry);
-    cometMelodySynth.connect(cometWet);
-    cometDry.connect(toneMaster);
-    cometWet.connect(reverbSend);
-
-    // Helper to wire a synth (or chain end) into the bus with a dry/wet split.
-    // Returns the synth so chained `.set(...)` style calls still work upstream.
-    const wireToBus = <T extends Tone.ToneAudioNode>(node: T, dry = 1.0, wet = 0.18): T => {
-      const dryG = new Tone.Gain(dry);
-      const wetG = new Tone.Gain(wet);
-      node.connect(dryG);
-      node.connect(wetG);
-      dryG.connect(toneMaster);
-      wetG.connect(reverbSend);
-      return node;
-    };
-
-    // Background pulsar-approach beat. Tone's MembraneSynth is purpose-built
-    // for kick-style hits — pitched body that sweeps down, with adjustable
-    // decay and "octaves" (sweep range) we tune for the bgBeat's signature
-    // deep heartbeat character.
-    const bgBeatKick = wireToBus(new Tone.MembraneSynth({
-      pitchDecay: 0.06,
-      octaves: 6,
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.001, decay: 0.45, sustain: 0, release: 0.5 },
-      volume: -6,
-    }), 1, 0.1);
-
-    // Bassteroid kick on C2 — same MembraneSynth shape, slightly faster pitch
-    // decay so the body reads as percussive rather than melodic.
-    const bassKick = wireToBus(new Tone.MembraneSynth({
-      pitchDecay: 0.04,
-      octaves: 4,
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.001, decay: 0.32, sustain: 0, release: 0.3 },
-      volume: -4,
-    }));
-
-    // Bassteroid boom (F2/IV chord tone). Longer pitch tail and a touch more
-    // sustain than the kick so the boom sits deeper in the mix.
-    const bassBoom = wireToBus(new Tone.MembraneSynth({
-      pitchDecay: 0.08,
-      octaves: 5,
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.002, decay: 0.42, sustain: 0, release: 0.4 },
-      volume: -4,
-    }));
-
-    // Bassteroid pluck (G2 sub-bass with closing filter). MonoSynth gives us a
-    // proper voice with built-in lowpass that the envelope can sweep.
-    const bassPluck = wireToBus(new Tone.MonoSynth({
-      oscillator: { type: "sawtooth" },
-      filter: { type: "lowpass", Q: 6, rolloff: -24 },
-      envelope: { attack: 0.005, decay: 0.18, sustain: 0, release: 0.25 },
-      filterEnvelope: { attack: 0.005, decay: 0.18, sustain: 0.1, release: 0.3, baseFrequency: 90, octaves: 3 },
-      volume: -8,
-    }));
-
-    // Bassteroid snap — metal synth for the percussive bandpassed snap timbre.
-    const bassSnap = wireToBus(new Tone.MetalSynth({
-      envelope: { attack: 0.001, decay: 0.12, release: 0.15 },
-      harmonicity: 5.1,
-      modulationIndex: 16,
-      resonance: 1700,
-      octaves: 0.7,
-      volume: -16,
-    }), 1, 0.25);
-
-    // Rhythm-shot pluck. Two voices: a MembraneSynth body for the C3 thump
-    // and a PluckSynth for the bright pluck-noise character at attack.
-    const fireBeatBody = wireToBus(new Tone.MembraneSynth({
-      pitchDecay: 0.04,
-      octaves: 3,
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.002, decay: 0.22, sustain: 0, release: 0.25 },
-      volume: -8,
-    }));
-    const fireBeatPluck = wireToBus(new Tone.PluckSynth({
-      attackNoise: 0.9,
-      dampening: 3200,
-      resonance: 0.7,
-      volume: -16,
-    }), 1, 0.25);
-
-    // Chime (bright sparkle) — PolySynth around FMSynth gives a bell-like
-    // partials with controlled inharmonicity.
-    const chimeSynth = wireToBus(new Tone.PolySynth(Tone.FMSynth, {
-      harmonicity: 3.5,
-      modulationIndex: 8,
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.002, decay: 0.4, sustain: 0, release: 0.9 },
-      modulationEnvelope: { attack: 0.005, decay: 0.3, sustain: 0, release: 0.6 },
-      volume: -12,
-    }), 0.6, 0.7);
-
-    // Powerup arpeggio — sine PolySynth with bright attack, heavy reverb
-    // since this is a celebratory cue and shouldn't sit dry.
-    const powerupSynth = wireToBus(new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.005, decay: 0.2, sustain: 0.1, release: 0.45 },
-      volume: -10,
-    }), 0.5, 0.7);
-
-    // Wave-clear chord — sine pad PolySynth, also heavily wet for celebration.
-    const waveClearSynth = wireToBus(new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.02, decay: 0.3, sustain: 0.2, release: 0.7 },
-      volume: -10,
-    }), 0.5, 0.7);
-
-    this.toneEngine = {
-      toneMaster,
-      reverbSend,
-      reverb,
-      chorus,
-      compressor,
-      limiter,
-      voiceBusDry,
-      voiceBusWet,
-      cometMelodySynth,
-      bgBeatKick,
-      bassKick,
-      bassBoom,
-      bassPluck,
-      bassSnap,
-      fireBeatBody,
-      fireBeatPluck,
-      chimeSynth,
-      powerupSynth,
-      waveClearSynth,
-    };
-    this.wireMasterToBus();
-    return this.toneEngine;
-  }
+  // ── Runtime Tone engine removed ────────────────────────────────────────
+  // Live playback no longer touches Tone — every voice is either a baked
+  // MP3 or a hand-built WebAudio graph routed through the native master
+  // compressor + limiter set up in ensureContext. Tone is still loaded by
+  // bakeSound (dev-only) to render fresh MP3s when a recipe changes.
 
   // Kick off offline-render for every recipe (and every quantized pitch
   // variant) we know about. Fire-and-forget; results land in bakedBuffers as
@@ -772,17 +539,6 @@ export class Sound {
       this.bakingInFlight.delete(key);
       this.bakedLoadStates.set(key, "failed");
     });
-  }
-
-  // Wire Sound.master into the Tone bus. Master sums every hand-built
-  // WebAudio voice; it taps into voiceBusDry for presence and voiceBusWet
-  // for the shared reverb tail. The Tone chain ends at ctx.destination via
-  // the limiter.
-  private wireMasterToBus() {
-    if (!this.ctx || !this.master || !this.toneEngine) return;
-    this.master.disconnect();
-    this.master.connect(this.toneEngine.voiceBusDry.input as AudioNode);
-    this.master.connect(this.toneEngine.voiceBusWet.input as AudioNode);
   }
 
   // ── Pre-rendered Tone one-shots ─────────────────────────────────────────
@@ -1005,8 +761,8 @@ export class Sound {
     // Per-sound recipe: build synth, trigger at offline time 0.
     switch (name) {
       case "fireBeat": {
-        const body = wire(new Tone.MembraneSynth({ pitchDecay: 0.03, octaves: 3, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.18, sustain: 0, release: 0.2 }, volume: -6 }), 1, 0.12);
-        const pluck = wire(new Tone.PluckSynth({ attackNoise: 0.5, dampening: 4000, resonance: 0.7 }), 0.9, 0.25);
+        const body = wire(new Tone.MembraneSynth({ pitchDecay: 0.04, octaves: 3, oscillator: { type: "sine" }, envelope: { attack: 0.002, decay: 0.22, sustain: 0, release: 0.25 }, volume: -8 }), 1, 0.18);
+        const pluck = wire(new Tone.PluckSynth({ attackNoise: 0.9, dampening: 3200, resonance: 0.7, volume: -16 }), 1, 0.25);
         body.triggerAttackRelease("C3", "16n", 0, 0.9);
         pluck.triggerAttack("G4", 0.001);
         break;
@@ -1039,7 +795,7 @@ export class Sound {
         break;
       }
       case "bassBoom": {
-        const boom = wire(new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 5, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.45, sustain: 0.05, release: 0.4 }, volume: -3 }), 1, 0.18);
+        const boom = wire(new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 5, oscillator: { type: "sine" }, envelope: { attack: 0.002, decay: 0.42, sustain: 0, release: 0.4 }, volume: -4 }), 1, 0.18);
         boom.triggerAttackRelease(87.3 * pitchRatio, "8n", 0, 0.9);
         break;
       }
@@ -1049,7 +805,7 @@ export class Sound {
         break;
       }
       case "bassSnap": {
-        const snap = wire(new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.1 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5, volume: -16 }), 1, 0.18);
+        const snap = wire(new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.12, release: 0.15 }, harmonicity: 5.1, modulationIndex: 16, resonance: 1700, octaves: 0.7, volume: -16 }), 1, 0.25);
         snap.triggerAttackRelease("C3", "16n", 0, 0.7);
         break;
       }
