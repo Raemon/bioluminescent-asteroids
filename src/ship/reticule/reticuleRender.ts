@@ -29,10 +29,14 @@ const HALF_BEAT_FRACTION = 0.5;
 // hoverDotRing persists the hover-start timestamp so the ring fills one dot per 8th-note across frames.
 type ReticuleState = {
   trajectoryTracks: TrajectoryTrackMap;
-  hoverDotRing: { hoverStartBeatTime: number | null };
+  hoverDotRing: {
+    hoverStartBeatTime: number | null;
+    completionBeatTime: number | null;
+  };
 };
 
-// one arc per 8th-note, full ring at 16 × eighthGrid (=4s at the default 0.5s quarter-grid).
+// 16 arcs filled evenly across HOVER_RING_FILL_SEC — completion lines up with the tutorial
+// gate (fill + completion-flare animation = TUTORIAL_HOVER_SEC).
 const HOVER_DOT_COUNT = 16;
 // each slot is TAU/16; arc fills half the slot so arc-length == gap-length around the ring.
 const HOVER_ARC_SWEEP = (TAU / HOVER_DOT_COUNT) * 0.5;
@@ -40,13 +44,24 @@ const HOVER_ARC_LINE_WIDTH = 1.5;
 // sits just past the crosshair tips so arcs don't crowd the aim disc.
 const HOVER_DOT_RING_RADIUS = 26;
 const HOVER_DOT_BUILDING_ALPHA = 0.45;
-// long enough that the arc visibly sweeps out from 0 to full length before settling.
-const HOVER_ARC_FADE_IN_SEC = 0.22;
+// full ring fills in 1.0s; per-arc fade-in is just under one slot so the leading edge sweeps
+// before the next arc starts. Completion flare runs for FLARE_SEC afterward.
+const HOVER_RING_FILL_SEC = 1.0;
+const HOVER_RING_SLOT_SEC = HOVER_RING_FILL_SEC / HOVER_DOT_COUNT;
+const HOVER_ARC_FADE_IN_SEC = HOVER_RING_SLOT_SEC * 0.9;
 // once complete, arcs breathe 1.0 → reticule's hovered base alpha so peak = "this shot lands".
 const HOVER_DOT_PULSE_PEAK_ALPHA = 1.0;
 const HOVER_DOT_PULSE_MIN_ALPHA = 0.28;
 const HOVER_DOT_PULSE_PERIOD_SEC = 2.0;
 const HOVER_DOT_HSL = RETICULE_DASH_HSL;
+// completion flare: brightens the ring + paints an additive halo for FLARE_SEC,
+// rising sharply then settling. Marks "lock acquired" — the tutorial gate keys off the
+// end of this animation, and the octave-up hum begins its sharper attack here too.
+const HOVER_FLARE_SEC = 0.25;
+const HOVER_FLARE_PEAK_BOOST = 2.4;
+const HOVER_FLARE_HALO_RADIUS = HOVER_DOT_RING_RADIUS + 6;
+const HOVER_FLARE_HALO_LINE_WIDTH = 3.0;
+const HOVER_FLARE_HALO_PEAK_ALPHA = 0.65;
 
 // the aim circle = locus of bullet endpoints at t=beatGrid over all headings. Single source
 // of truth so the reticule painter and the gameRender red-tint check agree on geometry.
@@ -104,19 +119,28 @@ const computeReticulePositions = (
   return { positions, primaryIndex };
 };
 
-// arcs fill once per 8th-note, then pulse together; the build resets on hover-loss in the caller.
-// Each arc fades in over HOVER_ARC_FADE_IN_SEC from elapsed = i * slotDuration, so newly-born
-// arcs ease in smoothly instead of popping.
+// arcs fill across HOVER_RING_FILL_SEC, then a HOVER_FLARE_SEC completion flare brightens them
+// and adds a halo ring before settling into the steady on-beat pulse. The build resets on
+// hover-loss in the caller. Returns whether the ring just crossed into "filled" this frame
+// (rising-edge signal for the audio companion).
 const paintHoverDotRing = (
-  ctx: CanvasRenderingContext2D, center: Vec, elapsed: number, slotDuration: number,
-  beatTime: number,
-) => {
+  ctx: CanvasRenderingContext2D, center: Vec, elapsed: number, beatTime: number,
+): { fillJustCompleted: boolean } => {
+  const slotDuration = HOVER_RING_SLOT_SEC;
   const visibleCount = Math.min(HOVER_DOT_COUNT, Math.floor(elapsed / slotDuration) + 1);
   const fullyBuilt = visibleCount >= HOVER_DOT_COUNT
     && (elapsed - (HOVER_DOT_COUNT - 1) * slotDuration) >= HOVER_ARC_FADE_IN_SEC;
+  const fillCompleteSec = HOVER_RING_FILL_SEC;
+  const flareAge = fullyBuilt ? Math.max(0, elapsed - fillCompleteSec) : -1;
+  const flareT = flareAge >= 0 ? Math.min(1, flareAge / HOVER_FLARE_SEC) : 0;
+  // ease shape: sharp rise (1 - (1-t)^2) then ease back to 0 → reads as a pop with settle.
+  const flareEnvelope = flareT > 0 && flareT < 1
+    ? Math.sin(flareT * Math.PI)
+    : 0;
   const baseAlpha = fullyBuilt
     ? cosineEnvelope(beatTime, HOVER_DOT_PULSE_PERIOD_SEC, HOVER_DOT_PULSE_MIN_ALPHA, HOVER_DOT_PULSE_PEAK_ALPHA)
     : HOVER_DOT_BUILDING_ALPHA;
+  const arcAlphaBoost = 1 + (HOVER_FLARE_PEAK_BOOST - 1) * flareEnvelope;
   ctx.lineWidth = HOVER_ARC_LINE_WIDTH;
   // round caps soften the leading edge as the arc sweeps outward.
   ctx.lineCap = "round";
@@ -131,7 +155,7 @@ const paintHoverDotRing = (
     const sweepEase = 1 - Math.pow(1 - t, 3);
     // alpha rises slightly ahead of the sweep so the leading edge stays bright.
     const alphaEase = Math.sqrt(t);
-    const alpha = baseAlpha * alphaEase;
+    const alpha = Math.min(1, baseAlpha * alphaEase * arcAlphaBoost);
     ctx.strokeStyle = `hsla(${HOVER_DOT_HSL}, ${alpha})`;
     const mid = start + i * slot;
     // grow from the counter-clockwise end (fixed) toward the clockwise end (advancing).
@@ -141,6 +165,15 @@ const paintHoverDotRing = (
     ctx.arc(center.x, center.y, HOVER_DOT_RING_RADIUS, ccwEnd, cwEnd);
     ctx.stroke();
   }
+  if (flareEnvelope > 0) {
+    const haloAlpha = HOVER_FLARE_HALO_PEAK_ALPHA * flareEnvelope;
+    ctx.lineWidth = HOVER_FLARE_HALO_LINE_WIDTH;
+    ctx.strokeStyle = `hsla(${HOVER_DOT_HSL}, ${haloAlpha})`;
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, HOVER_FLARE_HALO_RADIUS, 0, TAU);
+    ctx.stroke();
+  }
+  return { fillJustCompleted: fullyBuilt };
 };
 
 // cosine envelope between min/max produces a smooth, predictable visual pulse over time.
@@ -205,11 +238,14 @@ export const renderShipReticules = (
   if (hoveringFirstDot) {
     if (state.hoverDotRing.hoverStartBeatTime === null) {
       state.hoverDotRing.hoverStartBeatTime = beatTime;
+      state.hoverDotRing.completionBeatTime = null;
     }
     const elapsed = beatTime - state.hoverDotRing.hoverStartBeatTime;
-    // one arc per 16th-note (half an 8th) so the ring fills in ~2s instead of ~4s.
-    const sixteenthGrid = beatGrid / 4;
-    paintHoverDotRing(ctx, reticulePositions[primaryIndex], elapsed, sixteenthGrid, beatTime);
+    const { fillJustCompleted } = paintHoverDotRing(ctx, reticulePositions[primaryIndex], elapsed, beatTime);
+    if (fillJustCompleted && state.hoverDotRing.completionBeatTime === null) {
+      state.hoverDotRing.completionBeatTime = beatTime;
+      if (sound) sound.startFirstDotLockHum();
+    }
     if (sound) {
       const afterDelay = Math.max(0, elapsed - HOVER_HUM_DELAY_SEC);
       const swellLinear = Math.min(1, afterDelay / HOVER_HUM_RAMP_SEC);
@@ -217,10 +253,17 @@ export const renderShipReticules = (
       const intensity = swellLinear * swellLinear * (3 - 2 * swellLinear);
       const beatPhase01 = ((audioBeatTime % beatGrid) + beatGrid) % beatGrid / beatGrid;
       sound.updateFirstDotHum(intensity, beatPhase01, beatGrid);
+      if (state.hoverDotRing.completionBeatTime !== null) {
+        sound.updateFirstDotLockHum(beatPhase01, beatGrid);
+      }
     }
   } else {
     state.hoverDotRing.hoverStartBeatTime = null;
-    if (sound) sound.updateFirstDotHum(0);
+    state.hoverDotRing.completionBeatTime = null;
+    if (sound) {
+      sound.updateFirstDotHum(0);
+      sound.stopFirstDotLockHum();
+    }
   }
   ctx.restore();
 };

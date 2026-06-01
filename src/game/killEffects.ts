@@ -61,9 +61,10 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
     tryUnlockPilotLog3(game);
     advanceFirstWaveHintOnCombo(game);
     if (game.firstWaveHintStage === 4 && game.firstWaveOnBeatHitCount < 3) {
-      // fire-and-hit stage. The first on-beat hit graduates the field to the real
-      //   3-asteroid wave (tickTutorialSpawn swaps the single small for 3 bigs) and
-      //   counts as hit 1 of 3; the remaining two land on the bigs/children.
+      // fire-and-hit stage. The first on-beat hit graduates the field to the
+      //   big-asteroid tutorial phase (tickTutorialSpawn swaps the single small
+      //   for one big, respawning on clear) and counts as hit 1 of 3; the
+      //   remaining two land on subsequent bigs/children.
       if (game.firstWaveOnBeatHitCount === 0 && game.tutorialActive) game.tutorialFireHitDone = true;
       game.firstWaveOnBeatHitCount += 1;
       emitFirstWaveHintHitProgress(game.firstWaveOnBeatHitCount);

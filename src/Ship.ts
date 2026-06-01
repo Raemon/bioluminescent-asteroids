@@ -73,7 +73,13 @@ export class Ship {
   private trajectoryTracks: TrajectoryTrackMap = new Map();
   // persists across frames so the 8th-note hover ring can fill in over a continuous hover.
   //   Public so the tutorial can read hover duration for its "hold the reticule" gate.
-  hoverDotRingState: { hoverStartBeatTime: number | null } = { hoverStartBeatTime: null };
+  //   completionBeatTime stamps when the ring first reaches the lock threshold so the
+  //   completion flare (visual) and the octave-up companion hum (audio) fire once on the
+  //   rising edge and persist for as long as the hover lasts.
+  hoverDotRingState: {
+    hoverStartBeatTime: number | null;
+    completionBeatTime: number | null;
+  } = { hoverStartBeatTime: null, completionBeatTime: null };
 
   constructor(pos: Vec) { this.pos = pos; }
 

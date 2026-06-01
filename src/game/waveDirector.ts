@@ -263,6 +263,15 @@ export const spawnTutorialSmall = (game: Game) => {
   emitCrackParticles(game.particles, a, true);
 };
 
+// Post-graduation tutorial spawn: one large rock at a time, respawning on clear
+//   until the player finishes the hint progression. Avoids the difficulty cliff
+//   of jumping straight from one small practice rock to the full 3-big wave.
+export const spawnTutorialBig = (game: Game) => {
+  const a = spawnAsteroidAway(game, 240, undefined, "large", newBeatClaimSet());
+  game.asteroids.push(a);
+  emitCrackParticles(game.particles, a, true);
+};
+
 export const spawnWave = (game: Game) => {
   game.asteroids = [];
   game.canisters = [];

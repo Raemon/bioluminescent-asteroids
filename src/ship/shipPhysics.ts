@@ -15,8 +15,9 @@ const updateTurning = (ship: Ship, input: Input, dt: number) => {
   if (turnLeft || turnRight) ship.rotRamp = Math.min(1, ship.rotRamp + dt / 0.15);
   else ship.rotRamp = 0;
   const turnScale = 0.02 + 0.98 * ship.rotRamp;
-  if (turnLeft) ship.heading -= ship.rotSpeed * turnScale * dt;
-  if (turnRight) ship.heading += ship.rotSpeed * turnScale * dt;
+  const precision = input.down("shift") ? 0.2 : 1;
+  if (turnLeft) ship.heading -= ship.rotSpeed * turnScale * precision * dt;
+  if (turnRight) ship.heading += ship.rotSpeed * turnScale * precision * dt;
 };
 
 // tap-to-nudge feel; thrust ramps in over ~0.15s so a tap barely budges and a hold accelerates fully.

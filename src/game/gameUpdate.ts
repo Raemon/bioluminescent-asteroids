@@ -13,7 +13,7 @@ import {
 import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } from "./bassClock";
 import { tickWaveEvents } from "./waveEvents";
 import { detonateShockwave } from "./shockwave";
-import { spawnWave, isBossWave, updateBgBeatIntensity, spawnTutorialSmall } from "./waveDirector";
+import { spawnWave, isBossWave, updateBgBeatIntensity, spawnTutorialSmall, spawnTutorialBig } from "./waveDirector";
 import { showWaveSummary } from "./waveSummary";
 import {
   handleCollisions,
@@ -217,19 +217,29 @@ const syncHaloAmbient = (game: Game) => {
 };
 
 // seconds the reticule must rest on a first-beat dot to clear the hover gate.
-const TUTORIAL_HOVER_SEC = 1.0;
+const TUTORIAL_HOVER_SEC = 1.25;
 
 // Guided-tutorial spawn machine. Holds exactly one small practice rock (respawns
 //   when killed) and watches the two gates: hover a first-beat dot for 1s, then
 //   land one on-beat hit (set in killEffects). Clearing both graduates to the
-//   real 3-asteroid wave. The hover gate reads the ship's hover-ring timer.
+//   big-asteroid phase: one large rock at a time, respawning on clear, until
+//   the hint progression finishes (stage 0). The hover gate reads the ship's
+//   hover-ring timer.
 const tickTutorialSpawn = (game: Game) => {
   if (!game.tutorialActive) return;
-  // first on-beat hit landed (stage 4) → swap the single small for the real 3 bigs
-  //   and stop the single-rock spawner; the 3-hit + 4x stages continue on the bigs.
   if (game.tutorialFireHitDone) {
-    game.tutorialActive = false;
-    spawnWave(game);
+    // big phase. Once the hint progression finishes (stage 0), the next time
+    //   the field empties we kick off the real Wave 1 — fresh spawn + the
+    //   standard "Wave 1" title flash, as if the tutorial were a warm-up.
+    if (game.asteroids.length === 0) {
+      if (game.firstWaveHintStage === 0) {
+        game.tutorialActive = false;
+        spawnWave(game);
+        showWaveAnnounce(game);
+      } else {
+        spawnTutorialBig(game);
+      }
+    }
     return;
   }
   if (game.firstWaveHintStage === 1) {

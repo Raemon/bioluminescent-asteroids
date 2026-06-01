@@ -76,10 +76,11 @@ export class Game implements HudElements {
   // one-shot lerp of bgBeatIntensity (calibration loudness → wave level) so the
   //   beat eases in volume across the calibration→play hand-off instead of jumping.
   beatIntensityRamp: { from: number; to: number; t: number; dur: number } | null = null;
-  // first-run guided tutorial (rookies only). While active the field holds a
-  //   single small practice rock (respawning when killed); the two milestones
-  //   below gate progress: hover a first-beat dot for 1s, then land one on-beat
-  //   hit — after which the real 3-asteroid wave spawns and tutorialActive clears.
+  // first-run guided tutorial (rookies only). Starts with a single small
+  //   practice rock (respawning when killed); two milestones gate progress:
+  //   hover a first-beat dot for 1s, then land one on-beat hit. After that the
+  //   field holds one big rock at a time (respawning on clear) until the hint
+  //   progression finishes — then tutorialActive clears and waves advance.
   tutorialActive = false;
   tutorialHoverDone = false;
   tutorialFireHitDone = false;
