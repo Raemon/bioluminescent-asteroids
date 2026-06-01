@@ -1,5 +1,15 @@
-import * as Tone from "tone";
+// Tone is dev-only — loaded dynamically by loadTone() so the prod bundle
+// doesn't ship the ~150KB library. `import type` keeps the Tone.X type
+// annotations on the engine struct without dragging the runtime in.
+import type * as Tone from "tone";
 import { cfgN, cfgU } from "./soundConfig";
+
+type ToneModule = typeof import("tone");
+let toneModulePromise: Promise<ToneModule> | null = null;
+async function loadTone(): Promise<ToneModule> {
+  if (!toneModulePromise) toneModulePromise = import("tone");
+  return toneModulePromise;
+}
 
 // Tone.js master bus. Every voice — both Tone-native synths (bassKick,
 // chimeSynth, etc.) and the hand-built WebAudio voices (playFire,
@@ -19,7 +29,6 @@ type ToneEngineNodes = {
   voiceBusDry: Tone.Gain;
   voiceBusWet: Tone.Gain;
   cometMelodySynth: Tone.PolySynth;
-  cometShimmerByKey: Map<object, ToneCometShimmer>;
   // Per-voice synths for the highest-impact sounds — the ones the player
   // hears most often or that most differentiate "polished" from "raw
   // oscillators". Lower-traffic sounds still use the hand-built WebAudio
@@ -34,13 +43,6 @@ type ToneEngineNodes = {
   chimeSynth: Tone.PolySynth;
   powerupSynth: Tone.PolySynth;
   waveClearSynth: Tone.PolySynth;
-};
-
-type ToneCometShimmer = {
-  synth: Tone.PolySynth;
-  chord: string[];
-  fadeGain: Tone.Gain;
-  lfos: Tone.LFO[];
 };
 
 // Per-alien drone voice. Two detuned sines through a slow-sweeping lowpass,
@@ -417,12 +419,10 @@ export class Sound {
     this.bakedOut = this.ctx.createGain();
     this.bakedOut.gain.value = Sound.BAKED_BASE_GAIN * this.volume;
     this.bakedOut.connect(this.ctx.destination);
-    // Build the Tone bus immediately so master is hot before the first
-    // voice plays. ensureToneEngine wires master → voiceBusDry/Wet.
-    // Wrapped because some browsers (Firefox w/ resistFingerprinting and
-    // similar privacy modes) stub Web Audio in ways that crash Tone's
-    // destination init — we still want the rest of audio to work.
-    this.ensureToneEngine();
+    // Dev-only: build the Tone master bus + per-voice synths so the live
+    // bake fallback works when an MP3 isn't on disk. In prod ensureToneEngine
+    // early-returns and Tone is never imported (dynamic import is tree-shaken).
+    void this.ensureToneEngine();
     // Pre-fill the noise-buffer cache so the first bassteroid/comet spawn
     // doesn't pay the 6-8s buffer allocation mid-gameplay. AudioBuffers can't
     // be created before the context exists, so this is the earliest we can do
@@ -444,16 +444,18 @@ export class Sound {
     for (const d of durations) this.makeNoiseBuffer(d);
   }
 
-  // Lazy-build the Tone.js master bus and shared synths. Shares our existing
-  // AudioContext via Tone.setContext so a single ctx drives both engines
-  // (browsers cap how many AudioContexts you can have open).
-  ensureToneEngine(): ToneEngineNodes | null {
+  // Lazy-build the Tone.js master bus and shared synths. Dev-only — in prod
+  // every sound plays from the baked-mp3 cache, so Tone is dynamic-imported
+  // and never pulled into the prod bundle.
+  async ensureToneEngine(): Promise<ToneEngineNodes | null> {
     if (this.toneEngine) return this.toneEngine;
     if (this.toneEngineFailed) return null;
+    if (!import.meta.env.DEV) return null;
     this.ensureContext();
     if (!this.ctx) return null;
     try {
-      return this.buildToneEngine();
+      const Tone = await loadTone();
+      return this.buildToneEngine(Tone);
     } catch {
       // Browser stubbed Web Audio or Tone setup threw — disable further
       // attempts so we don't retry on every fire. Baked-mp3 playback still
@@ -466,7 +468,7 @@ export class Sound {
 
   private toneEngineFailed = false;
 
-  private buildToneEngine(): ToneEngineNodes | null {
+  private buildToneEngine(Tone: ToneModule): ToneEngineNodes | null {
     if (!this.ctx) return null;
 
     // Adopt our existing AudioContext. Tone wraps it; Tone destination ===
@@ -660,7 +662,6 @@ export class Sound {
       voiceBusDry,
       voiceBusWet,
       cometMelodySynth,
-      cometShimmerByKey: new Map(),
       bgBeatKick,
       bassKick,
       bassBoom,
@@ -704,6 +705,9 @@ export class Sound {
     // ([1, 1, 0.8409]); bgBeat uses 1 or 1.122 (offbeats), composited with
     // an intensity bucket (0..1 in 0.1 steps → ~11 buckets).
     const standardPitches = [1, 0.8409];
+    // cometNote: one entry per active melody index (skip the rest at idx=5).
+    // pitchRatio encodes the index — see bakeSound's cometNote case.
+    const cometIdxs = [0, 1, 2, 3, 4, 6, 7];
     const oneShots: Array<[SoundName, number[]]> = [
       ["fireBeat", [1]],
       ["chime", [1]],
@@ -713,6 +717,7 @@ export class Sound {
       ["bassBoom", standardPitches],
       ["bassPluck", standardPitches],
       ["bassSnap", standardPitches],
+      ["cometNote", cometIdxs],
     ];
     for (const [name, pitches] of oneShots) {
       for (const p of pitches) {
@@ -960,6 +965,8 @@ export class Sound {
   // envelope+release+reverb tail.
   private async bakeSound(name: SoundName, pitchRatio: number): Promise<AudioBuffer | null> {
     if (!this.ctx) return null;
+    if (!import.meta.env.DEV) return null;
+    const Tone = await loadTone();
     const sr = this.ctx.sampleRate;
     // Total duration to render. Longer than the dry note so the reverb tail
     // (1.5s decay in the bus) lands inside the buffer.
@@ -973,6 +980,8 @@ export class Sound {
       chime: 2.0,
       powerup: 1.6,
       waveClear: 2.4,
+      // cometNote: longest decay (downbeat "1n" + 3.4s release) is ~4.4s + reverb tail.
+      cometNote: 5.0,
     };
     const dur = durations[name] ?? 1.5;
     const length = Math.ceil(sr * dur);
@@ -1072,6 +1081,37 @@ export class Sound {
         const synth = wire(new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sine" }, envelope: { attack: 0.02, decay: 0.3, sustain: 0.2, release: 0.7 }, volume: -10 }), 0.5, 0.7);
         const notes = ["E4", "G#4", "B4", "Eb5"];
         for (let i = 0; i < notes.length; i++) synth.triggerAttackRelease(notes[i], "4n", i * 0.06, 0.7);
+        break;
+      }
+      case "cometNote": {
+        // pitchRatio encodes the melody index (0..7, skipping the rest at 5).
+        // Mirror the live cometMelodySynth recipe + per-idx velocity/duration
+        // shaping from playCometNote so the baked clip is bit-identical.
+        const idx = Math.round(pitchRatio);
+        const freq = Sound.COMET_MELODY[idx];
+        if (freq === null || freq === undefined) {
+          Tone.setContext(this.ctx as unknown as BaseAudioContext as never);
+          return null;
+        }
+        const isPhraseDownbeat = idx === 0 || idx === 4;
+        const isLift = idx === 3;
+        const isGrace = idx === 7;
+        const velocity = isPhraseDownbeat ? 0.7 : isLift ? 0.64 : isGrace ? 0.3 : 0.5;
+        const duration = isPhraseDownbeat || isLift ? "1n" : isGrace ? "4n" : "2n";
+        const synth = new Tone.PolySynth(Tone.FMSynth, {
+          harmonicity: 2.41,
+          modulationIndex: 11,
+          oscillator: { type: "sine" },
+          modulation: { type: "sawtooth" },
+          envelope: { attack: 0.05, decay: 0.6, sustain: 0.35, release: 3.4 },
+          modulationEnvelope: { attack: 0.04, decay: 0.5, sustain: 0.1, release: 2.0 },
+          volume: -12,
+        });
+        const dryG = new Tone.Gain(0.35);
+        const wetG = new Tone.Gain(0.9);
+        synth.connect(dryG); synth.connect(wetG);
+        dryG.connect(toneMaster); wetG.connect(reverbSend);
+        synth.triggerAttackRelease(freq, duration, 0, velocity);
         break;
       }
       default:
@@ -1833,24 +1873,12 @@ export class Sound {
   playCometNote(step: number) {
     if (!this.enabled) return;
     this.ensureContext();
-    if (!this.ctx || !this.master) return;
+    if (!this.ctx) return;
     const melody = Sound.COMET_MELODY;
     const idx = ((step % melody.length) + melody.length) % melody.length;
-    const freq = melody[idx];
-    if (freq === null) return;
-
-    const eng = this.ensureToneEngine();
-    if (!eng) return;
-    const isPhraseDownbeat = idx === 0 || idx === 4;
-    const isLift = idx === 3;
-    const isGrace = idx === 7;
-    const velocity = isPhraseDownbeat ? 0.7 : isLift ? 0.64 : isGrace ? 0.3 : 0.5;
-    const duration = isPhraseDownbeat || isLift ? "1n" : isGrace ? "4n" : "2n";
-    try {
-      eng.cometMelodySynth.triggerAttackRelease(freq, duration, undefined, velocity);
-    } catch {
-      // Tone trigger crashed mid-game (e.g. browser stub) — skip the note.
-    }
+    if (melody[idx] === null) return;
+    // pitchRatio encodes the melody index — see warmBakedCache / bakeSound.
+    this.playBaked("cometNote", idx);
   }
 
   // Ominous voice held under the comet's entire lifetime. Begins with a
@@ -2062,25 +2090,6 @@ export class Sound {
   }
 
   stopCometShimmer(key: object) {
-    if (this.toneEngine) {
-      const shimmer = this.toneEngine.cometShimmerByKey.get(key);
-      if (shimmer) {
-        const fadeOut = 2.0;
-        shimmer.fadeGain.gain.rampTo(0, fadeOut);
-        const now = Tone.now();
-        shimmer.synth.triggerRelease(shimmer.chord, now);
-        // Dispose after release tail clears, plus a small safety margin.
-        const cleanupAt = now + fadeOut + 0.5;
-        Tone.getTransport().scheduleOnce(() => {
-          for (const l of shimmer.lfos) l.dispose();
-          shimmer.synth.dispose();
-          shimmer.fadeGain.dispose();
-        }, cleanupAt);
-        this.toneEngine.cometShimmerByKey.delete(key);
-        // Fall through in case the legacy map also holds this key (it won't,
-        // but defensive — we're in the middle of an engine switch sometimes).
-      }
-    }
     if (!this.ctx) return;
     const node = this.cometShimmers.get(key);
     if (!node) return;
@@ -2324,9 +2333,6 @@ export class Sound {
 
   stopAllCometShimmers() {
     for (const key of Array.from(this.cometShimmers.keys())) this.stopCometShimmer(key);
-    if (this.toneEngine) {
-      for (const key of Array.from(this.toneEngine.cometShimmerByKey.keys())) this.stopCometShimmer(key);
-    }
   }
 
   // Yellow-halo ambient pad. A soft, C-rooted bed that hangs under the bass

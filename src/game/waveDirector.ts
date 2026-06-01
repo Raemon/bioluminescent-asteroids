@@ -105,7 +105,7 @@ const RHYTHM_SPAWN_CHANCE_PER_COMBO = 0.01;
 // Rhythm also multiplies the spawn speed of created world objects (asteroids,
 //   aliens, comets, canisters) by +5% per rhythm. Player ship + bullets exempt.
 const RHYTHM_SPAWN_SPEED_PER_COMBO = 0.05;
-const rhythmSpeedMul = (game: Game): number => 1 + game.beatCombo * RHYTHM_SPAWN_SPEED_PER_COMBO;
+export const rhythmSpeedMul = (game: Game): number => 1 + game.beatCombo * RHYTHM_SPAWN_SPEED_PER_COMBO;
 const rhythmChanceBonus = (game: Game): number => game.beatCombo * RHYTHM_SPAWN_CHANCE_PER_COMBO;
 
 // per-wave share of each alien size — early waves bias to small/medium so

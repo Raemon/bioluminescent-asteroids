@@ -41,7 +41,7 @@ const SIZE_SPEED: Record<AlienSize, [number, number]> = {
 const SIZE_BULLET_SPEED: Record<AlienSize, number> = {
   big: 220,
   medium: 280,
-  small: 340,
+  small: 400,
 };
 
 const SIZE_HUE: Record<AlienSize, number> = {
@@ -57,12 +57,12 @@ const SIZE_HUE: Record<AlienSize, number> = {
 // shots, cycled forever. Each entry is the wait BEFORE the next shot. Game
 // multiplies by BEAT_GRID and aligns to the global beat clock so shots fall
 // exactly on the rhythm grid the player is already listening to.
-//   small  : shot, shot, shot, REST → 3 hits then 1-beat breather (4-beat cycle)
+//   small  : one shot every 4 beats — sparse, but bullets travel farther/faster
 //   medium : shot, shot, REST, REST → 2 hits then 2-beat breather (4-beat cycle)
 //   big    : every beat, no rest    → relentless 1-beat cadence
 // The "rest" is encoded as a longer gap before the next shot in the cycle.
 export const ALIEN_FIRE_PATTERN_BEATS: Record<AlienSize, number[]> = {
-  small: [1, 1, 2],
+  small: [4],
   medium: [1, 3],
   big: [1],
 };

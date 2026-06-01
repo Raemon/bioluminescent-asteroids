@@ -14,6 +14,15 @@ const SIZE_BULLET_RADIUS: Record<AlienSize, number> = {
   small: 2.2,
 };
 
+// Beats of flight time before the bullet expires. Small fires only once every
+// 4 beats, so its bullet flies longer to compensate — the threat is sparse but
+// covers more of the field per shot.
+const SIZE_BULLET_LIFE_BEATS: Record<AlienSize, number> = {
+  big: 3,
+  medium: 3,
+  small: 5,
+};
+
 export class AlienBullet {
   pos: Vec;
   vel: Vec;
@@ -30,8 +39,7 @@ export class AlienBullet {
     this.size = size;
     this.hue = hue;
     this.radius = SIZE_BULLET_RADIUS[size];
-    // 3 beats of life vs the old 2 — same speed, so total range scales 1.5×.
-    this.maxLife = BEAT_GRID * 3;
+    this.maxLife = BEAT_GRID * SIZE_BULLET_LIFE_BEATS[size];
     this.life = this.maxLife;
   }
 

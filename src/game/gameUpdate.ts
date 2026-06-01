@@ -13,7 +13,7 @@ import {
 import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } from "./bassClock";
 import { tickWaveEvents } from "./waveEvents";
 import { detonateShockwave } from "./shockwave";
-import { spawnWave, isBossWave, updateBgBeatIntensity, spawnTutorialSmall, spawnTutorialBig } from "./waveDirector";
+import { spawnWave, isBossWave, updateBgBeatIntensity, spawnTutorialSmall, spawnTutorialBig, rhythmSpeedMul } from "./waveDirector";
 import { showWaveSummary } from "./waveSummary";
 import {
   handleCollisions,
@@ -490,7 +490,13 @@ const tickAlienFire = (game: Game) => {
 
 const fireOneAlienShot = (game: Game, a: Alien) => {
   if (game.ship.alive) {
-    game.alienBullets.push(a.fireAt(game.ship.pos));
+    const bullet = a.fireAt(game.ship.pos);
+    if (a.size === "small") {
+      const k = rhythmSpeedMul(game);
+      bullet.vel.x *= k;
+      bullet.vel.y *= k;
+    }
+    game.alienBullets.push(bullet);
     const fireSound = a.size === "big" ? "alienFireBig" : a.size === "medium" ? "alienFireMedium" : "alienFireSmall";
     game.sound.play(fireSound, 1, a.pos);
   } else {
