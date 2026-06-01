@@ -406,6 +406,11 @@ export class Sound {
     this.ctx = new AC();
     this.master = this.ctx.createGain();
     this.master.gain.value = Sound.MASTER_BASE_GAIN * this.volume;
+    // Default-connect master direct to destination so hand-built WebAudio
+    // voices stay audible even if Tone init throws (Firefox w/ RFP, some
+    // privacy extensions). wireMasterToBus swaps this for the Tone chain
+    // routing on browsers where the engine builds cleanly.
+    this.master.connect(this.ctx.destination);
     // Direct-to-destination bus for pre-baked buffers (whose tail already
     // contains the full Tone master chain). Mirrors the master gain level so
     // baked and live voices sit at a comparable loudness.
