@@ -853,6 +853,8 @@ html:has(#sound-root), body:has(> #sound-root) {
   text-transform: uppercase;
   font-weight: 300;
   padding-left: 0.45em;
+  margin-top: 20px;
+  margin-bottom: 20px;
 }
 
 .go-score { opacity: 0; }
@@ -869,11 +871,12 @@ html:has(#sound-root), body:has(> #sound-root) {
 #gameover-peak-label {
   font-size: 12px;
   letter-spacing: 0.55em;
-  color: #6ad7ff;
+  color: #fff8c8;
   text-transform: uppercase;
   font-weight: 300;
   opacity: 0.75;
   padding-left: 0.55em;
+  margin-top: 20px;
 }
 
 #gameover-peak-value {
@@ -933,12 +936,13 @@ html:has(#sound-root), body:has(> #sound-root) {
   text-align: center;
   width: min(320px, 80vw);
   padding: 10px 14px;
-  color: #e0f7ff;
+  color: #ccc;
   background: rgba(8, 16, 36, 0.55);
   border: 1px solid rgba(106, 215, 255, 0.45);
   border-radius: 6px;
   outline: none;
   caret-color: #6ad7ff;
+  margin-top: 20px;
   text-shadow: 0 0 12px rgba(140, 220, 255, 0.55);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }

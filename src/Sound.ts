@@ -2958,7 +2958,7 @@ export class Sound {
       case "bassSnap": this.playBassSnap(effectivePitch); break;
       case "bassHit": this.playBassHit(); break;
       case "bassEcho": this.playBassEcho(); break;
-      case "chime": this.playChime(); break;
+      case "chime": this.playChime(effectivePitch); break;
       case "bell": this.playBell(effectivePitch); break;
       case "warble": this.playWarble(); break;
       case "comboTick": this.playComboTick(); break;
@@ -4330,12 +4330,36 @@ export class Sound {
     }
   }
 
-  // High shimmery bell — three sine partials at near-bell ratios.
-  private playChime() {
-    if (this.playBaked("chime", 1)) return;
+  // High shimmery bell — three sine partials at near-bell ratios. Baked at
+  // C6+G6 (pitchRatio 1.0); callers can pass a ratio to playbackRate-shift
+  // the buffer (e.g. 0.5 = C5+G5) without forcing a new bake.
+  private playChime(pitchRatio = 1) {
+    if (pitchRatio === 1) {
+      if (this.playBaked("chime", 1)) return;
+    } else if (this.ctx && this.bakedOut) {
+      const buf = this.bakedBuffers.get(this.bakedKey("chime", 1));
+      if (buf) {
+        const src = this.ctx.createBufferSource();
+        src.buffer = buf;
+        src.playbackRate.value = pitchRatio;
+        const pos = this.spatialPosForCall;
+        if (pos) {
+          const spatial = this.makeSpatial(pos, this.bakedOut);
+          if (spatial) src.connect(spatial.panner);
+          else src.connect(this.bakedOut);
+        } else {
+          src.connect(this.bakedOut);
+        }
+        src.start();
+        return;
+      }
+      this.queueBake("chime", 1);
+    }
     const eng = this.ensureToneEngine();
     if (!eng) return;
-    eng.chimeSynth.triggerAttackRelease(["C6", "G6"], "8n", undefined, 0.65);
+    const c6 = 1046.5 * pitchRatio;
+    const g6 = 1568.0 * pitchRatio;
+    eng.chimeSynth.triggerAttackRelease([c6, g6], "8n", undefined, 0.65);
   }
 
   // Lower bell with inharmonic partials — feels like a temple bell rather

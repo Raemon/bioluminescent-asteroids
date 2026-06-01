@@ -84,18 +84,24 @@ const pulseScore = (el: HTMLElement) => {
   el.classList.add("ws-pulse");
 };
 
-// All row sounds use "bell" pitched to C4 (220 Hz * 1.189 ≈ 261.6 Hz) —
-//   inharmonic temple bell on the game's C tonal anchor (same C the bass
-//   field and halo pad sit on). Five tolling bells reads as haunting and
-//   ceremonial without the chirpy-major-ascent of the previous chime+tink
-//   ladder. The pitched bell also gets a softer peak (see playBell).
+// Opening bell on C4 (220 * 1.189 ≈ 261.6 Hz) anchors the sequence to the
+//   game's C — same C the bass field and halo pad sit on. The remaining
+//   rows are chimes pitched into a Cmaj7 spread (C5+G5, E5+B5, G5+D6,
+//   C6+G6) so the sequence climbs out of the bass register into a clean
+//   C-major resolution instead of tolling the same bell five times.
+//   Chime is baked at C6+G6 (pitchRatio 1.0); the lower entries
+//   playback-rate-shift the same buffer.
 const C_BELL = 1.189;
+const CHIME_C5 = 0.5;       // C5+G5
+const CHIME_E5 = 0.6299;    // E5+B5  (major 3rd of C)
+const CHIME_G5 = 0.7491;    // G5+D6  (5th)
+const CHIME_C6 = 1.0;       // C6+G6  (baked)
 const ROW_SOUNDS: Array<{ name: "chime" | "bell"; pitch: number }> = [
-  { name: "bell", pitch: C_BELL },
-  { name: "bell", pitch: C_BELL },
-  { name: "bell", pitch: C_BELL },
-  { name: "bell", pitch: C_BELL },
-  { name: "bell", pitch: C_BELL },
+  { name: "bell",  pitch: C_BELL },
+  { name: "chime", pitch: CHIME_C5 },
+  { name: "chime", pitch: CHIME_E5 },
+  { name: "chime", pitch: CHIME_G5 },
+  { name: "chime", pitch: CHIME_C6 },
 ];
 
 // 16-step haunting line for the drain. Downbeats (positions 0/4/8/12) land
