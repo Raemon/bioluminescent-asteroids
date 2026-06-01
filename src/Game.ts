@@ -133,7 +133,7 @@ export class Game implements HudElements {
   // controls-phase (stage 1, and the normal-mode start-of-run controls hint) usage
   //   tracker. In tutorial mode all four used → advance to stage 2; in normal mode
   //   all four used → dismiss the hint.
-  tutorialControlsUsed: { rotate: boolean; thrust: boolean; back: boolean; side: boolean } = { rotate: false, thrust: false, back: false, side: false };
+  tutorialControlsUsed: { rotate: boolean; thrust: boolean; back: boolean; side: boolean; fire: boolean } = { rotate: false, thrust: false, back: false, side: false, fire: false };
   // True while the normal-mode start-of-run controls hint is visible. Tutorial mode
   //   uses firstWaveHintStage === 1 instead, since the stage already gates that hint.
   controlsHintActive = false;

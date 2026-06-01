@@ -2,16 +2,16 @@ import { useEffect, useRef, useState } from "react";
 
 // Controls hint shown at the start of every run. Each key fades to low opacity as
 //   the player uses it (driven by the game's `tutorial:controls` event); the whole
-//   hint fades out once rotate/thrust/reverse are all used. Tutorial mode advances
-//   to stage 2 then; normal mode just dismisses via `controls-hint:dismiss`.
+//   hint fades out once rotate/thrust/reverse/fire are all used. Tutorial mode
+//   advances to stage 2 then; normal mode just dismisses via `controls-hint:dismiss`.
 
-type Controls = { rotate: boolean; thrust: boolean; back: boolean; side: boolean };
+type Controls = { rotate: boolean; thrust: boolean; back: boolean; side: boolean; fire: boolean };
 const FADE_MS = 800;
 
 export const TutorialControlsHint = () => {
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [used, setUsed] = useState<Controls>({ rotate: false, thrust: false, back: false, side: false });
+  const [used, setUsed] = useState<Controls>({ rotate: false, thrust: false, back: false, side: false, fire: false });
   const timeoutsRef = useRef<number[]>([]);
 
   useEffect(() => {
@@ -25,7 +25,7 @@ export const TutorialControlsHint = () => {
     };
     const show = () => {
       clearAll();
-      setUsed({ rotate: false, thrust: false, back: false, side: false });
+      setUsed({ rotate: false, thrust: false, back: false, side: false, fire: false });
       setMounted(true);
       schedule(() => setVisible(true), 32);
     };
@@ -66,6 +66,9 @@ export const TutorialControlsHint = () => {
         </span>
         <span className={`tch-ctrl${used.back ? " used" : ""}`}>
           <span className="key">↓</span> reverse
+        </span>
+        <span className={`tch-ctrl${used.fire ? " used" : ""}`}>
+          <span className="key">space</span> fire
         </span>
       </div>
     </div>

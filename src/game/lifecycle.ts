@@ -82,8 +82,8 @@ export const emitTutorialHoverProgress = (value: number) => {
 };
 // controls-phase usage (stage 1 + normal-mode start-of-run hint) — drives the
 //   fade-as-used keys in <TutorialControlsHint>.
-export const emitTutorialControls = (rotate: boolean, thrust: boolean, back: boolean, side: boolean) => {
-  window.dispatchEvent(new CustomEvent("tutorial:controls", { detail: { rotate, thrust, back, side } }));
+export const emitTutorialControls = (rotate: boolean, thrust: boolean, back: boolean, side: boolean, fire: boolean) => {
+  window.dispatchEvent(new CustomEvent("tutorial:controls", { detail: { rotate, thrust, back, side, fire } }));
 };
 export const emitTutorialHoverDone = () => {
   window.dispatchEvent(new CustomEvent("tutorial:hoverDone"));
@@ -253,7 +253,7 @@ export const finishCalibrationIntro = (game: Game) => {
 //   Start button → skips straight to Wave 1's single-asteroid warm-up. Used at both
 //   calibration hand-off and the direct startGame path so the two stay in sync.
 const beginFirstWaveByTutorialFlag = (game: Game) => {
-  game.tutorialControlsUsed = { rotate: false, thrust: false, back: false, side: false };
+  game.tutorialControlsUsed = { rotate: false, thrust: false, back: false, side: false, fire: false };
   if (game.tutorialRequested) {
     game.tutorialActive = true;
     spawnTutorialSmall(game);

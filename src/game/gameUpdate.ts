@@ -258,8 +258,8 @@ const tickTutorialSpawn = (game: Game) => {
   if (game.asteroids.length === 0) spawnTutorialSmall(game);
 };
 
-// controls gate: tracks rotate/thrust/reverse usage so the keys fade individually
-//   in the hint. Tutorial mode (stage 1) advances to stage 2 once all three are
+// controls gate: tracks rotate/thrust/reverse/fire usage so the keys fade individually
+//   in the hint. Tutorial mode (stage 1) advances to stage 2 once all four are
 //   used; normal mode just dismisses the start-of-run hint.
 const tickControlsGate = (game: Game) => {
   const used = game.tutorialControlsUsed;
@@ -267,8 +267,9 @@ const tickControlsGate = (game: Game) => {
   if (!used.rotate && (isDown(game.input, "rotateLeft") || isDown(game.input, "rotateRight"))) { used.rotate = true; changed = true; }
   if (!used.thrust && isDown(game.input, "thrust")) { used.thrust = true; changed = true; }
   if (!used.back && isDown(game.input, "reverse")) { used.back = true; changed = true; }
-  if (changed) emitTutorialControls(used.rotate, used.thrust, used.back, used.side);
-  if (used.rotate && used.thrust && used.back) {
+  if (!used.fire && isDown(game.input, "fire")) { used.fire = true; changed = true; }
+  if (changed) emitTutorialControls(used.rotate, used.thrust, used.back, used.side, used.fire);
+  if (used.rotate && used.thrust && used.back && used.fire) {
     if (game.tutorialActive && game.firstWaveHintStage === 1) {
       setFirstWaveHintStage(game, 2);
     } else if (game.controlsHintActive) {
