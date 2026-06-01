@@ -31,6 +31,7 @@ import { updatePopups } from "./popups";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderboardKeyRepeat } from "./scoreEntry";
+import { isDown, wasPressed } from "./controlBindings";
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
@@ -46,7 +47,7 @@ export const updateGame = (game: Game, dt: number) => {
     game.input.endFrame();
     return;
   }
-  if (game.input.pressed("escape") || game.input.pressed("esc")) togglePause(game);
+  if (wasPressed(game.input, "pause")) togglePause(game);
   else if (game.state === "paused" && pressedStart(game)) togglePause(game);
   if (game.state === "paused") { game.input.endFrame(); return; }
   game.time += dt * 1000;
@@ -94,7 +95,7 @@ const updateGameOver = (game: Game, dt: number) => {
   // Escape dismisses score entry so the player can skip submission and press Enter to restart.
   //   Handled here in addition to the input-level listener for the case where the player clicked
   //   outside the input before pressing Escape.
-  if (game.input.pressed("escape") || game.input.pressed("esc")) hideScoreEntry(game);
+  if (wasPressed(game.input, "pause")) hideScoreEntry(game);
   const enterPressed = pressedStart(game);
   if (enterPressed && !isScoreEntryBlockingEnter(game)) {
     stopParade(game);
@@ -248,9 +249,9 @@ const tickTutorialSpawn = (game: Game) => {
 const tickControlsGate = (game: Game) => {
   const used = game.tutorialControlsUsed;
   let changed = false;
-  if (!used.rotate && (game.input.down("arrowleft") || game.input.down("a") || game.input.down("arrowright") || game.input.down("d"))) { used.rotate = true; changed = true; }
-  if (!used.thrust && (game.input.down("arrowup") || game.input.down("w"))) { used.thrust = true; changed = true; }
-  if (!used.back && (game.input.down("arrowdown") || game.input.down("s"))) { used.back = true; changed = true; }
+  if (!used.rotate && (isDown(game.input, "rotateLeft") || isDown(game.input, "rotateRight"))) { used.rotate = true; changed = true; }
+  if (!used.thrust && isDown(game.input, "thrust")) { used.thrust = true; changed = true; }
+  if (!used.back && isDown(game.input, "reverse")) { used.back = true; changed = true; }
   if (changed) emitTutorialControls(used.rotate, used.thrust, used.back);
   if (used.rotate && used.thrust && used.back) setFirstWaveHintStage(game, 2);
 };

@@ -6,11 +6,12 @@ import { Bullet } from "../Bullet";
 import { Sound } from "../Sound";
 import { emitThrust, emitReverseThrust, emitSideThrust } from "./shipParticles";
 import { fireBullets } from "./shipWeapons";
+import { isDown } from "../game/controlBindings";
 
 // tap-to-nudge feel; rotation ramps in over ~0.15s so a tap turns finely and a hold turns fast.
 const updateTurning = (ship: Ship, input: Input, dt: number) => {
-  const turnLeft = input.down("arrowleft") || input.down("a");
-  const turnRight = input.down("arrowright") || input.down("d");
+  const turnLeft = isDown(input, "rotateLeft");
+  const turnRight = isDown(input, "rotateRight");
   if (turnLeft || turnRight) ship.rotRamp = Math.min(1, ship.rotRamp + dt / 0.15);
   else ship.rotRamp = 0;
   const turnScale = 0.02 + 0.98 * ship.rotRamp;
@@ -20,7 +21,7 @@ const updateTurning = (ship: Ship, input: Input, dt: number) => {
 
 // tap-to-nudge feel; thrust ramps in over ~0.15s so a tap barely budges and a hold accelerates fully.
 const updateThrustRamp = (ship: Ship, input: Input, dt: number) => {
-  const active = input.down("arrowup") || input.down("w") || input.down("arrowdown") || input.down("s");
+  const active = isDown(input, "thrust") || isDown(input, "reverse");
   if (active) ship.thrustRamp = Math.min(1, ship.thrustRamp + dt / 0.15);
   else ship.thrustRamp = 0;
 };
@@ -29,7 +30,7 @@ const thrustScale = (ship: Ship) => 0.02 + 0.98 * ship.thrustRamp;
 // thruster has to gate sound start/stop on the edge so the loop doesn't restart every frame.
 const updateForwardThrust = (ship: Ship, input: Input, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasThrusting = ship.thrustOn;
-  ship.thrustOn = input.down("arrowup") || input.down("w");
+  ship.thrustOn = isDown(input, "thrust");
   if (ship.thrustOn) {
     const a = ship.thrustPower * thrustScale(ship) * dt;
     ship.vel.x += Math.cos(ship.heading) * a;
@@ -43,7 +44,7 @@ const updateForwardThrust = (ship: Ship, input: Input, particles: ParticleSystem
 // retro-thrust mirrors forward thrust with its own audio loop and front-vented jet flames.
 const updateReverseThrust = (ship: Ship, input: Input, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasReversing = ship.reverseThrustOn;
-  ship.reverseThrustOn = input.down("arrowdown") || input.down("s");
+  ship.reverseThrustOn = isDown(input, "reverse");
   if (ship.reverseThrustOn) {
     const a = ship.thrustPower * thrustScale(ship) * dt;
     const h = ship.heading + Math.PI;
@@ -60,8 +61,8 @@ const updateReverseThrust = (ship: Ship, input: Input, particles: ParticleSystem
 const updateSideThrust = (ship: Ship, input: Input, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const enabled = ship.sideEnginesActive;
   const wasActive = ship.portThrustOn || ship.starboardThrustOn;
-  ship.portThrustOn = enabled && input.down("z");
-  ship.starboardThrustOn = enabled && input.down("x");
+  ship.portThrustOn = enabled && isDown(input, "sidePort");
+  ship.starboardThrustOn = enabled && isDown(input, "sideStarboard");
   if (ship.portThrustOn) {
     const a = ship.thrustPower * dt;
     const h = ship.heading - Math.PI / 2;
@@ -85,7 +86,7 @@ const updateSideThrust = (ship: Ship, input: Input, particles: ParticleSystem, s
 
 // rapid powerup halves the cooldown; both states use the same trigger gate.
 const updateFireTrigger = (ship: Ship, input: Input, bullets: Bullet[]) => {
-  if (!(input.down(" ") || input.down("spacebar"))) return;
+  if (!isDown(input, "fire")) return;
   if (ship.fireCooldown > 0) return;
   fireBullets(ship, bullets);
   const RAPID_FIRE_RATE_MULTIPLIER = 0.5;

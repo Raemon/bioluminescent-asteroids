@@ -63,11 +63,9 @@ export const setFirstWaveHintStage = (game: Game, stage: 0 | 1 | 2 | 3 | 4 | 5 |
   }
   window.dispatchEvent(new CustomEvent("first-wave-hint:stage", { detail: { stage } }));
   if (stage === 5) {
-    // build-to-4x stage. diamond N corresponds to rhythm N+1 (the 1x priming shot
-    //   doesn't count). Seed the row from current rhythm; fire ready immediately
-    //   if they're already at 4x — otherwise wait for applyHitToCombo.
-    emitFirstWaveHintRhythmProgress(Math.max(0, Math.min(game.beatCombo - 1, 3)));
-    if (game.beatCombo >= 4) emitFirstWaveHintStage3Ready();
+    // build-to-4x stage. Wipe rhythm so the player has to rebuild from scratch
+    //   — clearComboSilently also emits rhythmProgress(0) for the diamond row.
+    clearComboSilently(game);
   } else {
     // leaving the build-to-4x stage (or never entering it) clears the diamond row.
     emitFirstWaveHintRhythmProgress(0);
