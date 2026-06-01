@@ -51,7 +51,7 @@ export const setStartTutorialEnabled = (enabled: boolean) => {
 
 // React-side <FirstWaveHint> subscribes to this so the canvas/game loop stays
 //   out of layout + transitions — CSS + a single setTimeout do the dismiss work.
-export const setFirstWaveHintStage = (game: Game, stage: 0 | 1 | 2 | 3 | 4) => {
+export const setFirstWaveHintStage = (game: Game, stage: 0 | 1 | 2 | 3 | 4 | 5 | 6) => {
   if (game.firstWaveHintStage === stage) return;
   game.firstWaveHintStage = stage;
   // stage transitions always reset the sub-line + the stage-2 hit pips; both
@@ -62,14 +62,14 @@ export const setFirstWaveHintStage = (game: Game, stage: 0 | 1 | 2 | 3 | 4) => {
     emitFirstWaveHintHitProgress(0);
   }
   window.dispatchEvent(new CustomEvent("first-wave-hint:stage", { detail: { stage } }));
-  if (stage === 3) {
-    // diamond N corresponds to rhythm N+1 (the 1x priming shot doesn't
-    //   count). Seed the row from current rhythm; fire ready immediately
+  if (stage === 5) {
+    // build-to-4x stage. diamond N corresponds to rhythm N+1 (the 1x priming shot
+    //   doesn't count). Seed the row from current rhythm; fire ready immediately
     //   if they're already at 4x — otherwise wait for applyHitToCombo.
     emitFirstWaveHintRhythmProgress(Math.max(0, Math.min(game.beatCombo - 1, 3)));
     if (game.beatCombo >= 4) emitFirstWaveHintStage3Ready();
   } else {
-    // leaving stage 3 (or never entering it) clears the diamond row.
+    // leaving the build-to-4x stage (or never entering it) clears the diamond row.
     emitFirstWaveHintRhythmProgress(0);
   }
 };
@@ -115,6 +115,10 @@ export const emitFirstWaveHintRhythmProgress = (count: number) => {
 export const emitTutorialHoverProgress = (value: number) => {
   window.dispatchEvent(new CustomEvent("tutorial:hoverProgress", { detail: { value } }));
 };
+// controls-phase usage (stage 1) — drives the fade-as-used keys in <TutorialControlsHint>.
+export const emitTutorialControls = (rotate: boolean, thrust: boolean, back: boolean) => {
+  window.dispatchEvent(new CustomEvent("tutorial:controls", { detail: { rotate, thrust, back } }));
+};
 export const emitTutorialHoverDone = () => {
   window.dispatchEvent(new CustomEvent("tutorial:hoverDone"));
 };
@@ -155,7 +159,7 @@ const clearComboSilently = (game: Game) => {
   game.beatCombo = 0;
   game.firedOffBeatSinceLastBeat = false;
   syncComboHud(game);
-  if (game.firstWaveHintStage === 3) emitFirstWaveHintRhythmProgress(0);
+  if (game.firstWaveHintStage === 5) emitFirstWaveHintRhythmProgress(0);
 };
 
 // carries the prior run's trophy lineup so a returning player still sees what they took down.
@@ -191,6 +195,7 @@ export const showTitle = (game: Game) => {
   hideWaveSummary();
   setFirstWaveHintStage(game, 0);
   game.waveTransitioning = false;
+  emitGameState(game);
 };
 
 // First run gates on the latency calibrator: rhythm scoring is meaningless if the
@@ -246,6 +251,7 @@ export const startCalibrationIntro = (game: Game) => {
   game.lastRunScore = null;
   game.lastRunScoreId = null;
   syncHud(game);
+  emitGameState(game);
   window.dispatchEvent(new CustomEvent("beat-calibrator:open", { detail: { sound: game.sound, intro: true } }));
 };
 
@@ -269,19 +275,23 @@ export const finishCalibrationIntro = (game: Game) => {
   emitFirstWaveHintProgress(0);
   emitFirstWaveHintHitProgress(0);
   emitFirstWaveHintRhythmProgress(0);
+  beginFirstWaveByTutorialFlag(game);
+  syncHud(game);
+};
+
+// Rookies enter the guided tutorial (single practice rock + stage 1 controls hint);
+//   veterans skip straight to the normal 3-asteroid wave. Used at both calibration
+//   hand-off and the direct startGame path so the two stay in sync.
+const beginFirstWaveByTutorialFlag = (game: Game) => {
   if (isFirstWaveTutorialComplete()) {
-    // veterans skip the guided tutorial: straight to the normal 3-asteroid wave.
     setFirstWaveHintStage(game, 0);
     spawnWave(game);
   } else {
-    // rookies: the guided tutorial. One small practice rock to begin; the spawn
-    //   machine (tickTutorialSpawn) keeps a single rock alive until the player
-    //   clears the hover + fire-hit gates, then graduates to the real wave.
-    setFirstWaveHintStage(game, 0); // legacy stage machine stays dormant; the tutorial flow drives the UI
+    game.tutorialControlsUsed = { rotate: false, thrust: false, back: false };
     game.tutorialActive = true;
     spawnTutorialSmall(game);
+    setFirstWaveHintStage(game, 1);
   }
-  syncHud(game);
 };
 
 // per-run randomised bass intro order means the wave-2/3 picks vary between runs.
@@ -311,19 +321,19 @@ export const startGame = (game: Game) => {
   game.pulsar.setBossPlanetState("idle");
   game.pulsar.setWaveLevel(game.wave);
   updateBgBeatIntensity(game);
-  spawnWave(game);
   game.firstWaveOnBeatFireCount = 0;
   game.firstWaveOnBeatHitCount = 0;
   emitFirstWaveHintProgress(0);
   emitFirstWaveHintHitProgress(0);
   emitFirstWaveHintRhythmProgress(0);
-  setFirstWaveHintStage(game, isFirstWaveTutorialComplete() ? 0 : 1);
+  beginFirstWaveByTutorialFlag(game);
   game.overlayEl.classList.add("hidden");
   hideScoreEntry(game);
   game.leaderboardEl.classList.add("hidden");
   game.lastRunScore = null;
   game.lastRunScoreId = null;
   syncHud(game);
+  emitGameState(game);
 };
 
 // run-scoped state only; spawnWave handles per-wave timers separately.
@@ -393,13 +403,23 @@ const enterPause = (game: Game) => {
   game.overlayTitleEl.textContent = "Paused";
   game.overlayStartEl.textContent = "Resume";
   game.overlayEl.classList.remove("hidden");
+  game.overlayEl.classList.add("paused");
   game.abortEl.classList.remove("hidden");
+  emitGameState(game);
 };
 
 const leavePause = (game: Game) => {
   game.state = "playing";
   game.overlayEl.classList.add("hidden");
+  game.overlayEl.classList.remove("paused");
   game.abortEl.classList.add("hidden");
+  emitGameState(game);
+};
+
+// broadcast the game's coarse lifecycle state for UI chrome (pause button visibility,
+//   pause-screen controls panel). Cheap, fires only on transition.
+export const emitGameState = (game: Game) => {
+  window.dispatchEvent(new CustomEvent("game:state", { detail: { state: game.state } }));
 };
 
 // lets a stuck player exit cleanly via the kill-row screen without having to die out.
@@ -422,6 +442,7 @@ export const abortMission = (game: Game) => {
   game.overlayEl.classList.remove("hidden");
   renderKilledRow(game);
   showScoreEntry(game);
+  emitGameState(game);
 };
 
 // combo grid may have flipped (8ths→quarters if previous life had rapid); rebase the eval index.
@@ -431,6 +452,7 @@ export const respawn = (game: Game) => {
   game.nextBeatToEvaluate = Math.max(0, Math.floor((game.perceivedBeatTime - BEAT_WINDOW) / comboGrid(game)) + 1);
   game.state = "playing";
   syncHud(game);
+  emitGameState(game);
 };
 
 // death pauses beatTime so a leftover streak would pin the HUD until respawn — drop it now.
@@ -439,6 +461,7 @@ export const killShip = (game: Game) => {
   game.shake = 1.5;
   game.state = "dying";
   game.dyingTimer = 1.8;
+  emitGameState(game);
   clearComboSilently(game);
   game.sound.stopThrust();
   game.sound.stopReverseThrust();

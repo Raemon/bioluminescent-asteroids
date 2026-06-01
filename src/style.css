@@ -158,8 +158,8 @@ html:has(#sound-root), body:has(> #sound-root) {
   display: flex;
   align-items: center;
   gap: 16px;
-  /* leave room for the fixed settings gear pinned to the corner */
-  margin-right: 36px;
+  /* leave room for the fixed pause button + settings gear pinned to the corner */
+  margin-right: 96px;
 }
 
 #debug-overlay {
@@ -333,7 +333,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 #settings-gear {
   position: fixed;
   top: 19px;
-  right: 28px;
+  right: 64px;
   z-index: 15;
   pointer-events: auto;
   display: flex;
@@ -361,6 +361,64 @@ html:has(#sound-root), body:has(> #sound-root) {
   stroke-linecap: round;
   stroke-linejoin: round;
   filter: drop-shadow(0 0 4px rgba(106, 215, 255, 0.8));
+}
+
+/* Mirrors the settings-gear look: same corner band, same idle opacity, same
+   cyan glow. Sits to its left. Visibility is React-driven (hidden when not
+   playing) so we don't need a CSS gate here. */
+#pause-button {
+  position: fixed;
+  top: 19px;
+  right: 28px;
+  z-index: 15;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #6ad7ff;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+#pause-button:hover { opacity: 1; }
+
+#pause-button svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  filter: drop-shadow(0 0 4px rgba(106, 215, 255, 0.8));
+}
+
+.pause-button__tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  padding: 5px 9px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #d8f3ff;
+  background: rgba(8, 18, 36, 0.92);
+  border: 1px solid rgba(106, 215, 255, 0.4);
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 0 12px rgba(76, 182, 255, 0.25);
+}
+
+#pause-button:hover .pause-button__tooltip,
+#pause-button:focus-visible .pause-button__tooltip {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 #lives {
@@ -647,6 +705,13 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 #overlay-sub { font-size: 9.1px; }
 #overlay-sub .key { font-size: 7.8px; padding: 2px 6px; }
+
+.overlay-pause-controls {
+  margin-top: -16px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+.overlay-pause-controls .key { font-size: 11px; padding: 3px 8px; }
 
 #overlay-start {
   animation: pulse 2s ease-in-out infinite;
@@ -1908,3 +1973,87 @@ html:has(#sound-root), body:has(> #sound-root) {
   background: #ffffff;
   border-color: #ffffff;
 }
+
+/* the "Hold your reticule…" second line sits below the hover circle, smaller. */
+.first-wave-hint__line--sub {
+  font-size: clamp(8px, 0.95vw, 16px);
+  opacity: 0.6;
+  margin-top: 4px;
+}
+
+/* hover-commit circle (tutorial stage 3) — a conic "pie" that fills 0→full as the
+   player holds their reticule on a first-beat dot (--p driven from JS, 0..1). */
+.first-wave-hint__circle {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  margin: 16px auto 10px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(106, 215, 255, 0.4);
+  background: conic-gradient(rgba(106, 215, 255, 0.85) calc(var(--p, 0) * 360deg), rgba(106, 215, 255, 0.08) 0);
+  box-shadow: 0 0 16px rgba(76, 182, 255, 0.4);
+  transition: background 90ms linear;
+}
+
+.first-wave-hint__circle-core {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px dashed rgba(180, 232, 255, 0.85);
+  box-shadow: 0 0 8px rgba(140, 224, 255, 0.55), inset 0 0 6px rgba(140, 224, 255, 0.35);
+}
+
+.first-wave-hint__circle-core::before,
+.first-wave-hint__circle-core::after {
+  content: "";
+  position: absolute;
+  background: rgba(220, 244, 255, 0.9);
+  box-shadow: 0 0 6px rgba(140, 224, 255, 0.8);
+}
+
+.first-wave-hint__circle-core::before {
+  left: 50%;
+  top: -6px;
+  bottom: -6px;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.first-wave-hint__circle-core::after {
+  top: 50%;
+  left: -6px;
+  right: -6px;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+/* controls hint (tutorial stage 1) — each control fades to .2 once used. */
+.tutorial-controls-hint__title {
+  margin: 0 0 12px;
+  font-size: 14px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #6ad7ff;
+  font-weight: 300;
+}
+
+.tutorial-controls-hint__keys {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  justify-content: center;
+}
+
+.tch-ctrl {
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #6ad7ff;
+  opacity: 1;
+  transition: opacity 500ms ease;
+}
+
+.tch-ctrl.used { opacity: 0.2; }

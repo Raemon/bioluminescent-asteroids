@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { TutorialPanel } from "./TutorialPanel";
+import { ControlInfo } from "./ControlInfo";
 
 // Overlay shell: title, instructions, leaderboard, score-entry, abort-mission.
 // Hidden/visible state is still toggled by the game via .hidden on #overlay,
@@ -12,10 +13,15 @@ const isLocalhost = () =>
 
 export const Overlay = () => {
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     const onOpen = () => setTutorialOpen(true);
     const onClose = () => setTutorialOpen(false);
+    const onState = (e: Event) => {
+      const detail = (e as CustomEvent<{ state: string }>).detail;
+      setPaused(detail.state === "paused");
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && tutorialOpen) {
         e.stopPropagation();
@@ -29,10 +35,12 @@ export const Overlay = () => {
     document.addEventListener("keydown", onKey, true);
     window.addEventListener("tutorial-open-request", onOpen);
     window.addEventListener("tutorial-close-request", onClose);
+    window.addEventListener("game:state", onState as EventListener);
     return () => {
       document.removeEventListener("keydown", onKey, true);
       window.removeEventListener("tutorial-open-request", onOpen);
       window.removeEventListener("tutorial-close-request", onClose);
+      window.removeEventListener("game:state", onState as EventListener);
     };
   }, [tutorialOpen]);
 
@@ -66,6 +74,7 @@ export const Overlay = () => {
       <button id="overlay-start" type="button">
         Begin
       </button>
+      {paused && <ControlInfo id="overlay-pause-controls" className="overlay-pause-controls" />}
       <canvas id="killed-row" className="hidden" width={0} height={0} />
       <form id="score-entry" className="hidden" autoComplete="off" noValidate>
         <label htmlFor="score-entry-name">Enter callsign</label>

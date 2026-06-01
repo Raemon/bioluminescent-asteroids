@@ -4,11 +4,6 @@ import { BULLET_HIT_RADIUS_ON_BEAT, BULLET_HIT_RADIUS_OFF_BEAT, ReticuleTarget }
 import { toroidalDelta } from "./coneGeometry";
 
 const RETICULE_LINE_DASH: [number, number] = [4, 4];
-const RETICULE_HITBOX_ALPHA = 0.28;
-const RETICULE_COOLDOWN_DIM = 0.3;
-// when the reticule isn't touching a first-beat dot on any trajectory line, drop opacity so
-// the bright state reads as a clear "this shot will land on the next beat" cue.
-const RETICULE_OFF_FIRST_DOT_DIM = 0.35;
 // dashed crosshair sticking out past the outer disc — reads as "this is a targeting sight",
 // matching the lock-circle crosshair used on the on-rhythm aim spot.
 const RETICULE_CROSSHAIR_GAP = 3;
@@ -36,23 +31,18 @@ export const reticuleOverlapsAnyTarget = (
   return false;
 };
 
-// dim during cooldown + slow pulse so the player feels the rhythm window even with nothing in sight.
-export const computeBaseHitAlpha = (onCooldown: boolean, hitboxPulse: number): number =>
-  RETICULE_HITBOX_ALPHA * (onCooldown ? RETICULE_COOLDOWN_DIM : 1) * hitboxPulse;
-
 // two concentric dashed circles — inner is off-beat hit radius, outer is on-beat (larger).
 // Bright only when a first-beat dot sits under the reticule (or tutorial highlight); otherwise
-// dim, so the bright state means "this shot lands on the next beat" unambiguously. The per-beat
-// pulse already lives in `baseAlpha` via the caller, so no time-varying flicker is added here.
+// at the baseAlpha set by the caller, so the bright state means "this shot lands on the next
+// beat" unambiguously. The per-beat pulse already lives in `baseAlpha` via the caller.
 export const paintAimDiscs = (
   ctx: CanvasRenderingContext2D, reticulePos: Vec, baseAlpha: number,
   overlapsTarget: boolean, onFirstBeatDot: boolean,
   tutorialHighlight: boolean = false,
 ) => {
-  const overlapBoost = overlapsTarget ? RETICULE_OVERLAP_BRIGHTNESS : 1;
   const locked = onFirstBeatDot || tutorialHighlight;
-  const offDotDim = locked ? 1 : RETICULE_OFF_FIRST_DOT_DIM;
-  const hitAlpha = Math.min(1, baseAlpha * overlapBoost * offDotDim);
+  const overlapBoost = overlapsTarget || locked ? RETICULE_OVERLAP_BRIGHTNESS : 1;
+  const hitAlpha = Math.min(1, baseAlpha * overlapBoost);
   ctx.globalAlpha = 1;
   const prevShadowBlur = ctx.shadowBlur;
   const prevShadowColor = ctx.shadowColor;

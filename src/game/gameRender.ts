@@ -86,11 +86,12 @@ export const targetsForReticule = (game: Game) => [
 const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => {
   const { ctx } = game;
   const doubletime = comboGrid(game) < BEAT_GRID;
-  // highlight the reticule + first-beat dot while the wave-1 tutorial is telling the
-  //   player to use their targeting tools (stage 2 sub-line + stage 3 sub-line).
+  // highlight the reticule + first-beat dot while the tutorial wants the player on a
+  //   target: the drift/hover gate (3), the fire-and-hit sub-line (4), and build-to-4x (5).
   const tutorialHighlight =
-    (game.firstWaveHintStage === 2 && game.firstWaveHintSubVisible) ||
-    game.firstWaveHintStage === 3;
+    game.firstWaveHintStage === 3 ||
+    (game.firstWaveHintStage === 4 && game.firstWaveHintSubVisible) ||
+    game.firstWaveHintStage === 5;
   // perceivedBeatTime: the reticule pulse + first-beat dots cue when to fire, so they
   //   ride the latency-shifted clock and peak on the beat the player hears.
   game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime);

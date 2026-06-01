@@ -24,7 +24,7 @@ import {
   handleCanisterShots,
   handleGoldCrystalPickups,
 } from "./collisions";
-import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialHoverDone } from "./lifecycle";
+import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState } from "./lifecycle";
 import { syncHud, syncPowerupHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
 import { updatePopups } from "./popups";
@@ -157,6 +157,7 @@ const transitionToGameOver = (game: Game) => {
   game.overlayEl.classList.remove("hidden");
   renderKilledRow(game);
   showScoreEntry(game);
+  emitGameState(game);
 };
 
 import { HALO_MUSIC_POOL, pickHaloMusicVariation } from "./haloMusicConfig";
@@ -223,21 +224,35 @@ const TUTORIAL_HOVER_SEC = 1.0;
 //   real 3-asteroid wave. The hover gate reads the ship's hover-ring timer.
 const tickTutorialSpawn = (game: Game) => {
   if (!game.tutorialActive) return;
+  // first on-beat hit landed (stage 4) → swap the single small for the real 3 bigs
+  //   and stop the single-rock spawner; the 3-hit + 4x stages continue on the bigs.
   if (game.tutorialFireHitDone) {
     game.tutorialActive = false;
     spawnWave(game);
     return;
   }
-  if (!game.tutorialHoverDone) {
+  if (game.firstWaveHintStage === 1) {
+    tickControlsGate(game);
+  } else if (game.firstWaveHintStage === 3) {
+    // drift/hold gate: reticule rested on a first-beat dot for a full second.
     const hoverStart = game.ship.hoverDotRingState.hoverStartBeatTime;
     const elapsed = hoverStart === null ? 0 : game.perceivedBeatTime - hoverStart;
     emitTutorialHoverProgress(Math.max(0, Math.min(1, elapsed / TUTORIAL_HOVER_SEC)));
-    if (elapsed >= TUTORIAL_HOVER_SEC) {
-      game.tutorialHoverDone = true;
-      emitTutorialHoverDone();
-    }
+    if (elapsed >= TUTORIAL_HOVER_SEC) setFirstWaveHintStage(game, 4);
   }
   if (game.asteroids.length === 0) spawnTutorialSmall(game);
+};
+
+// controls gate (stage 1): clears once the player has used rotate, forward-thrust,
+//   and back-thrust each at least once. Emits usage so the keys fade as they're learned.
+const tickControlsGate = (game: Game) => {
+  const used = game.tutorialControlsUsed;
+  let changed = false;
+  if (!used.rotate && (game.input.down("arrowleft") || game.input.down("a") || game.input.down("arrowright") || game.input.down("d"))) { used.rotate = true; changed = true; }
+  if (!used.thrust && (game.input.down("arrowup") || game.input.down("w"))) { used.thrust = true; changed = true; }
+  if (!used.back && (game.input.down("arrowdown") || game.input.down("s"))) { used.back = true; changed = true; }
+  if (changed) emitTutorialControls(used.rotate, used.thrust, used.back);
+  if (used.rotate && used.thrust && used.back) setFirstWaveHintStage(game, 2);
 };
 
 // eases bgBeat loudness from the calibration practice level down to the wave
@@ -318,17 +333,18 @@ const handleOnBeatFire = (game: Game, firstNewIndex: number) => {
     if (game.maxCombo < 1) game.maxCombo = 1;
     syncHud(game);
   }
-  if (game.firstWaveHintStage === 1) {
+  if (game.firstWaveHintStage === 2) {
+    // fire-on-the-beat stage: 3 on-beat fires → advance to drift/hover (stage 3).
     game.firstWaveOnBeatFireCount += 1;
     emitFirstWaveHintProgress(game.firstWaveOnBeatFireCount);
-    if (game.firstWaveOnBeatFireCount >= 3) setFirstWaveHintStage(game, 2);
-  } else if (game.firstWaveHintStage === 2 && !game.firstWaveHintSubVisible) {
-    // first on-beat *fire* (hit or not) reveals the targeting sub-line; the
-    //   three diamonds are independently gated on on-beat *hits*.
+    if (game.firstWaveOnBeatFireCount >= 3) setFirstWaveHintStage(game, 3);
+  } else if (game.firstWaveHintStage === 4 && !game.firstWaveHintSubVisible) {
+    // fire-and-hit stage: first on-beat *fire* (hit or not) reveals the targeting
+    //   sub-line; the three diamonds are independently gated on on-beat *hits*.
     setFirstWaveHintSubVisible(game, true);
-  } else if (game.firstWaveHintStage === 3) {
-    // 0→1 priming step mirrors into the stage-3 row. Diamonds start at 2x
-    //   (diamond N = rhythm N+1), so priming alone leaves the row at 0.
+  } else if (game.firstWaveHintStage === 5) {
+    // build-to-4x stage. 0→1 priming step mirrors into the row. Diamonds start at
+    //   2x (diamond N = rhythm N+1), so priming alone leaves the row at 0.
     emitFirstWaveHintRhythmProgress(Math.max(0, Math.min(game.beatCombo - 1, 3)));
   }
 };

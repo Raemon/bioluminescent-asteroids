@@ -20,7 +20,7 @@ import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
-import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, markFirstWaveTutorialComplete, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro } from "./game/lifecycle";
+import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, markFirstWaveTutorialComplete, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro, togglePause } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
@@ -114,8 +114,13 @@ export class Game implements HudElements {
   //   complete in localStorage and won't show again. React-side <FirstWaveHint>
   //   listens for the "first-wave-hint:stage" CustomEvent and handles the CSS
   //   transition + auto-dismiss, so the game loop only owns the stage number.
-  firstWaveHintStage: 0 | 1 | 2 | 3 | 4 = 0;
+  // Guided-tutorial stage: 1 controls · 2 fire-on-beat · 3 drift/hover · 4 fire-and-hit
+  //   · 5 build-to-4x · 6 "become one with the Pulsar" · 0 hidden. Stage 1 is rendered
+  //   by <TutorialControlsHint>; 2–6 by <FirstWaveHint>.
+  firstWaveHintStage: 0 | 1 | 2 | 3 | 4 | 5 | 6 = 0;
   firstWaveOnBeatFireCount = 0;
+  // controls-phase (stage 1) usage tracker; cleared each used → advance to stage 2.
+  tutorialControlsUsed: { rotate: boolean; thrust: boolean; back: boolean } = { rotate: false, thrust: false, back: false };
   // stage-2 sub-line ("Use your targeting tools to help") is gated on the
   //   player landing three on-beat hits after stage 2 opens. The diamond
   //   row under stage 2's main line fills one pip per hit, and the sub-line
@@ -283,6 +288,7 @@ export class Game implements HudElements {
     });
     window.addEventListener("settings:opened", () => { this.settingsOpen = true; });
     window.addEventListener("settings:closed", () => { this.settingsOpen = false; });
+    window.addEventListener("game:togglePause", () => togglePause(this));
     // <FirstWaveHint> owns its own stage-3 auto-dismiss timer; when it fades
     //   out it asks the game to clear the stage. The tutorial is marked
     //   complete here so future runs skip the overlay entirely.
@@ -290,9 +296,9 @@ export class Game implements HudElements {
       setFirstWaveHintStage(this, 0);
       markFirstWaveTutorialComplete();
     });
-    // stage 3 → stage 4 ("Become one with the Pulsar") closing flourish.
+    // stage 5 (build-to-4x) → stage 6 ("Become one with the Pulsar") closing flourish.
     window.addEventListener("first-wave-hint:advance", () => {
-      if (this.firstWaveHintStage === 3) setFirstWaveHintStage(this, 4);
+      if (this.firstWaveHintStage === 5) setFirstWaveHintStage(this, 6);
     });
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();

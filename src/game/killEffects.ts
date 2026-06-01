@@ -7,7 +7,7 @@ import { Vec } from "../vec";
 import { spawnGoldCrystalAt } from "../GoldCrystal";
 import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
-import { markFirstWaveTutorialComplete, setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress, emitTutorialFireHitDone } from "./lifecycle";
+import { markFirstWaveTutorialComplete, setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
 import { popupCombo, popupScore } from "./popups";
 import {
@@ -48,12 +48,6 @@ export const hitSoundFor = (
 // same combo-update rule for every kill type — one helper means callers don't reimplement.
 //   hitPos anchors the "RHYTHM LOST" popup at the target the off-beat shot landed on.
 export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) => {
-  // guided-tutorial fire-hit gate: the first on-beat hit after the hover gate
-  //   graduates the player to the real wave (tickTutorialSpawn picks it up).
-  if (isOnBeatHit && game.tutorialActive && game.tutorialHoverDone && !game.tutorialFireHitDone) {
-    game.tutorialFireHitDone = true;
-    emitTutorialFireHitDone();
-  }
   if (isOnBeatHit && game.beatCombo >= 1) {
     const crossedSparkleThreshold = game.beatCombo === 11;
     game.beatCombo += 1;
@@ -66,11 +60,15 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
     tryUnlockPilotLog1(game);
     tryUnlockPilotLog3(game);
     advanceFirstWaveHintOnCombo(game);
-    if (game.firstWaveHintStage === 2 && game.firstWaveOnBeatHitCount < 3) {
+    if (game.firstWaveHintStage === 4 && game.firstWaveOnBeatHitCount < 3) {
+      // fire-and-hit stage. The first on-beat hit graduates the field to the real
+      //   3-asteroid wave (tickTutorialSpawn swaps the single small for 3 bigs) and
+      //   counts as hit 1 of 3; the remaining two land on the bigs/children.
+      if (game.firstWaveOnBeatHitCount === 0 && game.tutorialActive) game.tutorialFireHitDone = true;
       game.firstWaveOnBeatHitCount += 1;
       emitFirstWaveHintHitProgress(game.firstWaveOnBeatHitCount);
-      if (game.firstWaveOnBeatHitCount >= 3) setFirstWaveHintStage(game, 3);
-    } else if (game.firstWaveHintStage === 3) {
+      if (game.firstWaveOnBeatHitCount >= 3) setFirstWaveHintStage(game, 5);
+    } else if (game.firstWaveHintStage === 5) {
       // diamond N corresponds to rhythm N+1: 2x lights the first, 3x the
       //   second, 4x+ the third. A loss zeroes the row via loseCombo; this
       //   rebuilds it as on-beat hits restore the streak.
@@ -88,7 +86,7 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
 //   Stage 4 is the closing flourish that auto-dismisses on its own timer;
 //   don't cut it short.
 const advanceFirstWaveHintOnCombo = (game: Game) => {
-  if (game.beatCombo >= 6 && game.firstWaveHintStage !== 0 && game.firstWaveHintStage !== 4) {
+  if (game.beatCombo >= 6 && game.firstWaveHintStage !== 0 && game.firstWaveHintStage !== 6) {
     setFirstWaveHintStage(game, 0);
     markFirstWaveTutorialComplete();
   }

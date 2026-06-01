@@ -6,14 +6,17 @@ import { paintConeBackground, paintRangeArcs, RETICULE_DASH_HSL } from "./radarC
 import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost } from "./trajectoryPreview";
 import {
   reticuleOverlapsAnyTarget,
-  computeBaseHitAlpha, paintAimDiscs,
+  paintAimDiscs,
 } from "./aimDisc";
 import { PRONG_SPREAD } from "../shipWeapons";
 
-// hitbox alpha breathes slowly so the disc feels alive even when no target is in range.
-const RETICULE_HITBOX_PULSE_MAX = 1.0;
-const RETICULE_HITBOX_PULSE_MIN = 0.75;
+// hitbox alpha for the not-hovering reticule — this IS the final alpha (no hidden downstream
+// multipliers), so tweak these to brighten/dim the resting reticule directly.
+const RETICULE_HITBOX_PULSE_MAX = 0.32;
+const RETICULE_HITBOX_PULSE_MIN = 0.20;
 const RETICULE_HITBOX_PULSE_PERIOD_SEC = 2.0;
+// dim during fire cooldown so the player feels the rhythm window even with nothing in sight.
+const RETICULE_COOLDOWN_DIM = 0.3;
 const RETICULE_RADAR_PULSE_MAX = 1;
 const RETICULE_RADAR_PULSE_MIN = 0.4;
 const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
@@ -178,7 +181,8 @@ export const renderShipReticules = (
   const hitboxPulse = cosineEnvelope(beatTime, RETICULE_HITBOX_PULSE_PERIOD_SEC, RETICULE_HITBOX_PULSE_MIN, RETICULE_HITBOX_PULSE_MAX);
   const radarPulse = cosineEnvelope(beatTime, RETICULE_RADAR_PULSE_PERIOD_SEC, RETICULE_RADAR_PULSE_MIN, RETICULE_RADAR_PULSE_MAX);
   const beatPulseBoost = computeBeatPulseBoost(beatTime, beatGrid);
-  const baseHitAlpha = computeBaseHitAlpha(ship.fireCooldown > 0, hitboxPulse) * beatPulseBoost;
+  const cooldownDim = ship.fireCooldown > 0 ? RETICULE_COOLDOWN_DIM : 1;
+  const baseHitAlpha = hitboxPulse * cooldownDim * beatPulseBoost;
   paintConeBackground(ctx, ship, apex, beatTime, beatGrid);
   paintRangeArcs(ctx, ship, apex, beatTime, radarPulse);
   const frame = computeConeFrame(ship);

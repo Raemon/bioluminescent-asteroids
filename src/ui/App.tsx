@@ -4,6 +4,7 @@ import { FirstWaveHint } from "./FirstWaveHint";
 import { TutorialControlsHint } from "./TutorialControlsHint";
 import { BeatCalibrator } from "./BeatCalibrator";
 import { SettingsDialog } from "./SettingsDialog";
+import { PauseButton } from "./PauseButton";
 
 export const App = () => (
   <>
@@ -13,5 +14,6 @@ export const App = () => (
     <TutorialControlsHint />
     <BeatCalibrator />
     <SettingsDialog />
+    <PauseButton />
   </>
 );
