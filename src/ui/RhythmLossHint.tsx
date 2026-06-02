@@ -41,7 +41,7 @@ export const RhythmLossHint = () => {
   return (
     <div className={`first-wave-hint rhythm-loss-hint${visible ? " visible" : ""}`}>
       <div className="first-wave-hint__line">
-        Fire <span className="first-wave-hint__accent">and hit</span> on the beat<br />to gain rhythm
+        Fire <span className="first-wave-hint__accent">and hit</span> on the beat
       </div>
     </div>
   );
