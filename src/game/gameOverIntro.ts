@@ -1,4 +1,5 @@
 import type { Game } from "../Game";
+import { displayWave } from "./waveDirector";
 
 // Staged reveal for the game-over / mission-aborted screen. Three lines
 //   fade in left-of-the-parade in sequence:
@@ -40,8 +41,8 @@ export const showGameOverIntro = (game: Game, headlineKind: "gameover" | "aborte
   root.classList.remove("hidden");
 
   const waveLine = headlineKind === "aborted"
-    ? `Mission aborted — Wave ${game.wave}`
-    : `You reached Wave ${game.wave}`;
+    ? `Mission aborted — Wave ${displayWave(game.wave)}`
+    : `You reached Wave ${displayWave(game.wave)}`;
   setLine("gameover-wave", waveLine);
   setLine("gameover-peak-value", `${game.maxCombo}x`);
   setLine("gameover-score", `Score: ${String(game.score).padStart(6, "0")}`);

@@ -79,6 +79,31 @@ const rhythmChanceBonus = (game: Game): number => game.beatCombo * CFG.rhythm.ch
 export const isBossWave = (wave: number): boolean => CFG.boss.waves.includes(wave);
 export const isBossForeshadowWave = (wave: number): boolean => CFG.boss.foreshadowWaves.includes(wave);
 
+// internal wave numbering stays 1-based (so all the wave >= N gates keep working);
+// the player-facing label is shifted down by one so the warm-up rock is "Wave 0".
+export const displayWave = (wave: number): number => wave - 1;
+
+// Persistent across runs: once the player has ever reached 6x rhythm, they've
+// outgrown the single-rock warm-up. Future normal-mode runs (not tutorial)
+// skip straight to internal wave 2 — the first proper wave.
+const VETERAN_KEY = "pulsar.veteran";
+
+export const isVeteranPilot = (): boolean => {
+  try {
+    return localStorage.getItem(VETERAN_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+export const markVeteranPilot = () => {
+  try {
+    localStorage.setItem(VETERAN_KEY, "1");
+  } catch {
+    // localStorage may be blocked (private mode); next run just won't skip.
+  }
+};
+
 export const updateBgBeatIntensity = (game: Game) => {
   // a deliberate per-wave set wins over any in-flight calibration→play loudness ramp.
   game.beatIntensityRamp = null;
@@ -319,8 +344,8 @@ const rollHeadlineEvents = (game: Game) => {
   }
 };
 
-// Wave 1: a single large rock — a gentle warm-up before density ramps.
-// Waves 2+: 3, 3, 4, 4, 5, 5... per-wave count gives the player a wave to consolidate before density bumps.
+// Wave 0 (internal wave 1): a single large rock — a gentle warm-up before density ramps.
+// Wave 1+ (internal wave 2+): 3, 3, 4, 4, 5, 5... per-wave count gives the player a wave to consolidate before density bumps.
 //   A single `claimed` set is shared across the wave's spawns (including the
 //   tink roll below — see spawnWave) so each rock targets a distinct beat
 //   slot, giving the player a sustainable beat-by-beat target procession.

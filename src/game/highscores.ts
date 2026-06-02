@@ -1,5 +1,6 @@
 import type { Game } from "../Game";
 import type { KillBucket } from "./killBuckets";
+import { displayWave } from "./waveDirector";
 
 // bucket names are emitted by killEffects.ts; this label map keeps the
 // leaderboard summary readable instead of leaking internal asteroid kinds.
@@ -47,7 +48,7 @@ export const submitHighscore = async (
     body: JSON.stringify({
       name,
       score: game.score,
-      wave: game.wave,
+      wave: displayWave(game.wave),
       max_combo: game.maxCombo,
       kill_count: totalKills(game.killTally),
       kill_summary: game.killTally,

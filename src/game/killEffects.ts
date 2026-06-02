@@ -19,7 +19,7 @@ import {
   emitCometExplosion,
 } from "./particleBursts";
 import { snapshotAsteroidKill, snapshotAlienKill, snapshotCometKill } from "./killSnapshot";
-import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet } from "./waveDirector";
+import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet, markVeteranPilot } from "./waveDirector";
 import { BASS_KIND_SOUND } from "./bassClock";
 import type { KillBucket } from "./killBuckets";
 
@@ -55,6 +55,11 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
     game.beatCombo += 1;
     if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
     if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
+    if (game.beatCombo >= 6) markVeteranPilot();
+    // Dismiss the post-rhythm-loss "fire and hit on the beat" hint as soon as
+    // the player lands one — reaching here means an on-beat fire was followed
+    // by an on-beat hit. The component no-ops if it's not currently visible.
+    window.dispatchEvent(new CustomEvent("rhythm-loss-hint:dismiss"));
     // grid just halved (quarters→eighths) at the 16x sparkle threshold; resync the evaluator
     // so the freshly-uncovered odd eighths don't all close in a burst on the next frame.
     if (crossedSparkleThreshold && !game.ship.rapidActive) rebaseBeatEval(game);

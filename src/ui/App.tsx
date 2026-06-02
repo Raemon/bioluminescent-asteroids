@@ -2,6 +2,7 @@ import { Hud } from "./Hud";
 import { Overlay } from "./Overlay";
 import { FirstWaveHint } from "./FirstWaveHint";
 import { TutorialControlsHint } from "./TutorialControlsHint";
+import { RhythmLossHint } from "./RhythmLossHint";
 import { BeatCalibrator } from "./BeatCalibrator";
 import { SettingsDialog } from "./SettingsDialog";
 import { PauseButton } from "./PauseButton";
@@ -12,6 +13,7 @@ export const App = () => (
     <Overlay />
     <FirstWaveHint />
     <TutorialControlsHint />
+    <RhythmLossHint />
     <BeatCalibrator />
     <SettingsDialog />
     <PauseButton />

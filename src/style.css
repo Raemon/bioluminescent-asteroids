@@ -2332,3 +2332,10 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 .tch-ctrl.used { opacity: 0.35; }
+
+/* first-loss recovery hint: reuses .first-wave-hint typography (font, color,
+   accent, scale) and just overrides the position to sit at bottom-middle. */
+.rhythm-loss-hint {
+  top: auto;
+  bottom: 80px;
+}

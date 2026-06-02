@@ -5,7 +5,7 @@ import { ParticleSystem } from "../Particle";
 import { v } from "../vec";
 import { syncHud, syncComboHud, syncPowerupHud } from "./hud";
 import { comboGrid, beatWindow } from "./rhythmGate";
-import { spawnWave, updateBgBeatIntensity, spawnTutorialSmall } from "./waveDirector";
+import { spawnWave, updateBgBeatIntensity, spawnTutorialSmall, isVeteranPilot } from "./waveDirector";
 import { newWaveEventSchedule } from "./waveEvents";
 import { stopParade } from "./killedParade";
 import { renderKilledRow } from "./killedParade";
@@ -259,8 +259,10 @@ export const finishCalibrationIntro = (game: Game) => {
 };
 
 // Tutorial button → guided tutorial (single practice rock + stage 1 controls hint);
-//   Start button → skips straight to Wave 1's single-asteroid warm-up. Used at both
-//   calibration hand-off and the direct startGame path so the two stay in sync.
+//   Start button → skips straight to the single-asteroid warm-up (displayed Wave 0).
+//   Veteran pilots (anyone who has ever hit 6x rhythm) skip the warm-up and start on
+//   the first proper density wave instead. Used at both calibration hand-off and the
+//   direct startGame path so the two stay in sync.
 const beginFirstWaveByTutorialFlag = (game: Game) => {
   game.tutorialControlsUsed = { rotate: false, thrust: false, back: false, side: false, fire: false };
   if (game.tutorialRequested) {
@@ -269,6 +271,12 @@ const beginFirstWaveByTutorialFlag = (game: Game) => {
     setFirstWaveHintStage(game, 1);
   } else {
     setFirstWaveHintStage(game, 0);
+    if (isVeteranPilot()) {
+      game.wave = 2;
+      game.pulsar.setWaveLevel(game.wave);
+      updateBgBeatIntensity(game);
+      syncHud(game);
+    }
     spawnWave(game);
     game.controlsHintActive = true;
     window.dispatchEvent(new CustomEvent("controls-hint:show"));

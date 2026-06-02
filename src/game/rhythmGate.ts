@@ -3,6 +3,7 @@ import { Vec } from "../vec";
 import { BEAT_GRID, BEAT_WINDOW, DEBUG_BEAT_TIMING } from "./rhythmConstants";
 import { syncComboHud } from "./hud";
 import { popupBeatDebug, popupComboLost } from "./popups";
+import { isVeteranPilot } from "./waveDirector";
 
 // Two grid tiers, measured as the period between on-beat slots:
 //   combo 0–15       → quarter-notes (BEAT_GRID): the default groove.
@@ -86,6 +87,12 @@ export const loseCombo = (game: Game, sourcePos?: Vec) => {
     game.ship.comboLossFlash = 1;
     if (sourcePos && (!game.hasLostComboEver || haloActive)) {
       game.popups.push(popupComboLost(sourcePos));
+    }
+    // First meaningful loss for a brand-new pilot (never reached 6x rhythm in
+    // any prior run): show a bottom-screen hint explaining how to rebuild it.
+    // killEffects fires `rhythm-loss-hint:dismiss` on the next on-beat hit.
+    if (!game.hasLostComboEver && !isVeteranPilot()) {
+      window.dispatchEvent(new CustomEvent("rhythm-loss-hint:show"));
     }
     game.hasLostComboEver = true;
   }

@@ -13,7 +13,7 @@ import {
 import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } from "./bassClock";
 import { tickWaveEvents } from "./waveEvents";
 import { detonateShockwave } from "./shockwave";
-import { spawnWave, isBossWave, updateBgBeatIntensity, spawnTutorialSmall, spawnTutorialBig, rhythmSpeedMul } from "./waveDirector";
+import { spawnWave, isBossWave, updateBgBeatIntensity, spawnTutorialSmall, spawnTutorialBig, rhythmSpeedMul, displayWave } from "./waveDirector";
 import { showWaveSummary } from "./waveSummary";
 import {
   handleCollisions,
@@ -538,7 +538,7 @@ const showWaveAnnounce = (game: Game) => {
     document.body.appendChild(el);
   }
   const inner = el.firstElementChild as HTMLSpanElement;
-  inner.textContent = `Wave ${game.wave}`;
+  inner.textContent = `Wave ${displayWave(game.wave)}`;
   el.classList.remove("show");
   void el.offsetWidth;
   el.classList.add("show");
@@ -562,7 +562,7 @@ const advanceWave = (game: Game) => {
   game.pulsar.waveClear();
   if (wasBossWave) game.pulsar.setBossPlanetState("defeated");
   game.waveTransitioning = true;
-  showWaveSummary(game, completedWave, maxRhythm, finalRhythm, driftBonuses, () => {
+  showWaveSummary(game, displayWave(completedWave), maxRhythm, finalRhythm, driftBonuses, () => {
     game.wave = nextWave;
     game.maxComboThisWave = game.beatCombo;
     game.driftBonusesThisWave = 0;

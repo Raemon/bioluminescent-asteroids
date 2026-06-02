@@ -1,5 +1,6 @@
 import type { Game } from "../Game";
 import { SLOW_MO_DURATION } from "./slowMo";
+import { displayWave } from "./waveDirector";
 
 // cache the DOM handles once so per-frame syncs don't repeat document.getElementById calls.
 export type HudElements = {
@@ -110,7 +111,7 @@ export const flashScoreGain = (game: Game, points: number) => {
 // collapses score/wave/lives/combo DOM writes into one call so handlers stay one-liners.
 export const syncHud = (game: Game) => {
   game.scoreEl.textContent = String(game.score).padStart(6, "0");
-  game.waveEl.textContent = `WAVE ${game.wave}`;
+  game.waveEl.textContent = `WAVE ${displayWave(game.wave)}`;
   const lifeSpans: string[] = [];
   for (let i = 0; i < game.lives; i++) lifeSpans.push("<span></span>");
   game.livesEl.innerHTML = lifeSpans.join("");
