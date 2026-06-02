@@ -103,21 +103,25 @@ export const SettingsDialog = () => {
   };
 
   const applyBinding = (action: ControlAction, key: string) => {
-    const next: Bindings = { ...bindings } as Bindings;
-    for (const a of ACTION_ORDER) {
-      if (a === action) continue;
-      const filtered = bindings[a].filter((k) => k !== key);
-      if (filtered.length !== bindings[a].length) next[a] = filtered;
-    }
-    next[action] = [key];
-    setBindings(next);
-    saveBindings(next);
+    setBindings((prev) => {
+      const next: Bindings = { ...prev } as Bindings;
+      for (const a of ACTION_ORDER) {
+        if (a === action) continue;
+        const filtered = prev[a].filter((k) => k !== key);
+        if (filtered.length !== prev[a].length) next[a] = filtered;
+      }
+      next[action] = [key];
+      saveBindings(next);
+      return next;
+    });
   };
 
   const clearBinding = (action: ControlAction) => {
-    const next: Bindings = { ...bindings, [action]: [] } as Bindings;
-    setBindings(next);
-    saveBindings(next);
+    setBindings((prev) => {
+      const next: Bindings = { ...prev, [action]: [] } as Bindings;
+      saveBindings(next);
+      return next;
+    });
   };
 
   const resetControls = () => {
