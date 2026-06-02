@@ -9,23 +9,23 @@ import tailwindcss from "@tailwindcss/vite";
 
 loadDotenv();
 
-// Clean-URL middleware: rewrite extensionless /sound → /sound.html so the
-// address bar can show /sound in dev/preview.
-const cleanUrls = () => ({
-  name: "clean-urls",
-  configureServer(server: { middlewares: { use: (fn: (req: { url?: string }, _res: unknown, next: () => void) => void) => void } }) {
-    server.middlewares.use((req, _res, next) => {
-      if (req.url === "/sound") req.url = "/sound.html";
-      next();
-    });
-  },
-  configurePreviewServer(server: { middlewares: { use: (fn: (req: { url?: string }, _res: unknown, next: () => void) => void) => void } }) {
-    server.middlewares.use((req, _res, next) => {
-      if (req.url === "/sound") req.url = "/sound.html";
-      next();
-    });
-  },
-});
+// Clean-URL middleware: rewrite extensionless /sound → /sound.html and
+// /music → /music.html so the address bar can show clean paths in dev/preview.
+const cleanUrls = () => {
+  const rewrite = (req: { url?: string }) => {
+    if (req.url === "/sound") req.url = "/sound.html";
+    else if (req.url === "/music") req.url = "/music.html";
+  };
+  return {
+    name: "clean-urls",
+    configureServer(server: { middlewares: { use: (fn: (req: { url?: string }, _res: unknown, next: () => void) => void) => void } }) {
+      server.middlewares.use((req, _res, next) => { rewrite(req); next(); });
+    },
+    configurePreviewServer(server: { middlewares: { use: (fn: (req: { url?: string }, _res: unknown, next: () => void) => void) => void } }) {
+      server.middlewares.use((req, _res, next) => { rewrite(req); next(); });
+    },
+  };
+};
 
 // Dev-only writer for /sounds/config.json — the /sound page PUTs new tuning
 // values back to disk on every knob change so commits can capture them. Only
@@ -268,6 +268,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         sound: resolve(__dirname, "sound.html"),
+        music: resolve(__dirname, "music.html"),
       },
     },
   },

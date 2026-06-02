@@ -1,0 +1,10 @@
+{
+  "_comment": "Auto-edited by /music. Hand-edits welcome. Per-variation gains for halo-music layers (ambient/melodic/layer3). Read by Sound.haloMusicGain and Sound.haloMusicLayer3Gain via musicConfig.ts.",
+  "_version": 1,
+  "variations": {
+    "r2-el": { "ambient": 0.25, "melodic": 0.25, "layer3": 0.45 },
+    "r2-sb": { "ambient": 0.30, "melodic": 0.30, "layer3": 0.40 },
+    "r3-el": { "ambient": 0.22, "melodic": 0.22, "layer3": 0.30 },
+    "r4-sb": { "ambient": 0.25, "melodic": 0.25, "layer3": 0.32 }
+  }
+}

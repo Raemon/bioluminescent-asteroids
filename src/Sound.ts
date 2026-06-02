@@ -3,6 +3,7 @@
 // annotations on the engine struct without dragging the runtime in.
 import type * as Tone from "tone";
 import { cfgN, cfgU } from "./soundConfig";
+import { musicGain } from "./musicConfig";
 
 type ToneModule = typeof import("tone");
 let toneModulePromise: Promise<ToneModule> | null = null;

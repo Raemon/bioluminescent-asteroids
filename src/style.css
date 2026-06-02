@@ -164,6 +164,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   gap: 16px;
   /* leave room for the fixed pause button + settings gear pinned to the corner */
   margin-right: 72px;
+  transform: translateY(-2px);
 }
 
 #debug-overlay {
