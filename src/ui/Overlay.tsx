@@ -44,9 +44,9 @@ export const Overlay = () => {
     };
   }, [instructionsOpen]);
 
-  const openInstructions = (e: React.MouseEvent) => {
+  const startTutorial = (e: React.MouseEvent) => {
     e.stopPropagation();
-    document.getElementById("overlay-start-tutorial")?.click();
+    window.dispatchEvent(new CustomEvent("tutorial:request"));
   };
 
   const closeInstructions = () => {
@@ -56,7 +56,7 @@ export const Overlay = () => {
 
   return (
     <div id="overlay" className="hidden">
-      <button id="instructions-link" type="button" onClick={openInstructions}>
+      <button id="instructions-link" type="button" onClick={startTutorial}>
         tutorial
       </button>
       <a

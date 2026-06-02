@@ -183,39 +183,105 @@ def build_r4_sb_events() -> list:
 
 
 # ── r2-el lonely violin (NOT percussion) ───────────────────────────────────
-# Single-line solo violin (GM 40 = Violin). Sparse, melancholy, sits on the
-# same channel as a melodic instrument. Designed to match the r2-el cinematic
-# strings + felt piano aesthetic — feels like a fourth voice in the string
-# section but with the bow held alone.
+# Single-line solo violin (GM 40 = Violin). Designed against the *actual*
+# harmony of the r2-el ambient + melodic mp3s as measured by deepinspect.py
+# chroma over time — not the imagined plan of the earlier draft:
 #
-# Phrase structure mirrors the r2-el ambient/melodic harmonic plan:
-#   A   long-held G4 (open fifth)         soft entrance
-#   A'  brief F-Eb4 sigh, then silence    breath
-#   B   slow E5-D5-C5 descent             peak phrase — longing
-#   A'  held E4 resolution                quiet settle
+#   0–3s   brief Cmaj fragment (the loop seam from the previous resolve)
+#   3–14s  A minor drone (A-E with Bb passing colour)
+#   14–23s modulates toward G (G-D-A — the brief lift)
+#   23–32s back to A minor, with E-major dominant push (G#)
 #
-# All within a single-voice register so it never harmonizes with itself.
-# Channel 1 chosen arbitrarily for "non-drum melodic"; program 40 = Violin.
+# Earlier draft built a relentless legato climbing scale through every
+# 32nd-of-a-beat. That destroyed the "lonely" — a haunting solo needs real
+# silence between phrases so each note can be heard as the voice's own
+# choice, not part of a continuous line. It also wandered into G major
+# while the bed is sitting in A minor, which the user flagged as not
+# fitting the other two tracks.
+#
+# This version: 3 phrases of bowed cry separated by real bars of silence,
+# all locked to A natural minor. Pitches drawn from the chord tones of
+# whatever the bed is actually playing at that beat-window.
+#
+#   Phrase 1 (1–10)   the cry: E5 (open string) bow attack, hold,
+#                     slow sigh E5 → D5 → C5 (i fifth → minor-3rd descent)
+#   Phrase 2 (16–23)  the lift: A5 (octave above tonic) reaches up,
+#                     descends G5 → F5 → D5 over the bed's G-modulation
+#                     (F♮ matches the bed's F chroma at 17s)
+#   Phrase 3 (24–32)  the leading-tone hang: long held G#5 over the bed's
+#                     E-major dominant push, resolves down E5 → A4 (tonic)
+#                     ringing into the loop seam
+#
+# Three musical ideas, not 40 stepwise notes. OVERLAP is large (0.6 beats)
+# so the GM violin's per-note attack ties cleanly into the next note rather
+# than re-articulating — closer to legato bowing than tongued sequencing.
+# Bow-weight velocities use a swell-and-settle inside each held note via
+# two stacked attacks (a soft entry, then a fuller second bow on the same
+# pitch) — a trick borrowed from how the legacy halo pad fakes breath.
+#
+# Register lives in the viola's natural sweet spot (C4–E5) to match the
+# felt-piano's mid-band centroid (~600 Hz) and the cinematic-strings'
+# ambient (~890 Hz). The earlier draft sat the line in violin's E5–A5
+# register where the bed has almost no energy — sounded like a spotlit
+# soloist instead of a bowed voice floating *inside* the existing strings.
+# Audit numbers that drove the register choice:
+#   r2-el-ambient    band energy → 54% in 60–200 Hz, 29% in 200–500 Hz
+#                                   <0.1% in 2–6 kHz
+#   r2-el-melodic    band energy → 66% in 200–500 Hz, 24% in 500–2k Hz
+#                                   <1.6% in 2–6 kHz
+#   violin in E5–A5  band energy → 43% in 2–6 kHz (catastrophic mismatch)
+# Dropping an octave and using Viola (GM 41 — darker, less upper-harmonic
+# bite than GM 40 Violin) puts the line back inside the existing spectrum.
 VIOLIN_CH = 1
-VIOLIN_PROGRAM = 40
+VIOLIN_PROGRAM = 41   # Viola — darker bowed timbre than Violin (40)
 
 def build_r2_el_violin_events() -> list:
-    # (beat, dur_beats, ch, midi_note, velocity)
-    notes = [
-        # Phrase A (0–16): held G4 — long, slow swell via two stacked attacks
-        (0.0,  8.0,  "G4", 56),
-        (8.0,  6.0,  "G4", 60),
-        # Phrase A' (16–32): sigh F-Eb-D, then rest
-        (18.0, 2.0,  "F4", 52),
-        (20.5, 2.5,  "Eb4", 48),
-        # Phrase B (32–48): slow E5→D5→C5 descent (peak phrase)
-        (32.0, 6.0,  "E5", 64),
-        (38.5, 4.0,  "D5", 60),
-        (43.0, 4.0,  "C5", 56),
-        # Phrase A'' (48–64): quiet E4 resolution
-        (50.0, 10.0, "E4", 48),
+    # OVERLAP is large here so adjacent notes tie legato — closer to bowed
+    # phrasing than retriggered MIDI. Phrases are separated by silence
+    # (no note events in those beat windows), not by overlap=0.
+    OVERLAP = 0.6
+
+    # (beat_on, beat_off, pitch, velocity)
+    # 32s loop @ 120 BPM = 64 beats total.
+    # Pitches dropped one octave from the earlier draft to put the line
+    # inside the bed's spectral home (200–2k Hz). E4 is the viola open A
+    # string + perfect-fourth; A3 is the viola C-string third — both warm.
+    line = [
+        # ── Phrase 1: "the cry" (beats 2–20, ~1–10s) ───────────────────
+        # Bed: A minor with E pedal. Viola on E4 (perfect-unison E pitch
+        # class with the bed's E pedal), then falls through the minor 3rd.
+        (2.0,   8.0,  "E4", 58),   # soft bow attack, long hold
+        (8.0,  12.0,  "E4", 70),   # second bow on the same note — swell
+        (12.0, 16.0,  "D4", 64),   # the sigh begins
+        (16.0, 20.0,  "C4", 56),   # natural-minor 3rd — lands and rings
+        # silence beats 20–32: real breath before the lift
+
+        # ── Phrase 2: "the lift" (beats 32–44, ~16–22s) ────────────────
+        # Bed has modulated toward G major (G-D-A chroma, with F♮ leading
+        # the way at the 17s mark). Viola climbs to A4 — the octave above
+        # tonic, but over the G chord it reads as the suspended 9th, which
+        # is the "ache" — then descends matching the bed's F♮.
+        (32.0, 36.0,  "A4", 72),   # the reach — held over G-bed (sus-9th)
+        (36.0, 39.0,  "G4", 66),   # release down to the bed's root note
+        (39.0, 41.5,  "F4", 60),   # match the bed's F♮ chroma
+        (41.5, 44.0,  "D4", 54),   # land on G major's 5th
+        # silence beats 44–48: brief breath into the final phrase
+
+        # ── Phrase 3: "the leading-tone hang" (beats 48–64, ~24–32s) ──
+        # Bed is back in A minor with E-major dominant push (G# chroma
+        # detected at 23s). Viola holds G#4 — the leading tone against
+        # the natural-minor bed is the lonely interval. Then resolves down
+        # E4 → A3 (the tonic on the viola C string, warmest possible).
+        (48.0, 54.0,  "G#4", 64),  # the leading-tone hang — the haunt note
+        (54.0, 57.0,  "G#4", 72),  # second bow weight, the cry peaks
+        (57.0, 60.0,  "E4", 60),   # release down the perfect fifth
+        (60.0, 63.5,  "A3", 50),   # tonic resolution — viola C-string warmth
+        # last ~0.5 beat tails off into the loop fade
     ]
-    return [(b, d, VIOLIN_CH, midi_note(p), v) for b, d, p, v in notes]
+    return [
+        (on, (off - on) + OVERLAP, VIOLIN_CH, midi_note(p), v)
+        for on, off, p, v in line
+    ]
 
 
 def render_drum_stem(events: list, out_wav: Path, gain: float = 0.7) -> None:

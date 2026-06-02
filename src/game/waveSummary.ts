@@ -11,7 +11,42 @@ import { checkBonusLife } from "./bonusLife";
 //   over the playfield, anchored to the center of the screen.
 
 const PANEL_ID = "wave-summary";
-const TICK_AMOUNT = 100;
+
+// Drain schedule: the bonus is paid out in chunks that start at 50/each and
+//   double every 8 chunks (50, 50, ..., 100, 100, ..., 200, ...). The chunk
+//   count is rounded up to a multiple of 4 so the cascade always closes on a
+//   beat boundary. The last chunk is shrunk so the total equals the bonus.
+const DRAIN_BASE_CHUNK = 50;
+const DRAIN_DOUBLE_EVERY = 8;
+const DRAIN_CHUNK_GROUP = 4;
+const chunkSizeAt = (i: number) =>
+  DRAIN_BASE_CHUNK * Math.pow(2, Math.floor(i / DRAIN_DOUBLE_EVERY));
+const planDrainChunks = (total: number): number[] => {
+  if (total <= 0) return [];
+  const chunks: number[] = [];
+  let acc = 0;
+  let i = 0;
+  while (acc < total) {
+    const size = chunkSizeAt(i);
+    chunks.push(size);
+    acc += size;
+    i++;
+  }
+  // Round count up to a multiple of DRAIN_CHUNK_GROUP by extending the
+  //   schedule (the padding chunks will be trimmed to 0 below).
+  while (chunks.length % DRAIN_CHUNK_GROUP !== 0) {
+    chunks.push(chunkSizeAt(chunks.length));
+    acc += chunks[chunks.length - 1];
+  }
+  // Trim from the tail so the chunks sum to exactly `total`.
+  let overflow = acc - total;
+  for (let j = chunks.length - 1; j >= 0 && overflow > 0; j--) {
+    const take = Math.min(overflow, chunks[j]);
+    chunks[j] -= take;
+    overflow -= take;
+  }
+  return chunks;
+};
 
 // BEAT_GRID is in seconds; everything in this file is in milliseconds.
 const BEAT_MS = BEAT_GRID * 1000; // 500ms at 120 BPM
@@ -58,6 +93,7 @@ const buildPanel = (): SummaryEls => {
       </div>
       <div class="ws-row ws-rhythm"><span class="ws-label">Max Rhythm</span> <span class="ws-value" data-row="max"></span></div>
       <div class="ws-row ws-rhythm"><span class="ws-label">Final Rhythm</span> <span class="ws-value" data-row="final"></span></div>
+      <div class="ws-row ws-drift"><span class="ws-label">Drift Bonus</span> <span class="ws-value" data-row="drift"></span></div>
       <div class="ws-row ws-bonus"><span class="ws-label">Bonus</span> <span class="ws-value" data-row="bonus"></span></div>
       <div class="ws-row ws-score"><span class="ws-label">Score</span> <span class="ws-value" data-row="score"></span></div>
     `;
@@ -87,19 +123,20 @@ const pulseScore = (el: HTMLElement) => {
 
 // Opening bell on C4 (220 * 1.189 ≈ 261.6 Hz) anchors the sequence to the
 //   game's C — same C the bass field and halo pad sit on. The remaining
-//   rows are chimes pitched into a Cmaj7 spread (C5+G5, E5+B5, G5+D6,
-//   C6+G6) so the sequence climbs out of the bass register into a clean
-//   C-major resolution instead of tolling the same bell five times.
-//   Chime is baked at C6+G6 (pitchRatio 1.0); the lower entries
-//   playback-rate-shift the same buffer.
+//   rows climb a C-major pentatonic ladder (C5, D5, E5, G5, C6) so the
+//   sequence resolves cleanly back to the C anchor rather than tolling the
+//   same bell six times. Chime is baked at C6+G6 (pitchRatio 1.0); the
+//   lower entries playback-rate-shift the same buffer.
 const C_BELL = 1.189;
 const CHIME_C5 = 0.5;       // C5+G5
+const CHIME_D5 = 0.5612;    // D5+A5  (9th — passing tone)
 const CHIME_E5 = 0.6299;    // E5+B5  (major 3rd of C)
 const CHIME_G5 = 0.7491;    // G5+D6  (5th)
 const CHIME_C6 = 1.0;       // C6+G6  (baked)
 const ROW_SOUNDS: Array<{ name: "chime" | "bell"; pitch: number }> = [
   { name: "bell",  pitch: C_BELL },
   { name: "chime", pitch: CHIME_C5 },
+  { name: "chime", pitch: CHIME_D5 },
   { name: "chime", pitch: CHIME_E5 },
   { name: "chime", pitch: CHIME_G5 },
   { name: "chime", pitch: CHIME_C6 },
@@ -138,15 +175,17 @@ export const showWaveSummary = (
   completedWave: number,
   maxRhythm: number,
   finalRhythm: number,
+  driftBonuses: number,
   onFadeComplete?: () => void,
 ) => {
   cancelActiveTimers();
-  const bonus = (maxRhythm + finalRhythm) * 100;
+  const bonus = (maxRhythm + finalRhythm + driftBonuses) * 100;
   const { root, rows, bonusValueEl, scoreValueEl } = buildPanel();
 
   setRow(root, "wave", String(completedWave));
   setRow(root, "max", `x${maxRhythm}`);
   setRow(root, "final", `x${finalRhythm}`);
+  setRow(root, "drift", String(driftBonuses));
   setRow(root, "bonus", String(bonus));
   setRow(root, "score", String(game.score));
 
@@ -173,13 +212,14 @@ export const showWaveSummary = (
       scheduleFadeOut(root, onFadeComplete);
       return;
     }
+    const chunks = planDrainChunks(bonus);
     let remaining = bonus;
     let displayedScore = game.score;
     let tickIndex = 0;
     bonusValueEl.classList.add("ws-draining");
 
     const step = () => {
-      const delta = Math.min(TICK_AMOUNT, remaining);
+      const delta = chunks[tickIndex] ?? 0;
       remaining -= delta;
       displayedScore += delta;
       game.score += delta;
@@ -202,7 +242,7 @@ export const showWaveSummary = (
       }
       tickIndex++;
 
-      if (remaining > 0) {
+      if (tickIndex < chunks.length) {
         const id = window.setTimeout(step, TICK_MS);
         activeTimers.push(id);
       } else {

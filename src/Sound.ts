@@ -984,10 +984,62 @@ export class Sound {
     return true;
   }
 
-  // Soft confirmation pluck the calibrator fires on each tap — the game's
-  //   untimed-fire voice, so tapping already sounds like shooting.
+  // Confirmation pluck the calibrator fires on each tap. Same musical shape
+  //   as playFire but with an *instant* attack on every component — no 3–4ms
+  //   exponential ramp on the body/partial — so the perceived onset coincides
+  //   with the keypress and the player can hear the click sync against the beat.
   playCalibrationTap() {
-    this.play("fire");
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const bodyHz = cfgN("fire", "bodyHz", 392);
+    const bodyPeak = cfgN("fire", "bodyPeak", 0.16);
+    const bodyDecay = cfgN("fire", "bodyDecay", 0.11);
+    const partialHz = cfgN("fire", "partialHz", 784);
+    const partialPeak = cfgN("fire", "partialPeak", 0.07);
+    const partialDecay = cfgN("fire", "partialDecay", 0.05);
+    const tickHz = cfgN("fire", "tickHz", 1600);
+    const tickQ = cfgN("fire", "tickQ", 1.2);
+    const tickPeak = cfgN("fire", "tickPeak", 0.04);
+    const tickDecay = cfgN("fire", "tickDecay", 0.02);
+
+    const body = this.ctx.createOscillator();
+    const bodyGain = this.ctx.createGain();
+    body.type = "sine";
+    body.frequency.value = bodyHz;
+    bodyGain.gain.setValueAtTime(bodyPeak, t);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + bodyDecay);
+    body.connect(bodyGain);
+    bodyGain.connect(this.master);
+    body.start(t);
+    body.stop(t + bodyDecay + 0.02);
+
+    const partial = this.ctx.createOscillator();
+    const partialGain = this.ctx.createGain();
+    partial.type = "sine";
+    partial.frequency.value = partialHz;
+    partialGain.gain.setValueAtTime(partialPeak, t);
+    partialGain.gain.exponentialRampToValueAtTime(0.0001, t + partialDecay);
+    partial.connect(partialGain);
+    partialGain.connect(this.master);
+    partial.start(t);
+    partial.stop(t + partialDecay + 0.02);
+
+    const tickBuf = this.makeNoiseBuffer(Math.max(tickDecay, 0.005));
+    if (!tickBuf) return;
+    const tick = this.ctx.createBufferSource();
+    tick.buffer = tickBuf;
+    const tickFilter = this.ctx.createBiquadFilter();
+    tickFilter.type = "bandpass";
+    tickFilter.frequency.value = tickHz;
+    tickFilter.Q.value = tickQ;
+    const tickGain = this.ctx.createGain();
+    tickGain.gain.setValueAtTime(tickPeak, t);
+    tickGain.gain.exponentialRampToValueAtTime(0.0001, t + tickDecay);
+    tick.connect(tickFilter);
+    tickFilter.connect(tickGain);
+    tickGain.connect(this.master);
+    tick.start(t);
+    tick.stop(t + tickDecay + 0.005);
   }
 
   setEnabled(on: boolean) {
@@ -2380,7 +2432,7 @@ export class Sound {
   // build_layer3.py for the per-variation design).
   private haloMusicLayer3Gain(variation: HaloMusicVariation): number {
     switch (variation) {
-      case "r2-el": return 0.45;   // lonely violin (cinematic third voice)
+      case "r2-el": return 0.32;   // lonely viola (cinematic third voice)
       case "r2-sb": return 0.40;   // warm felt-glockenspiel arpeggio
       case "r3-el": return 0.30;   // synthwave plucked synth-bass arp
       case "r4-sb": return 0.32;   // chime counter-melody (interlocks, low-rhythm)

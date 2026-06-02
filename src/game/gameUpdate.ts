@@ -156,7 +156,6 @@ const transitionToGameOver = (game: Game) => {
   game.lastRunScoreId = null;
   game.overlayTitleEl.textContent = "";
   game.overlayStartEl.classList.add("hidden");
-  // game.overlayStartTutorialEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
   renderKilledRow(game, "vertical");
@@ -336,6 +335,7 @@ const tickPendingDriftBonuses = (game: Game) => {
     game.beatCombo += 1;
     if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
     if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
+    game.driftBonusesThisWave += 1;
     syncComboHud(game);
     game.sound.playComboChime(game.beatCombo, entry.pos);
     game.popups.push(popupDriftBonus(entry.pos));
@@ -555,15 +555,17 @@ const advanceWave = (game: Game) => {
   const completedWave = game.wave;
   const maxRhythm = Math.max(1, game.maxComboThisWave);
   const finalRhythm = Math.max(1, game.beatCombo);
+  const driftBonuses = game.driftBonusesThisWave;
   const nextWave = completedWave + 1;
   game.sound.play("waveClear");
   game.sound.play("pulsarHum");
   game.pulsar.waveClear();
   if (wasBossWave) game.pulsar.setBossPlanetState("defeated");
   game.waveTransitioning = true;
-  showWaveSummary(game, completedWave, maxRhythm, finalRhythm, () => {
+  showWaveSummary(game, completedWave, maxRhythm, finalRhythm, driftBonuses, () => {
     game.wave = nextWave;
     game.maxComboThisWave = game.beatCombo;
+    game.driftBonusesThisWave = 0;
     game.pulsar.setWaveLevel(game.wave);
     updateBgBeatIntensity(game);
     spawnWave(game);

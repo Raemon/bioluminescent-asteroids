@@ -135,7 +135,6 @@ export const showTitle = (game: Game) => {
   game.overlayTitleEl.textContent = "Pulsar Drift";
   game.overlayStartEl.textContent = "Start";
   game.overlayStartEl.classList.remove("hidden");
-  // game.overlayStartTutorialEl.classList.remove("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.remove("gameover-layout");
   hideGameOverIntro();
@@ -327,6 +326,7 @@ const resetRunTimers = (game: Game) => {
   game.beatCombo = 0;
   game.maxCombo = 0;
   game.maxComboThisWave = 0;
+  game.driftBonusesThisWave = 0;
   game.firedOffBeatSinceLastBeat = false;
   game.pendingDriftBonuses = [];
   game.slowMoTimer = 0;
@@ -389,7 +389,6 @@ const enterPause = (game: Game) => {
   game.overlayTitleEl.textContent = "Paused";
   game.overlayStartEl.textContent = "Resume";
   game.overlayStartEl.classList.remove("hidden");
-  // game.overlayStartTutorialEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("paused");
   game.overlayEl.classList.remove("gameover-layout");
@@ -429,7 +428,6 @@ export const abortMission = (game: Game) => {
   game.abortEl.classList.add("hidden");
   game.overlayTitleEl.textContent = "";
   game.overlayStartEl.classList.add("hidden");
-  // game.overlayStartTutorialEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
   renderKilledRow(game, "vertical");

@@ -107,6 +107,9 @@ export class Game implements HudElements {
   // per-wave high-water mark of beatCombo, surfaced in the wave-clear summary panel.
   //   Reset to the current beatCombo at the start of each new wave.
   maxComboThisWave = 0;
+  // per-wave count of fired drift bonuses, surfaced in the wave-clear summary as
+  //   a separate +100/each line. Reset at the same point as maxComboThisWave.
+  driftBonusesThisWave = 0;
   // latched on off-beat fire so the punishment can land at the next beat closure (not retroactive).
   firedOffBeatSinceLastBeat = false;
   // first-ever meaningful combo loss in a run gets a labeled popup so the player learns the mechanic.
@@ -170,7 +173,6 @@ export class Game implements HudElements {
   overlayEl: HTMLElement;
   overlayTitleEl: HTMLElement;
   overlayStartEl: HTMLElement;
-  overlayStartTutorialEl: HTMLElement;
   volumeEl: HTMLInputElement;
   abortEl: HTMLButtonElement;
   killedRowEl: HTMLCanvasElement;
@@ -254,7 +256,6 @@ export class Game implements HudElements {
     this.overlayEl = hud.overlayEl;
     this.overlayTitleEl = hud.overlayTitleEl;
     this.overlayStartEl = hud.overlayStartEl;
-    this.overlayStartTutorialEl = hud.overlayStartTutorialEl;
     this.volumeEl = hud.volumeEl;
     this.abortEl = hud.abortEl;
     this.killedRowEl = hud.killedRowEl;
@@ -288,11 +289,11 @@ export class Game implements HudElements {
       if (this.state === "title") this.tutorialRequested = false;
       triggerOverlayStart(this);
     });
-    // this.overlayStartTutorialEl.addEventListener("click", () => {
-    //   if (this.state !== "title") return;
-    //   this.tutorialRequested = true;
-    //   triggerOverlayStart(this);
-    // });
+    window.addEventListener("tutorial:request", () => {
+      if (this.state !== "title") return;
+      this.tutorialRequested = true;
+      triggerOverlayStart(this);
+    });
     // <BeatCalibrator> (React) owns the tap-to-beat UI; the game owns the audio
     //   context it schedules clicks on, plus persistence of the result. These
     //   three events are the contract between them.

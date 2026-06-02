@@ -109,7 +109,10 @@ def main():
         ("r2-sb-percussion", "r2-sb-percussion", (35, 65, 65, 20)),
         ("r3-el-percussion", "r3-el-percussion", (25, 60, 55, 15)),
         ("r4-sb-percussion", "r4-sb-percussion", (25, 60, 55, 15)),
-        ("r2-el-percussion", "r2-el-percussion", (45, 70, 80, 25)),
+        # Bumped room_scale 80→95 and pre-delay 25→35 to push the lonely
+        # violin further back in the mix — it should float over the bed,
+        # not sit in front of it.
+        ("r2-el-percussion", "r2-el-percussion", (55, 70, 95, 35)),
     ]
     for raw, out, rev in plan:
         results.append(process_one(raw, out, rev))

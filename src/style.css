@@ -2119,6 +2119,11 @@ html:has(#sound-root), body:has(> #sound-root) {
   text-shadow: 0 0 10px rgba(255, 200, 80, 0.65);
 }
 
+#wave-summary .ws-drift .ws-value {
+  color: #9be8ff;
+  text-shadow: 0 0 10px rgba(120, 220, 255, 0.7);
+}
+
 #wave-summary .ws-bonus .ws-value {
   color: #ffd86a;
   text-shadow: 0 0 10px rgba(255, 200, 80, 0.65);
