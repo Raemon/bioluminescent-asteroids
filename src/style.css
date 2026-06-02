@@ -163,7 +163,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   align-items: center;
   gap: 16px;
   /* leave room for the fixed pause button + settings gear pinned to the corner */
-  margin-right: 96px;
+  margin-right: 72px;
 }
 
 #debug-overlay {
@@ -339,7 +339,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 #settings-gear {
   position: fixed;
   top: 19px;
-  right: 64px;
+  right: 28px;
   z-index: 15;
   pointer-events: auto;
   display: flex;
@@ -375,7 +375,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 #pause-button {
   position: fixed;
   top: 19px;
-  right: 28px;
+  right: 64px;
   z-index: 15;
   pointer-events: auto;
   display: flex;

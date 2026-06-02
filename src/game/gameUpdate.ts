@@ -165,7 +165,7 @@ const transitionToGameOver = (game: Game) => {
   emitGameState(game);
 };
 
-import { HALO_MUSIC_POOL, pickHaloMusicVariation } from "./haloMusicConfig";
+import { HALO_MUSIC_POOL, PLAY_COMBO_MUSIC, pickHaloMusicVariation } from "./haloMusicConfig";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
 
 // yellow-halo (combo ≥ 4) opens the ambient pad; combo ≥ 6 adds the
@@ -187,6 +187,13 @@ const syncHaloAmbient = (game: Game) => {
   const hasMelodic = game.beatCombo >= 6;
   const hasWhiteBullets = game.beatCombo >= 8;
   const hasLayer3 = game.beatCombo >= 12;
+
+  if (!PLAY_COMBO_MUSIC) {
+    if (game.sound.haloMusic) game.sound.stopHaloMusic();
+    if (game.sound.haloAmbient) game.sound.stopHaloAmbient();
+    game.sound.setHaloAmbientCometMode(game.comets.length > 0);
+    return;
+  }
 
   if (HALO_MUSIC_POOL.length > 0) {
     // Pre-rendered music path. Three layers: ambient (4x) + melodic (6x) + layer3 (12x).

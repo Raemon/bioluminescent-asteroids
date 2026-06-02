@@ -30,6 +30,11 @@
 // doesn't pay fetch latency regardless of which one comes up.
 import type { HaloMusicVariation } from "../Sound";
 
+// Master on/off for the combo-driven music layers. When false, the 4x/6x/12x
+// halo tiers still light up visually but no music (pre-rendered or legacy
+// synth pad) starts — the field stays at bass-only.
+export const PLAY_COMBO_MUSIC = true;
+
 export const HALO_MUSIC_POOL: readonly HaloMusicVariation[] = ["r2-el", "r2-sb", "r3-el", "r4-sb"];
 
 // Pick a random variation from the pool, or "none" if the pool is empty
