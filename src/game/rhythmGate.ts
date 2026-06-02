@@ -3,7 +3,6 @@ import { Vec } from "../vec";
 import { BEAT_GRID, BEAT_WINDOW, DEBUG_BEAT_TIMING } from "./rhythmConstants";
 import { syncComboHud } from "./hud";
 import { popupBeatDebug, popupComboLost } from "./popups";
-import { isVeteranPilot } from "./waveDirector";
 
 // Two grid tiers, measured as the period between on-beat slots:
 //   combo 0–15       → quarter-notes (BEAT_GRID): the default groove.
@@ -88,10 +87,11 @@ export const loseCombo = (game: Game, sourcePos?: Vec) => {
     if (sourcePos && (!game.hasLostComboEver || haloActive)) {
       game.popups.push(popupComboLost(sourcePos));
     }
-    // First meaningful loss for a brand-new pilot (never reached 6x rhythm in
-    // any prior run): show a bottom-screen hint explaining how to rebuild it.
+    // Show the "fire and hit on the beat to gain rhythm" hint once per game,
+    // on the first meaningful loss outside the tutorial. The tutorial's own
+    // FirstWaveHint owns the screen while a stage is up, so suppress then.
     // killEffects fires `rhythm-loss-hint:dismiss` on the next on-beat hit.
-    if (!game.hasLostComboEver && !isVeteranPilot()) {
+    if (!game.hasLostComboEver && game.firstWaveHintStage === 0) {
       window.dispatchEvent(new CustomEvent("rhythm-loss-hint:show"));
     }
     game.hasLostComboEver = true;

@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-// Bottom-middle hint shown the first time a brand-new pilot loses rhythm.
-// Game side (rhythmGate.loseCombo) fires `rhythm-loss-hint:show` on the first
-// meaningful loss for non-veterans; killEffects fires `:dismiss` on the next
-// on-beat hit. Veterans (ever reached 6x) never see it because the show event
-// only dispatches for non-veterans.
+// Bottom-middle hint shown once per game, on the first meaningful rhythm loss
+// outside the tutorial. Game side (rhythmGate.loseCombo) fires
+// `rhythm-loss-hint:show`; killEffects fires `:dismiss` on the next on-beat hit.
 const FADE_MS = 800;
 
 export const RhythmLossHint = () => {

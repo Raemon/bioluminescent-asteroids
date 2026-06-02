@@ -2337,5 +2337,5 @@ html:has(#sound-root), body:has(> #sound-root) {
    accent, scale) and just overrides the position to sit at bottom-middle. */
 .rhythm-loss-hint {
   top: auto;
-  bottom: 80px;
+  bottom: 200px;
 }
