@@ -113,9 +113,13 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   bell: 285,
   warble: 130,
   tink: 195,
-  solidCrystal: 210,
-  solidCrystalSmall: 210,
+  solidCrystal: 222,
+  solidCrystalSmall: 222,
 };
+
+// Solid crystal large asteroids render slightly bigger than a stock large so
+// they read as a more dangerous, more robust target. Smalls keep stock size.
+const SOLID_CRYSTAL_LARGE_RADIUS = 43
 
 // Length of one musical measure (seconds). 4 beats at 120 BPM × 0.5s/beat.
 // Every bassteroid fires exactly once per measure regardless of split
@@ -576,6 +580,11 @@ export class Asteroid {
       // drifting slowly.
       this.rotSpeed = rand(-0.18, 0.18);
     }
+    if (kind === "solidCrystal") {
+      // Slightly oversized vs a stock large — reads as a more menacing target
+      // without towering over the field. Smalls keep stock size.
+      this.radius = SOLID_CRYSTAL_LARGE_RADIUS;
+    }
     if (isBoss) {
       // Boss is huge — override the size table so its physical footprint
       // matches its visual identity as a planetoid that just dropped in.
@@ -978,9 +987,12 @@ export class Asteroid {
       // 1.0 = right under the light, 0.0 = farthest facet. Power curve makes
       // the lit side noticeably brighter without crushing the shaded side.
       const lit = Math.pow(Math.max(0, 1 - d / maxLightDist), 1.6);
-      const lightness = 32 + lit * 52;          // 32% (deep) → 84% (lit)
-      const alpha = 0.55 + lit * 0.35;          // shaded facets stay translucent
-      ctx.fillStyle = `hsla(${H}, 92%, ${lightness}%, ${alpha})`;
+      const lightness = 24 + lit * 60;          // 24% (deep ice) → 84% (frosted highlight)
+      // Saturation falls off toward the lit side — frosted ice scatters light
+      // and reads near-white where it's hit, deep cool blue where it isn't.
+      const sat = 70 - lit * 35;                // 70% (shaded) → 35% (lit, frost-pale)
+      const alpha = 0.75 + lit * 0.2;
+      ctx.fillStyle = `hsla(${H}, ${sat}%, ${lightness}%, ${alpha})`;
       ctx.beginPath();
       ctx.moveTo(coreX, coreY);
       ctx.lineTo(a.x, a.y);

@@ -61,14 +61,23 @@ export const paintAimDiscs = (
   ctx.strokeStyle = `hsla(${dashHsl}, ${tutorialHighlight ? Math.max(hitAlpha, 0.85) : hitAlpha})`;
   ctx.lineWidth = 1;
   ctx.setLineDash(RETICULE_LINE_DASH);
-  ctx.beginPath();
-  ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_OFF_BEAT, 0, TAU);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_ON_BEAT, 0, TAU);
-  ctx.stroke();
-  ctx.setLineDash(RETICULE_CROSSHAIR_DASH);
-  const cInner = BULLET_HIT_RADIUS_ON_BEAT + RETICULE_CROSSHAIR_GAP;
+  const isSecondary = slot >= 2;
+  if (isSecondary) {
+    ctx.beginPath();
+    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_OFF_BEAT, 0, TAU);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_OFF_BEAT, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_ON_BEAT, 0, TAU);
+    ctx.stroke();
+  }
+  if (isSecondary) ctx.setLineDash([]);
+  else ctx.setLineDash(RETICULE_CROSSHAIR_DASH);
+  const ringRadius = isSecondary ? BULLET_HIT_RADIUS_OFF_BEAT : BULLET_HIT_RADIUS_ON_BEAT;
+  const cInner = ringRadius + RETICULE_CROSSHAIR_GAP;
   const cOuter = cInner + tickLength;
   ctx.beginPath();
   ctx.moveTo(reticulePos.x - cOuter, reticulePos.y); ctx.lineTo(reticulePos.x - cInner, reticulePos.y);
