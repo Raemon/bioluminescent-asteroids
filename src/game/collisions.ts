@@ -7,7 +7,6 @@ import { AlienBullet } from "../AlienBullet";
 import { Canister } from "../Canister";
 import {
   GoldCrystal,
-  GOLD_CRYSTAL_SCORE,
   GOLD_CRYSTAL_UPGRADE_CHANCE,
   GOLD_CRYSTAL_REVEAL_SCORE,
   spawnCanisterFromGoldCrystal,
@@ -297,8 +296,9 @@ const explodeCanister = (game: Game, c: Canister) => {
 //      score (see crackGoldCrystalForCanister). Any weaker / off-beat shot
 //      wastes it: no score, no popup, same sad sound + white burst a wasted
 //      canister gets, so the player reads "wrong tool" the same way.
-//   2) Fly through it. Slow-and-safe collect path — full GOLD_CRYSTAL_SCORE
-//      with no canister. Reasonable fallback when rhythm isn't available.
+//   2) Fly through it. The gem shatters on contact and the ship takes the
+//      hit — shield pops if up, otherwise killShip. No score: the gem is a
+//      rhythm target, never a freebie pickup.
 // Shoot pass runs first so a bullet at the gem this frame can't be
 // pre-empted by a same-frame ship overlap.
 export const handleGoldCrystalPickups = (game: Game) => {
@@ -314,8 +314,8 @@ export const handleGoldCrystalPickups = (game: Game) => {
       else wasteGoldCrystal(game, g);
       continue;
     }
-    if (game.ship.alive && g.collidesWith(game.ship.pos, game.ship.radius * 0.9)) {
-      collectGoldCrystal(game, g);
+    if (game.ship.alive && game.ship.invuln <= 0 && g.collidesWith(game.ship.pos, game.ship.radius * 0.9)) {
+      shatterGoldCrystalOnShip(game, g);
       continue;
     }
     remaining.push(g);
@@ -323,14 +323,19 @@ export const handleGoldCrystalPickups = (game: Game) => {
   game.goldCrystals = remaining;
 };
 
-const collectGoldCrystal = (game: Game, g: GoldCrystal) => {
-  game.sound.play("powerup", 1, g.pos);
-  game.sound.play("tink", 1, g.pos);
-  game.score += GOLD_CRYSTAL_SCORE;
-  game.popups.push(popupScore(g.pos, GOLD_CRYSTAL_SCORE));
+// Ship touched the gem: same sad crystal-break flavour as a solid-crystal
+// asteroid shatter, and the ship eats the impact (shield first, then kill).
+const shatterGoldCrystalOnShip = (game: Game, g: GoldCrystal) => {
+  game.sound.play("crystalShatterSmall", 1, g.pos);
+  game.shake = Math.min(game.shake + 0.3, 1.2);
   emitGoldCrystalPickup(game.particles, g);
-  syncHud(game);
-  checkBonusLife(game);
+  if (game.ship.shieldActive) {
+    game.ship.shieldActive = false;
+    game.ship.invuln = 0.8;
+    popShield(game);
+  } else {
+    killShip(game);
+  }
 };
 
 // Rhythm-cracked: 40% of the time the gem yields its embedded canister, the

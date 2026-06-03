@@ -96,16 +96,25 @@ type MantaShape = {
   // cephalic horns — small forward fins. Each is a tiny triangle the renderer
   // paints AFTER the body so it sits proud of the leading edge.
   horns: { tip: Vec; baseA: Vec; baseB: Vec }[];
-  // chevron ribs sweeping from spine to wing edge. Each rib is a pair of curve
-  // points (control + end). Mirrored top/bottom automatically.
-  ribs: { start: Vec; control: Vec; end: Vec }[];
+  // structural ribs sweeping from spine to wing edge. Each rib is a polyline
+  // (start → mid → end) of straight segments — the kink in the middle makes
+  // the rib read as a hard structural seam rather than an organic curve.
+  // Mirrored top/bottom automatically.
+  ribs: { start: Vec; mid: Vec; end: Vec }[];
+  // facet seams — extra straight line pairs that paint as hard dark plate
+  // joins over the curved silhouette. Each pair is a (start, end) polyline
+  // run; the renderer paints them as faint inset shadows with a brighter
+  // edge-light along one side. Gives the wing a mechanically-plated look
+  // without breaking the swept outline. Mirrored top/bottom.
+  facets: { start: Vec; end: Vec }[];
   // tail: a tapered whip emerging from the rear notch. baseHalfWidth controls
   // how thick it is at the body, length is how far back it reaches, and
   // barbHalfWidth is the tail tip's flare (0 for a clean point).
   tail: { length: number; baseHalfWidth: number; barbHalfWidth: number; sway: number } | null;
-  // cockpit slit — a small horizontal recess on the dorsal centerline, painted
-  // as a faint inner glow.
-  cockpit: { pos: Vec; width: number; height: number };
+  // cockpit canopy — a faceted polygon on the dorsal centerline rather than
+  // a smooth ellipse. Vertices traced clockwise; renderer fills with a dark
+  // glass tint and paints a thin bright edge.
+  cockpit: { vertices: Vec[] };
 };
 
 // Helper for symmetric outlines: takes the starboard-side waypoints (y >= 0)
@@ -148,12 +157,22 @@ const buildMantaShape = (size: AlienSize): MantaShape => {
         { tip: v(1.05, 0.08), baseA: v(0.75, 0.02), baseB: v(0.78, 0.15) },
       ],
       ribs: [
-        { start: v(0.55, 0.05), control: v(0.4, 0.3), end: v(0.1, 0.55) },
-        { start: v(0.15, 0.05), control: v(-0.05, 0.3), end: v(-0.25, 0.6) },
-        { start: v(-0.25, 0.05), control: v(-0.4, 0.2), end: v(-0.5, 0.35) },
+        { start: v(0.55, 0.05), mid: v(0.35, 0.32), end: v(0.05, 0.55) },
+        { start: v(0.15, 0.05), mid: v(-0.05, 0.32), end: v(-0.28, 0.58) },
+        { start: v(-0.25, 0.05), mid: v(-0.4, 0.22), end: v(-0.52, 0.34) },
+      ],
+      facets: [
+        // forward leading-edge chamfer (straight cut across the swept curve)
+        { start: v(0.7, 0.0), end: v(0.55, 0.32) },
+        // mid-wing seam joining hull to wing plate
+        { start: v(0.0, 0.0), end: v(-0.2, 0.5) },
+        // trailing-edge chamfer near the rear notch
+        { start: v(-0.5, 0.18), end: v(-0.35, 0.5) },
       ],
       tail: { length: 0.45, baseHalfWidth: 0.08, barbHalfWidth: 0.0, sway: 0.18 },
-      cockpit: { pos: v(0.55, 0), width: 0.22, height: 0.07 },
+      cockpit: {
+        vertices: [v(0.7, 0), v(0.6, -0.05), v(0.45, -0.05), v(0.4, 0), v(0.45, 0.05), v(0.6, 0.05)],
+      },
     };
   }
   if (size === "medium") {
@@ -183,13 +202,25 @@ const buildMantaShape = (size: AlienSize): MantaShape => {
         { tip: v(1.15, 0.1), baseA: v(0.85, 0.02), baseB: v(0.85, 0.2) },
       ],
       ribs: [
-        { start: v(0.6, 0.06), control: v(0.5, 0.4), end: v(0.2, 0.78) },
-        { start: v(0.25, 0.06), control: v(0.1, 0.45), end: v(-0.2, 0.85) },
-        { start: v(-0.1, 0.06), control: v(-0.25, 0.4), end: v(-0.4, 0.65) },
-        { start: v(-0.4, 0.05), control: v(-0.5, 0.2), end: v(-0.55, 0.35) },
+        { start: v(0.6, 0.06), mid: v(0.45, 0.45), end: v(0.15, 0.78) },
+        { start: v(0.25, 0.06), mid: v(0.05, 0.45), end: v(-0.22, 0.82) },
+        { start: v(-0.1, 0.06), mid: v(-0.28, 0.4), end: v(-0.42, 0.62) },
+        { start: v(-0.4, 0.05), mid: v(-0.5, 0.2), end: v(-0.58, 0.32) },
+      ],
+      facets: [
+        // forward leading-edge chamfer
+        { start: v(0.75, 0.0), end: v(0.6, 0.4) },
+        // mid-wing structural seam
+        { start: v(0.1, 0.0), end: v(-0.1, 0.65) },
+        // outer wing-plate seam
+        { start: v(-0.3, 0.3), end: v(-0.4, 0.65) },
+        // trailing-edge chamfer
+        { start: v(-0.55, 0.2), end: v(-0.35, 0.55) },
       ],
       tail: { length: 0.85, baseHalfWidth: 0.07, barbHalfWidth: 0.06, sway: 0.28 },
-      cockpit: { pos: v(0.6, 0), width: 0.28, height: 0.08 },
+      cockpit: {
+        vertices: [v(0.78, 0), v(0.66, -0.07), v(0.48, -0.07), v(0.4, 0), v(0.48, 0.07), v(0.66, 0.07)],
+      },
     };
   }
   // big — leviathan manta. Vast curved wing-disc, prominent cephalic horns,
@@ -218,14 +249,28 @@ const buildMantaShape = (size: AlienSize): MantaShape => {
       { tip: v(1.2, 0.14), baseA: v(0.9, 0.04), baseB: v(0.88, 0.24) },
     ],
     ribs: [
-      { start: v(0.65, 0.08), control: v(0.55, 0.5), end: v(0.25, 0.9) },
-      { start: v(0.3, 0.08), control: v(0.15, 0.55), end: v(-0.2, 0.95) },
-      { start: v(-0.05, 0.08), control: v(-0.25, 0.45), end: v(-0.45, 0.75) },
-      { start: v(-0.35, 0.06), control: v(-0.5, 0.3), end: v(-0.6, 0.5) },
-      { start: v(-0.55, 0.05), control: v(-0.62, 0.15), end: v(-0.65, 0.25) },
+      { start: v(0.65, 0.08), mid: v(0.5, 0.55), end: v(0.18, 0.9) },
+      { start: v(0.3, 0.08), mid: v(0.1, 0.6), end: v(-0.25, 0.92) },
+      { start: v(-0.05, 0.08), mid: v(-0.28, 0.5), end: v(-0.48, 0.72) },
+      { start: v(-0.35, 0.06), mid: v(-0.5, 0.3), end: v(-0.62, 0.48) },
+      { start: v(-0.55, 0.05), mid: v(-0.62, 0.15), end: v(-0.67, 0.24) },
+    ],
+    facets: [
+      // forward leading-edge chamfer — long straight cut
+      { start: v(0.8, 0.0), end: v(0.6, 0.5) },
+      // upper mid-wing seam (between cockpit row and outer wing)
+      { start: v(0.15, 0.0), end: v(-0.05, 0.78) },
+      // outer wing-plate seam
+      { start: v(-0.25, 0.4), end: v(-0.48, 0.8) },
+      // inner-rear hull seam
+      { start: v(-0.45, 0.1), end: v(-0.6, 0.45) },
+      // trailing-edge chamfer
+      { start: v(-0.6, 0.25), end: v(-0.4, 0.62) },
     ],
     tail: { length: 1.2, baseHalfWidth: 0.08, barbHalfWidth: 0.1, sway: 0.34 },
-    cockpit: { pos: v(0.65, 0), width: 0.34, height: 0.09 },
+    cockpit: {
+      vertices: [v(0.85, 0), v(0.72, -0.08), v(0.5, -0.08), v(0.4, 0), v(0.5, 0.08), v(0.72, 0.08)],
+    },
   };
 };
 
@@ -502,28 +547,75 @@ export class Alien {
       sctx.fill();
     }
 
-    // 5. Chevron ribs — curved glowing lines sweeping from spine to wing
-    //    edge. Mirrored top/bottom. Drawn additively so they glow against
-    //    the dark body. Clipped to the body so they never bleed outside the
-    //    wing silhouette.
+    // 5. Structural ribs + facet seams — straight-segment plate joins, not
+    //    organic curves. Ribs are kinked polylines (start → mid → end);
+    //    facets are single straight cuts. Both clipped to the body so they
+    //    can't bleed outside the wing silhouette.
     sctx.save();
     this.traceBody(sctx);
     sctx.clip();
+    sctx.lineCap = "butt";
+    sctx.lineJoin = "miter";
+
+    // Facet seams first — dark inset that reads as a panel join, with a
+    // brighter sliver on the dorsal side for "edge-lit plate" parallax.
+    sctx.globalCompositeOperation = "source-over";
+    for (const facet of shape.facets) {
+      // Dark seam (the join itself).
+      sctx.strokeStyle = `hsla(${baseHue - 12}, 70%, 5%, 0.55)`;
+      sctx.lineWidth = 1.2;
+      sctx.beginPath();
+      sctx.moveTo(facet.start.x * r, -facet.start.y * r);
+      sctx.lineTo(facet.end.x * r, -facet.end.y * r);
+      sctx.stroke();
+      sctx.beginPath();
+      sctx.moveTo(facet.start.x * r, facet.start.y * r);
+      sctx.lineTo(facet.end.x * r, facet.end.y * r);
+      sctx.stroke();
+    }
+    // Bright edge-light along one side of each seam (slightly offset toward
+    // the leading edge so the wing reads as a faceted plate catching light).
     sctx.globalCompositeOperation = "lighter";
-    sctx.lineCap = "round";
-    sctx.lineJoin = "round";
+    sctx.strokeStyle = `hsla(${baseHue + 20}, 100%, 75%, 0.32)`;
+    sctx.lineWidth = 0.7;
+    for (const facet of shape.facets) {
+      const dx = facet.end.x - facet.start.x;
+      const dy = facet.end.y - facet.start.y;
+      const len = Math.hypot(dx, dy) || 1;
+      // Perpendicular offset toward +X (forward) so the highlight sits on
+      // the leading side of each seam.
+      const nx = (-dy / len) * 0.025;
+      const ny = (dx / len) * 0.025;
+      // top side: flip y → flip perp y
+      sctx.beginPath();
+      sctx.moveTo((facet.start.x + nx) * r, (-(facet.start.y) - ny) * r);
+      sctx.lineTo((facet.end.x + nx) * r, (-(facet.end.y) - ny) * r);
+      sctx.stroke();
+      // bottom side
+      sctx.beginPath();
+      sctx.moveTo((facet.start.x + nx) * r, (facet.start.y + ny) * r);
+      sctx.lineTo((facet.end.x + nx) * r, (facet.end.y + ny) * r);
+      sctx.stroke();
+    }
+
+    // Ribs — kinked polylines drawn as glowing structural seams.
+    sctx.globalCompositeOperation = "lighter";
     sctx.strokeStyle = `hsla(${baseHue + 18}, 100%, 70%, 0.55)`;
     sctx.lineWidth = 1.2;
+    sctx.lineCap = "round";
+    sctx.lineJoin = "round";
     for (const rib of shape.ribs) {
-      // top side
+      // top side (mirrored)
       sctx.beginPath();
       sctx.moveTo(rib.start.x * r, -rib.start.y * r);
-      sctx.quadraticCurveTo(rib.control.x * r, -rib.control.y * r, rib.end.x * r, -rib.end.y * r);
+      sctx.lineTo(rib.mid.x * r, -rib.mid.y * r);
+      sctx.lineTo(rib.end.x * r, -rib.end.y * r);
       sctx.stroke();
-      // bottom side (mirrored)
+      // bottom side
       sctx.beginPath();
       sctx.moveTo(rib.start.x * r, rib.start.y * r);
-      sctx.quadraticCurveTo(rib.control.x * r, rib.control.y * r, rib.end.x * r, rib.end.y * r);
+      sctx.lineTo(rib.mid.x * r, rib.mid.y * r);
+      sctx.lineTo(rib.end.x * r, rib.end.y * r);
       sctx.stroke();
     }
     sctx.restore();
@@ -554,25 +646,43 @@ export class Alien {
     sctx.lineTo(-0.55 * r, 0);
     sctx.stroke();
 
-    // 8. Cockpit slit — a small dark recess with a faint inner glow. Drawn
-    //    on the dorsal centerline near the head.
-    const c = shape.cockpit;
-    const cx = c.pos.x * r;
-    const cy = c.pos.y * r;
-    const cw = c.width * r;
-    const ch = c.height * r;
+    // 8. Cockpit canopy — a faceted polygon (not an ellipse) reads as a
+    //    glass plate rather than an organic eye. Dark glass fill, thin
+    //    bright edge stroke, soft inner glow.
+    const tracePoly = (poly: Vec[]) => {
+      sctx.beginPath();
+      for (let i = 0; i < poly.length; i++) {
+        const x = poly[i].x * r;
+        const y = poly[i].y * r;
+        if (i === 0) sctx.moveTo(x, y);
+        else sctx.lineTo(x, y);
+      }
+      sctx.closePath();
+    };
+    sctx.globalCompositeOperation = "source-over";
     sctx.fillStyle = `hsla(${baseHue - 10}, 80%, 4%, 0.95)`;
-    sctx.beginPath();
-    sctx.ellipse(cx, cy, cw * 0.5, ch * 0.5, 0, 0, TAU);
+    tracePoly(shape.cockpit.vertices);
     sctx.fill();
+    sctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 80%, 0.75)`;
+    sctx.lineWidth = 0.8;
+    sctx.lineJoin = "miter";
+    sctx.stroke();
+    // Inner glow — a faint additive wash sitting inside the dark canopy.
+    sctx.save();
+    tracePoly(shape.cockpit.vertices);
+    sctx.clip();
     sctx.globalCompositeOperation = "lighter";
-    const cockpitGlow = sctx.createRadialGradient(cx, cy, 0, cx, cy, cw * 0.6);
+    // Compute polygon centroid for the radial gradient origin.
+    let gcx = 0, gcy = 0;
+    for (const p of shape.cockpit.vertices) { gcx += p.x; gcy += p.y; }
+    gcx = (gcx / shape.cockpit.vertices.length) * r;
+    gcy = (gcy / shape.cockpit.vertices.length) * r;
+    const cockpitGlow = sctx.createRadialGradient(gcx, gcy, 0, gcx, gcy, r * 0.2);
     cockpitGlow.addColorStop(0, `hsla(${baseHue + 20}, 100%, 75%, 0.7)`);
     cockpitGlow.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
     sctx.fillStyle = cockpitGlow;
-    sctx.beginPath();
-    sctx.ellipse(cx, cy, cw * 0.6, ch * 0.55, 0, 0, TAU);
-    sctx.fill();
+    sctx.fillRect(-extent, -extent, sizePx, sizePx);
+    sctx.restore();
     return canvas;
   }
 
@@ -626,20 +736,19 @@ export class Alien {
     // cockpit slit. Cast once into the offscreen sprite at construction.
     ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
 
-    // Bioluminescent chevron pulse — a brightness wave sweeps from spine
-    // outward along the rib pattern, like a manta's underbelly glow shifting
-    // as it banks. Fire-flash boosts the whole wave so the moment of firing
-    // reads as a coordinated glow.
+    // Edge-light pulse — a brightness wave sweeps from spine outward along
+    // the rib seams, reading as charge running through the wing's structural
+    // plates. Fire-flash boosts the whole wave so the moment of firing reads
+    // as a coordinated glow.
     ctx.save();
     this.traceBody(ctx);
     ctx.clip();
     ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     const sweep = (t * 0.0014 + this.weavePhase * 0.4) % 1;
     for (let i = 0; i < shape.ribs.length; i++) {
       const rib = shape.ribs[i];
-      // Each rib has its own phase offset so the glow sweeps along the wing.
       const phase = (sweep + i / shape.ribs.length) % 1;
-      // Triangle pulse — peaks once per sweep, decays smoothly.
       const tri = Math.max(0, 1 - Math.abs(phase - 0.5) * 2.4);
       const pulse = tri * (0.5 + 0.6 * this.fireFlash) + this.fireFlash * 0.25;
       if (pulse <= 0.02) continue;
@@ -647,11 +756,13 @@ export class Alien {
       ctx.lineWidth = 1.6;
       ctx.beginPath();
       ctx.moveTo(rib.start.x * r, -rib.start.y * r);
-      ctx.quadraticCurveTo(rib.control.x * r, -rib.control.y * r, rib.end.x * r, -rib.end.y * r);
+      ctx.lineTo(rib.mid.x * r, -rib.mid.y * r);
+      ctx.lineTo(rib.end.x * r, -rib.end.y * r);
       ctx.stroke();
       ctx.beginPath();
       ctx.moveTo(rib.start.x * r, rib.start.y * r);
-      ctx.quadraticCurveTo(rib.control.x * r, rib.control.y * r, rib.end.x * r, rib.end.y * r);
+      ctx.lineTo(rib.mid.x * r, rib.mid.y * r);
+      ctx.lineTo(rib.end.x * r, rib.end.y * r);
       ctx.stroke();
     }
     ctx.restore();

@@ -61,11 +61,15 @@ const HOVER_DOT_HSL = RETICULE_DASH_HSL;
 // independently; the flare visual can outrun it.
 const HOVER_FLARE_SEC = 0.7;
 const HOVER_FLARE_PEAK_BOOST = 4.0;
-// soundwave rings: one new concentric ring emitted per beat while the player holds hover.
-// Each ring expands outward from the dot ring and fades — reads as a radar ping pulsing in
-// time with the music. WAVE_LIFETIME_BEATS controls how long a single wave lives before
-// fully fading; >1 means waves overlap so the radiation feels continuous.
-const HOVER_WAVE_LIFETIME_BEATS = 2.0;
+// soundwave rings: one new concentric ring emitted every WAVE_PERIOD_BEATS while the player
+// holds hover. Each ring expands outward from the dot ring and fades — reads as a radar ping
+// pulsing in time with the music. WAVE_LIFETIME_BEATS controls how long a single wave lives
+// before fully fading; > PERIOD means consecutive waves overlap for a continuous feel.
+const HOVER_WAVE_PERIOD_BEATS = 2;
+const HOVER_WAVE_LIFETIME_BEATS = 3.0;
+// fire the first soundwave one beat before the ring finishes filling — the pulse anticipates
+// the lock instead of trailing it.
+const HOVER_WAVE_LEAD_BEATS = 1;
 const HOVER_WAVE_START_R = HOVER_DOT_RING_RADIUS + 2;
 const HOVER_WAVE_END_R = HOVER_DOT_RING_RADIUS + 44;
 const HOVER_WAVE_LINE_WIDTH = 2.0;
@@ -165,8 +169,11 @@ const paintHoverDotRing = (
     ? lerpHsl(HOVER_DOT_HSL, HOVER_FLARE_WARM_HSL, burstEnvelope)
     : HOVER_DOT_HSL;
   // soundwaves emit BEFORE arcs so the arcs and the dot/aim disc paint on top of them.
-  if (fullyBuilt) {
-    paintSoundwaves(ctx, center, elapsed - fillCompleteSec, beatTime, beatGrid);
+  // The first wave fires one beat before fill completes (HOVER_WAVE_LEAD_BEATS), so the
+  // pulse is already underway by the time the arcs finish locking in.
+  const wavesStartSec = fillCompleteSec - HOVER_WAVE_LEAD_BEATS * beatGrid;
+  if (elapsed >= wavesStartSec) {
+    paintSoundwaves(ctx, center, elapsed - wavesStartSec, beatTime, beatGrid);
   }
   ctx.lineWidth = HOVER_ARC_LINE_WIDTH;
   ctx.lineCap = "round";
@@ -191,22 +198,23 @@ const paintHoverDotRing = (
 };
 
 // concentric soundwave rings that radiate outward from the dot ring in time with the beat.
-// One new wave is emitted on each beat downbeat and lives for HOVER_WAVE_LIFETIME_BEATS,
-// so multiple waves can be in flight at once for a continuous radar-ping feel. The wave
-// that fires at lock acquisition is brighter so lock still reads as a distinct moment.
+// A new wave is emitted every HOVER_WAVE_PERIOD_BEATS and lives for HOVER_WAVE_LIFETIME_BEATS,
+// so consecutive waves overlap for a continuous radar-ping feel. The wave that fires at
+// lock acquisition is brighter so lock still reads as a distinct moment.
 // `lockAge` is seconds since the ring filled (≥0 when fully built).
 const paintSoundwaves = (
   ctx: CanvasRenderingContext2D, center: Vec, lockAge: number, beatTime: number, beatGrid: number,
 ) => {
   if (beatGrid <= 0) return;
   ctx.lineCap = "round";
-  // each wave is identified by the beat index it was emitted on. We look at the few most
-  // recent integer beats and draw any whose age is still within the lifetime window.
+  // waves emit on every PERIOD-th integer beat downbeat. Walk back from the most recent such
+  // beat and draw any wave still within its lifetime window.
   const beatsSinceLock = lockAge / beatGrid;
   const currentBeat = Math.floor(beatTime / beatGrid);
-  const maxOverlap = Math.ceil(HOVER_WAVE_LIFETIME_BEATS) + 1;
+  const mostRecentEmitBeat = currentBeat - ((currentBeat % HOVER_WAVE_PERIOD_BEATS) + HOVER_WAVE_PERIOD_BEATS) % HOVER_WAVE_PERIOD_BEATS;
+  const maxOverlap = Math.ceil(HOVER_WAVE_LIFETIME_BEATS / HOVER_WAVE_PERIOD_BEATS) + 1;
   for (let back = 0; back < maxOverlap; back++) {
-    const beatIndex = currentBeat - back;
+    const beatIndex = mostRecentEmitBeat - back * HOVER_WAVE_PERIOD_BEATS;
     const emitTime = beatIndex * beatGrid;
     const ageSec = beatTime - emitTime;
     if (ageSec < 0) continue;
@@ -223,9 +231,9 @@ const paintSoundwaves = (
     const fadeOut = Math.pow(1 - t, 1.8);
     const envelope = fadeIn * fadeOut;
     // the first wave fired after lock is brighter so lock acquisition still reads as a
-    // distinct beat. After a couple beats every wave settles to the steady look.
+    // distinct beat. After one full emit period every wave settles to the steady look.
     const beatsBetweenWaveAndLock = beatsSinceLock - ageBeats;
-    const isLockWave = beatsBetweenWaveAndLock >= 0 && beatsBetweenWaveAndLock < 1;
+    const isLockWave = beatsBetweenWaveAndLock >= 0 && beatsBetweenWaveAndLock < HOVER_WAVE_PERIOD_BEATS;
     const peakAlpha = isLockWave ? HOVER_LOCK_WAVE_PEAK_ALPHA : HOVER_WAVE_PEAK_ALPHA;
     const lineWidth = isLockWave ? HOVER_LOCK_WAVE_LINE_WIDTH : HOVER_WAVE_LINE_WIDTH;
     ctx.lineWidth = lineWidth;

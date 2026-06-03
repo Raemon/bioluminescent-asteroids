@@ -209,8 +209,8 @@ export const OBJECTS: GameObject[] = [
     label: "gold crystal asteroid",
     about: "hidden gold inside — drops a collectible",
     actions: [
-      // collectGoldCrystal pickup plays powerup+tink; the cracked-but-not-
-      // picked branch plays canisterAppear+tink at the spawn point.
+      // Ship-touch shatters the gem (crystalShatterSmall + ship damage); the
+      // rhythm-cracked branch plays canisterAppear+tink at the spawn point.
       { verb: "cracked → canister spawns", sound: "canisterAppear", trigger: beat(8), animation: "canister" },
     ],
   },
