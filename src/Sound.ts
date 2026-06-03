@@ -260,6 +260,9 @@ export class Sound {
   // at 0.6); 2.0 = double, the slider's default max. 0 disables playback via
   // `enabled` so per-voice early-outs still kick in.
   volume = 2;
+  // Extra multiplier applied on top of `volume` so pause can fade the mix
+  // to silence without losing the player's slider setting. 1 = no fade.
+  private pauseFadeFactor = 1;
   // Bumped up from 0.6 so the default (volume=2 → 1.2 effective) lands well
   // above the old all-the-way-up calibration; the slider lets players pull
   // back if it's too hot on their setup.
@@ -275,10 +278,15 @@ export class Sound {
   // Step index into the big-alien fire note cycle. Each shot advances by 1
   // so the riff plays back in order across hits.
   private bigAlienFireStep = 0;
-  // Decoded electric-guitar sample for playAlienFireBig. Loaded once on first
-  // ensureContext from public/sounds/guitar/. See PLAYER_NOTE_HZ below for the
-  // sample's actual recorded pitch — used to compute playbackRate.
-  private guitarSampleBuffer: AudioBuffer | null = null;
+  // Same idea for the medium alien — independent so its riff position
+  // doesn't get tied to the big alien's firing cadence.
+  private mediumAlienFireStep = 0;
+  // Two electric-guitar candidates loaded for A/B comparison: Jazz (FreePats
+  // SF2) and Gretsch (Karoryfer hollowbody). playAlienFireBig/Medium swap
+  // between them mid-riff so a single firing burst plays both side by side.
+  // Both recorded at A3 (220 Hz) — see SAMPLE_RECORDED_HZ at call sites.
+  private guitarSampleJazz: AudioBuffer | null = null;
+  private guitarSampleGretsch: AudioBuffer | null = null;
   private guitarSampleLoading = false;
   // Single soft hum held while the reticule hovers the first-beat dot. Null
   // when not hovering. Gain target rides the hover intensity each frame.
@@ -387,7 +395,7 @@ export class Sound {
     if (!AC) return;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = Sound.MASTER_BASE_GAIN * this.volume;
+    this.master.gain.value = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
     // Native compressor + brick-wall limiter mirroring the settings Tone's
     // master chain used to apply (Compressor: -18/3/0.01/0.18/12; Limiter:
     // -1/20/0.003/0.01). Runtime is identical in dev and prod — Tone is only
@@ -411,7 +419,7 @@ export class Sound {
     // contains the full Tone master chain). Mirrors the master gain level so
     // baked and live voices sit at a comparable loudness.
     this.bakedOut = this.ctx.createGain();
-    this.bakedOut.gain.value = Sound.BAKED_BASE_GAIN * this.volume;
+    this.bakedOut.gain.value = Sound.BAKED_BASE_GAIN * this.volume * this.pauseFadeFactor;
     this.bakedOut.connect(this.ctx.destination);
     // Pre-fill the noise-buffer cache so the first bassteroid/comet spawn
     // doesn't pay the 6-8s buffer allocation mid-gameplay. AudioBuffers can't
@@ -436,19 +444,30 @@ export class Sound {
     for (const d of durations) this.makeNoiseBuffer(d);
   }
 
-  // Fetch + decode the electric-guitar sample used by playAlienFireBig.
-  // Single-shot; idempotent. If the file is missing, playAlienFireBig
-  // silently no-ops on that voice (the rest of the mix continues normally).
+  // Fetch + decode both guitar candidates. Single-shot; idempotent. If a
+  // file is missing the corresponding voice silent-skips at call time.
   private async loadGuitarSample() {
-    if (!this.ctx || this.guitarSampleBuffer || this.guitarSampleLoading) return;
+    if (!this.ctx || this.guitarSampleLoading) return;
+    if (this.guitarSampleJazz && this.guitarSampleGretsch) return;
     this.guitarSampleLoading = true;
+    const ctx = this.ctx;
+    const loadOne = async (url: string): Promise<AudioBuffer | null> => {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) return null;
+        const ab = await r.arrayBuffer();
+        return await ctx.decodeAudioData(ab);
+      } catch {
+        return null;
+      }
+    };
     try {
-      const r = await fetch("/sounds/guitar/big-alien.wav");
-      if (!r.ok) return;
-      const ab = await r.arrayBuffer();
-      this.guitarSampleBuffer = await this.ctx.decodeAudioData(ab);
-    } catch {
-      // missing or undecodable — playAlienFireBig will skip
+      const [jazz, gretsch] = await Promise.all([
+        this.guitarSampleJazz ? Promise.resolve(this.guitarSampleJazz) : loadOne("/sounds/guitar/big-alien-jazz.wav"),
+        this.guitarSampleGretsch ? Promise.resolve(this.guitarSampleGretsch) : loadOne("/sounds/guitar/big-alien-gretsch.wav"),
+      ]);
+      if (jazz) this.guitarSampleJazz = jazz;
+      if (gretsch) this.guitarSampleGretsch = gretsch;
     } finally {
       this.guitarSampleLoading = false;
     }
@@ -1089,9 +1108,27 @@ export class Sound {
   // the per-voice early-outs gate any in-flight starts; v > 0 re-enables.
   setVolume(v: number) {
     this.volume = Math.max(0, Math.min(2, v));
-    if (this.master) this.master.gain.value = Sound.MASTER_BASE_GAIN * this.volume;
-    if (this.bakedOut) this.bakedOut.gain.value = Sound.BAKED_BASE_GAIN * this.volume;
+    if (this.master) this.master.gain.value = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
+    if (this.bakedOut) this.bakedOut.gain.value = Sound.BAKED_BASE_GAIN * this.volume * this.pauseFadeFactor;
     this.setEnabled(this.volume > 0);
+  }
+
+  // Ramp the master + bakedOut buses to `target` (0..1) over `duration` seconds.
+  // Used to fade audio out on pause and back in on resume without disturbing
+  // the player's volume slider. cancelScheduledValues clears any in-flight
+  // ramp so back-to-back pause/resume taps don't fight each other.
+  fadeForPause(target: number, duration: number) {
+    this.pauseFadeFactor = Math.max(0, Math.min(1, target));
+    if (!this.ctx || !this.master || !this.bakedOut) return;
+    const t = this.ctx.currentTime;
+    const masterTarget = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
+    const bakedTarget = Sound.BAKED_BASE_GAIN * this.volume * this.pauseFadeFactor;
+    for (const node of [this.master, this.bakedOut]) {
+      node.gain.cancelScheduledValues(t);
+      node.gain.setValueAtTime(node.gain.value, t);
+    }
+    this.master.gain.linearRampToValueAtTime(masterTarget, t + duration);
+    this.bakedOut.gain.linearRampToValueAtTime(bakedTarget, t + duration);
   }
 
   // Start a continuous theremin-ish drone for an alien. The `key` is the
@@ -2862,8 +2899,8 @@ export class Sound {
       case "comboTick": this.playComboTick(); break;
       case "comboSparkle": this.playComboSparkle(); break;
       case "tink": this.playTink(); break;
-      case "crystalShatterLarge": this.playCrystalShatter("large"); break;
-      case "crystalShatterSmall": this.playCrystalShatter("small"); break;
+      case "crystalShatterLarge": this.playCrystalShatter("large", effectivePitch); break;
+      case "crystalShatterSmall": this.playCrystalShatter("small", effectivePitch); break;
       case "scoreBlip": this.playScoreBlip(effectivePitch); break;
       case "summaryDownbeat": this.playSummaryDownbeat(Math.round(pitchRatio)); break;
       case "powerup": this.playPowerup(); break;
@@ -2899,8 +2936,8 @@ export class Sound {
   //          FreePats CC0 SF2, cycled through an E-minor riff. Pitch-shifted
   //          via playbackRate per shot. Falls back to silence if the WAV
   //          asset is missing — see loadGuitarSample.
-  // medium : E4 (329.6 Hz) — square-wave pluck with a bit of detune for
-  //          chorus. Mid-range; pairs with bg-beat downbeats.
+  // medium : Same sampled electric guitar as big, voiced one octave up
+  //          (C2/E2 riff) so the two sizes still read as distinct.
   // small  : G5 (784 Hz) — sharp triangle pluck with a fast vibrato, sits
   //          on top of the mix as a melodic ostinato when several smalls
   //          are firing in succession.
@@ -2910,90 +2947,98 @@ export class Sound {
     const ctx = this.ctx;
     const master = this.master;
     const t = ctx.currentTime;
-    const buf = this.guitarSampleBuffer;
-    // Sample missing (not loaded yet, or file absent). Kick off a load
-    // attempt and silent-skip this shot — the next one will likely hit.
+    // A/B switch: first 4 shots of the 8-shot cycle use sample A (Jazz),
+    // second 4 use sample B (Gretsch). Hearing both within one firing
+    // burst makes the difference easy to compare.
+    const step = this.bigAlienFireStep;
+    const buf = step < 4 ? this.guitarSampleJazz : this.guitarSampleGretsch;
     if (!buf) {
       this.loadGuitarSample();
       return;
     }
 
-    // Pitch of the source recording in public/sounds/guitar/big-alien.wav.
-    // If you export a different note from the SF2, update this constant.
-    // A3 = MIDI 57, 220 Hz — a comfortable mid-neck pitch for an electric.
+    // Both candidate WAVs are recorded at A3 (220 Hz).
     const SAMPLE_RECORDED_HZ = 220.0;
 
-    // Riff cycle: C E C E C G C G — sits in C major against the
-    // bassteroid bed. One note per shot.
-    const NOTE_CYCLE_HZ = [32.70, 41.20, 32.70, 41.20, 32.70, 49.00, 32.70, 49.00];
-    const rootHz = NOTE_CYCLE_HZ[this.bigAlienFireStep % NOTE_CYCLE_HZ.length];
-    this.bigAlienFireStep = (this.bigAlienFireStep + 1) % NOTE_CYCLE_HZ.length;
+    // Riff cycle: C1 E1 C1 E1 C1 E1 C1 E1 — sits in C major against
+    // the bassteroid bed. One note per shot.
+    const NOTE_CYCLE_HZ = [32.70, 41.20, 32.70, 41.20, 32.70, 41.20, 32.70, 41.20];
+    const rootHz = NOTE_CYCLE_HZ[step % NOTE_CYCLE_HZ.length];
+    this.bigAlienFireStep = (step + 1) % NOTE_CYCLE_HZ.length;
 
     // Single plucked note per shot. The riff across consecutive shots
-    // (E1 G1 E1 G1 E1 A1 E1 A1) carries the musicality — no chord stack.
+    // carries the musicality — no chord stack. Flat gain so the WAV's
+    // own attack transient and exponential decay read as the note shape.
+    // The buffer's playback duration depends on playbackRate because
+    // pitch-shifting down stretches the file — so the stop time must
+    // be computed from the actual stretched length, not the WAV's
+    // intrinsic 1.8 s, or the source gets cut mid-decay and clicks.
     const rate = rootHz / SAMPLE_RECORDED_HZ;
+    // Cap at 2.0 s — one bass-downbeat slot — so a shot overlaps at most
+    // the wave it fires on plus the next, never further.
+    const playbackDur = Math.min((buf.duration / rate) * 0.35, 2.0);
+
+    // Highpass at 90 Hz kills the sub-rumble that the heavy pitch-shift
+    // (~0.15x rate) introduces; peaking scoop at 280 Hz pulls the
+    // low-mid mud out so the note reads as a pluck instead of a boom.
+    const hp = ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 90;
+    hp.Q.value = 0.7;
+
+    const scoop = ctx.createBiquadFilter();
+    scoop.type = "peaking";
+    scoop.frequency.value = 280;
+    scoop.Q.value = 1.0;
+    scoop.gain.value = -8;
+
     const voiceGain = ctx.createGain();
-    voiceGain.gain.setValueAtTime(0.0001, t);
-    voiceGain.gain.exponentialRampToValueAtTime(0.80, t + 0.008);
-    voiceGain.gain.setValueAtTime(0.80, t + 0.8);
-    voiceGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+    voiceGain.gain.setValueAtTime(0.80, t);
+    voiceGain.gain.setValueAtTime(0.80, t + Math.max(0, playbackDur - 0.080));
+    voiceGain.gain.linearRampToValueAtTime(0.0001, t + playbackDur);
+
+    hp.connect(scoop);
+    scoop.connect(voiceGain);
     voiceGain.connect(master);
 
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.playbackRate.value = rate;
-    src.connect(voiceGain);
+    src.connect(hp);
     src.start(t);
-    src.stop(t + 1.6);
+    src.stop(t + playbackDur + 0.01);
   }
 
   private playAlienFireMedium() {
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
-    const f0 = 329.6; // E4
-    // Square pluck — bright, characterful, very 8-bit alien.
-    const oscA = this.ctx.createOscillator();
-    const oscB = this.ctx.createOscillator();
-    oscA.type = "square";
-    oscB.type = "square";
-    oscA.frequency.setValueAtTime(f0 * 0.95, t);
-    oscA.frequency.exponentialRampToValueAtTime(f0, t + 0.05);
-    oscB.frequency.setValueAtTime(f0 * 0.95 * 1.008, t);
-    oscB.frequency.exponentialRampToValueAtTime(f0 * 1.008, t + 0.05);
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.Q.value = 4;
-    filter.frequency.setValueAtTime(2400, t);
-    filter.frequency.exponentialRampToValueAtTime(700, t + 0.35);
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.18, t + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
-    oscA.connect(filter);
-    oscB.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.master);
-    oscA.start(t);
-    oscB.start(t);
-    oscA.stop(t + 0.42);
-    oscB.stop(t + 0.42);
-
-    // Tiny click at attack so the shot "lands" rhythmically.
-    const clickBuf = this.makeNoiseBuffer(0.025);
-    if (!clickBuf) return;
-    const click = this.ctx.createBufferSource();
-    click.buffer = clickBuf;
-    const clickFilter = this.ctx.createBiquadFilter();
-    clickFilter.type = "highpass";
-    clickFilter.frequency.value = 2200;
-    const clickGain = this.ctx.createGain();
-    clickGain.gain.setValueAtTime(0.08, t);
-    clickGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.025);
-    click.connect(clickFilter);
-    clickFilter.connect(clickGain);
-    clickGain.connect(this.master);
-    click.start(t);
-    click.stop(t + 0.03);
+    const ctx = this.ctx;
+    const master = this.master;
+    const t = ctx.currentTime;
+    // Same A/B split as the big alien — first 4 use Jazz, last 4 use Gretsch.
+    const step = this.mediumAlienFireStep;
+    const buf = step < 4 ? this.guitarSampleJazz : this.guitarSampleGretsch;
+    if (!buf) {
+      this.loadGuitarSample();
+      return;
+    }
+    // Same sampled-guitar voice as the big alien, one octave up so the
+    // two sizes still read as distinct in the mix. Cycle: C2 E2 C2 E2…
+    const SAMPLE_RECORDED_HZ = 220.0;
+    const NOTE_CYCLE_HZ = [65.41, 82.41, 65.41, 82.41, 65.41, 82.41, 65.41, 82.41];
+    const rootHz = NOTE_CYCLE_HZ[step % NOTE_CYCLE_HZ.length];
+    this.mediumAlienFireStep = (step + 1) % NOTE_CYCLE_HZ.length;
+    const rate = rootHz / SAMPLE_RECORDED_HZ;
+    const playbackDur = buf.duration / rate;
+    const voiceGain = ctx.createGain();
+    voiceGain.gain.setValueAtTime(0.55, t);
+    voiceGain.gain.setValueAtTime(0.55, t + playbackDur - 0.020);
+    voiceGain.gain.linearRampToValueAtTime(0.0001, t + playbackDur);
+    voiceGain.connect(master);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rate;
+    src.connect(voiceGain);
+    src.start(t);
   }
 
   private playAlienFireSmall() {
@@ -4544,19 +4589,35 @@ export class Sound {
   }
 
   // Solid-crystal asteroid shatter. Bright glass-breaking voice that replaces
-  // the noise explosion when the whole rock is the gem. Three layers:
-  //   1. Smash transient — short bandpassed white-noise burst (5-7 kHz) giving
+  // the noise explosion when the whole rock is the gem. Five layers:
+  //   1. Soft chime onset — a gentler stacked-fifth sine pair (one octave
+  //      below the rare playTink, since this fires on every solid-crystal kill)
+  //      that gives the moment of impact a warm glassy sparkle.
+  //   2. Smash transient — short bandpassed white-noise burst (5-7 kHz) giving
   //      the percussive *crack* of glass fracturing.
-  //   2. Inharmonic ringing partials — high sines at non-octave ratios that
+  //   3. Inharmonic ringing partials — high sines at non-octave ratios that
   //      mimic the spectral signature of struck glass. Each one's attack is
   //      jittered by a few ms so they cascade rather than firing as a chord;
   //      that staggered onset is what reads as "shards tinkling apart".
-  //   3. Shard tinkle tail — a quieter band-passed noise wash decaying over
+  //   4. Shard tinkle tail — a quieter band-passed noise wash decaying over
   //      the partial decay, fills the gaps between the discrete sine partials
   //      with the breathy hash of falling glass.
+  //   5. Long ringing bell — sub-octave + fundamental + perfect-fifth + octave
+  //      sines that swell in and decay over multiple seconds, the lingering
+  //      shimmer of a thick crystal shell ringing out. Tuned as a triad rather
+  //      than a detuned octave so it reads as a sweet bell, not a beating tone.
   // size === "large" gets a lower base + longer tail + more partials so a big
   // asteroid shattering feels weightier than a fragment popping.
-  private playCrystalShatter(size: "large" | "small") {
+  private playCrystalShatter(size: "large" | "small", ringPitchRatio = 1) {
+    // ringPitchRatio === 0 sentinel: snap the ring to the nearest octave of
+    // the fireBeat pluck note (G4 = 392 Hz), so an on-beat kill rings *in
+    // tune* with the rhythm shot that landed it. Caller passes 0 for on-beat.
+    const G4 = 392;
+    const baseRingHz = size === "large" ? 880 : 1320;
+    const snapToG = ringPitchRatio === 0;
+    const ringBaseHz = snapToG
+      ? G4 * Math.pow(2, Math.round(Math.log2(baseRingHz / G4)))
+      : baseRingHz * ringPitchRatio;
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     const isLarge = size === "large";
@@ -4635,6 +4696,59 @@ export class Sound {
       g.connect(this.master);
       src.start(t);
       src.stop(t + tinkleDur);
+    }
+    // Soft glassy onset — a gentler chime than the standalone playTink, since
+    // this fires on every solid-crystal kill rather than as a rare treat. Drop
+    // the partials an octave (880/1320 Hz instead of 1760/2637) and trim the
+    // peak so the onset reads as a warm chime, not a piercing ping. Small
+    // frags get a quieter chime so the parent's hit still leads the cascade.
+    const chimePeak = (isLarge ? 0.10 : 0.07);
+    const chimeDecay = isLarge ? 0.38 : 0.28;
+    const chimePartials = [880, 1320];
+    for (let i = 0; i < chimePartials.length; i++) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(chimePartials[i], t);
+      const peak = chimePeak / (i + 1);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(peak, t + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + chimeDecay);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      osc.stop(t + chimeDecay + 0.02);
+    }
+    // Long ringing tail — warm bell-like sustain that hangs in the air after
+    // the shatter transients die. Dropped an octave from the previous version
+    // (which read as thin/whiny in the upper register), so the fundamental
+    // sits near the fireBeat pluck. Body comes from a sub-octave partial; the
+    // upper partials follow a perfect-fifth + octave triad rather than a
+    // detuned octave — gives a sweet musical ring instead of a beating tone.
+    // Slower attack (90 ms swell) lets the bell bloom rather than sting.
+    const fundamental = ringBaseHz * 0.5;
+    const ringDur = isLarge ? 3.4 : 2.2;
+    const ringPeak = isLarge ? 0.11 : 0.08;
+    // [fundamental, sub-octave body, perfect fifth above, octave above]
+    const ringPartials: Array<{ ratio: number; gain: number; type: OscillatorType }> = [
+      { ratio: 0.5, gain: 0.7, type: "sine" },  // sub-octave: warmth/body
+      { ratio: 1.0, gain: 1.0, type: "sine" },  // fundamental
+      { ratio: 1.5, gain: 0.35, type: "sine" }, // perfect fifth: bell shimmer
+      { ratio: 2.0, gain: 0.18, type: "sine" }, // octave: gentle top
+    ];
+    for (const { ratio, gain: gMul, type } of ringPartials) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(fundamental * ratio, t);
+      const peak = ringPeak * gMul;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(peak, t + 0.09);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + ringDur);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      osc.stop(t + ringDur + 0.02);
     }
   }
 

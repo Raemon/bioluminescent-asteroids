@@ -48,10 +48,9 @@ export class Bullet {
   // reticule, so the visible bullet dims out across the post-reticule tail
   // where any hit would no longer land on a beat. 0 = no fade.
   fadeStartLife = 0;
-  // snapshot of which hover rings were locked at fire-time (index 0 = 1-beat slot, 1 = 2-beat,
-  // ...). Used at collision time to award the drift-shot 4× bonus only when the impact lands on
-  // a slot the player actually locked, so each reticule's lock pays out only for hits that
-  // would have landed at that reticule's beat position.
+  // Snapshot of which hover rings had finished their lock animation at fire-time (index 0 =
+  // 1-beat slot, 1 = 2-beat, ...). Any true entry makes this bullet drift-eligible — the
+  // on-beat rhythm-grace is already enforced separately at fire-time.
   driftLockedSlots: boolean[] = [];
 
   constructor(pos: Vec, vel: Vec, life: number) {
@@ -66,12 +65,17 @@ export class Bullet {
     return this.onBeat ? BULLET_DAMAGE_BEAT : BULLET_DAMAGE_BASE;
   }
 
-  // True when this on-beat hit should award the drift-shot 4× bonus: the impact must land
-  // in a slot whose hover ring was locked at fire-time. Slot k spans (k-1, k] beats of flight.
-  driftEligibleAtHit(beatGrid: number): boolean {
-    const elapsed = this.maxLife - this.life;
-    const slot = Math.max(1, Math.ceil(elapsed / beatGrid));
-    return this.driftLockedSlots[slot - 1] === true;
+  // True when this on-beat hit should award the drift-shot 4× bonus: any
+  // hover ring that finished its lock animation before fire-time grants
+  // drift eligibility for this bullet. The on-beat rhythm-grace window is
+  // already enforced by the fire-time onBeat check, so once a lock exists
+  // any hit by this bullet pays out — matching "if you got the lock
+  // animation, you should be able to land a drift shot".
+  driftEligibleAtHit(): boolean {
+    for (let i = 0; i < this.driftLockedSlots.length; i++) {
+      if (this.driftLockedSlots[i]) return true;
+    }
+    return false;
   }
 
   // Visual core radius. On-beat shots render larger; hitRadius() scales with

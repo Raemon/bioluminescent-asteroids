@@ -103,13 +103,13 @@ const computeReticulePosition = (
 };
 
 // effective bullet lifetime mirrors shipWeapons.launchBullet (and the post-fire superBoosted
-// stretch in handleOnBeatFire) so reticule range tracks what the actual shot does: pierce,
-// longshot, and superBoosted (combo ≥ 8) each double flight time.
+// stretch in handleOnBeatFire) so reticule range tracks what the actual shot does: pierce
+// doubles flight time; longshot and superBoosted (combo ≥ 8) each multiply by 1.5.
 const effectiveBulletLife = (ship: Ship, superBoosted: boolean): number => {
   let life = ship.bulletLife;
   if (ship.pierceActive) life *= 2;
-  if (ship.longshotActive) life *= 2;
-  if (superBoosted) life *= 2;
+  if (ship.longshotActive) life *= 1.5;
+  if (superBoosted) life *= 1.5;
   return life;
 };
 

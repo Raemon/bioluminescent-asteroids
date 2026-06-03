@@ -28,8 +28,9 @@ type BetaElement = {
 };
 
 const spawnAsteroid = (game: Game, kind: AsteroidKind = "normal") => {
+  const size = kind === "solidCrystal" ? "medium" : undefined;
   const a = spawnAwayFromShip(
-    () => spawnAsteroidAtEdge(game.w, game.h, undefined, kind),
+    () => spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size),
     game.ship.pos,
     220,
   );

@@ -116,7 +116,7 @@ const awardScoreForKill = (
     game.sound.play("comboSparkle", 1, hitPos);
     game.sound.playComboChime(multiplier, hitPos);
     if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
-    // Drift Bonus: on-beat hit whose slot's hover ring was locked at fire-time queues a
+    // Drift Bonus: on-beat hit by a bullet fired while any hover ring was locked queues a
     //   +1-rhythm reward 1 beat later. Cancelled if the streak breaks in the meantime.
     if (driftEligible) {
       game.pendingDriftBonuses.push({
@@ -182,19 +182,18 @@ const finishAsteroidKillCore = (
     // flying in other directions.
     game.goldCrystals.push(spawnGoldCrystalAt(a.pos, a.vel));
   }
-  if (a.kind === "solidCrystal") {
-    // Pure-crystal rock pops 1–3 collectibles on death — the whole body was
-    // the gem, so the loot scales accordingly. Gems are placed on the next
-    // 1–3 beat-slots from the player's vantage so a coasting pilot who just
-    // rotates can rhythm-pop the whole string in a row.
-    const gemCount = 1 + Math.floor(Math.random() * 3);
+  if (a.kind === "solidCrystal" && a.embeddedGemCount > 0) {
+    // Pure-crystal rock drops the same number of gems that were visible as
+    // frosted hints inside its body (0–2, decided at spawn). Gems are placed
+    // on the next beat-slots from the player's vantage so a coasting pilot
+    // who just rotates can rhythm-pop the whole string in a row.
     const ship = game.ship;
     const gems = spawnRhythmAlignedGems(
       ship.pos,
       ship.vel,
       ship.heading,
       a.pos,
-      gemCount,
+      a.embeddedGemCount,
       ship.bulletSpeed,
       BEAT_GRID,
     );
@@ -222,14 +221,20 @@ export const onAsteroidKilledByBullet = (
   b: Bullet,
   isOnBeatHit: boolean,
 ): Asteroid[] => {
-  const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit, b.driftEligibleAtHit(BEAT_GRID));
+  const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit, b.driftEligibleAtHit());
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   if (a.isBass()) game.sound.play("bassEcho", 1, a.pos);
   // On-beat plain asteroid kills get the taiko boom in place of the noise
   // explosion — replacing rather than layering so the acoustic drum isn't
   // masked by the broadband crash.
   const useTaiko = isOnBeatHit && a.kind === "normal";
-  game.sound.play(useTaiko ? "asteroidBoomBeat" : hitSoundFor(a), 1, a.pos);
+  const sound = useTaiko ? "asteroidBoomBeat" : hitSoundFor(a);
+  // Solid-crystal shatter: pitch=0 is a sentinel that tunes the long ringing
+  // tail to the fireBeat pluck note (G), so an on-beat shot leaves the crystal
+  // ringing in key with the rhythm. Off-beat keeps the natural ring pitch.
+  const isCrystalShatter = sound === "crystalShatterLarge" || sound === "crystalShatterSmall";
+  const pitch = isCrystalShatter && isOnBeatHit ? 0 : 1;
+  game.sound.play(sound, pitch, a.pos);
   return finishAsteroidKillCore(game, a, b.vel, isOnBeatHit, scoreEarned, comboAtKill, b.pos);
 };
 
@@ -252,7 +257,7 @@ export const onAsteroidCrackedByBullet = (game: Game, a: Asteroid, b: Bullet, is
   if (a.isBass()) game.sound.play("bassHit", 1, a.pos);
   emitCrackParticles(game.particles, a, isOnBeatHit);
   if (isOnBeatHit) game.sound.play("comboSparkle", 1, b.pos);
-  if (a.isBass()) awardScoreForKill(game, b.pos, bassChipScore(a), isOnBeatHit, b.driftEligibleAtHit(BEAT_GRID));
+  if (a.isBass()) awardScoreForKill(game, b.pos, bassChipScore(a), isOnBeatHit, b.driftEligibleAtHit());
 };
 
 // ram crack uses asteroidHit (not bassHit) so the impact reads as a kick, not a chip.
@@ -263,7 +268,7 @@ export const onAsteroidCrackedByRam = (game: Game, a: Asteroid) => {
 
 // no split path here — alien deaths fall into the "single body, fixed sound" pattern.
 export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boolean) => {
-  const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit, b.driftEligibleAtHit(BEAT_GRID));
+  const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit, b.driftEligibleAtHit());
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   game.shake = Math.min(game.shake + 0.5, 1.4);
   game.sound.play("alienExplode", 1, al.pos);

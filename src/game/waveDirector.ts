@@ -375,7 +375,9 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet) => {
 
   for (const kind of slotKinds) {
     const k = kind === "normal" ? undefined : kind;
-    game.asteroids.push(spawnAsteroidAway(game, 200, k, "large", claimed));
+    // Solid crystal is a medium-sized gem; everything else from this loop spawns large.
+    const size = kind === "solidCrystal" ? "medium" : "large";
+    game.asteroids.push(spawnAsteroidAway(game, 200, k, size, claimed));
   }
   for (const kind of activeSpecials) {
     game.asteroids.push(spawnSpecial(game, kind, claimed));

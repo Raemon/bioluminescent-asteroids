@@ -13,7 +13,6 @@ import {
   spawnCanisterFromGoldCrystal,
 } from "../GoldCrystal";
 import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebaseBeatEval } from "./rhythmGate";
-import { BEAT_GRID } from "./rhythmConstants";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup } from "./particleBursts";
@@ -79,7 +78,7 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     consumeBullet(b);
     const onBeat = isHitOnBeat(game, b);
     logBulletHit(game, "HIT asteroid", b);
-    const isDriftShot = onBeat && b.driftEligibleAtHit(BEAT_GRID);
+    const isDriftShot = onBeat && b.driftEligibleAtHit();
     const dmg = b.damage() * (isDriftShot ? 4 : 1);
     const { killed } = a.applyDamage(dmg);
     game.shake = Math.min(game.shake + (killed ? 0.4 : 0.2), 1.2);
@@ -170,19 +169,40 @@ const tryKillAlienWithBullets = (game: Game, a: Alien): boolean => {
 };
 
 // only one bullet "lands" per frame; the rest stay alive so they can hit on later frames.
+// Alien bullets also chip asteroids they fly into (1 damage), consumed on impact.
 export const handleAlienBulletHits = (game: Game) => {
-  if (!game.ship.alive || game.ship.invuln > 0) return;
   const remaining: AlienBullet[] = [];
-  let hit = false;
+  let shipHit = false;
+  const shipVulnerable = game.ship.alive && game.ship.invuln <= 0;
   for (const ab of game.alienBullets) {
-    if (!hit && alienBulletHitsShip(game, ab)) {
-      hit = true;
+    if (alienBulletDamagesAsteroid(game, ab)) continue;
+    if (shipVulnerable && !shipHit && alienBulletHitsShip(game, ab)) {
+      shipHit = true;
       onShipHitByAlienBullet(game);
       continue;
     }
     remaining.push(ab);
   }
   game.alienBullets = remaining;
+};
+
+// returns true if the bullet hit (and was consumed by) an asteroid this frame.
+const alienBulletDamagesAsteroid = (game: Game, ab: AlienBullet): boolean => {
+  for (let i = 0; i < game.asteroids.length; i++) {
+    const a = game.asteroids[i];
+    if (!a.collidesWith(ab.pos, ab.radius)) continue;
+    const { killed } = a.applyDamage(1);
+    game.shake = Math.min(game.shake + (killed ? 0.3 : 0.15), 1.2);
+    if (killed) {
+      const children = onAsteroidKilledByRam(game, a, ab.vel);
+      game.asteroids.splice(i, 1, ...children);
+    } else {
+      a.applyKnockback(ab.vel.x, ab.vel.y, 1);
+      onAsteroidCrackedByRam(game, a);
+    }
+    return true;
+  }
+  return false;
 };
 
 const alienBulletHitsShip = (game: Game, ab: AlienBullet): boolean => {

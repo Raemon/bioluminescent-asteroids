@@ -45,12 +45,12 @@ const SIZE_BULLET_SPEED: Record<AlienSize, number> = {
 };
 
 const SIZE_HUE: Record<AlienSize, number> = {
-  // Greenish for big (heavy), cyan-violet for medium, magenta for small —
-  // a cool spectrum that reads as "not asteroid" against the warmer
-  // bassteroid palette.
-  big: 130,
-  medium: 270,
-  small: 320,
+  // Deep-purple manta family — all three sizes sit in the same violet band so
+  // they read as the same species. Big is the deepest violet, small drifts
+  // a touch pinker, medium sits between them.
+  big: 278,
+  medium: 285,
+  small: 292,
 };
 
 // Per-size firing pattern: gaps (in BEAT_GRID units) between consecutive

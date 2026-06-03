@@ -545,6 +545,14 @@ export class Asteroid {
   // the piece should "sing" outward rather than leave a wake. Anchored
   // origin per wave; see SoundwaveRadiator.ts.
   radiator: SoundwaveRadiator | null = null;
+  // Number of gem collectibles this solid crystal will drop on death (0–2).
+  // Decided at spawn so the same count can be pre-rendered as frosted gems
+  // visible inside the crystal body. Unused for other kinds.
+  embeddedGemCount = 0;
+  // Local-space positions for the frosted gems inside a solidCrystal. Picked
+  // at construction so they sit at the same spots in the pre-baked sprite
+  // and the death payout.
+  embeddedGemSpots: { x: number; y: number; r: number; tilt: number }[] = [];
 
   constructor(pos: Vec, vel: Vec, size: AsteroidSize, hue?: number, kind: AsteroidKind = "normal", inheritBass?: BassShip) {
     this.pos = pos;
@@ -618,6 +626,23 @@ export class Asteroid {
       });
     }
     this.membranePhase = rand(0, TAU);
+    // Roll embedded gem count for solid crystals — 0, 1, or 2 — and pick
+    // local-space spots so they can be pre-baked into the sprite as frosted
+    // hints and dropped at the same positions on death.
+    if (kind === "solidCrystal") {
+      this.embeddedGemCount = Math.floor(Math.random() * 3);
+      for (let i = 0; i < this.embeddedGemCount; i++) {
+        const angle = rand(0, TAU);
+        const dist = this.embeddedGemCount === 1 ? rand(0, this.radius * 0.18) : this.radius * rand(0.28, 0.42);
+        const a = this.embeddedGemCount === 1 ? 0 : angle + (i * TAU) / this.embeddedGemCount;
+        this.embeddedGemSpots.push({
+          x: Math.cos(a) * dist,
+          y: Math.sin(a) * dist,
+          r: this.radius * rand(0.18, 0.24),
+          tilt: rand(0, TAU),
+        });
+      }
+    }
     this.sprite = this.buildSprite();
     // Bassteroid wake. Gen-0 (large) wears no drone yet — it gets the slow
     // glow Trail as a "pristine charged thing drifting in space" wake.
@@ -992,24 +1017,105 @@ export class Asteroid {
     ctx.arc(coreX, coreY, R * 0.55, 0, TAU);
     ctx.fill();
 
-    // Crisp edge rim — bright thin stroke along the outer polygon. This is
-    // the "cut glass" tell: a single hairline catching light along every
-    // facet edge. Drawn last so it sits cleanly on top of the fills.
-    ctx.strokeStyle = `hsla(${H + 30}, 100%, 95%, 0.85)`;
-    ctx.lineWidth = 1.2;
+    // Thick shell rim — three stacked strokes along the outer polygon read as
+    // a chunky crystalline shell, not a hairline. Outer dark layer gives the
+    // gem visible thickness, middle bright layer is the "cut glass" tell, and
+    // a thin inner highlight catches the light along the inside of the shell.
     ctx.lineJoin = "miter";
     ctx.miterLimit = 4;
+    const rimPath = () => {
+      ctx.beginPath();
+      for (let i = 0; i < verts.length; i++) {
+        if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
+        else ctx.lineTo(verts[i].x, verts[i].y);
+      }
+      ctx.closePath();
+    };
+    // Outer dark shell — gives the rim visible depth before the bright band.
+    ctx.strokeStyle = `hsla(${H - 10}, 70%, 22%, 0.85)`;
+    ctx.lineWidth = 4.5;
+    rimPath();
+    ctx.stroke();
+    // Bright glassy band — the main "cut glass" highlight.
+    ctx.strokeStyle = `hsla(${H + 30}, 100%, 95%, 0.9)`;
+    ctx.lineWidth = 2.6;
     ctx.shadowColor = `hsla(${H + 15}, 100%, 80%, 1)`;
-    ctx.shadowBlur = 6;
-    ctx.beginPath();
-    for (let i = 0; i < verts.length; i++) {
-      if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
-      else ctx.lineTo(verts[i].x, verts[i].y);
-    }
-    ctx.closePath();
+    ctx.shadowBlur = 7;
+    rimPath();
     ctx.stroke();
     ctx.shadowBlur = 0;
+    // Inner hairline — sits just inside the bright band, sells the shell as
+    // a solid wall of glass rather than a single painted line.
+    ctx.strokeStyle = `hsla(${H + 40}, 100%, 98%, 0.7)`;
+    ctx.lineWidth = 0.8;
+    ctx.save();
+    ctx.scale(0.93, 0.93);
+    rimPath();
+    ctx.stroke();
+    ctx.restore();
 
+    this.paintFrostedEmbeddedGems(ctx);
+
+    ctx.restore();
+  }
+
+  // Heavily blurred gold gem hints visible through the crystal — same hue as
+  // the GoldCrystal collectible they'll drop on death so the player can read
+  // the loot in advance. Painted while the surrounding paintSolidCrystalBody
+  // clip is still active, so any blurred bleed stays inside the silhouette.
+  private paintFrostedEmbeddedGems(ctx: CanvasRenderingContext2D) {
+    if (this.embeddedGemCount === 0) return;
+    const GOLD_HUE = 46;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const spot of this.embeddedGemSpots) {
+      ctx.save();
+      ctx.translate(spot.x, spot.y);
+      ctx.rotate(spot.tilt);
+      // Soft halo behind the gem so it reads as "something glowing through
+      // the ice" even when the hex polygon is too small to pick out.
+      ctx.filter = "blur(5px)";
+      const haloR = spot.r * 1.5;
+      const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, haloR);
+      halo.addColorStop(0, `hsla(${GOLD_HUE}, 90%, 65%, 0.55)`);
+      halo.addColorStop(0.6, `hsla(${GOLD_HUE - 6}, 85%, 55%, 0.22)`);
+      halo.addColorStop(1, `hsla(${GOLD_HUE}, 80%, 50%, 0)`);
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(0, 0, haloR, 0, TAU);
+      ctx.fill();
+      // Faceted gem body — heavy blur keeps the silhouette suggestive.
+      const facetCount = 6;
+      const verts: { x: number; y: number }[] = [];
+      for (let i = 0; i < facetCount; i++) {
+        const a = (i / facetCount) * TAU;
+        const rj = spot.r * rand(0.82, 1.04);
+        verts.push({ x: Math.cos(a) * rj, y: Math.sin(a) * rj });
+      }
+      ctx.filter = "blur(3px)";
+      ctx.beginPath();
+      for (let i = 0; i < verts.length; i++) {
+        if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
+        else ctx.lineTo(verts[i].x, verts[i].y);
+      }
+      ctx.closePath();
+      const body = ctx.createRadialGradient(0, 0, 0, 0, 0, spot.r);
+      body.addColorStop(0, `hsla(${GOLD_HUE + 6}, 95%, 75%, 0.7)`);
+      body.addColorStop(0.6, `hsla(${GOLD_HUE}, 90%, 58%, 0.5)`);
+      body.addColorStop(1, `hsla(${GOLD_HUE - 8}, 85%, 42%, 0.22)`);
+      ctx.fillStyle = body;
+      ctx.fill();
+      // Tiny bright core through the frost.
+      ctx.filter = "blur(2px)";
+      const core = ctx.createRadialGradient(0, 0, 0, 0, 0, spot.r * 0.4);
+      core.addColorStop(0, `hsla(${GOLD_HUE + 18}, 100%, 92%, 0.7)`);
+      core.addColorStop(1, `hsla(${GOLD_HUE + 6}, 95%, 70%, 0)`);
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(0, 0, spot.r * 0.4, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
     ctx.restore();
   }
 
@@ -1321,7 +1427,7 @@ export class Asteroid {
       }
       return fragmentList;
     }
-    // Solid crystal: large shatters into 4 fast-moving small crystal
+    // Solid crystal: large shatters into 3 fast-moving small crystal
     // fragments fanning around the bullet's heading. Smalls don't split
     // further — they're the terminal tier.
     if (this.kind === "solidCrystal") {
@@ -1331,10 +1437,10 @@ export class Asteroid {
       const parentSpeed = Math.hypot(this.vel.x, this.vel.y);
       const ejectDist = this.radius * 0.55;
       const fragmentList: Asteroid[] = [];
-      for (let i = 0; i < 4; i++) {
-        // ±0.4 and ±1.2 rad around the bullet axis: four pieces spread
-        // forward of the impact, none flying straight back at the shooter.
-        const offsets = [-1.2, -0.4, 0.4, 1.2];
+      for (let i = 0; i < 3; i++) {
+        // Three pieces fanned forward of the impact — none flying straight
+        // back at the shooter.
+        const offsets = [-0.9, 0, 0.9];
         const childAngle = baseAngle + offsets[i] + rand(-0.12, 0.12);
         const childPos = {
           x: this.pos.x + Math.cos(childAngle) * ejectDist,

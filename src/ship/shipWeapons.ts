@@ -10,8 +10,8 @@ export const PRONG_SPREAD = 0.21;
 // pierce extends bullet lifetime so the punch-through shot also reaches farther,
 // making the powerup feel like a true "penetrating" upgrade and not just multi-hit.
 const PIERCE_RANGE_MULT = 2;
-// longshot doubles bullet range so a shot reaches the 2-beat reticule instead of the 1-beat one.
-const LONGSHOT_RANGE_MULT = 2;
+// longshot extends bullet range 1.5x so a shot reaches further than the 1-beat reticule.
+const LONGSHOT_RANGE_MULT = 1.5;
 
 // bullet inherits a fraction of ship velocity so muzzle output reads as physical, not portaled.
 const launchBullet = (ship: Ship, headingOffset: number, pierce: boolean, longshot: boolean): Bullet => {

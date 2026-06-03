@@ -375,7 +375,7 @@ const handleOnBeatFire = (game: Game, firstNewIndex: number) => {
   // boosted bullets fly while the yellow halo (combo ≥ 4, tier 2) is up.
   const boosted = game.ship.comboHaloTier >= 2;
   // combo ≥ 8 promotes to the white "super-boosted" tier — sharper look and
-  // 2× range; same hitbox as yellow so the reward is reach, not sweep.
+  // 1.5× range; same hitbox as yellow so the reward is reach, not sweep.
   const superBoosted = game.beatCombo >= 8;
   for (let i = firstNewIndex; i < game.bullets.length; i++) {
     const newBullet = game.bullets[i];
@@ -383,8 +383,8 @@ const handleOnBeatFire = (game: Game, firstNewIndex: number) => {
     newBullet.boosted = boosted;
     newBullet.superBoosted = superBoosted;
     if (superBoosted) {
-      newBullet.life *= 2;
-      newBullet.maxLife *= 2;
+      newBullet.life *= 1.5;
+      newBullet.maxLife *= 1.5;
       const slotCount = Math.max(1, Math.floor(newBullet.maxLife / BEAT_GRID));
       newBullet.fadeStartLife = Math.max(0, newBullet.maxLife - slotCount * BEAT_GRID);
     }
