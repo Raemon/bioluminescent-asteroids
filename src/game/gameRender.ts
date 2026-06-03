@@ -74,11 +74,12 @@ const paintEntityLayers = (
 
 // reticule reads every visible target on the field; gather them once not repeatedly.
 // Exported so the ship-rotation snap (gameUpdate) can use the same target set as the reticule.
+// Alien bullets are deliberately excluded — they're incoming threats, not things you shoot,
+// and painting trajectories for them clutters the field with predictions the player can't act on.
 export const targetsForReticule = (game: Game) => [
   ...game.asteroids,
   ...game.comets,
   ...game.aliens,
-  ...game.alienBullets,
   ...game.canisters,
 ];
 

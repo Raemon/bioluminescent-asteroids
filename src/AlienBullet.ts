@@ -1,4 +1,4 @@
-import { Vec, addScaledMut, wrapMut, TAU } from "./vec";
+import { Vec, addScaledMut, wrapMut } from "./vec";
 import { drawGlow } from "./glow";
 import { AlienSize } from "./Alien";
 import { BEAT_GRID } from "./game/rhythmConstants";
@@ -6,12 +6,12 @@ import { BEAT_GRID } from "./game/rhythmConstants";
 // Bullets shot BY aliens. The player can be hit by them (handled in Game).
 // Distinct hue from player bullets (cyan/gold) — these run hot pink/violet/
 // green per source so the player can read "incoming, not mine" at a glance.
-// Per-size visible radius. Small bullets read as a faster, tighter pinprick;
-// medium/big stay chunky so their threat is legible at distance.
+// Per-size visible radius. All three are tight stingers — the big one only
+// reads as larger because its dart is longer, not because the head balloons.
 const SIZE_BULLET_RADIUS: Record<AlienSize, number> = {
-  big: 2.6,
-  medium: 3.4,
-  small: 2.2,
+  big: 2.4,
+  medium: 2.0,
+  small: 1.6,
 };
 
 // Beats of flight time before the bullet expires. Small fires only once every
@@ -56,34 +56,62 @@ export class AlienBullet {
     ctx.globalCompositeOperation = "lighter";
     const trailHue = this.hue;
     const headHue = this.hue;
+    // Tighter trail — narrower glow so the bullet reads as a precise stinger
+    // rather than a smeared comet.
     for (let i = 0; i < this.trail.length; i++) {
       const segmentT = i / this.trail.length;
       const p = this.trail[i];
-      const r = this.radius * segmentT * 1.4;
-      drawGlow(ctx, p.x, p.y, r * 5, trailHue, 0.55 * segmentT);
+      const r = this.radius * segmentT * 1.0;
+      drawGlow(ctx, p.x, p.y, r * 3.2, trailHue, 0.42 * segmentT);
     }
     const r = this.radius;
-    drawGlow(ctx, this.pos.x, this.pos.y, r * 7, headHue, 0.95);
+    // Restrained head halo — small bright core, not a blob.
+    drawGlow(ctx, this.pos.x, this.pos.y, r * 3.5, headHue, 0.85);
     ctx.globalAlpha = 1;
-    ctx.fillStyle = `hsla(${headHue + 40}, 100%, 96%, 1)`;
+    const angle = Math.atan2(this.vel.y, this.vel.x);
+    ctx.translate(this.pos.x, this.pos.y);
+    ctx.rotate(angle);
+    // Per-size stinger silhouettes — all sharp slim darts pointed along
+    // velocity. Big gets the longest barbed nose, medium a clean dart, small
+    // a tight pinprick needle.
+    let len: number;
+    let waist: number;
+    let tail: number;
     if (this.size === "big") {
-      // Pointy dart — long nose, narrow waist, short tail. Oriented along velocity.
-      const angle = Math.atan2(this.vel.y, this.vel.x);
-      ctx.translate(this.pos.x, this.pos.y);
-      ctx.rotate(angle);
-      ctx.beginPath();
-      ctx.moveTo(r * 3.2, 0);
-      ctx.lineTo(r * 0.2, -r * 0.9);
-      ctx.lineTo(-r * 1.6, -r * 0.35);
-      ctx.lineTo(-r * 1.6, r * 0.35);
-      ctx.lineTo(r * 0.2, r * 0.9);
-      ctx.closePath();
-      ctx.fill();
+      len = r * 4.2;
+      waist = r * 0.9;
+      tail = r * 1.8;
+    } else if (this.size === "medium") {
+      len = r * 4.0;
+      waist = r * 0.75;
+      tail = r * 1.5;
     } else {
-      ctx.beginPath();
-      ctx.arc(this.pos.x, this.pos.y, r, 0, TAU);
-      ctx.fill();
+      len = r * 3.6;
+      waist = r * 0.6;
+      tail = r * 1.2;
     }
+    // Darker violet outline halo behind the bright core gives the stinger
+    // a faint shadow so it stays legible on bright backgrounds.
+    ctx.fillStyle = `hsla(${headHue}, 90%, 55%, 0.85)`;
+    ctx.beginPath();
+    ctx.moveTo(len, 0);
+    ctx.lineTo(0, -waist);
+    ctx.lineTo(-tail, -waist * 0.4);
+    ctx.lineTo(-tail, waist * 0.4);
+    ctx.lineTo(0, waist);
+    ctx.closePath();
+    ctx.fill();
+    // Bright inner stinger — same shape, pulled in slightly so the violet
+    // edge frames the white core.
+    ctx.fillStyle = `hsla(${headHue + 40}, 100%, 96%, 1)`;
+    ctx.beginPath();
+    ctx.moveTo(len * 0.88, 0);
+    ctx.lineTo(0, -waist * 0.7);
+    ctx.lineTo(-tail * 0.88, -waist * 0.28);
+    ctx.lineTo(-tail * 0.88, waist * 0.28);
+    ctx.lineTo(0, waist * 0.7);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
   }
 }

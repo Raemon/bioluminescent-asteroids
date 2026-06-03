@@ -1031,14 +1031,16 @@ export class Asteroid {
       }
       ctx.closePath();
     };
+    // Small variant is more fragile — render with a thinner shell rim.
+    const isSmall = this.kind === "solidCrystalSmall";
     // Outer dark shell — gives the rim visible depth before the bright band.
     ctx.strokeStyle = `hsla(${H - 10}, 70%, 22%, 0.85)`;
-    ctx.lineWidth = 4.5;
+    ctx.lineWidth = isSmall ? 2.0 : 4.5;
     rimPath();
     ctx.stroke();
     // Bright glassy band — the main "cut glass" highlight.
     ctx.strokeStyle = `hsla(${H + 30}, 100%, 95%, 0.9)`;
-    ctx.lineWidth = 2.6;
+    ctx.lineWidth = isSmall ? 1.2 : 2.6;
     ctx.shadowColor = `hsla(${H + 15}, 100%, 80%, 1)`;
     ctx.shadowBlur = 7;
     rimPath();

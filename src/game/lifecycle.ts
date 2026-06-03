@@ -394,6 +394,7 @@ const enterPause = (game: Game) => {
   game.sound.stopThrust();
   game.sound.stopReverseThrust();
   game.sound.stopSideThrust();
+  game.sound.fadeForPause(0, 0.35);
   game.overlayTitleEl.textContent = "Paused";
   game.overlayStartEl.textContent = "Resume";
   game.overlayStartEl.classList.remove("hidden");
@@ -407,6 +408,7 @@ const enterPause = (game: Game) => {
 
 const leavePause = (game: Game) => {
   game.state = "playing";
+  game.sound.fadeForPause(1, 0.25);
   game.overlayEl.classList.add("hidden");
   game.overlayEl.classList.remove("paused");
   game.abortEl.classList.add("hidden");
@@ -431,6 +433,7 @@ export const abortMission = (game: Game) => {
   game.sound.stopReverseThrust();
   game.sound.stopSideThrust();
   stopAllPersistentAudio(game);
+  game.sound.fadeForPause(1, 0.1);
   game.lastRunScore = game.score;
   game.lastRunScoreId = null;
   game.abortEl.classList.add("hidden");

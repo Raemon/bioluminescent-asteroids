@@ -91,103 +91,124 @@ type AlienEngine = { pos: Vec; size: number };
 
 type AlienShip = { panels: AlienPanel[]; lights: AlienLight[]; engines: AlienEngine[] };
 
-const rect = (x1: number, y1: number, x2: number, y2: number): AlienPanel => ({
-  vertices: [v(x1, y1), v(x2, y1), v(x2, y2), v(x1, y2)],
-});
-
 // All coords in radius-units (renderer scales by this.radius). +X = nose
-// forward, +Y = "down" relative to the hull. Each size has its own silhouette
-// tuned so the three sizes are distinct at a glance.
-//   small : interceptor — narrow nose, tight body, twin micro-engines
-//   medium: fighter      — pointed nose, swept wings, twin engines
-//   big   : gunship      — blunt cockpit, broad hull, side cannon pods, twin big engines
+// forward, +Y = "down" relative to the hull. The three sizes share a manta-ray
+// craft family — swept delta wings flaring back from a central faceted hull,
+// twin cephalic fins jutting forward, slim tail/wake plates trailing. Each
+// size is a distinct silhouette but the shared language reads at a glance:
+//   small : darter      — short stubby wings, no tail, twin micro-thrusters
+//   medium: stingcraft  — clean delta, single barbed tail, paired forward fins
+//   big   : leviathan   — vast wingspan, twin trailing wing-tip filaments,
+//                          forked tail, paired cannon pods on wing roots
 const buildAlienShape = (size: AlienSize): AlienShip => {
   if (size === "small") {
     return {
       panels: [
-        // nose spike
-        { vertices: [v(0.95, 0), v(0.25, -0.22), v(0.25, 0.22)] },
-        // main hull plate
-        rect(-0.55, -0.26, 0.25, 0.26),
-        // dorsal cockpit blister
-        { vertices: [v(-0.05, -0.18), v(0.2, -0.32), v(0.2, 0.32), v(-0.05, 0.18)] },
-        // engine block at the back
-        rect(-0.78, -0.22, -0.55, 0.22),
+        // central faceted hull pod — diamond seen from above
+        { vertices: [v(0.55, 0), v(0.15, -0.22), v(-0.45, -0.18), v(-0.55, 0), v(-0.45, 0.18), v(0.15, 0.22)] },
+        // swept delta wings — short and stubby, tips raked back
+        { vertices: [v(0.15, -0.18), v(-0.15, -0.7), v(-0.55, -0.55), v(-0.4, -0.15)] },
+        { vertices: [v(0.15, 0.18), v(-0.15, 0.7), v(-0.55, 0.55), v(-0.4, 0.15)] },
+        // twin cephalic fins — short forward prongs that flank the nose
+        { vertices: [v(0.7, -0.05), v(0.4, -0.2), v(0.3, -0.12), v(0.55, -0.02)] },
+        { vertices: [v(0.7, 0.05), v(0.4, 0.2), v(0.3, 0.12), v(0.55, 0.02)] },
       ],
       lights: [
+        // nose sensor
         { pos: v(0.55, 0), size: 0.07 },
-        { pos: v(0.1, 0), size: 0.06 },
-        { pos: v(-0.45, -0.18), size: 0.05 },
-        { pos: v(-0.45, 0.18), size: 0.05 },
+        // dorsal hull node
+        { pos: v(-0.05, 0), size: 0.06 },
+        // wing-tip running lights
+        { pos: v(-0.25, -0.55), size: 0.05 },
+        { pos: v(-0.25, 0.55), size: 0.05 },
       ],
       engines: [
-        { pos: v(-0.78, -0.12), size: 0.13 },
-        { pos: v(-0.78, 0.12), size: 0.13 },
+        { pos: v(-0.55, -0.08), size: 0.11 },
+        { pos: v(-0.55, 0.08), size: 0.11 },
       ],
     };
   }
   if (size === "medium") {
     return {
       panels: [
-        // pointed nose
-        { vertices: [v(1.0, 0), v(0.35, -0.28), v(0.35, 0.28)] },
-        // forward hull
-        rect(-0.2, -0.32, 0.35, 0.32),
-        // cockpit hex
-        { vertices: [v(0.05, -0.18), v(0.3, -0.1), v(0.3, 0.1), v(0.05, 0.18), v(-0.1, 0.1), v(-0.1, -0.1)] },
-        // swept wings — top and bottom
-        { vertices: [v(-0.05, -0.32), v(-0.55, -0.85), v(-0.7, -0.6), v(-0.35, -0.32)] },
-        { vertices: [v(-0.05, 0.32), v(-0.55, 0.85), v(-0.7, 0.6), v(-0.35, 0.32)] },
-        // rear engine block
-        rect(-0.75, -0.28, -0.2, 0.28),
+        // central faceted hull — longer diamond with pointed nose
+        { vertices: [v(0.75, 0), v(0.3, -0.22), v(-0.35, -0.22), v(-0.55, 0), v(-0.35, 0.22), v(0.3, 0.22)] },
+        // swept delta wings — broader, tips swept back into a barbed point
+        { vertices: [v(0.25, -0.22), v(-0.1, -0.95), v(-0.45, -0.75), v(-0.5, -0.45), v(-0.25, -0.18)] },
+        { vertices: [v(0.25, 0.22), v(-0.1, 0.95), v(-0.45, 0.75), v(-0.5, 0.45), v(-0.25, 0.18)] },
+        // forward cephalic fins — longer aggressive prongs flanking the nose
+        { vertices: [v(0.95, -0.08), v(0.5, -0.3), v(0.35, -0.18), v(0.7, -0.04)] },
+        { vertices: [v(0.95, 0.08), v(0.5, 0.3), v(0.35, 0.18), v(0.7, 0.04)] },
+        // cockpit ridge — narrow hex along the spine
+        { vertices: [v(0.2, -0.1), v(0.4, -0.05), v(0.4, 0.05), v(0.2, 0.1), v(0.05, 0.05), v(0.05, -0.05)] },
+        // trailing tail spine — thin barb
+        { vertices: [v(-0.55, -0.06), v(-0.95, -0.02), v(-0.95, 0.02), v(-0.55, 0.06)] },
       ],
       lights: [
-        { pos: v(0.7, 0), size: 0.07 },
-        { pos: v(0.12, 0), size: 0.06 },
-        { pos: v(-0.55, -0.72), size: 0.06 },
-        { pos: v(-0.55, 0.72), size: 0.06 },
-        { pos: v(-0.45, 0), size: 0.05 },
+        // nose sensor
+        { pos: v(0.75, 0), size: 0.07 },
+        // cockpit ridge
+        { pos: v(0.22, 0), size: 0.06 },
+        // wing-tip barbs
+        { pos: v(-0.12, -0.82), size: 0.06 },
+        { pos: v(-0.12, 0.82), size: 0.06 },
+        // dorsal hull node
+        { pos: v(-0.25, 0), size: 0.05 },
       ],
       engines: [
-        { pos: v(-0.75, -0.16), size: 0.16 },
-        { pos: v(-0.75, 0.16), size: 0.16 },
+        { pos: v(-0.55, -0.13), size: 0.14 },
+        { pos: v(-0.55, 0.13), size: 0.14 },
       ],
     };
   }
-  // big — heavy gunship: blunt nose, broad mid-hull, side cannon pods, twin big engines
+  // big — leviathan manta: vast wingspan, paired cannon pods on the wing
+  // roots, forked trailing tail, twin wing-tip filaments.
   return {
     panels: [
-      // blunt nose — short triangle/trapezoid
-      { vertices: [v(0.92, -0.18), v(0.92, 0.18), v(0.55, 0.4), v(0.25, 0.4), v(0.25, -0.4), v(0.55, -0.4)] },
-      // broad main hull
-      rect(-0.45, -0.5, 0.4, 0.5),
-      // cockpit dome (front-top)
-      { vertices: [v(0.18, -0.14), v(0.5, -0.22), v(0.5, 0.22), v(0.18, 0.14)] },
-      // side cannon pods (top & bottom)
-      rect(-0.25, -0.85, 0.2, -0.5),
-      rect(-0.25, 0.5, 0.2, 0.85),
-      // cannon barrels sticking forward from the pods
-      rect(0.18, -0.78, 0.55, -0.58),
-      rect(0.18, 0.58, 0.55, 0.78),
-      // rear engine block
-      rect(-0.78, -0.42, -0.45, 0.42),
-      // wing-tip stabilizers
-      { vertices: [v(-0.45, -0.5), v(-0.78, -0.62), v(-0.78, -0.42)] },
-      { vertices: [v(-0.45, 0.5), v(-0.78, 0.62), v(-0.78, 0.42)] },
+      // central faceted hull — broad armored diamond
+      { vertices: [v(0.78, 0), v(0.35, -0.32), v(-0.4, -0.32), v(-0.6, 0), v(-0.4, 0.32), v(0.35, 0.32)] },
+      // huge swept delta wings — long raked tips
+      { vertices: [v(0.3, -0.3), v(-0.05, -1.05), v(-0.5, -0.95), v(-0.6, -0.6), v(-0.35, -0.25)] },
+      { vertices: [v(0.3, 0.3), v(-0.05, 1.05), v(-0.5, 0.95), v(-0.6, 0.6), v(-0.35, 0.25)] },
+      // forward cephalic fins — broad pronged horns
+      { vertices: [v(1.0, -0.12), v(0.55, -0.38), v(0.35, -0.22), v(0.75, -0.06)] },
+      { vertices: [v(1.0, 0.12), v(0.55, 0.38), v(0.35, 0.22), v(0.75, 0.06)] },
+      // cockpit dome — armored hex ridge along the spine
+      { vertices: [v(0.2, -0.16), v(0.5, -0.08), v(0.5, 0.08), v(0.2, 0.16), v(0.0, 0.08), v(0.0, -0.08)] },
+      // wing-root cannon pods — angular plates either side of the hull
+      { vertices: [v(0.05, -0.5), v(0.35, -0.42), v(0.4, -0.32), v(0.1, -0.32)] },
+      { vertices: [v(0.05, 0.5), v(0.35, 0.42), v(0.4, 0.32), v(0.1, 0.32)] },
+      // cannon barrels protruding forward from the wing-root pods
+      { vertices: [v(0.2, -0.6), v(0.55, -0.55), v(0.55, -0.42), v(0.2, -0.45)] },
+      { vertices: [v(0.2, 0.6), v(0.55, 0.55), v(0.55, 0.42), v(0.2, 0.45)] },
+      // forked trailing tail — two slim barbs from the rear hull
+      { vertices: [v(-0.6, -0.1), v(-1.0, -0.18), v(-1.0, -0.12), v(-0.6, -0.04)] },
+      { vertices: [v(-0.6, 0.1), v(-1.0, 0.18), v(-1.0, 0.12), v(-0.6, 0.04)] },
+      // wing-tip trailing filaments — thin lines extending past the wings
+      { vertices: [v(-0.05, -1.05), v(-0.18, -1.18), v(-0.2, -1.14), v(-0.08, -1.02)] },
+      { vertices: [v(-0.05, 1.05), v(-0.18, 1.18), v(-0.2, 1.14), v(-0.08, 1.02)] },
     ],
     lights: [
-      { pos: v(0.7, 0), size: 0.07 },
-      { pos: v(0.5, -0.7), size: 0.06 },
-      { pos: v(0.5, 0.7), size: 0.06 },
-      { pos: v(-0.05, 0), size: 0.07 },
-      { pos: v(-0.6, -0.3), size: 0.05 },
-      { pos: v(-0.6, 0.3), size: 0.05 },
-      { pos: v(-0.3, -0.7), size: 0.05 },
-      { pos: v(-0.3, 0.7), size: 0.05 },
+      // nose sensor cluster
+      { pos: v(0.78, 0), size: 0.08 },
+      // forward fin tips
+      { pos: v(0.95, -0.1), size: 0.05 },
+      { pos: v(0.95, 0.1), size: 0.05 },
+      // cockpit dome
+      { pos: v(0.25, 0), size: 0.07 },
+      // wing-root cannon pods
+      { pos: v(0.5, -0.5), size: 0.06 },
+      { pos: v(0.5, 0.5), size: 0.06 },
+      // wing-tip lights (where filaments meet wings)
+      { pos: v(-0.08, -1.0), size: 0.06 },
+      { pos: v(-0.08, 1.0), size: 0.06 },
+      // tail-tip lights
+      { pos: v(-0.95, -0.15), size: 0.04 },
+      { pos: v(-0.95, 0.15), size: 0.04 },
     ],
     engines: [
-      { pos: v(-0.78, -0.25), size: 0.2 },
-      { pos: v(-0.78, 0.25), size: 0.2 },
+      { pos: v(-0.6, -0.18), size: 0.18 },
+      { pos: v(-0.6, 0.18), size: 0.18 },
     ],
   };
 };
