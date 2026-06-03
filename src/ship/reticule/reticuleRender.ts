@@ -56,31 +56,25 @@ const HOVER_DOT_PULSE_PEAK_ALPHA = 1.0;
 const HOVER_DOT_PULSE_MIN_ALPHA = 0.28;
 const HOVER_DOT_PULSE_PERIOD_SEC = 2.0;
 const HOVER_DOT_HSL = RETICULE_DASH_HSL;
-// completion flare: brightens the ring + paints additive halos + radial spokes for FLARE_SEC,
-// rising sharply then settling. Marks "lock acquired" — the octave-up hum starts here too.
-// Tutorial gate fires on elapsed >= TUTORIAL_HOVER_SEC independently; the flare visual can
-// outrun it.
+// lock flare: brightens the dot-ring arcs briefly at lock acquisition. Marks "lock acquired"
+// — the octave-up hum starts here too. Tutorial gate fires on elapsed >= TUTORIAL_HOVER_SEC
+// independently; the flare visual can outrun it.
 const HOVER_FLARE_SEC = 0.7;
 const HOVER_FLARE_PEAK_BOOST = 4.0;
-const HOVER_FLARE_RING_LINE_WIDTH = 3.0;
-const HOVER_FLARE_RING_PEAK_ALPHA = 0.95;
-// shockwave: a single bright ring expands outward from the dot ring.
-const HOVER_FLARE_SHOCKWAVE_START_R = HOVER_DOT_RING_RADIUS + 2;
-const HOVER_FLARE_SHOCKWAVE_END_R = HOVER_DOT_RING_RADIUS + 38;
-const HOVER_FLARE_SHOCKWAVE_LINE_WIDTH = 2.4;
-const HOVER_FLARE_SHOCKWAVE_PEAK_ALPHA = 0.9;
-// inner pulse ring that contracts slightly then fades — adds a "snap" at the very centre.
-const HOVER_FLARE_INNER_START_R = HOVER_DOT_RING_RADIUS - 2;
-const HOVER_FLARE_INNER_END_R = HOVER_DOT_RING_RADIUS - 10;
-// radial light spokes for a starburst pop.
-const HOVER_FLARE_SPOKE_COUNT = 12;
-const HOVER_FLARE_SPOKE_INNER_R = HOVER_DOT_RING_RADIUS + 3;
-const HOVER_FLARE_SPOKE_OUTER_R = HOVER_DOT_RING_RADIUS + 28;
-const HOVER_FLARE_SPOKE_LINE_WIDTH = 1.6;
-const HOVER_FLARE_SPOKE_PEAK_ALPHA = 0.85;
-// central bright flash dot.
-const HOVER_FLARE_CORE_R = 8;
-const HOVER_FLARE_CORE_PEAK_ALPHA = 0.7;
+// soundwave rings: one new concentric ring emitted per beat while the player holds hover.
+// Each ring expands outward from the dot ring and fades — reads as a radar ping pulsing in
+// time with the music. WAVE_LIFETIME_BEATS controls how long a single wave lives before
+// fully fading; >1 means waves overlap so the radiation feels continuous.
+const HOVER_WAVE_LIFETIME_BEATS = 2.0;
+const HOVER_WAVE_START_R = HOVER_DOT_RING_RADIUS + 2;
+const HOVER_WAVE_END_R = HOVER_DOT_RING_RADIUS + 44;
+const HOVER_WAVE_LINE_WIDTH = 2.0;
+const HOVER_WAVE_PEAK_ALPHA = 0.7;
+// lock-event wave: a single brighter wave fired the moment the ring completes filling, so
+// lock acquisition still reads as a distinct beat even though the steady soundwave pulse
+// is already running.
+const HOVER_LOCK_WAVE_PEAK_ALPHA = 0.95;
+const HOVER_LOCK_WAVE_LINE_WIDTH = 2.8;
 // gold hue at the peak — drift the dash colour toward warm/white so the lock reads as "reward".
 const HOVER_FLARE_WARM_HSL = "48, 100%, 70%";
 
@@ -145,12 +139,12 @@ const computeReticulePositions = (
   return { positions, primaryIndex, slotIndices };
 };
 
-// arcs fill across HOVER_RING_FILL_SEC, then a HOVER_FLARE_SEC completion flare brightens them
-// and adds an expanding shockwave + radial starburst + bright core before settling into the
-// steady on-beat pulse. The build resets on hover-loss in the caller. Returns whether the ring
-// just crossed into "filled" this frame (rising-edge signal for the audio companion).
+// arcs fill across HOVER_RING_FILL_SEC, then a brief HOVER_FLARE_SEC arc-brightening marks
+// lock acquisition. While the ring is fully built, concentric soundwave rings radiate
+// outward in time with the beat for as long as the player holds hover. Returns whether the
+// ring just crossed into "filled" this frame (rising-edge signal for the audio companion).
 const paintHoverDotRing = (
-  ctx: CanvasRenderingContext2D, center: Vec, elapsed: number, beatTime: number,
+  ctx: CanvasRenderingContext2D, center: Vec, elapsed: number, beatTime: number, beatGrid: number,
 ): { fillJustCompleted: boolean } => {
   const slotDuration = HOVER_RING_SLOT_SEC;
   const visibleCount = Math.min(HOVER_DOT_COUNT, Math.floor(elapsed / slotDuration) + 1);
@@ -159,106 +153,86 @@ const paintHoverDotRing = (
   const fillCompleteSec = HOVER_RING_FILL_SEC;
   const flareAge = fullyBuilt ? Math.max(0, elapsed - fillCompleteSec) : -1;
   const flareT = flareAge >= 0 ? Math.min(1, flareAge / HOVER_FLARE_SEC) : 0;
-  // burst envelope: very fast rise (peaks at t≈0.25), long fall — reads as a "snap, glow, fade".
+  // burst envelope: very fast rise, long fall — drives the brief arc brightening at lock.
   const burstEnvelope = flareT > 0 && flareT < 1
     ? Math.pow(Math.sin(flareT * Math.PI), 0.6) * Math.pow(1 - flareT, 0.5)
     : 0;
-  // shockwave envelope: linear rise to peak alpha then long radial expansion to outer radius.
-  const shockwaveEnvelope = flareT > 0 && flareT < 1 ? Math.sin(flareT * Math.PI) : 0;
   const baseAlpha = fullyBuilt
     ? cosineEnvelope(beatTime, HOVER_DOT_PULSE_PERIOD_SEC, HOVER_DOT_PULSE_MIN_ALPHA, HOVER_DOT_PULSE_PEAK_ALPHA)
     : HOVER_DOT_BUILDING_ALPHA;
   const arcAlphaBoost = 1 + (HOVER_FLARE_PEAK_BOOST - 1) * burstEnvelope;
-  // arcs drift from cool dash colour toward warm gold at the peak of the burst.
   const arcHsl = burstEnvelope > 0
     ? lerpHsl(HOVER_DOT_HSL, HOVER_FLARE_WARM_HSL, burstEnvelope)
     : HOVER_DOT_HSL;
+  // soundwaves emit BEFORE arcs so the arcs and the dot/aim disc paint on top of them.
+  if (fullyBuilt) {
+    paintSoundwaves(ctx, center, elapsed - fillCompleteSec, beatTime, beatGrid);
+  }
   ctx.lineWidth = HOVER_ARC_LINE_WIDTH;
-  // round caps soften the leading edge as the arc sweeps outward.
   ctx.lineCap = "round";
   ctx.setLineDash([]);
-  // first arc centred at 12 o'clock, then clockwise — reads as a natural "starting point".
   const slot = TAU / HOVER_DOT_COUNT;
   const start = -Math.PI / 2;
   for (let i = 0; i < visibleCount; i++) {
     const age = elapsed - i * slotDuration;
     const t = Math.min(1, Math.max(0, age / HOVER_ARC_FADE_IN_SEC));
-    // easeOutCubic: arc shoots out fast then settles, feels springy + joyful.
     const sweepEase = 1 - Math.pow(1 - t, 3);
-    // alpha rises slightly ahead of the sweep so the leading edge stays bright.
     const alphaEase = Math.sqrt(t);
     const alpha = Math.min(1, baseAlpha * alphaEase * arcAlphaBoost);
     ctx.strokeStyle = `hsla(${arcHsl}, ${alpha})`;
     const mid = start + i * slot;
-    // grow from the counter-clockwise end (fixed) toward the clockwise end (advancing).
     const ccwEnd = mid - HOVER_ARC_SWEEP / 2;
     const cwEnd = ccwEnd + HOVER_ARC_SWEEP * sweepEase;
     ctx.beginPath();
     ctx.arc(center.x, center.y, HOVER_DOT_RING_RADIUS, ccwEnd, cwEnd);
     ctx.stroke();
   }
-  if (flareT > 0 && flareT < 1) {
-    paintFlareBurst(ctx, center, flareT, burstEnvelope, shockwaveEnvelope);
-  }
   return { fillJustCompleted: fullyBuilt };
 };
 
-// the celebratory burst layered on top of the ring once lock completes: an expanding shockwave
-// ring, an inward-snapping inner ring, a starburst of radial spokes, and a bright central core.
-// All in warm gold so the lock reads as a reward against the cool cyan reticule colour.
-const paintFlareBurst = (
-  ctx: CanvasRenderingContext2D, center: Vec, flareT: number, burstEnvelope: number, shockwaveEnvelope: number,
+// concentric soundwave rings that radiate outward from the dot ring in time with the beat.
+// One new wave is emitted on each beat downbeat and lives for HOVER_WAVE_LIFETIME_BEATS,
+// so multiple waves can be in flight at once for a continuous radar-ping feel. The wave
+// that fires at lock acquisition is brighter so lock still reads as a distinct moment.
+// `lockAge` is seconds since the ring filled (≥0 when fully built).
+const paintSoundwaves = (
+  ctx: CanvasRenderingContext2D, center: Vec, lockAge: number, beatTime: number, beatGrid: number,
 ) => {
+  if (beatGrid <= 0) return;
   ctx.lineCap = "round";
-  // expanding outer shockwave — radius interpolates start→end across the full flare.
-  if (shockwaveEnvelope > 0) {
-    const r = HOVER_FLARE_SHOCKWAVE_START_R + (HOVER_FLARE_SHOCKWAVE_END_R - HOVER_FLARE_SHOCKWAVE_START_R) * flareT;
-    ctx.lineWidth = HOVER_FLARE_SHOCKWAVE_LINE_WIDTH;
-    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${HOVER_FLARE_SHOCKWAVE_PEAK_ALPHA * shockwaveEnvelope})`;
+  // each wave is identified by the beat index it was emitted on. We look at the few most
+  // recent integer beats and draw any whose age is still within the lifetime window.
+  const beatsSinceLock = lockAge / beatGrid;
+  const currentBeat = Math.floor(beatTime / beatGrid);
+  const maxOverlap = Math.ceil(HOVER_WAVE_LIFETIME_BEATS) + 1;
+  for (let back = 0; back < maxOverlap; back++) {
+    const beatIndex = currentBeat - back;
+    const emitTime = beatIndex * beatGrid;
+    const ageSec = beatTime - emitTime;
+    if (ageSec < 0) continue;
+    const ageBeats = ageSec / beatGrid;
+    if (ageBeats > HOVER_WAVE_LIFETIME_BEATS) continue;
+    // skip waves that would have been emitted before the lock — keeps the radiation tied
+    // to the moment the player actually achieved hover.
+    if (ageBeats > beatsSinceLock + 0.01) continue;
+    const t = ageBeats / HOVER_WAVE_LIFETIME_BEATS;
+    const r = HOVER_WAVE_START_R + (HOVER_WAVE_END_R - HOVER_WAVE_START_R) * t;
+    // fade-in over the first ~10% so a newly-emitted wave doesn't pop in too hard, then
+    // fade out the rest of its life. Quadratic falloff feels like a soundwave dissipating.
+    const fadeIn = Math.min(1, t / 0.1);
+    const fadeOut = Math.pow(1 - t, 1.8);
+    const envelope = fadeIn * fadeOut;
+    // the first wave fired after lock is brighter so lock acquisition still reads as a
+    // distinct beat. After a couple beats every wave settles to the steady look.
+    const beatsBetweenWaveAndLock = beatsSinceLock - ageBeats;
+    const isLockWave = beatsBetweenWaveAndLock >= 0 && beatsBetweenWaveAndLock < 1;
+    const peakAlpha = isLockWave ? HOVER_LOCK_WAVE_PEAK_ALPHA : HOVER_WAVE_PEAK_ALPHA;
+    const lineWidth = isLockWave ? HOVER_LOCK_WAVE_LINE_WIDTH : HOVER_WAVE_LINE_WIDTH;
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${peakAlpha * envelope})`;
     ctx.beginPath();
     ctx.arc(center.x, center.y, r, 0, TAU);
     ctx.stroke();
-  }
-  // ring at the dot ring itself — a brief, very bright overlay that peaks early with the burst.
-  if (burstEnvelope > 0) {
-    ctx.lineWidth = HOVER_FLARE_RING_LINE_WIDTH;
-    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${HOVER_FLARE_RING_PEAK_ALPHA * burstEnvelope})`;
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, HOVER_DOT_RING_RADIUS, 0, TAU);
-    ctx.stroke();
-  }
-  // inner pulse: contracts inward as it fades — gives the burst a sucking-in counterpart.
-  if (burstEnvelope > 0) {
-    const r = HOVER_FLARE_INNER_START_R + (HOVER_FLARE_INNER_END_R - HOVER_FLARE_INNER_START_R) * flareT;
-    ctx.lineWidth = HOVER_FLARE_RING_LINE_WIDTH * 0.7;
-    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${HOVER_FLARE_RING_PEAK_ALPHA * 0.6 * burstEnvelope})`;
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, Math.max(2, r), 0, TAU);
-    ctx.stroke();
-  }
-  // radial spokes shooting outward — the "starburst" pop.
-  if (burstEnvelope > 0) {
-    ctx.lineWidth = HOVER_FLARE_SPOKE_LINE_WIDTH;
-    const spokeAlpha = HOVER_FLARE_SPOKE_PEAK_ALPHA * burstEnvelope;
-    // spokes extend with flareT so they read as light streaking outward.
-    const outerR = HOVER_FLARE_SPOKE_INNER_R + (HOVER_FLARE_SPOKE_OUTER_R - HOVER_FLARE_SPOKE_INNER_R) * flareT;
-    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${spokeAlpha})`;
-    for (let i = 0; i < HOVER_FLARE_SPOKE_COUNT; i++) {
-      const angle = (i / HOVER_FLARE_SPOKE_COUNT) * TAU;
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      ctx.beginPath();
-      ctx.moveTo(center.x + cos * HOVER_FLARE_SPOKE_INNER_R, center.y + sin * HOVER_FLARE_SPOKE_INNER_R);
-      ctx.lineTo(center.x + cos * outerR, center.y + sin * outerR);
-      ctx.stroke();
-    }
-  }
-  // bright central core — a small filled disc that pops at the peak and fades.
-  if (burstEnvelope > 0) {
-    ctx.fillStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${HOVER_FLARE_CORE_PEAK_ALPHA * burstEnvelope})`;
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, HOVER_FLARE_CORE_R * (1 + 0.4 * burstEnvelope), 0, TAU);
-    ctx.fill();
   }
 };
 
@@ -358,7 +332,7 @@ export const renderShipReticules = (
     const proximity = trajectoryResult.slotProximities[slot] ?? 0;
     const hovering = proximity > 0 && idx >= 0;
     const center = hovering ? reticulePositions[idx] : null;
-    const intensity = updateHoverRing(state.hoverDotRings[slot], hovering, center, ctx, beatTime, sound);
+    const intensity = updateHoverRing(state.hoverDotRings[slot], hovering, center, ctx, beatTime, beatGrid, sound);
     if (hovering) anyHover = true;
     if (intensity > maxIntensity) maxIntensity = intensity;
     if (state.hoverDotRings[slot].completionBeatTime !== null) anyLocked = true;
@@ -381,7 +355,7 @@ export const renderShipReticules = (
 const updateHoverRing = (
   ring: { hoverStartBeatTime: number | null; completionBeatTime: number | null },
   hovering: boolean, ringCenter: Vec | null,
-  ctx: CanvasRenderingContext2D, beatTime: number, sound: Sound | null,
+  ctx: CanvasRenderingContext2D, beatTime: number, beatGrid: number, sound: Sound | null,
 ): number => {
   if (!hovering || ringCenter === null) {
     ring.hoverStartBeatTime = null;
@@ -393,7 +367,7 @@ const updateHoverRing = (
     ring.completionBeatTime = null;
   }
   const elapsed = beatTime - ring.hoverStartBeatTime;
-  const { fillJustCompleted } = paintHoverDotRing(ctx, ringCenter, elapsed, beatTime);
+  const { fillJustCompleted } = paintHoverDotRing(ctx, ringCenter, elapsed, beatTime, beatGrid);
   if (fillJustCompleted && ring.completionBeatTime === null) {
     ring.completionBeatTime = beatTime;
     if (sound) sound.startFirstDotLockHum();

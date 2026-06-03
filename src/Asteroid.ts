@@ -113,8 +113,8 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   bell: 285,
   warble: 130,
   tink: 195,
-  solidCrystal: 222,
-  solidCrystalSmall: 222,
+  solidCrystal: 232,
+  solidCrystalSmall: 232,
 };
 
 // Solid crystal large asteroids render slightly bigger than a stock large so
@@ -987,10 +987,10 @@ export class Asteroid {
       // 1.0 = right under the light, 0.0 = farthest facet. Power curve makes
       // the lit side noticeably brighter without crushing the shaded side.
       const lit = Math.pow(Math.max(0, 1 - d / maxLightDist), 1.6);
-      const lightness = 24 + lit * 60;          // 24% (deep ice) → 84% (frosted highlight)
+      const lightness = 16 + lit * 56;          // 16% (deep ice) → 72% (frosted highlight)
       // Saturation falls off toward the lit side — frosted ice scatters light
       // and reads near-white where it's hit, deep cool blue where it isn't.
-      const sat = 70 - lit * 35;                // 70% (shaded) → 35% (lit, frost-pale)
+      const sat = 85 - lit * 30;                // 85% (shaded) → 55% (lit, frost-pale)
       const alpha = 0.75 + lit * 0.2;
       ctx.fillStyle = `hsla(${H}, ${sat}%, ${lightness}%, ${alpha})`;
       ctx.beginPath();

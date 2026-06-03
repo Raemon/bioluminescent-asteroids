@@ -389,168 +389,291 @@ export class Alien {
     return Math.hypot(dx, dy) < this.radius * 0.9 + pointRadius;
   }
 
-  // Bakes the static hull (panel fills, outlined strokes with shadowBlur,
-  // centre-stripe seams) once at construction. Drawn live each frame: halo,
-  // engine plumes, running lights, damage cracks, hit-flash overlay.
+  // Traces the closed body outline (the curved manta silhouette) onto whatever
+  // 2D context is given, scaled to this.radius. Used by the sprite bake AND by
+  // live renderers (cracks clip, hit-flash fill, ribs clip). Centred on (0,0)
+  // in radius-units: caller is responsible for translate/rotate.
+  private traceBody(ctx: CanvasRenderingContext2D) {
+    const r = this.radius;
+    const outline = this.shape.outline;
+    ctx.beginPath();
+    ctx.moveTo(outline[0].p.x * r, outline[0].p.y * r);
+    for (let i = 1; i < outline.length; i++) {
+      const wp = outline[i];
+      ctx.quadraticCurveTo(wp.control.x * r, wp.control.y * r, wp.p.x * r, wp.p.y * r);
+    }
+    ctx.closePath();
+  }
+
+  // Traces the tail strip from rear-of-body back to tail tip. Closed shape;
+  // base half-width tapers to barb half-width (0 = sharp point). A bit of sway
+  // would be nice but the tail uses its own static taper here — animated sway
+  // happens in live render where we have weavePhase.
+  private traceTail(ctx: CanvasRenderingContext2D, swayPhase: number) {
+    const tail = this.shape.tail;
+    if (!tail) return;
+    const r = this.radius;
+    // Tail emerges from the rear notch at the body's rear (approximately at
+    // x = -0.6, y = 0). Build it from a few segments with a sinusoidal sway
+    // applied perpendicular to its forward axis (+X negative).
+    const segs = 6;
+    const baseX = -0.55;
+    const top: { x: number; y: number }[] = [];
+    const bot: { x: number; y: number }[] = [];
+    for (let i = 0; i <= segs; i++) {
+      const t = i / segs;
+      const x = baseX - t * tail.length;
+      const half = tail.baseHalfWidth * (1 - t) + tail.barbHalfWidth * t;
+      // Sway peaks toward the tip — base stays anchored to the body.
+      const sway = Math.sin(swayPhase + t * 2.6) * tail.sway * t;
+      top.push({ x: x * r, y: (-half + sway) * r });
+      bot.push({ x: x * r, y: (half + sway) * r });
+    }
+    ctx.beginPath();
+    ctx.moveTo(top[0].x, top[0].y);
+    for (let i = 1; i < top.length; i++) ctx.lineTo(top[i].x, top[i].y);
+    // tail tip (centred between last top & bot already), then walk back
+    for (let i = bot.length - 1; i >= 0; i--) ctx.lineTo(bot[i].x, bot[i].y);
+    ctx.closePath();
+  }
+
+  // Bakes the static parts of the manta into an offscreen sprite. Painted
+  // once at construction and blitted each frame; live parts (halo, chevron
+  // pulse, wake, damage, hit-flash) layer on top in render().
   buildSprite(): HTMLCanvasElement {
     const r = this.radius;
     const baseHue = this.hue;
-    const ship = this.ship;
-    // Padding accommodates the shadowBlur=10 outline glow extending past panel edges.
-    const padding = 14;
-    const size = Math.ceil(2 * (r + padding));
+    const shape = this.shape;
+    // Padding accommodates leading-edge glow + horn tips + wing extent.
+    const padding = 18;
+    // Big and medium have outline points that reach past 1.0 (horns at 1.2,
+    // wings at ~1.05) — pad the sprite generously so nothing clips.
+    const extent = Math.ceil(r * 1.25 + padding);
+    const sizePx = extent * 2;
     const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
+    canvas.width = sizePx;
+    canvas.height = sizePx;
     const sctx = canvas.getContext("2d")!;
-    this.spriteHalfSize = size / 2;
-    sctx.translate(size / 2, size / 2);
+    this.spriteHalfSize = sizePx / 2;
+    sctx.translate(sizePx / 2, sizePx / 2);
+
+    // 1. Soft underbody glow — radial wash from spine outward, deeper in the
+    //    centre of the wing-disc and fading toward the edges. Painted first
+    //    so the silhouette fill rides on top of it.
     sctx.globalCompositeOperation = "lighter";
+    const underglow = sctx.createRadialGradient(0, 0, r * 0.1, 0, 0, r * 1.1);
+    underglow.addColorStop(0, `hsla(${baseHue + 6}, 90%, 40%, 0.55)`);
+    underglow.addColorStop(0.55, `hsla(${baseHue}, 80%, 28%, 0.35)`);
+    underglow.addColorStop(1, `hsla(${baseHue - 6}, 70%, 18%, 0)`);
+    sctx.fillStyle = underglow;
+    sctx.fillRect(-extent, -extent, sizePx, sizePx);
 
-    const tracePanel = (panel: AlienPanel) => {
-      sctx.beginPath();
-      for (let i = 0; i < panel.vertices.length; i++) {
-        const x = panel.vertices[i].x * r;
-        const y = panel.vertices[i].y * r;
-        if (i === 0) sctx.moveTo(x, y);
-        else sctx.lineTo(x, y);
-      }
-      sctx.closePath();
-    };
+    // 2. Body silhouette — dorsal-to-ventral gradient (darker along the spine,
+    //    a touch lighter at the wing edges) gives the wing a sense of volume
+    //    from above. Paint in source-over so the fill is opaque purple, not
+    //    additively brightened.
+    sctx.globalCompositeOperation = "source-over";
+    this.traceBody(sctx);
+    const bodyFill = sctx.createLinearGradient(0, -r, 0, r);
+    bodyFill.addColorStop(0, `hsla(${baseHue + 4}, 75%, 32%, 0.96)`);
+    bodyFill.addColorStop(0.5, `hsla(${baseHue - 2}, 80%, 14%, 0.98)`);
+    bodyFill.addColorStop(1, `hsla(${baseHue + 4}, 75%, 32%, 0.96)`);
+    sctx.fillStyle = bodyFill;
+    sctx.fill();
 
-    sctx.shadowColor = `hsla(${baseHue + 10}, 100%, 70%, 1)`;
-    for (const panel of ship.panels) {
-      tracePanel(panel);
-      const fill = sctx.createLinearGradient(-r, -r, r, r);
-      fill.addColorStop(0, `hsla(${baseHue}, 70%, 22%, 0.9)`);
-      fill.addColorStop(0.5, `hsla(${baseHue + 8}, 65%, 32%, 0.9)`);
-      fill.addColorStop(1, `hsla(${baseHue - 5}, 75%, 14%, 0.9)`);
-      sctx.fillStyle = fill;
-      sctx.shadowBlur = 0;
+    // 3. Tail body — same fill language as the wing so it reads as one piece.
+    //    Static sway phase 0 for the baked version; live render adds animated
+    //    sway as a separate stroke on top.
+    if (shape.tail) {
+      this.traceTail(sctx, 0);
+      sctx.fillStyle = `hsla(${baseHue - 4}, 80%, 14%, 0.95)`;
       sctx.fill();
-      sctx.shadowBlur = 10;
-      sctx.lineWidth = 1.6;
-      sctx.strokeStyle = `hsla(${baseHue + 14}, 100%, 80%, 0.95)`;
+    }
+
+    // 4. Cephalic horns — small filled triangles flanking the nose. Same
+    //    body-fill language so they read as part of the same creature.
+    sctx.fillStyle = `hsla(${baseHue + 4}, 78%, 24%, 0.95)`;
+    for (const horn of shape.horns) {
+      sctx.beginPath();
+      sctx.moveTo(horn.tip.x * r, horn.tip.y * r);
+      sctx.lineTo(horn.baseA.x * r, horn.baseA.y * r);
+      sctx.lineTo(horn.baseB.x * r, horn.baseB.y * r);
+      sctx.closePath();
+      sctx.fill();
+    }
+
+    // 5. Chevron ribs — curved glowing lines sweeping from spine to wing
+    //    edge. Mirrored top/bottom. Drawn additively so they glow against
+    //    the dark body. Clipped to the body so they never bleed outside the
+    //    wing silhouette.
+    sctx.save();
+    this.traceBody(sctx);
+    sctx.clip();
+    sctx.globalCompositeOperation = "lighter";
+    sctx.lineCap = "round";
+    sctx.lineJoin = "round";
+    sctx.strokeStyle = `hsla(${baseHue + 18}, 100%, 70%, 0.55)`;
+    sctx.lineWidth = 1.2;
+    for (const rib of shape.ribs) {
+      // top side
+      sctx.beginPath();
+      sctx.moveTo(rib.start.x * r, -rib.start.y * r);
+      sctx.quadraticCurveTo(rib.control.x * r, -rib.control.y * r, rib.end.x * r, -rib.end.y * r);
+      sctx.stroke();
+      // bottom side (mirrored)
+      sctx.beginPath();
+      sctx.moveTo(rib.start.x * r, rib.start.y * r);
+      sctx.quadraticCurveTo(rib.control.x * r, rib.control.y * r, rib.end.x * r, rib.end.y * r);
       sctx.stroke();
     }
+    sctx.restore();
+
+    // 6. Leading-edge highlight — a bright crescent traced along the front
+    //    portion of the silhouette. Read as "wing cutting through space".
+    //    We retrace the outline but only stroke; the lighter blend mode +
+    //    shadowBlur paints a soft glow that hugs the leading edge. Body
+    //    fill (drawn earlier in source-over) covers the rear stroke so only
+    //    the forward arc reads as the highlight.
+    sctx.globalCompositeOperation = "lighter";
+    sctx.shadowColor = `hsla(${baseHue + 30}, 100%, 80%, 1)`;
+    sctx.shadowBlur = 9;
+    sctx.strokeStyle = `hsla(${baseHue + 24}, 100%, 78%, 0.85)`;
+    sctx.lineWidth = 1.4;
+    this.traceBody(sctx);
+    sctx.stroke();
     sctx.shadowBlur = 0;
 
-    sctx.lineWidth = 0.8;
-    sctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 85%, 0.45)`;
-    for (const panel of ship.panels) {
-      sctx.save();
-      tracePanel(panel);
-      sctx.clip();
-      let cx = 0;
-      let cy = 0;
-      for (const p of panel.vertices) {
-        cx += p.x;
-        cy += p.y;
-      }
-      cx = (cx / panel.vertices.length) * r;
-      cy = (cy / panel.vertices.length) * r;
-      sctx.beginPath();
-      sctx.moveTo(cx - r * 0.3, cy);
-      sctx.lineTo(cx + r * 0.3, cy);
-      sctx.stroke();
-      sctx.restore();
-    }
+    // 7. Spine ridge — a faint dark line down the centerline gives the
+    //    wing-disc a dorsal seam. Source-over so it darkens rather than
+    //    glows.
+    sctx.globalCompositeOperation = "source-over";
+    sctx.strokeStyle = `hsla(${baseHue - 10}, 70%, 6%, 0.5)`;
+    sctx.lineWidth = 1.0;
+    sctx.beginPath();
+    sctx.moveTo(0.85 * r, 0);
+    sctx.lineTo(-0.55 * r, 0);
+    sctx.stroke();
+
+    // 8. Cockpit slit — a small dark recess with a faint inner glow. Drawn
+    //    on the dorsal centerline near the head.
+    const c = shape.cockpit;
+    const cx = c.pos.x * r;
+    const cy = c.pos.y * r;
+    const cw = c.width * r;
+    const ch = c.height * r;
+    sctx.fillStyle = `hsla(${baseHue - 10}, 80%, 4%, 0.95)`;
+    sctx.beginPath();
+    sctx.ellipse(cx, cy, cw * 0.5, ch * 0.5, 0, 0, TAU);
+    sctx.fill();
+    sctx.globalCompositeOperation = "lighter";
+    const cockpitGlow = sctx.createRadialGradient(cx, cy, 0, cx, cy, cw * 0.6);
+    cockpitGlow.addColorStop(0, `hsla(${baseHue + 20}, 100%, 75%, 0.7)`);
+    cockpitGlow.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
+    sctx.fillStyle = cockpitGlow;
+    sctx.beginPath();
+    sctx.ellipse(cx, cy, cw * 0.6, ch * 0.55, 0, 0, TAU);
+    sctx.fill();
     return canvas;
   }
 
   render(ctx: CanvasRenderingContext2D, t: number) {
     const baseHue = this.hue;
     const r = this.radius;
-    const ship = this.ship;
+    const shape = this.shape;
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
     ctx.rotate(this.rotation);
     ctx.globalCompositeOperation = "lighter";
 
-    // Soft halo grows with fire-flash so "about to fire / just fired" reads
-    // from a distance.
-    const haloAlpha = 0.16 + 0.32 * this.fireFlash;
-    const haloRadius = r * (2.0 + 0.4 * this.fireFlash);
-    const halo = ctx.createRadialGradient(0, 0, r * 0.4, 0, 0, haloRadius);
+    // Soft elongated halo — wider across the wing than along it, so the glow
+    // matches the manta's wing-disc shape. Grows with fire-flash to telegraph
+    // an incoming shot from a distance.
+    const haloAlpha = 0.14 + 0.28 * this.fireFlash;
+    const haloRadiusX = r * (1.3 + 0.25 * this.fireFlash);
+    const haloRadiusY = r * (1.7 + 0.3 * this.fireFlash);
+    ctx.save();
+    ctx.scale(haloRadiusX / haloRadiusY, 1);
+    const halo = ctx.createRadialGradient(0, 0, r * 0.2, 0, 0, haloRadiusY);
     halo.addColorStop(0, `hsla(${baseHue}, 100%, 65%, ${haloAlpha})`);
-    halo.addColorStop(0.6, `hsla(${baseHue + 12}, 100%, 55%, ${haloAlpha * 0.3})`);
+    halo.addColorStop(0.55, `hsla(${baseHue + 10}, 100%, 55%, ${haloAlpha * 0.35})`);
     halo.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
     ctx.fillStyle = halo;
     ctx.beginPath();
-    ctx.arc(0, 0, haloRadius, 0, TAU);
+    ctx.arc(0, 0, haloRadiusY, 0, TAU);
     ctx.fill();
+    ctx.restore();
 
-    // Engine plumes — back-facing thrust glow at each nozzle. Pulses with the
-    // weave so the ship feels alive between shots.
-    const plumePulse = 0.7 + 0.3 * Math.sin(this.weavePhase * 3.5);
-    for (const eng of ship.engines) {
-      const ex = eng.pos.x * r;
-      const ey = eng.pos.y * r;
-      const plumeLen = r * (0.55 + 0.18 * plumePulse);
-      const plumeRad = eng.size * r * 1.6;
-      const pg = ctx.createRadialGradient(ex - plumeLen * 0.3, ey, 0, ex - plumeLen * 0.3, ey, plumeLen);
-      pg.addColorStop(0, `hsla(${baseHue + 30}, 100%, 80%, ${0.7 * plumePulse})`);
-      pg.addColorStop(0.5, `hsla(${baseHue + 10}, 100%, 60%, ${0.3 * plumePulse})`);
-      pg.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
-      ctx.fillStyle = pg;
+    // Wake pulses — twin soft trails behind the rear-of-body. Pulses with the
+    // weave so the manta feels like it's gliding rather than thrusting. No
+    // "engine plumes" — these read as the slipstream of a swimming creature.
+    const wakePulse = 0.7 + 0.3 * Math.sin(this.weavePhase * 2.4);
+    for (const side of [-1, 1]) {
+      const wx = -0.55 * r;
+      const wy = 0.18 * r * side;
+      const wakeLen = r * (0.45 + 0.18 * wakePulse);
+      const wakeRad = r * 0.16;
+      const wg = ctx.createRadialGradient(wx - wakeLen * 0.4, wy, 0, wx - wakeLen * 0.4, wy, wakeLen);
+      wg.addColorStop(0, `hsla(${baseHue + 14}, 100%, 70%, ${0.45 * wakePulse})`);
+      wg.addColorStop(0.55, `hsla(${baseHue}, 100%, 55%, ${0.2 * wakePulse})`);
+      wg.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
+      ctx.fillStyle = wg;
       ctx.beginPath();
-      ctx.ellipse(ex - plumeLen * 0.4, ey, plumeLen, plumeRad, 0, 0, TAU);
+      ctx.ellipse(wx - wakeLen * 0.4, wy, wakeLen, wakeRad, 0, 0, TAU);
       ctx.fill();
     }
 
-    // Baked panel hull (fills + outlined strokes with shadowBlur + seams).
+    // Baked body — silhouette fill, chevron ribs, leading-edge glow, spine,
+    // cockpit slit. Cast once into the offscreen sprite at construction.
     ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
 
-    // tracePanel used by cracks (clip mask) and hit-flash (fill mask) below.
-    const tracePanel = (panel: AlienPanel) => {
+    // Bioluminescent chevron pulse — a brightness wave sweeps from spine
+    // outward along the rib pattern, like a manta's underbelly glow shifting
+    // as it banks. Fire-flash boosts the whole wave so the moment of firing
+    // reads as a coordinated glow.
+    ctx.save();
+    this.traceBody(ctx);
+    ctx.clip();
+    ctx.lineCap = "round";
+    const sweep = (t * 0.0014 + this.weavePhase * 0.4) % 1;
+    for (let i = 0; i < shape.ribs.length; i++) {
+      const rib = shape.ribs[i];
+      // Each rib has its own phase offset so the glow sweeps along the wing.
+      const phase = (sweep + i / shape.ribs.length) % 1;
+      // Triangle pulse — peaks once per sweep, decays smoothly.
+      const tri = Math.max(0, 1 - Math.abs(phase - 0.5) * 2.4);
+      const pulse = tri * (0.5 + 0.6 * this.fireFlash) + this.fireFlash * 0.25;
+      if (pulse <= 0.02) continue;
+      ctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 85%, ${Math.min(1, pulse * 0.85)})`;
+      ctx.lineWidth = 1.6;
       ctx.beginPath();
-      for (let i = 0; i < panel.vertices.length; i++) {
-        const x = panel.vertices[i].x * r;
-        const y = panel.vertices[i].y * r;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-    };
+      ctx.moveTo(rib.start.x * r, -rib.start.y * r);
+      ctx.quadraticCurveTo(rib.control.x * r, -rib.control.y * r, rib.end.x * r, -rib.end.y * r);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(rib.start.x * r, rib.start.y * r);
+      ctx.quadraticCurveTo(rib.control.x * r, rib.control.y * r, rib.end.x * r, rib.end.y * r);
+      ctx.stroke();
+    }
+    ctx.restore();
 
-    // Running lights — each blinks on its own phase. Fire-flash boosts every
-    // light so the moment of firing reads as a coordinated pulse.
-    const blinkPhase = t * 0.004 + this.weavePhase;
-    for (let i = 0; i < ship.lights.length; i++) {
-      const light = ship.lights[i];
-      const lx = light.pos.x * r;
-      const ly = light.pos.y * r;
-      const blink = 0.45 + 0.4 * Math.sin(blinkPhase + i * 0.9) + 0.4 * this.fireFlash;
-      const lr = light.size * r * 1.2;
-      const lg = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr * 3);
-      lg.addColorStop(0, `hsla(${baseHue + 40}, 100%, 96%, ${Math.min(1, 0.9 * blink)})`);
-      lg.addColorStop(0.35, `hsla(${baseHue + 10}, 100%, 72%, ${Math.min(1, 0.55 * blink)})`);
-      lg.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
-      ctx.fillStyle = lg;
-      ctx.beginPath();
-      ctx.arc(lx, ly, lr * 3, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = `hsla(${baseHue + 50}, 100%, 98%, ${Math.min(1, blink)})`;
-      ctx.beginPath();
-      ctx.arc(lx, ly, lr * 0.55, 0, TAU);
-      ctx.fill();
+    // Animated tail sway — stroke the tail outline with a faint glow so the
+    // whip-tail trails behind the wing, rather than locking statically to the
+    // baked sprite. Uses the same weave phase as the rest of the body.
+    if (shape.tail) {
+      ctx.save();
+      ctx.strokeStyle = `hsla(${baseHue + 20}, 100%, 75%, 0.4)`;
+      ctx.lineWidth = 1.2;
+      this.traceTail(ctx, this.weavePhase * 1.4);
+      ctx.stroke();
+      ctx.restore();
     }
 
-    // Damage cracks — one per HP lost. Clipped to the union of panels so
-    // they only show where there's actual hull underneath.
+    // Damage cracks — one per HP lost. Clipped to the body silhouette so
+    // they only show where there's actual wing underneath.
     const cracksToDraw = this.maxHp - this.hp;
     if (cracksToDraw > 0) {
       ctx.save();
-      ctx.beginPath();
-      for (const panel of ship.panels) {
-        for (let i = 0; i < panel.vertices.length; i++) {
-          const x = panel.vertices[i].x * r;
-          const y = panel.vertices[i].y * r;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-      }
+      this.traceBody(ctx);
       ctx.clip();
       const crackScale = 0.6;
       for (let i = 0; i < cracksToDraw; i++) {
@@ -594,13 +717,11 @@ export class Alien {
       ctx.restore();
     }
 
-    // Hit-flash — pale overlay across all panels.
+    // Hit-flash — pale overlay across the body silhouette.
     if (this.flashAmount > 0) {
       ctx.fillStyle = `hsla(${baseHue + 40}, 100%, 95%, ${this.flashAmount * 0.32})`;
-      for (const panel of ship.panels) {
-        tracePanel(panel);
-        ctx.fill();
-      }
+      this.traceBody(ctx);
+      ctx.fill();
     }
 
     ctx.restore();
