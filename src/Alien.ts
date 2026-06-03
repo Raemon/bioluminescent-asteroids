@@ -76,140 +76,156 @@ export const bigAlienBurstAngleOffset = (i: number): number => {
   return (t - 0.5) * BIG_ALIEN_ARC;
 };
 
-// Hand-built panel for the alien hull. Same idea as bassteroid modules —
-// hard-edged plates with bright outlines — but oriented along +X (nose
-// forward) so the ship reads as facing the direction it's flying.
-type AlienPanel = { vertices: Vec[] };
+// Manta-craft shape. The body is a single curved silhouette — no panels — and
+// the renderer carves it into a wing-disc with chevron ribs, leading-edge
+// highlight, spine ridge, cockpit slit, and a trailing whip-tail. All coords
+// in radius-units (renderer scales by this.radius); +X = nose forward, +Y =
+// wingtip "down" relative to the heading.
+//
+// Outline is built as a single closed curve from these waypoints, traced
+// clockwise from the nose around the starboard wing-tip → tail → port tip and
+// back. The tail is a separate filled strip that fans out from the body's
+// rear notch so it can taper independently of the wing.
+type MantaWaypoint = { p: Vec; control: Vec };
+type MantaShape = {
+  // outline: nose → starboard fin tip → starboard wing root → starboard wing
+  // tip → starboard rear → tail-root starboard → tail-root port → port rear →
+  // port wing tip → port wing root → port fin tip → back to nose. Each pair
+  // (p, control) is a quadratic curve to p with the given control point.
+  outline: MantaWaypoint[];
+  // cephalic horns — small forward fins. Each is a tiny triangle the renderer
+  // paints AFTER the body so it sits proud of the leading edge.
+  horns: { tip: Vec; baseA: Vec; baseB: Vec }[];
+  // chevron ribs sweeping from spine to wing edge. Each rib is a pair of curve
+  // points (control + end). Mirrored top/bottom automatically.
+  ribs: { start: Vec; control: Vec; end: Vec }[];
+  // tail: a tapered whip emerging from the rear notch. baseHalfWidth controls
+  // how thick it is at the body, length is how far back it reaches, and
+  // barbHalfWidth is the tail tip's flare (0 for a clean point).
+  tail: { length: number; baseHalfWidth: number; barbHalfWidth: number; sway: number } | null;
+  // cockpit slit — a small horizontal recess on the dorsal centerline, painted
+  // as a faint inner glow.
+  cockpit: { pos: Vec; width: number; height: number };
+};
 
-// Running-light hard-point. Glowing dot painted on top of panels so each size
-// has a memorable silhouette even after damage.
-type AlienLight = { pos: Vec; size: number };
+// Helper for symmetric outlines: takes the starboard-side waypoints (y >= 0)
+// and returns a full closed outline by appending mirrored port-side ones in
+// reverse order. The nose and tail-junction points are shared (not mirrored).
+const symmetricOutline = (
+  nose: MantaWaypoint,
+  starboardEdge: MantaWaypoint[],
+  rearStarboard: MantaWaypoint,
+  rearPort: MantaWaypoint,
+  portEdgeReturning: MantaWaypoint[],
+): MantaWaypoint[] => [nose, ...starboardEdge, rearStarboard, rearPort, ...portEdgeReturning];
 
-// Engine nozzle position. Renderer paints a back-facing thrust plume that
-// pulses with weave/fire flash so the ship feels alive between shots.
-type AlienEngine = { pos: Vec; size: number };
-
-type AlienShip = { panels: AlienPanel[]; lights: AlienLight[]; engines: AlienEngine[] };
-
-// All coords in radius-units (renderer scales by this.radius). +X = nose
-// forward, +Y = "down" relative to the hull. The three sizes share a manta-ray
-// craft family — swept delta wings flaring back from a central faceted hull,
-// twin cephalic fins jutting forward, slim tail/wake plates trailing. Each
-// size is a distinct silhouette but the shared language reads at a glance:
-//   small : darter      — short stubby wings, no tail, twin micro-thrusters
-//   medium: stingcraft  — clean delta, single barbed tail, paired forward fins
-//   big   : leviathan   — vast wingspan, twin trailing wing-tip filaments,
-//                          forked tail, paired cannon pods on wing roots
-const buildAlienShape = (size: AlienSize): AlienShip => {
+const buildMantaShape = (size: AlienSize): MantaShape => {
   if (size === "small") {
+    // Juvenile darter — short wing-disc, sharp swept tips, stubby tail.
     return {
-      panels: [
-        // central faceted hull pod — diamond seen from above
-        { vertices: [v(0.55, 0), v(0.15, -0.22), v(-0.45, -0.18), v(-0.55, 0), v(-0.45, 0.18), v(0.15, 0.22)] },
-        // swept delta wings — short and stubby, tips raked back
-        { vertices: [v(0.15, -0.18), v(-0.15, -0.7), v(-0.55, -0.55), v(-0.4, -0.15)] },
-        { vertices: [v(0.15, 0.18), v(-0.15, 0.7), v(-0.55, 0.55), v(-0.4, 0.15)] },
-        // twin cephalic fins — short forward prongs that flank the nose
-        { vertices: [v(0.7, -0.05), v(0.4, -0.2), v(0.3, -0.12), v(0.55, -0.02)] },
-        { vertices: [v(0.7, 0.05), v(0.4, 0.2), v(0.3, 0.12), v(0.55, 0.02)] },
+      outline: symmetricOutline(
+        { p: v(0.95, 0), control: v(0.95, 0) },
+        [
+          // starboard leading edge: nose → fin shoulder → wing tip
+          { p: v(0.35, 0.55), control: v(0.85, 0.45) },
+          { p: v(-0.25, 0.7), control: v(0.0, 0.85) },
+          // starboard trailing edge: wing tip → rear notch
+          { p: v(-0.55, 0.3), control: v(-0.5, 0.55) },
+        ],
+        { p: v(-0.55, 0.12), control: v(-0.55, 0.18) },
+        { p: v(-0.55, -0.12), control: v(-0.55, 0) },
+        [
+          // port trailing edge: rear notch → wing tip
+          { p: v(-0.25, -0.7), control: v(-0.5, -0.55) },
+          // port leading edge: wing tip → nose
+          { p: v(0.35, -0.55), control: v(0.0, -0.85) },
+          // close back to nose
+          { p: v(0.95, 0), control: v(0.85, -0.45) },
+        ],
+      ),
+      horns: [
+        { tip: v(1.05, -0.08), baseA: v(0.75, -0.02), baseB: v(0.78, -0.15) },
+        { tip: v(1.05, 0.08), baseA: v(0.75, 0.02), baseB: v(0.78, 0.15) },
       ],
-      lights: [
-        // nose sensor
-        { pos: v(0.55, 0), size: 0.07 },
-        // dorsal hull node
-        { pos: v(-0.05, 0), size: 0.06 },
-        // wing-tip running lights
-        { pos: v(-0.25, -0.55), size: 0.05 },
-        { pos: v(-0.25, 0.55), size: 0.05 },
+      ribs: [
+        { start: v(0.55, 0.05), control: v(0.4, 0.3), end: v(0.1, 0.55) },
+        { start: v(0.15, 0.05), control: v(-0.05, 0.3), end: v(-0.25, 0.6) },
+        { start: v(-0.25, 0.05), control: v(-0.4, 0.2), end: v(-0.5, 0.35) },
       ],
-      engines: [
-        { pos: v(-0.55, -0.08), size: 0.11 },
-        { pos: v(-0.55, 0.08), size: 0.11 },
-      ],
+      tail: { length: 0.45, baseHalfWidth: 0.08, barbHalfWidth: 0.0, sway: 0.18 },
+      cockpit: { pos: v(0.55, 0), width: 0.22, height: 0.07 },
     };
   }
   if (size === "medium") {
+    // Adult sting-craft — broader sweeping wing-disc, downturned tips, mid
+    // whip tail with a slight terminal flare.
     return {
-      panels: [
-        // central faceted hull — longer diamond with pointed nose
-        { vertices: [v(0.75, 0), v(0.3, -0.22), v(-0.35, -0.22), v(-0.55, 0), v(-0.35, 0.22), v(0.3, 0.22)] },
-        // swept delta wings — broader, tips swept back into a barbed point
-        { vertices: [v(0.25, -0.22), v(-0.1, -0.95), v(-0.45, -0.75), v(-0.5, -0.45), v(-0.25, -0.18)] },
-        { vertices: [v(0.25, 0.22), v(-0.1, 0.95), v(-0.45, 0.75), v(-0.5, 0.45), v(-0.25, 0.18)] },
-        // forward cephalic fins — longer aggressive prongs flanking the nose
-        { vertices: [v(0.95, -0.08), v(0.5, -0.3), v(0.35, -0.18), v(0.7, -0.04)] },
-        { vertices: [v(0.95, 0.08), v(0.5, 0.3), v(0.35, 0.18), v(0.7, 0.04)] },
-        // cockpit ridge — narrow hex along the spine
-        { vertices: [v(0.2, -0.1), v(0.4, -0.05), v(0.4, 0.05), v(0.2, 0.1), v(0.05, 0.05), v(0.05, -0.05)] },
-        // trailing tail spine — thin barb
-        { vertices: [v(-0.55, -0.06), v(-0.95, -0.02), v(-0.95, 0.02), v(-0.55, 0.06)] },
+      outline: symmetricOutline(
+        { p: v(1.0, 0), control: v(1.0, 0) },
+        [
+          { p: v(0.45, 0.6), control: v(0.95, 0.45) },
+          { p: v(-0.05, 0.95), control: v(0.25, 1.05) },
+          { p: v(-0.45, 0.55), control: v(-0.45, 0.95) },
+          { p: v(-0.6, 0.15), control: v(-0.55, 0.4) },
+        ],
+        { p: v(-0.55, 0.08), control: v(-0.6, 0.12) },
+        { p: v(-0.55, -0.08), control: v(-0.6, 0) },
+        [
+          { p: v(-0.6, -0.15), control: v(-0.55, -0.12) },
+          { p: v(-0.45, -0.55), control: v(-0.55, -0.4) },
+          { p: v(-0.05, -0.95), control: v(-0.45, -0.95) },
+          { p: v(0.45, -0.6), control: v(0.25, -1.05) },
+          { p: v(1.0, 0), control: v(0.95, -0.45) },
+        ],
+      ),
+      horns: [
+        { tip: v(1.15, -0.1), baseA: v(0.85, -0.02), baseB: v(0.85, -0.2) },
+        { tip: v(1.15, 0.1), baseA: v(0.85, 0.02), baseB: v(0.85, 0.2) },
       ],
-      lights: [
-        // nose sensor
-        { pos: v(0.75, 0), size: 0.07 },
-        // cockpit ridge
-        { pos: v(0.22, 0), size: 0.06 },
-        // wing-tip barbs
-        { pos: v(-0.12, -0.82), size: 0.06 },
-        { pos: v(-0.12, 0.82), size: 0.06 },
-        // dorsal hull node
-        { pos: v(-0.25, 0), size: 0.05 },
+      ribs: [
+        { start: v(0.6, 0.06), control: v(0.5, 0.4), end: v(0.2, 0.78) },
+        { start: v(0.25, 0.06), control: v(0.1, 0.45), end: v(-0.2, 0.85) },
+        { start: v(-0.1, 0.06), control: v(-0.25, 0.4), end: v(-0.4, 0.65) },
+        { start: v(-0.4, 0.05), control: v(-0.5, 0.2), end: v(-0.55, 0.35) },
       ],
-      engines: [
-        { pos: v(-0.55, -0.13), size: 0.14 },
-        { pos: v(-0.55, 0.13), size: 0.14 },
-      ],
+      tail: { length: 0.85, baseHalfWidth: 0.07, barbHalfWidth: 0.06, sway: 0.28 },
+      cockpit: { pos: v(0.6, 0), width: 0.28, height: 0.08 },
     };
   }
-  // big — leviathan manta: vast wingspan, paired cannon pods on the wing
-  // roots, forked trailing tail, twin wing-tip filaments.
+  // big — leviathan manta. Vast curved wing-disc, prominent cephalic horns,
+  // long taper-to-flare whip tail, broad leading edge.
   return {
-    panels: [
-      // central faceted hull — broad armored diamond
-      { vertices: [v(0.78, 0), v(0.35, -0.32), v(-0.4, -0.32), v(-0.6, 0), v(-0.4, 0.32), v(0.35, 0.32)] },
-      // huge swept delta wings — long raked tips
-      { vertices: [v(0.3, -0.3), v(-0.05, -1.05), v(-0.5, -0.95), v(-0.6, -0.6), v(-0.35, -0.25)] },
-      { vertices: [v(0.3, 0.3), v(-0.05, 1.05), v(-0.5, 0.95), v(-0.6, 0.6), v(-0.35, 0.25)] },
-      // forward cephalic fins — broad pronged horns
-      { vertices: [v(1.0, -0.12), v(0.55, -0.38), v(0.35, -0.22), v(0.75, -0.06)] },
-      { vertices: [v(1.0, 0.12), v(0.55, 0.38), v(0.35, 0.22), v(0.75, 0.06)] },
-      // cockpit dome — armored hex ridge along the spine
-      { vertices: [v(0.2, -0.16), v(0.5, -0.08), v(0.5, 0.08), v(0.2, 0.16), v(0.0, 0.08), v(0.0, -0.08)] },
-      // wing-root cannon pods — angular plates either side of the hull
-      { vertices: [v(0.05, -0.5), v(0.35, -0.42), v(0.4, -0.32), v(0.1, -0.32)] },
-      { vertices: [v(0.05, 0.5), v(0.35, 0.42), v(0.4, 0.32), v(0.1, 0.32)] },
-      // cannon barrels protruding forward from the wing-root pods
-      { vertices: [v(0.2, -0.6), v(0.55, -0.55), v(0.55, -0.42), v(0.2, -0.45)] },
-      { vertices: [v(0.2, 0.6), v(0.55, 0.55), v(0.55, 0.42), v(0.2, 0.45)] },
-      // forked trailing tail — two slim barbs from the rear hull
-      { vertices: [v(-0.6, -0.1), v(-1.0, -0.18), v(-1.0, -0.12), v(-0.6, -0.04)] },
-      { vertices: [v(-0.6, 0.1), v(-1.0, 0.18), v(-1.0, 0.12), v(-0.6, 0.04)] },
-      // wing-tip trailing filaments — thin lines extending past the wings
-      { vertices: [v(-0.05, -1.05), v(-0.18, -1.18), v(-0.2, -1.14), v(-0.08, -1.02)] },
-      { vertices: [v(-0.05, 1.05), v(-0.18, 1.18), v(-0.2, 1.14), v(-0.08, 1.02)] },
+    outline: symmetricOutline(
+      { p: v(1.0, 0), control: v(1.0, 0) },
+      [
+        { p: v(0.5, 0.65), control: v(1.0, 0.5) },
+        { p: v(0.05, 1.05), control: v(0.35, 1.2) },
+        { p: v(-0.55, 0.7), control: v(-0.45, 1.15) },
+        { p: v(-0.7, 0.3), control: v(-0.7, 0.5) },
+      ],
+      { p: v(-0.6, 0.12), control: v(-0.65, 0.2) },
+      { p: v(-0.6, -0.12), control: v(-0.65, 0) },
+      [
+        { p: v(-0.7, -0.3), control: v(-0.65, -0.2) },
+        { p: v(-0.55, -0.7), control: v(-0.7, -0.5) },
+        { p: v(0.05, -1.05), control: v(-0.45, -1.15) },
+        { p: v(0.5, -0.65), control: v(0.35, -1.2) },
+        { p: v(1.0, 0), control: v(1.0, -0.5) },
+      ],
+    ),
+    horns: [
+      { tip: v(1.2, -0.14), baseA: v(0.9, -0.04), baseB: v(0.88, -0.24) },
+      { tip: v(1.2, 0.14), baseA: v(0.9, 0.04), baseB: v(0.88, 0.24) },
     ],
-    lights: [
-      // nose sensor cluster
-      { pos: v(0.78, 0), size: 0.08 },
-      // forward fin tips
-      { pos: v(0.95, -0.1), size: 0.05 },
-      { pos: v(0.95, 0.1), size: 0.05 },
-      // cockpit dome
-      { pos: v(0.25, 0), size: 0.07 },
-      // wing-root cannon pods
-      { pos: v(0.5, -0.5), size: 0.06 },
-      { pos: v(0.5, 0.5), size: 0.06 },
-      // wing-tip lights (where filaments meet wings)
-      { pos: v(-0.08, -1.0), size: 0.06 },
-      { pos: v(-0.08, 1.0), size: 0.06 },
-      // tail-tip lights
-      { pos: v(-0.95, -0.15), size: 0.04 },
-      { pos: v(-0.95, 0.15), size: 0.04 },
+    ribs: [
+      { start: v(0.65, 0.08), control: v(0.55, 0.5), end: v(0.25, 0.9) },
+      { start: v(0.3, 0.08), control: v(0.15, 0.55), end: v(-0.2, 0.95) },
+      { start: v(-0.05, 0.08), control: v(-0.25, 0.45), end: v(-0.45, 0.75) },
+      { start: v(-0.35, 0.06), control: v(-0.5, 0.3), end: v(-0.6, 0.5) },
+      { start: v(-0.55, 0.05), control: v(-0.62, 0.15), end: v(-0.65, 0.25) },
     ],
-    engines: [
-      { pos: v(-0.6, -0.18), size: 0.18 },
-      { pos: v(-0.6, 0.18), size: 0.18 },
-    ],
+    tail: { length: 1.2, baseHalfWidth: 0.08, barbHalfWidth: 0.1, sway: 0.34 },
+    cockpit: { pos: v(0.65, 0), width: 0.34, height: 0.09 },
   };
 };
 
@@ -272,13 +288,14 @@ export class Alien {
   // Rotation follows the heading (so the nose points along velocity), with
   // a small sway added in render() for life.
   rotation: number;
-  // Hand-built ship silhouette (panels + lights + engines). Built once at
-  // spawn and reused for both the body draw and the damage-crack clip mask.
-  ship: AlienShip;
-  // Pre-baked hull (panel fills + outlined strokes with shadowBlur + seam
-  // lines). Drawn once per frame with one drawImage instead of re-running
-  // ~10 shadowBlur strokes per panel — shadowBlur is one of the heaviest
-  // canvas ops, and pre-baking it eliminates that per-frame cost entirely.
+  // Curve-based manta silhouette (outline + chevron ribs + horns + tail +
+  // cockpit). Built once at spawn and reused for the body draw, the crack
+  // clip mask, and the hit-flash overlay.
+  shape: MantaShape;
+  // Pre-baked hull — static parts (silhouette fill + chevron ribs + leading
+  // edge highlight + spine ridge + cockpit slit). Drawn once per frame with
+  // one drawImage. The live parts (halo, chevron bioluminescent pulse, wake,
+  // damage cracks, hit-flash) layer on top each frame.
   sprite: HTMLCanvasElement;
   // Half of the sprite's canvas size, used to centre the drawImage blit.
   spriteHalfSize: number = 0;
@@ -301,7 +318,7 @@ export class Alien {
     this.weavePhase = rand(0, TAU);
     this.weaveSpeed = rand(0.6, 1.1);
     this.rotation = Math.atan2(vel.y, vel.x);
-    this.ship = buildAlienShape(size);
+    this.shape = buildMantaShape(size);
     this.sprite = this.buildSprite();
     this.scoreValue = SIZE_SCORE[size];
     // Trail tuned per size — bigger aliens have a thicker, slower-pulsing

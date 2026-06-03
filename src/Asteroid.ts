@@ -1014,6 +1014,20 @@ export class Asteroid {
     }
     ctx.stroke();
 
+    // Frosted veil — a milky pale-blue ring sitting just inside the rim,
+    // fading to transparent at the centre. Light scatters near the surface of
+    // ice; this is the optical tell. Drawn additive so it brightens facets
+    // underneath without flattening them.
+    const frostGrad = ctx.createRadialGradient(0, 0, R * 0.15, 0, 0, R * 1.0);
+    frostGrad.addColorStop(0, `hsla(${H + 10}, 30%, 90%, 0)`);
+    frostGrad.addColorStop(0.55, `hsla(${H + 8}, 45%, 85%, 0.12)`);
+    frostGrad.addColorStop(0.85, `hsla(${H + 6}, 55%, 92%, 0.32)`);
+    frostGrad.addColorStop(1, `hsla(${H + 4}, 60%, 96%, 0.45)`);
+    ctx.fillStyle = frostGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, TAU);
+    ctx.fill();
+
     // Inner luminous core — small soft pool at the gem's heart, biased toward
     // the light. Sells the "you can see *into* the crystal" depth without
     // burning a bright spot onto the surface like the old highlight did.
@@ -1021,9 +1035,9 @@ export class Asteroid {
       coreX, coreY, 0,
       coreX, coreY, R * 0.55,
     );
-    coreGrad.addColorStop(0, `hsla(${H + 15}, 100%, 92%, 0.5)`);
-    coreGrad.addColorStop(0.5, `hsla(${H + 5}, 95%, 75%, 0.18)`);
-    coreGrad.addColorStop(1, `hsla(${H}, 90%, 60%, 0)`);
+    coreGrad.addColorStop(0, `hsla(${H + 15}, 40%, 95%, 0.45)`);
+    coreGrad.addColorStop(0.5, `hsla(${H + 5}, 55%, 82%, 0.15)`);
+    coreGrad.addColorStop(1, `hsla(${H}, 60%, 65%, 0)`);
     ctx.fillStyle = coreGrad;
     ctx.beginPath();
     ctx.arc(coreX, coreY, R * 0.55, 0, TAU);
@@ -1050,17 +1064,19 @@ export class Asteroid {
     ctx.lineWidth = isSmall ? 2.0 : 4.5;
     rimPath();
     ctx.stroke();
-    // Bright glassy band — the main "cut glass" highlight.
-    ctx.strokeStyle = `hsla(${H + 30}, 100%, 95%, 0.9)`;
+    // Frosted highlight band — softer and cooler than a cut-glass edge would
+    // be. Lower saturation + a wider shadow blur reads as light scattering on
+    // a rimey ice surface instead of a polished gem facet.
+    ctx.strokeStyle = `hsla(${H + 18}, 45%, 92%, 0.75)`;
     ctx.lineWidth = isSmall ? 1.2 : 2.6;
-    ctx.shadowColor = `hsla(${H + 15}, 100%, 80%, 1)`;
-    ctx.shadowBlur = 7;
+    ctx.shadowColor = `hsla(${H + 12}, 50%, 88%, 1)`;
+    ctx.shadowBlur = 11;
     rimPath();
     ctx.stroke();
     ctx.shadowBlur = 0;
-    // Inner hairline — sits just inside the bright band, sells the shell as
-    // a solid wall of glass rather than a single painted line.
-    ctx.strokeStyle = `hsla(${H + 40}, 100%, 98%, 0.7)`;
+    // Inner hairline — sits just inside the bright band; the cool, low-sat
+    // tint keeps it reading as ice rather than chrome.
+    ctx.strokeStyle = `hsla(${H + 25}, 35%, 96%, 0.55)`;
     ctx.lineWidth = 0.8;
     ctx.save();
     ctx.scale(0.93, 0.93);

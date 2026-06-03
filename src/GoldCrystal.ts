@@ -245,7 +245,11 @@ export const spawnCanisterFromGoldCrystal = (g: GoldCrystal, w: number, h: numbe
   const delta = sub(aim, g.pos);
   const fullDist = len(delta) || 1;
   const dir = mul(delta, 1 / fullDist);
-  const driftSpeed = rand(60, 110);
-  const pathLength = fullDist * rand(0.75, 0.95);
+  // Slower drift + longer path budget than a standard canister so freed
+  // upgrades hang around long enough for the player to actually chase them
+  // down — the gem already cost work to crack, so the reward shouldn't warp
+  // out before they can react.
+  const driftSpeed = rand(45, 80);
+  const pathLength = fullDist * rand(1.1, 1.5);
   return new Canister({ ...g.pos }, mul(dir, driftSpeed), kind, pathLength);
 };
