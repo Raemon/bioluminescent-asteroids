@@ -116,7 +116,7 @@ const awardScoreForKill = (
     game.sound.play("comboSparkle", 1, hitPos);
     game.sound.playComboChime(multiplier, hitPos);
     if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
-    // Drift Bonus: on-beat hit by a bullet fired while any hover ring was locked queues a
+    // Drift Shot: on-beat hit by a bullet fired while any hover ring was locked queues a
     //   +1-rhythm reward 1 beat later. Cancelled if the streak breaks in the meantime.
     if (driftEligible) {
       game.pendingDriftBonuses.push({

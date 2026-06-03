@@ -549,7 +549,7 @@ export class Asteroid {
   // the piece should "sing" outward rather than leave a wake. Anchored
   // origin per wave; see SoundwaveRadiator.ts.
   radiator: SoundwaveRadiator | null = null;
-  // Number of gem collectibles this solid crystal will drop on death (0–2).
+  // Number of gem collectibles this solid crystal will drop on death (0–3).
   // Decided at spawn so the same count can be pre-rendered as frosted gems
   // visible inside the crystal body. Unused for other kinds.
   embeddedGemCount = 0;
@@ -635,11 +635,12 @@ export class Asteroid {
       });
     }
     this.membranePhase = rand(0, TAU);
-    // Roll embedded gem count for solid crystals — 0, 1, or 2 — and pick
-    // local-space spots so they can be pre-baked into the sprite as frosted
-    // hints and dropped at the same positions on death.
+    // Roll embedded gem count for solid crystals — weighted 60/25/10/5 for
+    // 0/1/2/3 gems — and pick local-space spots so they can be pre-baked into
+    // the sprite as frosted hints and dropped at the same positions on death.
     if (kind === "solidCrystal") {
-      this.embeddedGemCount = Math.floor(Math.random() * 3);
+      const gemRoll = Math.random();
+      this.embeddedGemCount = gemRoll < 0.6 ? 0 : gemRoll < 0.85 ? 1 : gemRoll < 0.95 ? 2 : 3;
       for (let i = 0; i < this.embeddedGemCount; i++) {
         const angle = rand(0, TAU);
         const dist = this.embeddedGemCount === 1 ? rand(0, this.radius * 0.18) : this.radius * rand(0.28, 0.42);
@@ -1457,7 +1458,7 @@ export class Asteroid {
       }
       return fragmentList;
     }
-    // Solid crystal: large shatters into 3 fast-moving small crystal
+    // Solid crystal: large shatters into 2 fast-moving small crystal
     // fragments fanning around the bullet's heading. Smalls don't split
     // further — they're the terminal tier.
     if (this.kind === "solidCrystal") {
@@ -1467,10 +1468,10 @@ export class Asteroid {
       const parentSpeed = Math.hypot(this.vel.x, this.vel.y);
       const ejectDist = this.radius * 0.55;
       const fragmentList: Asteroid[] = [];
-      for (let i = 0; i < 3; i++) {
-        // Three pieces fanned forward of the impact — none flying straight
+      for (let i = 0; i < 2; i++) {
+        // Two pieces fanned forward of the impact — neither flying straight
         // back at the shooter.
-        const offsets = [-0.9, 0, 0.9];
+        const offsets = [-0.7, 0.7];
         const childAngle = baseAngle + offsets[i] + rand(-0.12, 0.12);
         const childPos = {
           x: this.pos.x + Math.cos(childAngle) * ejectDist,

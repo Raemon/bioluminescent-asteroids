@@ -324,7 +324,7 @@ const updatePlaying = (game: Game, dt: number) => {
   if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning && !game.tutorialActive) advanceWave(game);
 };
 
-// Drift Bonus queue: on-beat hits made under a fully-locked first-dot hover ring
+// Drift Shot queue: on-beat hits made under a fully-locked first-dot hover ring
 //   schedule a +1-rhythm reward for 1 beat later. If the streak broke before the
 //   moment arrives, drop the entry — the bonus is tied to a live streak.
 const tickPendingDriftBonuses = (game: Game) => {

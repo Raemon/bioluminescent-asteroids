@@ -4359,7 +4359,7 @@ export class Sound {
   playComboSparkleShort() { this.playComboSparkle(0.5); }
 
   // Drift-shot hit fanfare — fires when an on-beat shot lands while the first-dot hover ring
-  // is locked (i.e. the same condition that queues the +1 Drift Bonus and the 4x damage). A
+  // is locked (i.e. the same condition that queues the +1 Drift Shot and the 4x damage). A
   // bright, celebratory layer that sits *on top of* the normal comboSparkle + chime so the
   // player hears the regular on-beat reward AND a distinct extra "ding" for the drift-shot.
   //   Three layers:

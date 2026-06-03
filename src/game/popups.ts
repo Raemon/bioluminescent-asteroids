@@ -63,7 +63,7 @@ export const popupDriftBonus = (pos: Vec): Popup => ({
   vel: { x: rand(-10, 10), y: -65 },
   life: COMBO_POPUP_LIFE,
   maxLife: COMBO_POPUP_LIFE,
-  text: "DRIFT BONUS",
+  text: "DRIFT SHOT",
   font: "700 18px 'Space Grotesk', system-ui, sans-serif",
   fill: "#9be8ff",
   shadowColor: "rgba(120, 220, 255, 0.85)",
