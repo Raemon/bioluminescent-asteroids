@@ -1,13 +1,17 @@
 import { Vec, TAU } from "../../vec";
 import { RETICULE_DASH_HSL } from "./radarCone";
-import { BULLET_HIT_RADIUS_ON_BEAT, BULLET_HIT_RADIUS_OFF_BEAT, ReticuleTarget } from "./trajectoryPreview";
+import { BULLET_HIT_RADIUS_ON_BEAT, BULLET_HIT_RADIUS_OFF_BEAT, ReticuleTarget, slotCrosshairLengthTrajectory } from "./trajectoryPreview";
 import { toroidalDelta } from "./coneGeometry";
 
 const RETICULE_LINE_DASH: [number, number] = [4, 4];
 // dashed crosshair sticking out past the outer disc — reads as "this is a targeting sight",
-// matching the lock-circle crosshair used on the on-rhythm aim spot.
+// matching the lock-circle crosshair used on the on-rhythm aim spot. The reticule's tick length
+// shadows its matching trajectory-dot tick length (1-beat reticule pairs with 1-beat dot, etc.)
+// so the player can scan "small ticks pair with small ticks" to know which to drift-lock.
 const RETICULE_CROSSHAIR_GAP = 3;
-const RETICULE_CROSSHAIR_LENGTH = 6;
+// reticule ticks extend the matching dot's ticks by this much so the reticule still reads as the
+// larger sight while preserving the per-slot pairing.
+const RETICULE_TICK_BONUS = 1;
 const RETICULE_CROSSHAIR_DASH: [number, number] = [2, 2];
 // brightness boost when the disc covers a target tells the player "this shot will land".
 const RETICULE_OVERLAP_BRIGHTNESS = 3;
@@ -39,7 +43,10 @@ export const paintAimDiscs = (
   ctx: CanvasRenderingContext2D, reticulePos: Vec, baseAlpha: number,
   overlapsTarget: boolean, onFirstBeatDot: boolean,
   tutorialHighlight: boolean = false,
+  slot: number = 1,
 ) => {
+  // slot ≤ 0 (e.g. prong fans the shot off-axis) falls back to the default 1-beat tick length.
+  const tickLength = (slot >= 1 ? slotCrosshairLengthTrajectory(slot) : slotCrosshairLengthTrajectory(1)) + RETICULE_TICK_BONUS;
   const locked = onFirstBeatDot || tutorialHighlight;
   const overlapBoost = overlapsTarget || locked ? RETICULE_OVERLAP_BRIGHTNESS : 1;
   const hitAlpha = Math.min(1, baseAlpha * overlapBoost);
@@ -62,7 +69,7 @@ export const paintAimDiscs = (
   ctx.stroke();
   ctx.setLineDash(RETICULE_CROSSHAIR_DASH);
   const cInner = BULLET_HIT_RADIUS_ON_BEAT + RETICULE_CROSSHAIR_GAP;
-  const cOuter = cInner + RETICULE_CROSSHAIR_LENGTH;
+  const cOuter = cInner + tickLength;
   ctx.beginPath();
   ctx.moveTo(reticulePos.x - cOuter, reticulePos.y); ctx.lineTo(reticulePos.x - cInner, reticulePos.y);
   ctx.moveTo(reticulePos.x + cInner, reticulePos.y); ctx.lineTo(reticulePos.x + cOuter, reticulePos.y);

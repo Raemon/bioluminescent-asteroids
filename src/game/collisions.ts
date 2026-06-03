@@ -13,6 +13,7 @@ import {
   spawnCanisterFromGoldCrystal,
 } from "../GoldCrystal";
 import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebaseBeatEval } from "./rhythmGate";
+import { BEAT_GRID } from "./rhythmConstants";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup } from "./particleBursts";
@@ -78,7 +79,7 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     consumeBullet(b);
     const onBeat = isHitOnBeat(game, b);
     logBulletHit(game, "HIT asteroid", b);
-    const isDriftShot = onBeat && game.ship.hoverDotRingState.completionBeatTime !== null;
+    const isDriftShot = onBeat && b.driftEligibleAtHit(BEAT_GRID);
     const dmg = b.damage() * (isDriftShot ? 4 : 1);
     const { killed } = a.applyDamage(dmg);
     game.shake = Math.min(game.shake + (killed ? 0.4 : 0.2), 1.2);

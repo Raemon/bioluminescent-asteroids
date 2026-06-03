@@ -357,8 +357,10 @@ const classifyNewBullets = (game: Game, firstNewIndex: number) => {
   //   late on the raw audio grid.
   const firedOnBeat = isInBeatWindow(game, game.perceivedBeatTime);
   const count = game.bullets.length - firstNewIndex;
+  const lockedSlots = game.ship.hoverDotRingStates.map(r => r.completionBeatTime !== null);
   for (let i = firstNewIndex; i < game.bullets.length; i++) {
     game.bullets[i].firedAtBeatTime = game.perceivedBeatTime;
+    game.bullets[i].driftLockedSlots = lockedSlots;
   }
   logBeatEvent(game, "FIRE", game.perceivedBeatTime, `bullets=${count}`);
   spawnBeatDebugPopup(game, game.ship.pos, game.perceivedBeatTime, "FIRE");

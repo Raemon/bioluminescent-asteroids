@@ -272,6 +272,14 @@ export class Sound {
   // Per-alien continuous theremin drone. Keyed by the Alien instance so the
   // Game side can start/stop without us needing an ID scheme.
   alienDrones: Map<object, AlienDroneNode> = new Map();
+  // Step index into the big-alien fire note cycle. Each shot advances by 1
+  // so the riff plays back in order across hits.
+  private bigAlienFireStep = 0;
+  // Decoded electric-guitar sample for playAlienFireBig. Loaded once on first
+  // ensureContext from public/sounds/guitar/. See PLAYER_NOTE_HZ below for the
+  // sample's actual recorded pitch — used to compute playbackRate.
+  private guitarSampleBuffer: AudioBuffer | null = null;
+  private guitarSampleLoading = false;
   // Single soft hum held while the reticule hovers the first-beat dot. Null
   // when not hovering. Gain target rides the hover intensity each frame.
   private firstDotHum: FirstDotHumNode | null = null;
@@ -410,6 +418,7 @@ export class Sound {
     // be created before the context exists, so this is the earliest we can do
     // it — runs once, on first user interaction.
     this.prewarmNoiseBuffers();
+    this.loadGuitarSample();
     // Kick off the baked-mp3 fetch + decode for every voice that has a baked
     // recipe. The title screen awaits bakedCacheReady() before letting the
     // player start so playBaked is guaranteed to hit cache. In dev, missing
@@ -425,6 +434,24 @@ export class Sound {
   private prewarmNoiseBuffers() {
     const durations = [0.018, 0.025, 0.08, 0.18, 0.3, 0.34, 0.4, 0.55, 3, 4, 6, 8];
     for (const d of durations) this.makeNoiseBuffer(d);
+  }
+
+  // Fetch + decode the electric-guitar sample used by playAlienFireBig.
+  // Single-shot; idempotent. If the file is missing, playAlienFireBig
+  // silently no-ops on that voice (the rest of the mix continues normally).
+  private async loadGuitarSample() {
+    if (!this.ctx || this.guitarSampleBuffer || this.guitarSampleLoading) return;
+    this.guitarSampleLoading = true;
+    try {
+      const r = await fetch("/sounds/guitar/big-alien.wav");
+      if (!r.ok) return;
+      const ab = await r.arrayBuffer();
+      this.guitarSampleBuffer = await this.ctx.decodeAudioData(ab);
+    } catch {
+      // missing or undecodable — playAlienFireBig will skip
+    } finally {
+      this.guitarSampleLoading = false;
+    }
   }
 
   // ── Runtime Tone engine removed ────────────────────────────────────────
@@ -2879,109 +2906,180 @@ export class Sound {
 
   private playAlienFireBig() {
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
-    // Deep C2 fundamental with a hand-stacked overtone series — sub sine, a
-    // body triangle at the fundamental, perfect fifth + octave + tritone
-    // partials for menace, plus a snap of bandpassed noise on the attack.
-    // The whole thing decays in ~0.32s so eight half-beat bursts read as
-    // distinct rhythmic hits instead of blurring into a drone.
-    const f0 = 65.41; // C2
+    const ctx = this.ctx;
+    const master = this.master;
+    const t = ctx.currentTime;
+    // Power-chord roots, one octave below E-standard low-E (~41 Hz).
+    // Cycle: E1 G1 E1 G1 E1 A1 E1 A1 — minor riff that hides under
+    // the bassteroid bed and walks up to the V on the long hits.
+    const NOTE_CYCLE = [41.20, 49.00, 41.20, 49.00, 41.20, 55.00, 41.20, 55.00];
+    const f0 = NOTE_CYCLE[this.bigAlienFireStep % NOTE_CYCLE.length];
+    this.bigAlienFireStep = (this.bigAlienFireStep + 1) % NOTE_CYCLE.length;
 
-    // Sub-bass sine — the chest-thump.
-    const sub = this.ctx.createOscillator();
+    // ---- Amp chain. Tanh clipping for crunch, then a tilted EQ that
+    // scoops mids and bumps presence — the classic "scooped metal"
+    // cab voicing. Gain stages are kept conservative because the
+    // master bus has a -18 dB compressor + brick-wall limiter that
+    // will duck everything else if this voice pushes too hard.
+    const amp = this.makeBoomSaturator(4);
+    // High-pass to drop the unfocused sub-rumble out of the distorted
+    // path; the clean sub layer reinforces the fundamental separately.
+    const ampHP = ctx.createBiquadFilter();
+    ampHP.type = "highpass";
+    ampHP.frequency.value = 90;
+    ampHP.Q.value = 0.7;
+    // Cab body — a 4x12-ish low-mid resonance.
+    const cabLow = ctx.createBiquadFilter();
+    cabLow.type = "peaking";
+    cabLow.frequency.value = 180;
+    cabLow.Q.value = 1.2;
+    cabLow.gain.value = 2;
+    // Mid scoop.
+    const cabScoop = ctx.createBiquadFilter();
+    cabScoop.type = "peaking";
+    cabScoop.frequency.value = 650;
+    cabScoop.Q.value = 0.9;
+    cabScoop.gain.value = -5;
+    // Presence — that biting upper-mid bark that makes guitars cut.
+    const cabPresence = ctx.createBiquadFilter();
+    cabPresence.type = "peaking";
+    cabPresence.frequency.value = 2400;
+    cabPresence.Q.value = 1.4;
+    cabPresence.gain.value = 3;
+    // Cab roll-off — speakers don't reproduce above ~5-6 kHz.
+    const cabLP = ctx.createBiquadFilter();
+    cabLP.type = "lowpass";
+    cabLP.frequency.value = 5200;
+    cabLP.Q.value = 0.6;
+    const ampGain = ctx.createGain();
+    // Gentle attack ramp (24 ms) so the noise-seed transient at the
+    // top of each Karplus-Strong buffer doesn't slam the master
+    // limiter. Holds through the sustain then decays out at ~1.1s.
+    ampGain.gain.setValueAtTime(0.0001, t);
+    ampGain.gain.exponentialRampToValueAtTime(0.18, t + 0.024);
+    ampGain.gain.setValueAtTime(0.18, t + 0.45);
+    ampGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.10);
+    if (amp) amp.connect(ampHP);
+    ampHP.connect(cabLow);
+    cabLow.connect(cabScoop);
+    cabScoop.connect(cabPresence);
+    cabPresence.connect(cabLP);
+    cabLP.connect(ampGain);
+    ampGain.connect(master);
+    const ampIn: AudioNode = amp ?? ampHP;
+
+    // ---- Three Karplus-Strong strings, voiced as a power chord
+    // (root, fifth, octave) two octaves up from the sub root so the
+    // strings live in guitar territory (~165-330 Hz fundamentals).
+    // KS is what gives the authentic plucked-string timbre — a
+    // sawtooth alone, even through a heavy amp, sounds synth-y;
+    // KS has the natural inharmonic high-end decay of a real string.
+    const stringRoot = f0 * 4; // E3-ish, sitting where a guitar low-E lives
+    const sr = ctx.sampleRate;
+    const stringDur = 1.2;
+    const stringLen = Math.floor(sr * stringDur);
+    const renderString = (ratio: number, detuneCents: number, level: number) => {
+      const freq = stringRoot * ratio * Math.pow(2, detuneCents / 1200);
+      // KS delay-line length = sample rate / fundamental.
+      const period = Math.max(2, Math.round(sr / freq));
+      const buf = ctx.createBuffer(1, stringLen, sr);
+      const data = buf.getChannelData(0);
+      // Seed the delay line with filtered noise — the "pick noise"
+      // that the string filters into a tone. Bandpassed around the
+      // fundamental so the attack has body, not hiss.
+      const seed = new Float32Array(period);
+      // Half-scale seed: KS works at any seed amplitude, and ±0.5
+      // keeps the initial noise burst well below the master limiter
+      // threshold so this voice doesn't duck everything else.
+      for (let i = 0; i < period; i++) seed[i] = (Math.random() * 2 - 1) * 0.5;
+      // Light pre-shaping: a 1-pole LP applied to the seed makes
+      // the attack rounder, more like a flesh pick than a sharp one.
+      let s = 0;
+      for (let i = 0; i < period; i++) {
+        s = s * 0.55 + seed[i] * 0.45;
+        seed[i] = s;
+      }
+      // Run the Karplus-Strong loop: each new sample is the average
+      // of two delayed samples (low-pass), scaled by a damping factor
+      // that controls how quickly highs roll off — i.e. sustain.
+      // Damping of 0.996 gives a long ringing sustain; lower it for
+      // a deader sound. Slight variation per string keeps them from
+      // phasing perfectly.
+      const damping = 0.9965;
+      for (let i = 0; i < stringLen; i++) {
+        if (i < period) {
+          data[i] = seed[i];
+        } else {
+          // Standard KS: y[n] = damping * 0.5 * (y[n-N] + y[n-N-1])
+          data[i] = damping * 0.5 * (data[i - period] + data[i - period - 1]);
+        }
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const g = ctx.createGain();
+      g.gain.value = level;
+      src.connect(g);
+      g.connect(ampIn);
+      src.start(t);
+      src.stop(t + stringDur);
+    };
+    // Power chord: root, perfect fifth (3/2), octave (2/1). Tiny
+    // detune per string keeps it from sounding like a single voice.
+    renderString(1.0, -4, 0.35);
+    renderString(1.5, +3, 0.28);
+    renderString(2.0, -2, 0.22);
+
+    // ---- Sub-bass reinforcement (clean, not through the amp).
+    // Sine at the true cycle root so the riff is felt as well as heard.
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.setValueAtTime(f0 * 0.5, t);
-    sub.frequency.exponentialRampToValueAtTime(f0, t + 0.05);
-    const subGain = this.ctx.createGain();
+    sub.frequency.exponentialRampToValueAtTime(f0, t + 0.03);
+    const subGain = ctx.createGain();
     subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(0.34, t + 0.012);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
+    subGain.gain.exponentialRampToValueAtTime(0.22, t + 0.010);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.50);
     sub.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(master);
     sub.start(t);
-    sub.stop(t + 0.42);
+    sub.stop(t + 0.55);
 
-    // Body triangle at the fundamental — rounds out the sub.
-    const body = this.ctx.createOscillator();
-    body.type = "triangle";
-    body.frequency.value = f0;
-    const bodyGain = this.ctx.createGain();
-    bodyGain.gain.setValueAtTime(0.0001, t);
-    bodyGain.gain.exponentialRampToValueAtTime(0.18, t + 0.018);
-    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
-    body.connect(bodyGain);
-    bodyGain.connect(this.master);
-    body.start(t);
-    body.stop(t + 0.36);
+    // ---- Pick attack. Two layers: a tight high-mid click for the
+    // plectrum striking the wound string, and a brief scrape with
+    // a downward sweep that reads as the pick dragging across all
+    // three strings at once (like a real chord strum).
+    const pickBuf = this.makeNoiseBuffer(0.05);
+    if (pickBuf) {
+      const click = ctx.createBufferSource();
+      click.buffer = pickBuf;
+      const clickFilter = ctx.createBiquadFilter();
+      clickFilter.type = "bandpass";
+      clickFilter.frequency.value = 3200;
+      clickFilter.Q.value = 1.8;
+      const clickGain = ctx.createGain();
+      clickGain.gain.setValueAtTime(0.14, t);
+      clickGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.025);
+      click.connect(clickFilter);
+      clickFilter.connect(clickGain);
+      clickGain.connect(master);
+      click.start(t);
+      click.stop(t + 0.05);
 
-    // Perfect fifth (G2) — tonal weight, slightly detuned for thickness.
-    const fifthA = this.ctx.createOscillator();
-    fifthA.type = "sawtooth";
-    fifthA.frequency.value = f0 * 1.5;
-    const fifthB = this.ctx.createOscillator();
-    fifthB.type = "sawtooth";
-    fifthB.frequency.value = f0 * 1.5 * 1.005;
-    const fifthFilter = this.ctx.createBiquadFilter();
-    fifthFilter.type = "lowpass";
-    fifthFilter.Q.value = 3;
-    fifthFilter.frequency.setValueAtTime(900, t);
-    fifthFilter.frequency.exponentialRampToValueAtTime(220, t + 0.28);
-    const fifthGain = this.ctx.createGain();
-    fifthGain.gain.setValueAtTime(0.0001, t);
-    fifthGain.gain.exponentialRampToValueAtTime(0.09, t + 0.02);
-    fifthGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
-    fifthA.connect(fifthFilter);
-    fifthB.connect(fifthFilter);
-    fifthFilter.connect(fifthGain);
-    fifthGain.connect(this.master);
-    fifthA.start(t);
-    fifthB.start(t);
-    fifthA.stop(t + 0.34);
-    fifthB.stop(t + 0.34);
-
-    // Tritone partial — short, dissonant overtone that gives the shot bite.
-    const tritone = this.ctx.createOscillator();
-    tritone.type = "sine";
-    tritone.frequency.value = f0 * 2.83;
-    const tritoneGain = this.ctx.createGain();
-    tritoneGain.gain.setValueAtTime(0.0001, t);
-    tritoneGain.gain.exponentialRampToValueAtTime(0.05, t + 0.01);
-    tritoneGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
-    tritone.connect(tritoneGain);
-    tritoneGain.connect(this.master);
-    tritone.start(t);
-    tritone.stop(t + 0.14);
-
-    // Octave shimmer that blooms slightly late — "lift-off" tail.
-    const oct = this.ctx.createOscillator();
-    oct.type = "sine";
-    oct.frequency.value = f0 * 2;
-    const octGain = this.ctx.createGain();
-    octGain.gain.setValueAtTime(0.0001, t);
-    octGain.gain.exponentialRampToValueAtTime(0.07, t + 0.05);
-    octGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
-    oct.connect(octGain);
-    octGain.connect(this.master);
-    oct.start(t);
-    oct.stop(t + 0.3);
-
-    // Bandpassed noise transient — the percussive "thunk" of the cannon.
-    const noiseBuf = this.makeNoiseBuffer(0.05);
-    if (noiseBuf) {
-      const noise = this.ctx.createBufferSource();
-      noise.buffer = noiseBuf;
-      const noiseFilter = this.ctx.createBiquadFilter();
-      noiseFilter.type = "bandpass";
-      noiseFilter.frequency.value = 180;
-      noiseFilter.Q.value = 1.5;
-      const noiseGain = this.ctx.createGain();
-      noiseGain.gain.setValueAtTime(0.18, t);
-      noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-      noise.connect(noiseFilter);
-      noiseFilter.connect(noiseGain);
-      noiseGain.connect(this.master);
-      noise.start(t);
-      noise.stop(t + 0.06);
+      const scrape = ctx.createBufferSource();
+      scrape.buffer = pickBuf;
+      const scrapeFilter = ctx.createBiquadFilter();
+      scrapeFilter.type = "bandpass";
+      scrapeFilter.Q.value = 2.2;
+      scrapeFilter.frequency.setValueAtTime(4800, t);
+      scrapeFilter.frequency.exponentialRampToValueAtTime(1100, t + 0.045);
+      const scrapeGain = ctx.createGain();
+      scrapeGain.gain.setValueAtTime(0.08, t);
+      scrapeGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      scrape.connect(scrapeFilter);
+      scrapeFilter.connect(scrapeGain);
+      scrapeGain.connect(master);
+      scrape.start(t);
+      scrape.stop(t + 0.05);
     }
   }
 

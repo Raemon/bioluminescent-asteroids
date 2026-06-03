@@ -74,11 +74,16 @@ const TRAJECTORY_LOCK_CROSSHAIR_GAP = 3;
 const TRAJECTORY_LOCK_CROSSHAIR_LENGTH = 7;
 const TRAJECTORY_LOCK_CROSSHAIR_DASH: number[] = [2, 2];
 // first-beat dot crosshair — same sight visual as the lock crosshair, sized to clear the halo
-// ring so the ticks read as separate marks rather than overlapping the dashed halo.
+// ring so the ticks read as separate marks rather than overlapping the dashed halo. Tick length
+// grows per slot so the 1-beat dot pairs visually with the 1-beat reticule, 2-beat with 2-beat,
+// etc. — the player can scan "small ticks pair with small ticks" to know which to drift-lock.
 const TRAJECTORY_FIRST_BEAT_CROSSHAIR_INNER = TRAJECTORY_FIRST_BEAT_HALO_RADIUS + 2;
-const TRAJECTORY_FIRST_BEAT_CROSSHAIR_LENGTH = 5;
 const TRAJECTORY_FIRST_BEAT_CROSSHAIR_DASH: number[] = [2, 2];
 const TRAJECTORY_FIRST_BEAT_CROSSHAIR_LINE_WIDTH = 0.75;
+// shared with aimDisc.ts via SLOT_CROSSHAIR_LENGTHS_TRAJECTORY; one entry per slot starting at 1-beat.
+export const SLOT_CROSSHAIR_LENGTHS_TRAJECTORY = [5, 9, 13, 17] as const;
+export const slotCrosshairLengthTrajectory = (slot: number): number =>
+  SLOT_CROSSHAIR_LENGTHS_TRAJECTORY[Math.min(SLOT_CROSSHAIR_LENGTHS_TRAJECTORY.length - 1, Math.max(0, slot - 1))];
 // the centermost-target's first-beat dot upgrades its halo + crosshair to bright white at full
 // alpha so the player can instantly see which target their on-beat shot is locked to.
 // Geometry matches the ship's aim disc (outer ring + crosshair from aimDisc.ts) so the focused
@@ -136,6 +141,9 @@ export type TrajectoryContext = {
   h: number;
   frame: ConeFrame;
   reticulePos: Vec;
+  // one entry per reachable on-beat slot — index 0 = 1-beat reticule, 1 = 2-beat, ...
+  //   null at a slot means no centred reticule there (e.g. prong fans the shot off-axis).
+  reticulePosBySlot: Array<Vec | null>;
   aimCircleCenter: Vec;
   aimCircleRadius: number;
   trajectoryTracks: TrajectoryTrackMap;
@@ -231,6 +239,7 @@ const paintFirstBeatDot = (
   ctx: CanvasRenderingContext2D, px: number, py: number,
   proximity01: number, entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
   dimFactor: number = 1, tutorialHighlight: boolean = false, focused: boolean = false,
+  tickLength: number = SLOT_CROSSHAIR_LENGTHS_TRAJECTORY[0],
 ) => {
   const proximityAlpha = TRAJECTORY_FIRST_BEAT_DOT_ALPHA
     + (TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA - TRAJECTORY_FIRST_BEAT_DOT_ALPHA) * proximity01;
@@ -296,7 +305,7 @@ const paintFirstBeatDot = (
   ctx.lineWidth = TRAJECTORY_FIRST_BEAT_CROSSHAIR_LINE_WIDTH;
   ctx.setLineDash(TRAJECTORY_FIRST_BEAT_CROSSHAIR_DASH);
   const inner = TRAJECTORY_FIRST_BEAT_CROSSHAIR_INNER;
-  const outer = inner + TRAJECTORY_FIRST_BEAT_CROSSHAIR_LENGTH;
+  const outer = inner + tickLength;
   ctx.beginPath();
   ctx.moveTo(px - outer, py); ctx.lineTo(px - inner, py);
   ctx.moveTo(px + inner, py); ctx.lineTo(px + outer, py);
@@ -367,9 +376,14 @@ const firstDotProximity01 = (px: number, py: number, retX: number, retY: number)
   return t * t * (3 - 2 * t);
 };
 
-// overlapsReticule = strict hit (powers reticule lock-on visuals); firstDotProximity = soft
-// 0..1 from firstDotProximity01, used by the hover-commit ring so its threshold is more forgiving.
-type DotWalkResult = { overlapsReticule: boolean; firstDotProximity: number };
+// overlapsReticule = strict hit (powers reticule lock-on visuals); slotProximities[k-1] = soft
+// 0..1 proximity between the k-beat reticule and the k-th on-beat trajectory dot, used by the
+// per-slot hover rings. Length matches the reticule-by-slot array; 0 at a slot means either no
+// reticule there or the reticule is far from the dot.
+type DotWalkResult = {
+  overlapsReticule: boolean;
+  slotProximities: number[];
+};
 
 // the cone is computed in the apex's "virtual" frame (toroidalDelta-remapped), so dot
 // positions can land outside [0,w)×[0,h). Wrapping back into the canvas before painting makes
@@ -386,27 +400,39 @@ const wrapToCanvas = (x: number, y: number, w: number, h: number): [number, numb
 const drawBeatDotsAlongRay = (
   ctx: CanvasRenderingContext2D,
   rawStartX: number, rawStartY: number, ux: number, uy: number,
-  retX: number, retY: number,
+  reticulesBySlot: Array<[number, number] | null>,
   sMin: number, sMax: number, dotStep: number, dotOffset: number,
   entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
   w: number, h: number, doubletime: boolean, tutorialHighlight: boolean, focused: boolean,
 ): DotWalkResult => {
   let overlapsReticule = false;
-  let firstDotProximity = 0;
+  const slotCount = reticulesBySlot.length;
+  const slotProximities: number[] = new Array(slotCount).fill(0);
   // doubletime halves the spacing and marks every other k as a half-beat (off-beat) dot.
   const step = doubletime ? dotStep * 0.5 : dotStep;
   const isHalfBeatK = (k: number): boolean => doubletime && (k % 2 === 1);
-  // first-beat dots are anchored to the target (next-beat future position), not to the wedge —
+  // on-beat dot indices are anchored to the target (next-beat future position), not to the wedge —
   // letting cone clipping exclude them produces a worse "lock cue lies about position" bug than
-  // the cosmetic spill it would prevent. k=1 (on-beat) and k=1 doubletime half-beat always paint.
-  const firstOnBeatK = doubletime ? 2 : 1;
+  // the cosmetic spill it would prevent. Each slot's on-beat dot (and the doubletime half-beat
+  // first-dot lead) always paints, regardless of cone clipping.
   const firstHalfBeatK = 1;
+  // 1-indexed slot → k value at which that slot's on-beat dot appears
+  const slotToK = (slot: number): number => doubletime ? slot * 2 : slot;
+  const maxSlotK = slotCount > 0 ? slotToK(slotCount) : 0;
+  const isAnchorK = (k: number): boolean => {
+    if (doubletime && k === firstHalfBeatK) return true;
+    if (k <= 0 || k > maxSlotK) return false;
+    if (doubletime && k % 2 !== 0) return false;
+    const slot = doubletime ? k / 2 : k;
+    return reticulesBySlot[slot - 1] !== null;
+  };
   let drawnOnBeatDots = 0;
   let drawnHalfBeatDots = 0;
   for (let k = 1; ; k++) {
     const sK = dotOffset + step * k;
-    if (sK > sMax) break;
-    const isFirstBeatDot = k === firstOnBeatK || (doubletime && k === firstHalfBeatK);
+    const isFirstBeatDot = isAnchorK(k);
+    if (sK > sMax && k > maxSlotK) break;
+    if (sK > sMax && !isFirstBeatDot) continue;
     if (sK < sMin && !isFirstBeatDot) continue;
     const px = rawStartX + ux * sK;
     const py = rawStartY + uy * sK;
@@ -427,21 +453,31 @@ const drawBeatDotsAlongRay = (
       }
       drawnHalfBeatDots++;
     } else {
-      if (drawnOnBeatDots === 0) {
-        const overlap = firstDotOverlapsReticule(px, py, retX, retY);
-        const proximity01 = firstDotProximity01(px, py, retX, retY);
+      const slotIdx = drawnOnBeatDots; // 0-based slot for this on-beat dot
+      const reticule = slotIdx < slotCount ? reticulesBySlot[slotIdx] : null;
+      if (reticule !== null) {
+        const [retXk, retYk] = reticule;
+        const proximityK = firstDotProximity01(px, py, retXk, retYk);
+        const tickLength = slotCrosshairLengthTrajectory(slotIdx + 1);
         if (SHOW_FIRST_BEAT_DOT) {
-          paintFirstBeatDot(ctx, drawX, drawY, proximity01, entryFlashBoost, beatPulseBoost, focusBoost, 1, tutorialHighlight, focused);
+          // tutorial highlight + the 1st-dot strict-overlap signal only apply to the 1-beat slot.
+          paintFirstBeatDot(
+            ctx, drawX, drawY, proximityK, entryFlashBoost, beatPulseBoost, focusBoost,
+            1, slotIdx === 0 ? tutorialHighlight : false, slotIdx === 0 ? focused : false,
+            tickLength,
+          );
         }
-        if (overlap) overlapsReticule = true;
-        if (proximity01 > firstDotProximity) firstDotProximity = proximity01;
+        if (slotIdx === 0 && firstDotOverlapsReticule(px, py, retXk, retYk)) {
+          overlapsReticule = true;
+        }
+        if (proximityK > slotProximities[slotIdx]) slotProximities[slotIdx] = proximityK;
       } else {
         paintBeatDot(ctx, drawX, drawY, entryFlashBoost, focusBoost);
       }
       drawnOnBeatDots++;
     }
   }
-  return { overlapsReticule, firstDotProximity };
+  return { overlapsReticule, slotProximities };
 };
 
 const drawAimIntersectionsAlongRay = (
@@ -536,7 +572,7 @@ const computeOnBeatAim = (
 // core trajectory renderer — operates on a position/velocity snapshot, with optional cone clipping.
 // alphaMultiplier folds in entry-flash boost and exit-fade decay; clipToCone is false during fade so the
 // lingering ghost remains visible even after the target has left the radar wedge.
-const EMPTY_DOT_WALK_RESULT: DotWalkResult = { overlapsReticule: false, firstDotProximity: 0 };
+const EMPTY_DOT_WALK_RESULT: DotWalkResult = { overlapsReticule: false, slotProximities: [] };
 
 const paintTrajectoryFromSnapshot = (
   ctx: TrajectoryContext, snap: TrajectorySnapshot, firstSeen: number,
@@ -580,6 +616,9 @@ const paintTrajectoryFromSnapshot = (
   ctx.ctx.globalAlpha = Math.min(1, TRAJECTORY_ALPHA * effectivePulse * alphaMultiplier);
 
   const [retX, retY] = remapReticuleToTarget(ctx.apex, ctx.reticulePos, ctx.w, ctx.h);
+  const reticulesBySlot: Array<[number, number] | null> = ctx.reticulePosBySlot.map(p =>
+    p === null ? null : remapReticuleToTarget(ctx.apex, p, ctx.w, ctx.h),
+  );
   const [aimCenterX, aimCenterY] = remapReticuleToTarget(ctx.apex, ctx.aimCircleCenter, ctx.w, ctx.h);
   const dotStep = speed * ctx.beatGrid;
   const dotOffset = -(r + edgePad);
@@ -592,7 +631,7 @@ const paintTrajectoryFromSnapshot = (
     );
   }
   const result = drawBeatDotsAlongRay(
-    ctx.ctx, rawStartX, rawStartY, ux, uy, retX, retY,
+    ctx.ctx, rawStartX, rawStartY, ux, uy, reticulesBySlot,
     sMin, sMax, dotStep, dotOffset, entryFlashBoost, beatPulseBoost, focusBoost,
     ctx.w, ctx.h, ctx.doubletime, ctx.tutorialHighlight, showOnRhythmSpot,
   );
@@ -722,14 +761,21 @@ const pickCenterMostTarget = (
 ): ReticuleTarget | null =>
   pickCenterMostTargetForFocus(ctx.apex, ctx.frame, ctx.w, ctx.h, targets);
 
-// walks every visible target; returns strict overlap (for reticule lock) and the max soft
-// proximity (0..1, for the hover-commit ring's more forgiving trigger).
-export type TrajectoryPreviewResult = { overlapsReticule: boolean; firstDotProximity: number };
+// walks every visible target; returns strict overlap (for the 1-beat reticule lock-on visual)
+// and the max soft proximity per slot (0..1, used by each slot's hover-commit ring). Slot k's
+// proximity is at index k-1; entries beyond the renderer's slot count are absent.
+export type TrajectoryPreviewResult = {
+  overlapsReticule: boolean;
+  slotProximities: number[];
+};
+
+const emptySlotProximities = (n: number): number[] => new Array(n).fill(0);
 
 export const paintTrajectoryPreviews = (
   ctx: TrajectoryContext, targets: ReadonlyArray<ReticuleTarget>,
 ): TrajectoryPreviewResult => {
-  if (ctx.frame.length <= 0) return { overlapsReticule: false, firstDotProximity: 0 };
+  const slotCount = ctx.reticulePosBySlot.length;
+  if (ctx.frame.length <= 0) return { overlapsReticule: false, slotProximities: emptySlotProximities(slotCount) };
   ctx.ctx.save();
   ctx.ctx.setLineDash([]);
   ctx.ctx.lineWidth = 1.5;
@@ -737,15 +783,17 @@ export const paintTrajectoryPreviews = (
   const rendered = new Set<object>();
   const spotTarget = pickCenterMostTarget(ctx, targets);
   let overlapsReticule = false;
-  let firstDotProximity = 0;
+  const slotProximities = emptySlotProximities(slotCount);
   const liveByKey = new Map<object, ReticuleTarget>();
   for (const t of targets) liveByKey.set(t as unknown as object, t);
   for (const t of targets) {
     const r = previewLiveTarget(ctx, t, rendered, t === spotTarget);
     if (r.overlapsReticule) overlapsReticule = true;
-    if (r.firstDotProximity > firstDotProximity) firstDotProximity = r.firstDotProximity;
+    for (let i = 0; i < slotCount && i < r.slotProximities.length; i++) {
+      if (r.slotProximities[i] > slotProximities[i]) slotProximities[i] = r.slotProximities[i];
+    }
   }
   renderFadingTrajectories(ctx, rendered, liveByKey);
   ctx.ctx.restore();
-  return { overlapsReticule, firstDotProximity };
+  return { overlapsReticule, slotProximities };
 };

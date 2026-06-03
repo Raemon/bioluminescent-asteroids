@@ -94,7 +94,10 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
     game.firstWaveHintStage === 5;
   // perceivedBeatTime: the reticule pulse + first-beat dots cue when to fire, so they
   //   ride the latency-shifted clock and peak on the beat the player hears.
-  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime);
+  // superBoosted (combo ≥ 8) doubles bullet range the same way longshot does — pass it
+  //   through so the reticule renderer paints the matching 2-beat slot.
+  const superBoosted = game.beatCombo >= 8;
+  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime, superBoosted);
   renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.perceivedBeatTime, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
   renderPopups(ctx, game.popups);

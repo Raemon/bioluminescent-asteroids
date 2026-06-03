@@ -77,10 +77,15 @@ export class Ship {
   //   completionBeatTime stamps when the ring first reaches the lock threshold so the
   //   completion flare (visual) and the octave-up companion hum (audio) fire once on the
   //   rising edge and persist for as long as the hover lasts.
-  hoverDotRingState: {
+  // One ring state per reachable on-beat slot (index 0 = 1-beat, index 1 = 2-beat, ...).
+  //   Grown lazily by the renderer as longshot/superBoosted/etc. extend bullet range.
+  //   hoverDotRingState aliases slot-1 so the tutorial's drift/hold gate keeps reading the
+  //   same field it always has.
+  hoverDotRingStates: Array<{
     hoverStartBeatTime: number | null;
     completionBeatTime: number | null;
-  } = { hoverStartBeatTime: null, completionBeatTime: null };
+  }> = [{ hoverStartBeatTime: null, completionBeatTime: null }];
+  get hoverDotRingState() { return this.hoverDotRingStates[0]; }
 
   constructor(pos: Vec) { this.pos = pos; }
 
@@ -115,8 +120,9 @@ export class Ship {
     ctx: CanvasRenderingContext2D, beatGrid: number, w: number, h: number,
     targets: ReadonlyArray<ReticuleTarget> = [], beatTime: number = 0, doubletime: boolean = false,
     tutorialHighlight: boolean = false, sound: Sound | null = null, audioBeatTime: number = beatTime,
+    superBoosted: boolean = false,
   ) {
-    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRing: this.hoverDotRingState }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight, sound, audioBeatTime);
+    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRings: this.hoverDotRingStates }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight, sound, audioBeatTime, superBoosted);
   }
 
   // hull + thrust + retro + shield + combo halo all composite together in one save/restore block.

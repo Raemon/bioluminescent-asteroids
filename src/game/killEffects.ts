@@ -106,7 +106,9 @@ const advanceFirstWaveHintOnCombo = (game: Game) => {
 
 // multiplier + sparkle + popup are the on-beat reward — one helper guarantees consistency.
 //   Returns the points actually added so the parade can flash the same "+N" per kill.
-const awardScoreForKill = (game: Game, hitPos: Vec, baseScore: number, isOnBeatHit: boolean): number => {
+const awardScoreForKill = (
+  game: Game, hitPos: Vec, baseScore: number, isOnBeatHit: boolean, driftEligible: boolean = false,
+): number => {
   let scoreEarned = baseScore;
   if (isOnBeatHit) {
     const multiplier = game.beatCombo;
@@ -114,9 +116,9 @@ const awardScoreForKill = (game: Game, hitPos: Vec, baseScore: number, isOnBeatH
     game.sound.play("comboSparkle", 1, hitPos);
     game.sound.playComboChime(multiplier, hitPos);
     if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
-    // Drift Bonus: on-beat hit while the first-dot hover ring is fully locked queues
-    //   a +1-rhythm reward 1 beat later. Cancelled if the streak breaks in the meantime.
-    if (game.ship.hoverDotRingState.completionBeatTime !== null) {
+    // Drift Bonus: on-beat hit whose slot's hover ring was locked at fire-time queues a
+    //   +1-rhythm reward 1 beat later. Cancelled if the streak breaks in the meantime.
+    if (driftEligible) {
       game.pendingDriftBonuses.push({
         fireAt: game.perceivedBeatTime + BEAT_GRID,
         pos: { x: hitPos.x, y: hitPos.y },
@@ -220,7 +222,7 @@ export const onAsteroidKilledByBullet = (
   b: Bullet,
   isOnBeatHit: boolean,
 ): Asteroid[] => {
-  const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit);
+  const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit, b.driftEligibleAtHit(BEAT_GRID));
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   if (a.isBass()) game.sound.play("bassEcho", 1, a.pos);
   // On-beat plain asteroid kills get the taiko boom in place of the noise
@@ -250,7 +252,7 @@ export const onAsteroidCrackedByBullet = (game: Game, a: Asteroid, b: Bullet, is
   if (a.isBass()) game.sound.play("bassHit", 1, a.pos);
   emitCrackParticles(game.particles, a, isOnBeatHit);
   if (isOnBeatHit) game.sound.play("comboSparkle", 1, b.pos);
-  if (a.isBass()) awardScoreForKill(game, b.pos, bassChipScore(a), isOnBeatHit);
+  if (a.isBass()) awardScoreForKill(game, b.pos, bassChipScore(a), isOnBeatHit, b.driftEligibleAtHit(BEAT_GRID));
 };
 
 // ram crack uses asteroidHit (not bassHit) so the impact reads as a kick, not a chip.
@@ -261,7 +263,7 @@ export const onAsteroidCrackedByRam = (game: Game, a: Asteroid) => {
 
 // no split path here — alien deaths fall into the "single body, fixed sound" pattern.
 export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boolean) => {
-  const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit);
+  const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit, b.driftEligibleAtHit(BEAT_GRID));
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   game.shake = Math.min(game.shake + 0.5, 1.4);
   game.sound.play("alienExplode", 1, al.pos);

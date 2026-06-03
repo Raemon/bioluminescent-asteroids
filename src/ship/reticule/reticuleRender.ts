@@ -26,13 +26,15 @@ const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
 const HALF_BEAT_FRACTION = 0.5;
 
 // bind ship state to per-target memo so trajectory previews can track entry-flash and fade across frames.
-// hoverDotRing persists the hover-start timestamp so the ring fills one dot per 8th-note across frames.
+// hoverDotRings: one entry per reachable on-beat slot (index 0 = 1-beat, 1 = 2-beat, ...). Array is
+// owned by Ship and grown lazily as bullet range extends; renderer pads it here if it needs more.
+type HoverRingState = {
+  hoverStartBeatTime: number | null;
+  completionBeatTime: number | null;
+};
 type ReticuleState = {
   trajectoryTracks: TrajectoryTrackMap;
-  hoverDotRing: {
-    hoverStartBeatTime: number | null;
-    completionBeatTime: number | null;
-  };
+  hoverDotRings: HoverRingState[];
 };
 
 // 16 arcs filled evenly across HOVER_RING_FILL_SEC — completion lines up with the tutorial
@@ -100,42 +102,47 @@ const computeReticulePosition = (
   return wrap(add(muzzle, mul(bulletVel, beatGrid * beatFraction)), w, h);
 };
 
-// effective bullet lifetime mirrors shipWeapons.launchBullet so reticule range tracks
-// what the actual shot does: pierce and longshot each double flight time.
-const effectiveBulletLife = (ship: Ship): number => {
+// effective bullet lifetime mirrors shipWeapons.launchBullet (and the post-fire superBoosted
+// stretch in handleOnBeatFire) so reticule range tracks what the actual shot does: pierce,
+// longshot, and superBoosted (combo ≥ 8) each double flight time.
+const effectiveBulletLife = (ship: Ship, superBoosted: boolean): number => {
   let life = ship.bulletLife;
   if (ship.pierceActive) life *= 2;
   if (ship.longshotActive) life *= 2;
+  if (superBoosted) life *= 2;
   return life;
 };
 
 // prong fans the aim into two angles (no centred shot); doubletime adds a half-beat preview at
 // half distance; integer-k reticules mark every beat-slot the bullet actually crosses
-// (t = beatGrid*k < life), so the count adapts to longshot/pierce range and to the rhythm-gate
-// tempo (eighth-grid at combo ≥ 12 or under rapid). primaryIndex points at the centred 1-beat
-// reticule (anchor for the trajectory's first-dot overlap check), or -1 when prong is active —
-// there's no centred shot to anchor on, so the trajectory uses the standalone centred position
-// for previews instead.
-type ReticulePositions = { positions: Vec[]; primaryIndex: number };
+// (t = beatGrid*k < life), so the count adapts to longshot/pierce/superBoosted range and to
+// the rhythm-gate tempo (eighth-grid at combo ≥ 12 or under rapid). slotIndices[k-1] points at
+// the centred k-beat reticule (anchor for that slot's hover-ring + drift-shot), or -1 when prong
+// is active (no centred shot) or that slot is out of range.
+type ReticulePositions = { positions: Vec[]; primaryIndex: number; slotIndices: number[] };
 const computeReticulePositions = (
-  ship: Ship, beatGrid: number, w: number, h: number, doubletime: boolean,
+  ship: Ship, beatGrid: number, w: number, h: number, doubletime: boolean, superBoosted: boolean,
 ): ReticulePositions => {
   const angleOffsets = ship.prongActive ? [-PRONG_SPREAD, PRONG_SPREAD] : [0];
-  const bulletLife = effectiveBulletLife(ship);
+  const bulletLife = effectiveBulletLife(ship, superBoosted);
   const slotCount = Math.max(1, Math.floor(bulletLife / beatGrid));
   const integerFractions: number[] = [];
   for (let k = 1; k <= slotCount; k++) integerFractions.push(k);
   const beatFractions = doubletime ? [HALF_BEAT_FRACTION, ...integerFractions] : integerFractions;
   const positions: Vec[] = [];
   let primaryIndex = -1;
+  const slotIndices: number[] = new Array(slotCount).fill(-1);
   for (const frac of beatFractions) {
     for (const off of angleOffsets) {
       const idx = positions.length;
       positions.push(computeReticulePosition(ship, beatGrid, w, h, off, frac));
       if (off === 0 && frac === 1) primaryIndex = idx;
+      if (off === 0 && Number.isInteger(frac) && frac >= 1 && frac <= slotCount) {
+        slotIndices[frac - 1] = idx;
+      }
     }
   }
-  return { positions, primaryIndex };
+  return { positions, primaryIndex, slotIndices };
 };
 
 // arcs fill across HOVER_RING_FILL_SEC, then a HOVER_FLARE_SEC completion flare brightens them
@@ -289,14 +296,23 @@ export const renderShipReticules = (
   //   The hum's accent, by contrast, is *audio* and must land with the rest of the
   //   heard mix on the true grid, so the caller passes the raw clock separately.
   audioBeatTime: number = beatTime,
+  superBoosted: boolean = false,
 ) => {
   if (!ship.alive) return;
-  const { positions: reticulePositions, primaryIndex } = computeReticulePositions(ship, beatGrid, w, h, doubletime);
+  const { positions: reticulePositions, primaryIndex, slotIndices } = computeReticulePositions(ship, beatGrid, w, h, doubletime, superBoosted);
   // trajectory preview anchors on the centred "shoot now to hit next beat" spot. With prong
   // active there's no drawn reticule there, so compute the anchor directly from ship heading.
   const primaryReticule = primaryIndex >= 0
     ? reticulePositions[primaryIndex]
     : computeReticulePosition(ship, beatGrid, w, h, 0, 1);
+  // one entry per reachable on-beat slot; null where no centred reticule exists for that slot
+  // (e.g. prong fans the shot, so no slot has a centred point to hover).
+  const reticulePosBySlot: Array<Vec | null> = slotIndices.map(i => i >= 0 ? reticulePositions[i] : null);
+  // grow the Ship's hover-ring array to match if range extended this frame; never shrink (so a
+  // brief range loss doesn't wipe a partially-locked ring).
+  while (state.hoverDotRings.length < slotIndices.length) {
+    state.hoverDotRings.push({ hoverStartBeatTime: null, completionBeatTime: null });
+  }
   const apex = ship.pos;
   const { center: aimCircleCenter, radius: aimCircleRadius } = computeAimCircle(ship, beatGrid);
   ctx.save();
@@ -310,50 +326,79 @@ export const renderShipReticules = (
   paintRangeArcs(ctx, ship, apex, beatTime, radarPulse);
   const frame = computeConeFrame(ship);
   const trajectoryResult = paintTrajectoryPreviews({
-    ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule, aimCircleCenter, aimCircleRadius,
+    ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule,
+    reticulePosBySlot, aimCircleCenter, aimCircleRadius,
     trajectoryTracks: state.trajectoryTracks, doubletime, tutorialHighlight,
   }, targets);
   const fromTrajectory = trajectoryResult.overlapsReticule;
+  // reverse map: position-index → slot number (1-indexed). For prong, slotIndices entries are
+  // -1 so this stays -1 and the reticule uses the default tick length.
+  const slotByPosIndex = new Array<number>(reticulePositions.length).fill(-1);
+  for (let s = 0; s < slotIndices.length; s++) {
+    if (slotIndices[s] >= 0) slotByPosIndex[slotIndices[s]] = s + 1;
+  }
   for (let i = 0; i < reticulePositions.length; i++) {
     const pos = reticulePositions[i];
     const onFirstBeatDot = fromTrajectory && i === primaryIndex;
     const overlaps = onFirstBeatDot
       ? true
       : reticuleOverlapsAnyTarget(pos, targets, w, h);
-    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, onFirstBeatDot, tutorialHighlight);
+    const slot = slotByPosIndex[i];
+    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, onFirstBeatDot, tutorialHighlight, slot);
   }
-  // ring uses the softer proximity halo (>0 anywhere in the first-dot glow ramp) so the player
-  // gets feedback the moment the reticule grazes the visible first circle, not just on strict hit.
-  const hoveringFirstDot = trajectoryResult.firstDotProximity > 0 && primaryIndex >= 0;
-  if (hoveringFirstDot) {
-    if (state.hoverDotRing.hoverStartBeatTime === null) {
-      state.hoverDotRing.hoverStartBeatTime = beatTime;
-      state.hoverDotRing.completionBeatTime = null;
-    }
-    const elapsed = beatTime - state.hoverDotRing.hoverStartBeatTime;
-    const { fillJustCompleted } = paintHoverDotRing(ctx, reticulePositions[primaryIndex], elapsed, beatTime);
-    if (fillJustCompleted && state.hoverDotRing.completionBeatTime === null) {
-      state.hoverDotRing.completionBeatTime = beatTime;
-      if (sound) sound.startFirstDotLockHum();
-    }
-    if (sound) {
-      const afterDelay = Math.max(0, elapsed - HOVER_HUM_DELAY_SEC);
-      const swellLinear = Math.min(1, afterDelay / HOVER_HUM_RAMP_SEC);
-      // smoothstep so the swell eases in instead of climbing linearly off the silence.
-      const intensity = swellLinear * swellLinear * (3 - 2 * swellLinear);
+  // each slot's ring uses the softer proximity halo (>0 anywhere in the dot glow ramp) so the
+  // player gets feedback the moment the reticule grazes the visible circle, not just on strict
+  // hit. Per-slot rings are independent; audio is collapsed into one voice that follows the
+  // strongest hover and stays locked as long as ANY ring is locked.
+  let maxIntensity = 0;
+  let anyHover = false;
+  let anyLocked = false;
+  for (let slot = 0; slot < slotIndices.length; slot++) {
+    const idx = slotIndices[slot];
+    const proximity = trajectoryResult.slotProximities[slot] ?? 0;
+    const hovering = proximity > 0 && idx >= 0;
+    const center = hovering ? reticulePositions[idx] : null;
+    const intensity = updateHoverRing(state.hoverDotRings[slot], hovering, center, ctx, beatTime, sound);
+    if (hovering) anyHover = true;
+    if (intensity > maxIntensity) maxIntensity = intensity;
+    if (state.hoverDotRings[slot].completionBeatTime !== null) anyLocked = true;
+  }
+  if (sound) {
+    if (anyHover) {
       const beatPhase01 = ((audioBeatTime % beatGrid) + beatGrid) % beatGrid / beatGrid;
-      sound.updateFirstDotHum(intensity, beatPhase01, beatGrid);
-      if (state.hoverDotRing.completionBeatTime !== null) {
-        sound.updateFirstDotLockHum(beatPhase01, beatGrid);
-      }
-    }
-  } else {
-    state.hoverDotRing.hoverStartBeatTime = null;
-    state.hoverDotRing.completionBeatTime = null;
-    if (sound) {
+      sound.updateFirstDotHum(maxIntensity, beatPhase01, beatGrid);
+      if (anyLocked) sound.updateFirstDotLockHum(beatPhase01, beatGrid);
+    } else {
       sound.updateFirstDotHum(0);
       sound.stopFirstDotLockHum();
     }
   }
   ctx.restore();
+};
+
+// per-ring state machine + visual paint. Returns the hum intensity contributed by this ring
+// (0 when not hovering). Audio mixing is left to the caller so a single voice covers both rings.
+const updateHoverRing = (
+  ring: { hoverStartBeatTime: number | null; completionBeatTime: number | null },
+  hovering: boolean, ringCenter: Vec | null,
+  ctx: CanvasRenderingContext2D, beatTime: number, sound: Sound | null,
+): number => {
+  if (!hovering || ringCenter === null) {
+    ring.hoverStartBeatTime = null;
+    ring.completionBeatTime = null;
+    return 0;
+  }
+  if (ring.hoverStartBeatTime === null) {
+    ring.hoverStartBeatTime = beatTime;
+    ring.completionBeatTime = null;
+  }
+  const elapsed = beatTime - ring.hoverStartBeatTime;
+  const { fillJustCompleted } = paintHoverDotRing(ctx, ringCenter, elapsed, beatTime);
+  if (fillJustCompleted && ring.completionBeatTime === null) {
+    ring.completionBeatTime = beatTime;
+    if (sound) sound.startFirstDotLockHum();
+  }
+  const afterDelay = Math.max(0, elapsed - HOVER_HUM_DELAY_SEC);
+  const swellLinear = Math.min(1, afterDelay / HOVER_HUM_RAMP_SEC);
+  return swellLinear * swellLinear * (3 - 2 * swellLinear);
 };
