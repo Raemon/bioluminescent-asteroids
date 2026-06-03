@@ -1,5 +1,29 @@
 [
   {
+    "id": "2026-06-03-2af5e8d",
+    "date": "2026-06-03",
+    "title": "Dev log button and aim disc visual improvements",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "A new \"dev log\" button in the overlay lets you open and close the latest dev log entry at any time.",
+          "An indicator dot appears on the dev log button when there is an unread entry.",
+          "The dev log panel can now be dismissed with the Escape key."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Aim disc color now correctly matches your ship's trajectory chevron color."
+        ]
+      }
+    ],
+    "commits": [
+      "2af5e8d"
+    ]
+  },
+  {
     "id": "2026-06-03-c369430",
     "date": "2026-06-03",
     "title": "Solid crystals, manta aliens, and stinger bullets",
