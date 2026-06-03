@@ -1,5 +1,23 @@
 [
   {
+    "id": "2026-06-03-db469d9",
+    "date": "2026-06-03",
+    "title": "Solid crystal gem drops and fragment changes",
+    "sections": [
+      {
+        "heading": "Changed",
+        "items": [
+          "Solid crystals now use weighted probabilities for gem drops: 60% chance of 0 gems, 25% for 1, 10% for 2, and 5% for 3.",
+          "Destroying a large solid crystal now produces 2 fragments instead of 3.",
+          "The in-game bonus label has been renamed from \"DRIFT BONUS\" to \"DRIFT SHOT\"."
+        ]
+      }
+    ],
+    "commits": [
+      "db469d9"
+    ]
+  },
+  {
     "id": "2026-06-03-2af5e8d",
     "date": "2026-06-03",
     "title": "Dev log button and aim disc visual improvements",
