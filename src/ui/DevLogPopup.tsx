@@ -22,13 +22,19 @@ const writeSeen = (id: string) => {
   try {
     localStorage.setItem(STORAGE_KEY, id);
   } catch {
-    // localStorage unavailable — popup will just re-show next visit.
+    // localStorage unavailable — unseen indicator just persists.
   }
 };
 
 export const DevLogPopup = () => {
   const [entry, setEntry] = useState<DevLogEntry | null>(null);
+  const [open, setOpen] = useState(false);
   const [visible, setVisible] = useState(false);
+
+  const close = () => {
+    setVisible(false);
+    window.setTimeout(() => setOpen(false), 300);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -39,10 +45,11 @@ export const DevLogPopup = () => {
         if (!Array.isArray(data) || data.length === 0) return;
         const newest = data[0] as DevLogEntry;
         if (!newest?.id || !newest?.title || !Array.isArray(newest?.sections)) return;
-        if (readSeen() === newest.id) return;
         setEntry(newest);
-        // Tiny delay so the CSS transition runs from initial state.
-        window.setTimeout(() => setVisible(true), 32);
+        const seen = readSeen() === newest.id;
+        window.dispatchEvent(
+          new CustomEvent("devlog:unseen", { detail: { unseen: !seen } }),
+        );
       })
       .catch(() => {
         // Missing or malformed devlog.json — silently skip.
@@ -52,13 +59,35 @@ export const DevLogPopup = () => {
     };
   }, []);
 
-  if (!entry) return null;
+  useEffect(() => {
+    const onToggle = () => {
+      if (!entry) return;
+      if (open) {
+        close();
+      } else {
+        setOpen(true);
+        window.setTimeout(() => setVisible(true), 32);
+        writeSeen(entry.id);
+        window.dispatchEvent(
+          new CustomEvent("devlog:unseen", { detail: { unseen: false } }),
+        );
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && open) {
+        e.stopPropagation();
+        close();
+      }
+    };
+    window.addEventListener("devlog:toggle", onToggle);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("devlog:toggle", onToggle);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [entry, open]);
 
-  const dismiss = () => {
-    writeSeen(entry.id);
-    setVisible(false);
-    window.setTimeout(() => setEntry(null), 300);
-  };
+  if (!entry || !open) return null;
 
   return (
     <div
@@ -69,8 +98,8 @@ export const DevLogPopup = () => {
       <button
         type="button"
         className="devlog-popup__close"
-        aria-label="Dismiss dev log"
-        onClick={dismiss}
+        aria-label="Close dev log"
+        onClick={close}
       >
         ×
       </button>
@@ -88,8 +117,8 @@ export const DevLogPopup = () => {
           </section>
         ))}
       </div>
-      <button type="button" className="devlog-popup__dismiss" onClick={dismiss}>
-        Got it
+      <button type="button" className="devlog-popup__dismiss" onClick={close}>
+        Close
       </button>
     </div>
   );

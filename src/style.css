@@ -514,6 +514,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 #overlay.hidden { display: none; }
 
 #sound-link,
+#devlog-link,
 #instructions-link {
   position: absolute;
   top: 22px;
@@ -533,14 +534,33 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 #instructions-link { left: 28px; }
-#sound-link { left: 135px; }
+#devlog-link { left: 135px; }
+#sound-link { left: 250px; }
 
 #sound-link.hidden { display: none; }
 
 #sound-link:hover,
+#devlog-link:hover,
 #instructions-link:hover {
   color: #6ad7ff;
   border-color: rgba(106, 215, 255, 0.6);
+}
+
+#devlog-link.has-unseen {
+  color: #c8efff;
+  border-color: rgba(106, 215, 255, 0.55);
+}
+
+#devlog-link.has-unseen::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff7aa8;
+  box-shadow: 0 0 6px rgba(255, 122, 168, 0.85);
 }
 
 #instructions-panel {
@@ -2342,11 +2362,11 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 .devlog-popup {
   position: fixed;
-  top: 24px;
-  right: 24px;
+  top: 68px;
+  left: 24px;
   z-index: 25;
   width: min(360px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
+  max-height: calc(100vh - 92px);
   display: flex;
   flex-direction: column;
   padding: 18px 20px 16px;
