@@ -6,6 +6,7 @@ import { RhythmLossHint } from "./RhythmLossHint";
 import { BeatCalibrator } from "./BeatCalibrator";
 import { SettingsDialog } from "./SettingsDialog";
 import { PauseButton } from "./PauseButton";
+import { DevLogPopup } from "./DevLogPopup";
 
 export const App = () => (
   <>
@@ -17,5 +18,6 @@ export const App = () => (
     <BeatCalibrator />
     <SettingsDialog />
     <PauseButton />
+    <DevLogPopup />
   </>
 );

@@ -11,7 +11,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "postinstall": "prisma generate",
-    "merge": "branch=$(git branch --show-current) && git checkout main && git merge \"$branch\" && git push origin main && git checkout \"$branch\""
+    "devlog": "node scripts/devlog-gen.mjs",
+    "merge": "branch=$(git branch --show-current) && node scripts/devlog-gen.mjs && (git diff --cached --quiet || git commit -m \"devlog: auto-generated entry\") && git checkout main && git merge \"$branch\" && git push origin main && git checkout \"$branch\""
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
