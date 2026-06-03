@@ -49,8 +49,16 @@ export const WAVE_DIRECTOR_CONFIG = {
 
   // firstWave guarantees one gem; later waves roll per spawn.
   goldCrystal: {
-    firstWave: 4,
+    firstWave: 1,
     perSpawnChance: 0.25,
+  },
+
+  // Solid crystal: tougher than a regular gem rock (16 HP + 4× small fragments).
+  // Introduced later than gold so the player has time to learn the gem-drop
+  // dynamic with a single-HP target before facing a 16-HP variant.
+  solidCrystal: {
+    firstWave: 2,
+    perSpawnChance: 0.12,
   },
 
   boss: {

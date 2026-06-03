@@ -78,7 +78,8 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     consumeBullet(b);
     const onBeat = isHitOnBeat(game, b);
     logBulletHit(game, "HIT asteroid", b);
-    const dmg = b.damage();
+    const isDriftShot = onBeat && game.ship.hoverDotRingState.completionBeatTime !== null;
+    const dmg = b.damage() * (isDriftShot ? 4 : 1);
     const { killed } = a.applyDamage(dmg);
     game.shake = Math.min(game.shake + (killed ? 0.4 : 0.2), 1.2);
     applyHitToCombo(game, onBeat, b.pos);
@@ -334,6 +335,16 @@ const crackGoldCrystalForCanister = (game: Game, g: GoldCrystal) => {
 // — no score, no popup, just the sad destroyed sound + white burst. Teaches
 // the player the gem is strictly a rhythm target.
 const wasteGoldCrystal = (game: Game, g: GoldCrystal) => {
+  game.sound.play("explosionSmall", 1, g.pos);
+  game.sound.play("canisterDestroyed", 1, g.pos);
+  game.shake = Math.min(game.shake + 0.25, 1.2);
+  emitCanisterPop(game.particles, g);
+};
+
+// Lifetime ran out before the player grabbed or shot the gem. Same
+// "lost upgrade" feedback as a wasted shot so an unattended gem doesn't
+// just silently vanish — the bang nudges the player to notice next time.
+export const expireGoldCrystal = (game: Game, g: GoldCrystal) => {
   game.sound.play("explosionSmall", 1, g.pos);
   game.sound.play("canisterDestroyed", 1, g.pos);
   game.shake = Math.min(game.shake + 0.25, 1.2);

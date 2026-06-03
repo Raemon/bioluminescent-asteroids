@@ -52,7 +52,12 @@ export type AsteroidSize = "large" | "medium" | "small";
 // to *notice* it). Killing it drops a collectible GoldCrystal where the rock
 // was, plus an off-balanced fragment recipe (3 small OR 1 small + 1 medium).
 // Always spawned at large size; doesn't survive past a single kill.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "tink" | "boss" | "goldCrystal";
+//
+// "solidCrystal" is a tough, fully-faceted ice-blue crystal asteroid — 16 HP
+// (4× a normal large), no embedded gold tease, the whole rock IS the crystal.
+// On death it drops 1–3 collectible GoldCrystals AND splits into 4 fast-moving
+// "solidCrystalSmall" fragments (4 HP each, no further split).
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "tink" | "boss" | "goldCrystal" | "solidCrystal" | "solidCrystalSmall";
 
 export const BASS_KINDS: ReadonlyArray<"bassA" | "bassB" | "bassC" | "bassD"> = ["bassA", "bassB", "bassC", "bassD"];
 
@@ -108,6 +113,8 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   bell: 285,
   warble: 130,
   tink: 195,
+  solidCrystal: 210,
+  solidCrystalSmall: 210,
 };
 
 // Length of one musical measure (seconds). 4 beats at 120 BPM × 0.5s/beat.
@@ -153,6 +160,11 @@ export const BASS_HP: Record<AsteroidSize, number> = {
   medium: ASTEROID_HP.medium * BASS_HP_MULTIPLIER,
   small: ASTEROID_HP.small * BASS_HP_MULTIPLIER,
 };
+
+// Solid-crystal HP: large = 16 (4× a normal large, matches the bass armouring
+// budget but with a single-tier breakdown), small fragments = 4 each.
+export const SOLID_CRYSTAL_HP_LARGE = 16;
+export const SOLID_CRYSTAL_HP_SMALL = 4;
 
 // Vertex list (local-space, normalised to radius=1) for one armoured panel
 // of a bassteroid. Each kind is a fixed cluster of these panels — drawn with
@@ -565,7 +577,15 @@ export class Asteroid {
       // pebbles.
       this.rotSpeed = rand(-0.12, 0.12) * (size === "large" ? 0.5 : 1);
     }
-    this.maxHp = isBoss ? BOSS_HP[size] : isBass ? BASS_HP[size] : ASTEROID_HP[size];
+    this.maxHp = isBoss
+      ? BOSS_HP[size]
+      : isBass
+        ? BASS_HP[size]
+        : kind === "solidCrystal"
+          ? SOLID_CRYSTAL_HP_LARGE
+          : kind === "solidCrystalSmall"
+            ? SOLID_CRYSTAL_HP_SMALL
+            : ASTEROID_HP[size];
     this.hp = this.maxHp;
     // For most asteroids each HP gets its own pre-rolled crack so the
     // damage state escalates predictably. The boss has a much higher HP
@@ -578,6 +598,12 @@ export class Asteroid {
     const kindHue = KIND_HUE[kind];
     this.hue = hue ?? (isBoss ? BOSS_HUE : kindHue !== undefined ? kindHue : nextWaveHue());
     this.harmonics = this.buildHarmonicsForKind(kind);
+    // Solid crystal reads as cut glass — drop the outline sample count to a
+    // small number (7 for large, 6 for small fragments) so the silhouette
+    // is a hard-edged polygon with sharp corners rather than a smoothly
+    // resampled Fourier curve. Kiki, not bouba.
+    if (kind === "solidCrystal") this.outlineSamples = 7;
+    else if (kind === "solidCrystalSmall") this.outlineSamples = 6;
     this.outline = this.computeOutline();
     this.nuclei = [];
     const nucleusCount = size === "large" ? 5 : size === "medium" ? 3 : 2;
@@ -653,6 +679,19 @@ export class Asteroid {
       // Tiny faceted gem: very angular, many high frequencies.
       freqs = [4, 6, 9, 13];
       ampScale = 0.85;
+    } else if (kind === "solidCrystal" || kind === "solidCrystalSmall") {
+      // Pure crystal: a low harmonic count + low outlineSamples (set in the
+      // constructor) make the silhouette a hard-edged polygon. Avoid any
+      // freq that divides outlineSamples (7 for large, 6 for small) — those
+      // alias to a constant offset across all sample points and produce no
+      // visible variation. Low harmonics (1,2) handle the overall lopsided
+      // body (one side bulges, the other tapers); 4 and 5 spike individual
+      // vertices outward as broken-off shards. Result: dramatically irregular
+      // polygons, each one different. computeOutline clamps the resulting
+      // radius to a safe band so the shard can't collapse to a degenerate
+      // self-intersecting polygon when harmonics happen to align in phase.
+      freqs = [1, 2, 4, 5];
+      ampScale = 1.8;
     } else {
       // Default — classic asteroid lumpiness.
       freqs = [2, 3, 5, 7];
@@ -762,6 +801,7 @@ export class Asteroid {
     }
 
     if (this.kind === "goldCrystal") this.paintEmbeddedGoldCrystal(ctx);
+    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall") this.paintSolidCrystalBody(ctx);
 
     return canvas;
   }
@@ -853,6 +893,122 @@ export class Asteroid {
     ctx.beginPath();
     ctx.arc(0, 0, baseR * 0.35, 0, TAU);
     ctx.fill();
+
+    ctx.restore();
+  }
+
+  // Paint a faceted crystal body over the asteroid silhouette. The interior
+  // facets are built by triangulating the silhouette polygon itself — each
+  // triangle (apex → adjacent outer vertices) gets a fill tinted by its
+  // distance from a virtual light source, so the gem reads as one coherent
+  // refractive object rather than a polygon with disjoint sparkle stapled on.
+  private paintSolidCrystalBody(ctx: CanvasRenderingContext2D) {
+    const H = this.hue;
+    const R = this.radius;
+    // Outer polygon vertices in local space — the same hard polygon the
+    // silhouette stroke draws. We reuse these for triangulation so the inner
+    // facet seams land *on* the outer corners.
+    const verts: Vec[] = [];
+    for (let i = 0; i < this.outlineSamples; i++) {
+      const angle = (i / this.outlineSamples) * TAU;
+      const r = this.outline[i];
+      verts.push(v(Math.cos(angle) * r, Math.sin(angle) * r));
+    }
+
+    ctx.save();
+    // Clip to the silhouette so anything we draw stays inside the gem.
+    ctx.beginPath();
+    for (let i = 0; i < verts.length; i++) {
+      if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
+      else ctx.lineTo(verts[i].x, verts[i].y);
+    }
+    ctx.closePath();
+    ctx.clip();
+
+    // Virtual light source — sits up-left, just outside the gem. Each facet's
+    // brightness comes from its centroid's distance to this point, so the
+    // shading is continuous across the body and the gem looks like one solid
+    // object catching light from one direction.
+    const lightX = -R * 0.55;
+    const lightY = -R * 0.6;
+    const maxLightDist = R * 2.0;
+
+    // Slightly inset "core" point each triangle fans from — offset toward the
+    // light so the brightest pool isn't pinned to the exact geometric centre
+    // (which always looks artificial). Tiny inset, no random jitter — keeps
+    // every solid crystal coherent rather than each one looking ad-hoc.
+    const coreX = -R * 0.08;
+    const coreY = -R * 0.08;
+
+    ctx.globalCompositeOperation = "source-over";
+
+    // Triangulate the polygon as a fan around the core point. Each triangle
+    // is one visible facet, shaded by its proximity to the virtual light.
+    for (let i = 0; i < verts.length; i++) {
+      const a = verts[i];
+      const b = verts[(i + 1) % verts.length];
+      const cx = (coreX + a.x + b.x) / 3;
+      const cy = (coreY + a.y + b.y) / 3;
+      const d = Math.hypot(cx - lightX, cy - lightY);
+      // 1.0 = right under the light, 0.0 = farthest facet. Power curve makes
+      // the lit side noticeably brighter without crushing the shaded side.
+      const lit = Math.pow(Math.max(0, 1 - d / maxLightDist), 1.6);
+      const lightness = 32 + lit * 52;          // 32% (deep) → 84% (lit)
+      const alpha = 0.55 + lit * 0.35;          // shaded facets stay translucent
+      ctx.fillStyle = `hsla(${H}, 92%, ${lightness}%, ${alpha})`;
+      ctx.beginPath();
+      ctx.moveTo(coreX, coreY);
+      ctx.lineTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Hairline facet seams — the cuts between adjacent fan triangles. Drawn
+    // as one path so the seam style is uniform and the alpha doesn't stack
+    // at the core point.
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = `hsla(${H + 20}, 100%, 90%, 0.18)`;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    for (const vtx of verts) {
+      ctx.moveTo(coreX, coreY);
+      ctx.lineTo(vtx.x * 0.96, vtx.y * 0.96);
+    }
+    ctx.stroke();
+
+    // Inner luminous core — small soft pool at the gem's heart, biased toward
+    // the light. Sells the "you can see *into* the crystal" depth without
+    // burning a bright spot onto the surface like the old highlight did.
+    const coreGrad = ctx.createRadialGradient(
+      coreX, coreY, 0,
+      coreX, coreY, R * 0.55,
+    );
+    coreGrad.addColorStop(0, `hsla(${H + 15}, 100%, 92%, 0.5)`);
+    coreGrad.addColorStop(0.5, `hsla(${H + 5}, 95%, 75%, 0.18)`);
+    coreGrad.addColorStop(1, `hsla(${H}, 90%, 60%, 0)`);
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(coreX, coreY, R * 0.55, 0, TAU);
+    ctx.fill();
+
+    // Crisp edge rim — bright thin stroke along the outer polygon. This is
+    // the "cut glass" tell: a single hairline catching light along every
+    // facet edge. Drawn last so it sits cleanly on top of the fills.
+    ctx.strokeStyle = `hsla(${H + 30}, 100%, 95%, 0.85)`;
+    ctx.lineWidth = 1.2;
+    ctx.lineJoin = "miter";
+    ctx.miterLimit = 4;
+    ctx.shadowColor = `hsla(${H + 15}, 100%, 80%, 1)`;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    for (let i = 0; i < verts.length; i++) {
+      if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
+      else ctx.lineTo(verts[i].x, verts[i].y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
 
     ctx.restore();
   }
@@ -954,6 +1110,7 @@ export class Asteroid {
   }
 
   computeOutline(): number[] {
+    const isCrystal = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall";
     const samples: number[] = [];
     for (let i = 0; i < this.outlineSamples; i++) {
       const angle = (i / this.outlineSamples) * TAU;
@@ -961,6 +1118,10 @@ export class Asteroid {
       for (const harmonic of this.harmonics) {
         r += harmonic.amp * Math.cos(angle * harmonic.freq + harmonic.phase);
       }
+      // Crystals run with aggressive harmonic amps to get dramatic shard
+      // silhouettes; clamp so an unlucky phase alignment can't collapse a
+      // vertex to (or past) the origin and produce a self-intersecting poly.
+      if (isCrystal) r = Math.max(0.45, Math.min(1.55, r));
       samples.push(r * this.radius);
     }
     return samples;
@@ -970,6 +1131,11 @@ export class Asteroid {
     let r = 1;
     for (const harmonic of this.harmonics) {
       r += harmonic.amp * Math.cos(angle * harmonic.freq + harmonic.phase);
+    }
+    // Mirror the clamp in computeOutline so the collision surface matches
+    // the visible silhouette for the high-amp crystal harmonics.
+    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall") {
+      r = Math.max(0.45, Math.min(1.55, r));
     }
     return r * this.radius;
   }
@@ -1047,6 +1213,9 @@ export class Asteroid {
       if (this.size === "medium") return 800;
       return 300;
     }
+    // Solid crystal pays out for the bullet budget it absorbs (16 HP / 4 HP).
+    if (this.kind === "solidCrystal") return 400;
+    if (this.kind === "solidCrystalSmall") return 200;
     return SIZE_SCORE[this.size];
   }
 
@@ -1152,6 +1321,35 @@ export class Asteroid {
       }
       return fragmentList;
     }
+    // Solid crystal: large shatters into 4 fast-moving small crystal
+    // fragments fanning around the bullet's heading. Smalls don't split
+    // further — they're the terminal tier.
+    if (this.kind === "solidCrystal") {
+      const baseAngle = impactDir
+        ? Math.atan2(impactDir.y, impactDir.x)
+        : Math.atan2(this.vel.y, this.vel.x);
+      const parentSpeed = Math.hypot(this.vel.x, this.vel.y);
+      const ejectDist = this.radius * 0.55;
+      const fragmentList: Asteroid[] = [];
+      for (let i = 0; i < 4; i++) {
+        // ±0.4 and ±1.2 rad around the bullet axis: four pieces spread
+        // forward of the impact, none flying straight back at the shooter.
+        const offsets = [-1.2, -0.4, 0.4, 1.2];
+        const childAngle = baseAngle + offsets[i] + rand(-0.12, 0.12);
+        const childPos = {
+          x: this.pos.x + Math.cos(childAngle) * ejectDist,
+          y: this.pos.y + Math.sin(childAngle) * ejectDist,
+        };
+        // Fast-moving: parent speed + a generous burst kick. Floor ensures
+        // even a stationary parent ejects sharp shards.
+        const speedMag = parentSpeed * rand(1.1, 1.5) + rand(180, 240);
+        const child = new Asteroid(childPos, fromAngle(childAngle, speedMag), "small", this.hue, "solidCrystalSmall");
+        child.rotSpeed = rand(1.2, 2.4) * (Math.random() < 0.5 ? -1 : 1);
+        fragmentList.push(child);
+      }
+      return fragmentList;
+    }
+    if (this.kind === "solidCrystalSmall") return [];
     if (this.size === "small") return [];
     return this.splitRegular(opts);
   }

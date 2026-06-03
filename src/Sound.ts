@@ -180,6 +180,8 @@ export type SoundName =
   | "comboTick"
   | "comboSparkle"
   | "tink"
+  | "crystalShatterLarge"
+  | "crystalShatterSmall"
   | "scoreBlip"
   | "summaryDownbeat"
   | "powerup"
@@ -421,7 +423,7 @@ export class Sound {
   // missing entries still work (lazy alloc on first call), they just pay
   // the spawn-time stutter you're avoiding here.
   private prewarmNoiseBuffers() {
-    const durations = [0.018, 0.025, 0.08, 0.18, 0.3, 0.4, 3, 4, 6, 8];
+    const durations = [0.018, 0.025, 0.08, 0.18, 0.3, 0.34, 0.4, 0.55, 3, 4, 6, 8];
     for (const d of durations) this.makeNoiseBuffer(d);
   }
 
@@ -2833,6 +2835,8 @@ export class Sound {
       case "comboTick": this.playComboTick(); break;
       case "comboSparkle": this.playComboSparkle(); break;
       case "tink": this.playTink(); break;
+      case "crystalShatterLarge": this.playCrystalShatter("large"); break;
+      case "crystalShatterSmall": this.playCrystalShatter("small"); break;
       case "scoreBlip": this.playScoreBlip(effectivePitch); break;
       case "summaryDownbeat": this.playSummaryDownbeat(Math.round(pitchRatio)); break;
       case "powerup": this.playPowerup(); break;
@@ -2876,49 +2880,109 @@ export class Sound {
   private playAlienFireBig() {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    // Carrier: sawtooth bending up half a semitone over the attack, then
-    // sustained. Two oscs slightly detuned for body.
-    const f0 = 130.8; // C3
-    const oscA = this.ctx.createOscillator();
-    const oscB = this.ctx.createOscillator();
-    oscA.type = "sawtooth";
-    oscB.type = "sawtooth";
-    oscA.frequency.setValueAtTime(f0 * 0.94, t);
-    oscA.frequency.exponentialRampToValueAtTime(f0, t + 0.08);
-    oscB.frequency.setValueAtTime(f0 * 0.94 * 1.006, t);
-    oscB.frequency.exponentialRampToValueAtTime(f0 * 1.006, t + 0.08);
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.Q.value = 4;
-    filter.frequency.setValueAtTime(420, t);
-    filter.frequency.exponentialRampToValueAtTime(1400, t + 0.06);
-    filter.frequency.exponentialRampToValueAtTime(380, t + 0.45);
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.32, t + 0.04);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
-    oscA.connect(filter);
-    oscB.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.master);
-    oscA.start(t);
-    oscB.start(t);
-    oscA.stop(t + 0.6);
-    oscB.stop(t + 0.6);
+    // Deep C2 fundamental with a hand-stacked overtone series — sub sine, a
+    // body triangle at the fundamental, perfect fifth + octave + tritone
+    // partials for menace, plus a snap of bandpassed noise on the attack.
+    // The whole thing decays in ~0.32s so eight half-beat bursts read as
+    // distinct rhythmic hits instead of blurring into a drone.
+    const f0 = 65.41; // C2
 
-    // Octave shimmer — a sine one octave up that fades in late, giving the
-    // shot a "lifting off" quality.
-    const sh = this.ctx.createOscillator();
-    sh.type = "sine";
-    sh.frequency.value = f0 * 2;
-    const shGain = this.ctx.createGain();
-    shGain.gain.setValueAtTime(0.0001, t);
-    shGain.gain.exponentialRampToValueAtTime(0.09, t + 0.12);
-    shGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
-    sh.connect(shGain);
-    shGain.connect(this.master);
-    sh.start(t);
-    sh.stop(t + 0.55);
+    // Sub-bass sine — the chest-thump.
+    const sub = this.ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(f0 * 0.5, t);
+    sub.frequency.exponentialRampToValueAtTime(f0, t + 0.05);
+    const subGain = this.ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.34, t + 0.012);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + 0.42);
+
+    // Body triangle at the fundamental — rounds out the sub.
+    const body = this.ctx.createOscillator();
+    body.type = "triangle";
+    body.frequency.value = f0;
+    const bodyGain = this.ctx.createGain();
+    bodyGain.gain.setValueAtTime(0.0001, t);
+    bodyGain.gain.exponentialRampToValueAtTime(0.18, t + 0.018);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+    body.connect(bodyGain);
+    bodyGain.connect(this.master);
+    body.start(t);
+    body.stop(t + 0.36);
+
+    // Perfect fifth (G2) — tonal weight, slightly detuned for thickness.
+    const fifthA = this.ctx.createOscillator();
+    fifthA.type = "sawtooth";
+    fifthA.frequency.value = f0 * 1.5;
+    const fifthB = this.ctx.createOscillator();
+    fifthB.type = "sawtooth";
+    fifthB.frequency.value = f0 * 1.5 * 1.005;
+    const fifthFilter = this.ctx.createBiquadFilter();
+    fifthFilter.type = "lowpass";
+    fifthFilter.Q.value = 3;
+    fifthFilter.frequency.setValueAtTime(900, t);
+    fifthFilter.frequency.exponentialRampToValueAtTime(220, t + 0.28);
+    const fifthGain = this.ctx.createGain();
+    fifthGain.gain.setValueAtTime(0.0001, t);
+    fifthGain.gain.exponentialRampToValueAtTime(0.09, t + 0.02);
+    fifthGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    fifthA.connect(fifthFilter);
+    fifthB.connect(fifthFilter);
+    fifthFilter.connect(fifthGain);
+    fifthGain.connect(this.master);
+    fifthA.start(t);
+    fifthB.start(t);
+    fifthA.stop(t + 0.34);
+    fifthB.stop(t + 0.34);
+
+    // Tritone partial — short, dissonant overtone that gives the shot bite.
+    const tritone = this.ctx.createOscillator();
+    tritone.type = "sine";
+    tritone.frequency.value = f0 * 2.83;
+    const tritoneGain = this.ctx.createGain();
+    tritoneGain.gain.setValueAtTime(0.0001, t);
+    tritoneGain.gain.exponentialRampToValueAtTime(0.05, t + 0.01);
+    tritoneGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    tritone.connect(tritoneGain);
+    tritoneGain.connect(this.master);
+    tritone.start(t);
+    tritone.stop(t + 0.14);
+
+    // Octave shimmer that blooms slightly late — "lift-off" tail.
+    const oct = this.ctx.createOscillator();
+    oct.type = "sine";
+    oct.frequency.value = f0 * 2;
+    const octGain = this.ctx.createGain();
+    octGain.gain.setValueAtTime(0.0001, t);
+    octGain.gain.exponentialRampToValueAtTime(0.07, t + 0.05);
+    octGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+    oct.connect(octGain);
+    octGain.connect(this.master);
+    oct.start(t);
+    oct.stop(t + 0.3);
+
+    // Bandpassed noise transient — the percussive "thunk" of the cannon.
+    const noiseBuf = this.makeNoiseBuffer(0.05);
+    if (noiseBuf) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+      const noiseFilter = this.ctx.createBiquadFilter();
+      noiseFilter.type = "bandpass";
+      noiseFilter.frequency.value = 180;
+      noiseFilter.Q.value = 1.5;
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.18, t);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      noise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(this.master);
+      noise.start(t);
+      noise.stop(t + 0.06);
+    }
   }
 
   private playAlienFireMedium() {
@@ -4287,6 +4351,80 @@ export class Sound {
 
   playComboSparkleShort() { this.playComboSparkle(0.5); }
 
+  // Drift-shot hit fanfare — fires when an on-beat shot lands while the first-dot hover ring
+  // is locked (i.e. the same condition that queues the +1 Drift Bonus and the 4x damage). A
+  // bright, celebratory layer that sits *on top of* the normal comboSparkle + chime so the
+  // player hears the regular on-beat reward AND a distinct extra "ding" for the drift-shot.
+  //   Three layers:
+  //   1) Fast rising arpeggio (C5–E5–G5–C6) on a soft triangle — reads as "achievement unlocked".
+  //   2) A small bell strike at C6 with two inharmonic partials — adds shimmer and pitch focus.
+  //   3) A high noise sparkle burst — the "magic dust" topping.
+  // No spatial panning: like comboChime, this is a melodic reward and should sit centered.
+  playDriftShotHit() {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    // 1) Rising arpeggio — C major triad climbing into an octave. Steps land
+    //    fast (every 25ms) so the whole flourish fits inside ~150ms — a "zing" rather than a tune.
+    const arpFreqs = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+    const stepSec = 0.025;
+    for (let i = 0; i < arpFreqs.length; i++) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.value = arpFreqs[i];
+      const start = t + i * stepSec;
+      const peak = 0.10;
+      const release = 0.18;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(peak, start + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + release);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(start);
+      osc.stop(start + release + 0.02);
+    }
+    // 2) Bell-tone landing on the top note — two inharmonic partials so it has shimmer.
+    const bellFundamental = 1046.50; // C6
+    const bellPartials = [1, 2.76]; // shared ratio family with playBell
+    const bellStart = t + (arpFreqs.length - 1) * stepSec;
+    for (let i = 0; i < bellPartials.length; i++) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = bellFundamental * bellPartials[i];
+      const peak = 0.09 / (i + 1.2);
+      const decay = 0.5 - i * 0.12;
+      gain.gain.setValueAtTime(0.0001, bellStart);
+      gain.gain.exponentialRampToValueAtTime(peak, bellStart + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, bellStart + decay);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(bellStart);
+      osc.stop(bellStart + decay + 0.05);
+    }
+    // 3) High-passed noise sparkle — fairy-dust top end that lifts the whole hit.
+    const noiseBuf = this.makeNoiseBuffer(0.18);
+    if (noiseBuf) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "highpass";
+      filter.frequency.value = 6000;
+      filter.Q.value = 0.8;
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.12, t + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      noise.start(t);
+      noise.stop(t + 0.20);
+    }
+  }
+
   // Escalating melody chime — one rounded synth note per successive on-beat
   // kill. All variants open with the same three universal anchor notes on a
   // C pedal (C2 → G2 → D3 — root, fifth, ninth), then branch into a scale
@@ -4440,6 +4578,101 @@ export class Sound {
       gain.connect(this.master);
       osc.start(t);
       osc.stop(t + decay + 0.02);
+    }
+  }
+
+  // Solid-crystal asteroid shatter. Bright glass-breaking voice that replaces
+  // the noise explosion when the whole rock is the gem. Three layers:
+  //   1. Smash transient — short bandpassed white-noise burst (5-7 kHz) giving
+  //      the percussive *crack* of glass fracturing.
+  //   2. Inharmonic ringing partials — high sines at non-octave ratios that
+  //      mimic the spectral signature of struck glass. Each one's attack is
+  //      jittered by a few ms so they cascade rather than firing as a chord;
+  //      that staggered onset is what reads as "shards tinkling apart".
+  //   3. Shard tinkle tail — a quieter band-passed noise wash decaying over
+  //      the partial decay, fills the gaps between the discrete sine partials
+  //      with the breathy hash of falling glass.
+  // size === "large" gets a lower base + longer tail + more partials so a big
+  // asteroid shattering feels weightier than a fragment popping.
+  private playCrystalShatter(size: "large" | "small") {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const isLarge = size === "large";
+    const partialCount = isLarge ? 6 : 4;
+    const base = isLarge ? 1320 : 2100;
+    const decay = isLarge ? 0.55 : 0.34;
+    const peakBase = isLarge ? 0.22 : 0.18;
+    // Non-octave ratios chosen to read as struck glass — none are integer
+    // multiples, so the partials beat against each other rather than fusing
+    // into a single pitched tone.
+    const ratios = [1, 1.41, 1.89, 2.51, 3.18, 4.07];
+    for (let i = 0; i < partialCount; i++) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(base * ratios[i], t);
+      // Stagger each partial's attack 0-22 ms so they tinkle in instead of
+      // firing as one chord. Higher partials tend to come in later — that's
+      // how real shards behave (heavy pieces ring first, fine dust after).
+      const attackOffset = (i / partialCount) * 0.018 + Math.random() * 0.006;
+      const peak = (peakBase / (i + 1)) * (0.7 + Math.random() * 0.4);
+      const tail = decay * (0.55 + Math.random() * 0.5);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(peak, t + attackOffset + 0.003);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + attackOffset + tail);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      osc.stop(t + attackOffset + tail + 0.02);
+    }
+    // Smash transient: short bandpassed noise crack at the very front, sells
+    // the actual fracture moment before the partials take over.
+    const crackDur = 0.08;
+    const crackBuf = this.makeNoiseBuffer(crackDur);
+    if (crackBuf) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = crackBuf;
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = isLarge ? 5200 : 6800;
+      bp.Q.value = 1.4;
+      const g = this.ctx.createGain();
+      const crackPeak = isLarge ? 0.32 : 0.28;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(crackPeak, t + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + crackDur);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(this.master);
+      src.start(t);
+      src.stop(t + crackDur);
+    }
+    // Tinkling shards tail — a softer noise wash band-limited to the same
+    // glassy band as the partials, decaying across the full tail so the gaps
+    // between sine partials are filled with the hash of falling debris.
+    const tinkleDur = decay;
+    const tinkleBuf = this.makeNoiseBuffer(tinkleDur);
+    if (tinkleBuf) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = tinkleBuf;
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = isLarge ? 2200 : 3200;
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.setValueAtTime(9000, t);
+      lp.frequency.exponentialRampToValueAtTime(4000, t + tinkleDur);
+      const g = this.ctx.createGain();
+      const tinklePeak = isLarge ? 0.12 : 0.10;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(tinklePeak, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + tinkleDur);
+      src.connect(hp);
+      hp.connect(lp);
+      lp.connect(g);
+      g.connect(this.master);
+      src.start(t);
+      src.stop(t + tinkleDur);
     }
   }
 

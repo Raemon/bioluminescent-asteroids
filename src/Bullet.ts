@@ -31,8 +31,9 @@ export class Bullet {
   // up (combo ≥ 4). Renders yellow instead of blue and deals 2× the on-beat
   // damage so the gold-tier streak feels lethal as well as visible.
   boosted = false;
-  // True when fired at combo ≥ 8. Renders white and doubles the collision
-  // hitbox so the streak feels like a wider sweep, not just more damage.
+  // True when fired at combo ≥ 8. Renders as a tight white shot and flies
+  // twice as far — same hitbox/core as the yellow tier, but sharper-looking
+  // and with extended reach so the streak feels like a longer arm.
   superBoosted = false;
   // Set by Ship.fire when the player has the pierce powerup active. Game's
   // collision pass keeps a piercing bullet alive on hit instead of consuming
@@ -68,9 +69,8 @@ export class Bullet {
 
   // Collision radius — larger than the visible core so glancing shots that
   // look like they should connect (inside the glow) actually register.
-  // Super-boosted (combo ≥ 8) doubles this so white bullets sweep wider.
   hitRadius(): number {
-    return this.effectiveRadius() * 2.5 * (this.superBoosted ? 2 : 1);
+    return this.effectiveRadius() * 2.5;
   }
 
   update(dt: number, w: number, h: number) {
@@ -95,19 +95,19 @@ export class Bullet {
     const headHue = this.boosted ? 48 : this.onBeat ? 222 : this.pierce ? 60 : 180;
     const trailAlphaScale = this.onBeat ? 0.85 : 0.4;
     const headAlpha = this.onBeat ? 1.0 : 0.75;
-    const headRadiusMul = this.onBeat ? 10 : 6;
+    // super-boosted (combo ≥ 8) keeps the yellow-tier core size but tightens
+    // the halo (6 vs 10) for a sharper, more pointed read.
+    const headRadiusMul = this.superBoosted ? 6 : this.onBeat ? 10 : 6;
+    const trailRadiusMul = this.superBoosted ? 3 : 5;
     const coreRadius = this.effectiveRadius();
-    // super-boosted (combo ≥ 8) doubles the hitbox; the visible core and
-    // glow scale up too so the bullet reads as the wider sweep it really is.
-    const visualScale = this.superBoosted ? 2 : 1;
     for (let i = 0; i < this.trail.length; i++) {
       const segmentT = i / this.trail.length;
       const p = this.trail[i];
-      const r = coreRadius * segmentT * 1.5 * visualScale;
-      drawGlow(ctx, p.x, p.y, r * 5, trailHue, trailAlphaScale * segmentT * rangeAlpha, this.superBoosted);
+      const r = coreRadius * segmentT * 1.5;
+      drawGlow(ctx, p.x, p.y, r * trailRadiusMul, trailHue, trailAlphaScale * segmentT * rangeAlpha, this.superBoosted);
     }
 
-    drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul * visualScale, headHue, headAlpha * rangeAlpha, this.superBoosted);
+    drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul, headHue, headAlpha * rangeAlpha, this.superBoosted);
     ctx.globalAlpha = rangeAlpha;
     // Bright core dot — for on-beat use a near-white blue-tinted highlight so
     // the deep-blue halo reads as the carrier and the core still pops.
@@ -121,7 +121,7 @@ export class Bullet {
             ? "hsla(60, 100%, 96%, 1)"
             : "hsla(180, 100%, 98%, 1)";
     ctx.beginPath();
-    ctx.arc(this.pos.x, this.pos.y, coreRadius * visualScale, 0, TAU);
+    ctx.arc(this.pos.x, this.pos.y, coreRadius, 0, TAU);
     ctx.fill();
     ctx.restore();
   }

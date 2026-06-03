@@ -1,4 +1,4 @@
-import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut, sub, mul, len } from "./vec";
+import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut, sub, mul, len, fromAngle } from "./vec";
 import { Canister, POWERUP_KINDS } from "./Canister";
 
 // Probability that a successfully-cracked gem actually contains an upgrade.
@@ -24,8 +24,8 @@ export const GOLD_CRYSTAL_SCORE = 2500;
 // for it after handling the surrounding rubble cloud, but not so long that an
 // uncollected gem clutters the field for the rest of the wave.
 const LIFETIME = 18;
-// Last second of lifetime, the gem fades to telegraph imminent departure.
-const FADE_TAIL = 1.5;
+// gem explodes at full brightness when LIFETIME runs out, so no fade tail.
+const FADE_TAIL = 0;
 
 export class GoldCrystal {
   pos: Vec;
@@ -194,6 +194,45 @@ export const spawnGoldCrystalAt = (pos: Vec, parentVel: Vec): GoldCrystal => {
   // small so the gem stays predictably near the kill site.
   const drift = v(parentVel.x * 0.25 + rand(-18, 18), parentVel.y * 0.25 + rand(-18, 18));
   return new GoldCrystal({ ...pos }, drift);
+};
+
+// Spawn a fan of gems aligned to the next N beat-slots from the player's
+// vantage. Gem k sits where a bullet fired (k+1) beats from now lands one
+// beat later, assuming the player keeps coasting and only rotates to aim.
+// Aim circle used by the reticule system: center = shipPos + shipVel*0.4*beat,
+// radius = bulletSpeed*beat. k beats of pre-fire drift add shipVel*k*beat,
+// so gem k = shipPos + shipVel*(k+1+0.4)*beat + dir_k*bulletSpeed*beat.
+// Drift is zero so the gem stays parked at the solved slot.
+export const spawnRhythmAlignedGems = (
+  shipPos: Vec,
+  shipVel: Vec,
+  shipHeading: number,
+  deathPos: Vec,
+  count: number,
+  bulletSpeed: number,
+  beatGrid: number,
+): GoldCrystal[] => {
+  const toDeath = sub(deathPos, shipPos);
+  const baseDist = len(toDeath);
+  // aim outward from the ship toward the kill site; fall back to facing
+  // when the rock died on top of the player.
+  const baseAngle = baseDist > 1 ? Math.atan2(toDeath.y, toDeath.x) : shipHeading;
+  // small fan so gems read as distinct targets, not a single column.
+  const SPREAD_PER_GEM = 0.11;
+  const startOffset = -((count - 1) * SPREAD_PER_GEM) / 2;
+  const aimRadius = bulletSpeed * beatGrid;
+  const gems: GoldCrystal[] = [];
+  for (let k = 0; k < count; k++) {
+    const angle = baseAngle + startOffset + k * SPREAD_PER_GEM;
+    const dir = fromAngle(angle);
+    const driftBeats = (k + 1 + 0.4) * beatGrid;
+    const gemPos = v(
+      shipPos.x + shipVel.x * driftBeats + dir.x * aimRadius,
+      shipPos.y + shipVel.y * driftBeats + dir.y * aimRadius,
+    );
+    gems.push(new GoldCrystal(gemPos, v(0, 0)));
+  }
+  return gems;
 };
 
 // Drop a fresh powerup canister where the gem was. Aims at a random point on

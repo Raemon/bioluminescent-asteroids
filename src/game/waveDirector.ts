@@ -354,21 +354,27 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet) => {
   const activeSpecials = activeSpecialsForWave(game, game.wave);
   const normalCount = Math.max(0, totalCount - activeSpecials.length);
 
-  // Pre-roll the kind for each normal slot. On the introductory wave
-  // (CFG.goldCrystal.firstWave) we force exactly one slot to be a gem
-  // rock so the player sees the mechanic; on later waves each slot rolls
-  // independently at CFG.goldCrystal.perSpawnChance.
+  // Pre-roll the kind for each normal slot. On the introductory wave for a
+  // given special (firstWave) we force exactly one slot of that kind so the
+  // player sees the mechanic at least once; on later waves each slot rolls
+  // independently at the configured per-spawn chance. Solid crystal rolls
+  // are checked first — when one fires, the slot can't also become a gem rock.
   const slotKinds: AsteroidKind[] = [];
   for (let i = 0; i < normalCount; i++) {
+    const isSolid = game.wave > CFG.solidCrystal.firstWave && Math.random() < CFG.solidCrystal.perSpawnChance;
+    if (isSolid) { slotKinds.push("solidCrystal"); continue; }
     const isGem = game.wave > CFG.goldCrystal.firstWave && Math.random() < CFG.goldCrystal.perSpawnChance;
     slotKinds.push(isGem ? "goldCrystal" : "normal");
   }
   if (game.wave === CFG.goldCrystal.firstWave && normalCount > 0 && !slotKinds.includes("goldCrystal")) {
     slotKinds[Math.floor(Math.random() * normalCount)] = "goldCrystal";
   }
+  if (game.wave === CFG.solidCrystal.firstWave && normalCount > 0 && !slotKinds.includes("solidCrystal")) {
+    slotKinds[Math.floor(Math.random() * normalCount)] = "solidCrystal";
+  }
 
   for (const kind of slotKinds) {
-    const k = kind === "goldCrystal" ? "goldCrystal" : undefined;
+    const k = kind === "normal" ? undefined : kind;
     game.asteroids.push(spawnAsteroidAway(game, 200, k, "large", claimed));
   }
   for (const kind of activeSpecials) {

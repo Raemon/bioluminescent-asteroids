@@ -1,7 +1,7 @@
 import type { Game } from "../Game";
 import { dist } from "../vec";
 import { Asteroid } from "../Asteroid";
-import { Alien, ALIEN_FIRE_PATTERN_BEATS } from "../Alien";
+import { Alien, ALIEN_FIRE_PATTERN_BEATS, bigAlienBurstAngleOffset } from "../Alien";
 import { BEAT_GRID } from "./rhythmConstants";
 import {
   isInBeatWindow,
@@ -23,6 +23,7 @@ import {
   handleCanisterPickups,
   handleCanisterShots,
   handleGoldCrystalPickups,
+  expireGoldCrystal,
 } from "./collisions";
 import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState } from "./lifecycle";
 import { syncHud, syncPowerupHud, syncComboHud } from "./hud";
@@ -371,13 +372,20 @@ const classifyNewBullets = (game: Game, firstNewIndex: number) => {
 const handleOnBeatFire = (game: Game, firstNewIndex: number) => {
   // boosted bullets fly while the yellow halo (combo ≥ 4, tier 2) is up.
   const boosted = game.ship.comboHaloTier >= 2;
-  // combo ≥ 8 promotes to the white "super-boosted" tier — bigger hitbox.
+  // combo ≥ 8 promotes to the white "super-boosted" tier — sharper look and
+  // 2× range; same hitbox as yellow so the reward is reach, not sweep.
   const superBoosted = game.beatCombo >= 8;
   for (let i = firstNewIndex; i < game.bullets.length; i++) {
     const newBullet = game.bullets[i];
     newBullet.onBeat = true;
     newBullet.boosted = boosted;
     newBullet.superBoosted = superBoosted;
+    if (superBoosted) {
+      newBullet.life *= 2;
+      newBullet.maxLife *= 2;
+      const slotCount = Math.max(1, Math.floor(newBullet.maxLife / BEAT_GRID));
+      newBullet.fadeStartLife = Math.max(0, newBullet.maxLife - slotCount * BEAT_GRID);
+    }
   }
   game.sound.play("comboTick");
   if (game.beatCombo === 0) {
@@ -457,7 +465,13 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
     if (!wasWarping && c.warping) game.sound.play("canisterAppear", 1, c.pos);
   }
   compactInPlace(game.canisters, (c) => c.alive);
-  for (const g of game.goldCrystals) g.update(musicDt, game.w, game.h);
+  for (const g of game.goldCrystals) {
+    const wasAlive = g.alive;
+    g.update(musicDt, game.w, game.h);
+    // collect/waste paths remove gems via handleGoldCrystalPickups without
+    // touching alive, so any alive→dead transition here is a lifetime expiry.
+    if (wasAlive && !g.alive) expireGoldCrystal(game, g);
+  }
   compactInPlace(game.goldCrystals, (g) => g.alive);
   updatePositionalAudio(game);
 };
@@ -497,7 +511,8 @@ const tickAlienFire = (game: Game) => {
 
 const fireOneAlienShot = (game: Game, a: Alien) => {
   if (game.ship.alive) {
-    const bullet = a.fireAt(game.ship.pos);
+    const angleOffset = a.size === "big" ? bigAlienBurstAngleOffset(a.firePatternIndex) : 0;
+    const bullet = a.fireAt(game.ship.pos, angleOffset);
     if (a.size === "small") {
       const k = rhythmSpeedMul(game);
       bullet.vel.x *= k;

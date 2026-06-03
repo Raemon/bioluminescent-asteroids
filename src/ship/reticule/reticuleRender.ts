@@ -54,14 +54,33 @@ const HOVER_DOT_PULSE_PEAK_ALPHA = 1.0;
 const HOVER_DOT_PULSE_MIN_ALPHA = 0.28;
 const HOVER_DOT_PULSE_PERIOD_SEC = 2.0;
 const HOVER_DOT_HSL = RETICULE_DASH_HSL;
-// completion flare: brightens the ring + paints an additive halo for FLARE_SEC,
-// rising sharply then settling. Marks "lock acquired" — the tutorial gate keys off the
-// end of this animation, and the octave-up hum begins its sharper attack here too.
-const HOVER_FLARE_SEC = 0.25;
-const HOVER_FLARE_PEAK_BOOST = 2.4;
-const HOVER_FLARE_HALO_RADIUS = HOVER_DOT_RING_RADIUS + 6;
-const HOVER_FLARE_HALO_LINE_WIDTH = 3.0;
-const HOVER_FLARE_HALO_PEAK_ALPHA = 0.65;
+// completion flare: brightens the ring + paints additive halos + radial spokes for FLARE_SEC,
+// rising sharply then settling. Marks "lock acquired" — the octave-up hum starts here too.
+// Tutorial gate fires on elapsed >= TUTORIAL_HOVER_SEC independently; the flare visual can
+// outrun it.
+const HOVER_FLARE_SEC = 0.7;
+const HOVER_FLARE_PEAK_BOOST = 4.0;
+const HOVER_FLARE_RING_LINE_WIDTH = 3.0;
+const HOVER_FLARE_RING_PEAK_ALPHA = 0.95;
+// shockwave: a single bright ring expands outward from the dot ring.
+const HOVER_FLARE_SHOCKWAVE_START_R = HOVER_DOT_RING_RADIUS + 2;
+const HOVER_FLARE_SHOCKWAVE_END_R = HOVER_DOT_RING_RADIUS + 38;
+const HOVER_FLARE_SHOCKWAVE_LINE_WIDTH = 2.4;
+const HOVER_FLARE_SHOCKWAVE_PEAK_ALPHA = 0.9;
+// inner pulse ring that contracts slightly then fades — adds a "snap" at the very centre.
+const HOVER_FLARE_INNER_START_R = HOVER_DOT_RING_RADIUS - 2;
+const HOVER_FLARE_INNER_END_R = HOVER_DOT_RING_RADIUS - 10;
+// radial light spokes for a starburst pop.
+const HOVER_FLARE_SPOKE_COUNT = 12;
+const HOVER_FLARE_SPOKE_INNER_R = HOVER_DOT_RING_RADIUS + 3;
+const HOVER_FLARE_SPOKE_OUTER_R = HOVER_DOT_RING_RADIUS + 28;
+const HOVER_FLARE_SPOKE_LINE_WIDTH = 1.6;
+const HOVER_FLARE_SPOKE_PEAK_ALPHA = 0.85;
+// central bright flash dot.
+const HOVER_FLARE_CORE_R = 8;
+const HOVER_FLARE_CORE_PEAK_ALPHA = 0.7;
+// gold hue at the peak — drift the dash colour toward warm/white so the lock reads as "reward".
+const HOVER_FLARE_WARM_HSL = "48, 100%, 70%";
 
 // the aim circle = locus of bullet endpoints at t=beatGrid over all headings. Single source
 // of truth so the reticule painter and the gameRender red-tint check agree on geometry.
@@ -120,9 +139,9 @@ const computeReticulePositions = (
 };
 
 // arcs fill across HOVER_RING_FILL_SEC, then a HOVER_FLARE_SEC completion flare brightens them
-// and adds a halo ring before settling into the steady on-beat pulse. The build resets on
-// hover-loss in the caller. Returns whether the ring just crossed into "filled" this frame
-// (rising-edge signal for the audio companion).
+// and adds an expanding shockwave + radial starburst + bright core before settling into the
+// steady on-beat pulse. The build resets on hover-loss in the caller. Returns whether the ring
+// just crossed into "filled" this frame (rising-edge signal for the audio companion).
 const paintHoverDotRing = (
   ctx: CanvasRenderingContext2D, center: Vec, elapsed: number, beatTime: number,
 ): { fillJustCompleted: boolean } => {
@@ -133,14 +152,20 @@ const paintHoverDotRing = (
   const fillCompleteSec = HOVER_RING_FILL_SEC;
   const flareAge = fullyBuilt ? Math.max(0, elapsed - fillCompleteSec) : -1;
   const flareT = flareAge >= 0 ? Math.min(1, flareAge / HOVER_FLARE_SEC) : 0;
-  // ease shape: sharp rise (1 - (1-t)^2) then ease back to 0 → reads as a pop with settle.
-  const flareEnvelope = flareT > 0 && flareT < 1
-    ? Math.sin(flareT * Math.PI)
+  // burst envelope: very fast rise (peaks at t≈0.25), long fall — reads as a "snap, glow, fade".
+  const burstEnvelope = flareT > 0 && flareT < 1
+    ? Math.pow(Math.sin(flareT * Math.PI), 0.6) * Math.pow(1 - flareT, 0.5)
     : 0;
+  // shockwave envelope: linear rise to peak alpha then long radial expansion to outer radius.
+  const shockwaveEnvelope = flareT > 0 && flareT < 1 ? Math.sin(flareT * Math.PI) : 0;
   const baseAlpha = fullyBuilt
     ? cosineEnvelope(beatTime, HOVER_DOT_PULSE_PERIOD_SEC, HOVER_DOT_PULSE_MIN_ALPHA, HOVER_DOT_PULSE_PEAK_ALPHA)
     : HOVER_DOT_BUILDING_ALPHA;
-  const arcAlphaBoost = 1 + (HOVER_FLARE_PEAK_BOOST - 1) * flareEnvelope;
+  const arcAlphaBoost = 1 + (HOVER_FLARE_PEAK_BOOST - 1) * burstEnvelope;
+  // arcs drift from cool dash colour toward warm gold at the peak of the burst.
+  const arcHsl = burstEnvelope > 0
+    ? lerpHsl(HOVER_DOT_HSL, HOVER_FLARE_WARM_HSL, burstEnvelope)
+    : HOVER_DOT_HSL;
   ctx.lineWidth = HOVER_ARC_LINE_WIDTH;
   // round caps soften the leading edge as the arc sweeps outward.
   ctx.lineCap = "round";
@@ -156,7 +181,7 @@ const paintHoverDotRing = (
     // alpha rises slightly ahead of the sweep so the leading edge stays bright.
     const alphaEase = Math.sqrt(t);
     const alpha = Math.min(1, baseAlpha * alphaEase * arcAlphaBoost);
-    ctx.strokeStyle = `hsla(${HOVER_DOT_HSL}, ${alpha})`;
+    ctx.strokeStyle = `hsla(${arcHsl}, ${alpha})`;
     const mid = start + i * slot;
     // grow from the counter-clockwise end (fixed) toward the clockwise end (advancing).
     const ccwEnd = mid - HOVER_ARC_SWEEP / 2;
@@ -165,15 +190,80 @@ const paintHoverDotRing = (
     ctx.arc(center.x, center.y, HOVER_DOT_RING_RADIUS, ccwEnd, cwEnd);
     ctx.stroke();
   }
-  if (flareEnvelope > 0) {
-    const haloAlpha = HOVER_FLARE_HALO_PEAK_ALPHA * flareEnvelope;
-    ctx.lineWidth = HOVER_FLARE_HALO_LINE_WIDTH;
-    ctx.strokeStyle = `hsla(${HOVER_DOT_HSL}, ${haloAlpha})`;
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, HOVER_FLARE_HALO_RADIUS, 0, TAU);
-    ctx.stroke();
+  if (flareT > 0 && flareT < 1) {
+    paintFlareBurst(ctx, center, flareT, burstEnvelope, shockwaveEnvelope);
   }
   return { fillJustCompleted: fullyBuilt };
+};
+
+// the celebratory burst layered on top of the ring once lock completes: an expanding shockwave
+// ring, an inward-snapping inner ring, a starburst of radial spokes, and a bright central core.
+// All in warm gold so the lock reads as a reward against the cool cyan reticule colour.
+const paintFlareBurst = (
+  ctx: CanvasRenderingContext2D, center: Vec, flareT: number, burstEnvelope: number, shockwaveEnvelope: number,
+) => {
+  ctx.lineCap = "round";
+  // expanding outer shockwave — radius interpolates start→end across the full flare.
+  if (shockwaveEnvelope > 0) {
+    const r = HOVER_FLARE_SHOCKWAVE_START_R + (HOVER_FLARE_SHOCKWAVE_END_R - HOVER_FLARE_SHOCKWAVE_START_R) * flareT;
+    ctx.lineWidth = HOVER_FLARE_SHOCKWAVE_LINE_WIDTH;
+    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${HOVER_FLARE_SHOCKWAVE_PEAK_ALPHA * shockwaveEnvelope})`;
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, r, 0, TAU);
+    ctx.stroke();
+  }
+  // ring at the dot ring itself — a brief, very bright overlay that peaks early with the burst.
+  if (burstEnvelope > 0) {
+    ctx.lineWidth = HOVER_FLARE_RING_LINE_WIDTH;
+    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${HOVER_FLARE_RING_PEAK_ALPHA * burstEnvelope})`;
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, HOVER_DOT_RING_RADIUS, 0, TAU);
+    ctx.stroke();
+  }
+  // inner pulse: contracts inward as it fades — gives the burst a sucking-in counterpart.
+  if (burstEnvelope > 0) {
+    const r = HOVER_FLARE_INNER_START_R + (HOVER_FLARE_INNER_END_R - HOVER_FLARE_INNER_START_R) * flareT;
+    ctx.lineWidth = HOVER_FLARE_RING_LINE_WIDTH * 0.7;
+    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${HOVER_FLARE_RING_PEAK_ALPHA * 0.6 * burstEnvelope})`;
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, Math.max(2, r), 0, TAU);
+    ctx.stroke();
+  }
+  // radial spokes shooting outward — the "starburst" pop.
+  if (burstEnvelope > 0) {
+    ctx.lineWidth = HOVER_FLARE_SPOKE_LINE_WIDTH;
+    const spokeAlpha = HOVER_FLARE_SPOKE_PEAK_ALPHA * burstEnvelope;
+    // spokes extend with flareT so they read as light streaking outward.
+    const outerR = HOVER_FLARE_SPOKE_INNER_R + (HOVER_FLARE_SPOKE_OUTER_R - HOVER_FLARE_SPOKE_INNER_R) * flareT;
+    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${spokeAlpha})`;
+    for (let i = 0; i < HOVER_FLARE_SPOKE_COUNT; i++) {
+      const angle = (i / HOVER_FLARE_SPOKE_COUNT) * TAU;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      ctx.beginPath();
+      ctx.moveTo(center.x + cos * HOVER_FLARE_SPOKE_INNER_R, center.y + sin * HOVER_FLARE_SPOKE_INNER_R);
+      ctx.lineTo(center.x + cos * outerR, center.y + sin * outerR);
+      ctx.stroke();
+    }
+  }
+  // bright central core — a small filled disc that pops at the peak and fades.
+  if (burstEnvelope > 0) {
+    ctx.fillStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${HOVER_FLARE_CORE_PEAK_ALPHA * burstEnvelope})`;
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, HOVER_FLARE_CORE_R * (1 + 0.4 * burstEnvelope), 0, TAU);
+    ctx.fill();
+  }
+};
+
+// linear interp between two HSL strings of the form "H, S%, L%". Used to drift the ring colour
+// from cyan to warm gold at the peak of the lock-in flare.
+const lerpHsl = (a: string, b: string, t: number): string => {
+  const pa = a.split(",").map((s) => parseFloat(s));
+  const pb = b.split(",").map((s) => parseFloat(s));
+  const h = pa[0] + (pb[0] - pa[0]) * t;
+  const s = pa[1] + (pb[1] - pa[1]) * t;
+  const l = pa[2] + (pb[2] - pa[2]) * t;
+  return `${h}, ${s}%, ${l}%`;
 };
 
 // cosine envelope between min/max produces a smooth, predictable visual pulse over time.

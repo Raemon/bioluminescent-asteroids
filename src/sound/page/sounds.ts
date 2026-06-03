@@ -214,6 +214,15 @@ export const OBJECTS: GameObject[] = [
       { verb: "cracked → canister spawns", sound: "canisterAppear", trigger: beat(8), animation: "canister" },
     ],
   },
+  {
+    id: "asteroid-solidCrystal",
+    label: "solid crystal asteroid",
+    about: "the whole rock is the gem — shatters like cut glass",
+    actions: [
+      { verb: "killed (large shatter)", sound: "crystalShatterLarge", trigger: beat(4) },
+      { verb: "killed (small frag shatter)", sound: "crystalShatterSmall", trigger: beat(2) },
+    ],
+  },
 
   {
     id: "alien-big",
@@ -350,6 +359,7 @@ const MENTIONED_SOUNDS = [
   "explosionSmall", "explosionMedium", "explosionLarge", "asteroidBoomBeat",
   "bassKick", "bassPluck", "bassBoom", "bassSnap", "bassHit", "bassEcho",
   "chime", "bell", "warble", "tink",
+  "crystalShatterLarge", "crystalShatterSmall",
   // aliens
   "alienFireBig", "alienFireMedium", "alienFireSmall", "alienHit", "alienExplode",
   // comets

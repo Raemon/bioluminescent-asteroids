@@ -12,6 +12,7 @@ export type KillBucket =
   | "warble"
   | "tink"
   | "goldCrystal"
+  | "solidCrystal"
   | "alien_big"
   | "alien_medium"
   | "alien_small"

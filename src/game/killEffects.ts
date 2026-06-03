@@ -4,7 +4,7 @@ import { Alien } from "../Alien";
 import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
 import { Vec } from "../vec";
-import { spawnGoldCrystalAt } from "../GoldCrystal";
+import { spawnGoldCrystalAt, spawnRhythmAlignedGems } from "../GoldCrystal";
 import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
 import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
@@ -33,17 +33,23 @@ const asteroidBucket = (a: Asteroid): KillBucket => {
   if (a.isBass()) return "bassteroid";
   if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble" || a.kind === "tink") return a.kind;
   if (a.kind === "goldCrystal") return "goldCrystal";
+  if (a.kind === "solidCrystal" || a.kind === "solidCrystalSmall") return "solidCrystal";
   return `asteroid_${a.size}`;
 };
 
 // bassteroids run their own bassHit/bassEcho path; this maps the non-bass kinds to sounds.
 export const hitSoundFor = (
   a: Asteroid,
-): "explosionLarge" | "explosionMedium" | "explosionSmall" | "chime" | "bell" | "warble" | "tink" => {
+): "explosionLarge" | "explosionMedium" | "explosionSmall" | "chime" | "bell" | "warble" | "tink" | "crystalShatterLarge" | "crystalShatterSmall" => {
   if (a.kind === "chime") return "chime";
   if (a.kind === "bell") return "bell";
   if (a.kind === "warble") return "warble";
   if (a.kind === "tink") return "tink";
+  // Solid crystal asteroids shatter like cut glass — the whole body IS the
+  // gem, so a noise explosion would feel wrong. Large parent + small frags
+  // each get their own size-scaled shatter.
+  if (a.kind === "solidCrystal") return "crystalShatterLarge";
+  if (a.kind === "solidCrystalSmall") return "crystalShatterSmall";
   return a.size === "large" ? "explosionLarge" : a.size === "medium" ? "explosionMedium" : "explosionSmall";
 };
 
@@ -115,6 +121,8 @@ const awardScoreForKill = (game: Game, hitPos: Vec, baseScore: number, isOnBeatH
         fireAt: game.perceivedBeatTime + BEAT_GRID,
         pos: { x: hitPos.x, y: hitPos.y },
       });
+      // celebratory fanfare on top of the standard on-beat sparkle/chime.
+      game.sound.playDriftShotHit();
     }
   }
   game.score += scoreEarned;
@@ -171,6 +179,24 @@ const finishAsteroidKillCore = (
     // recipe (handled inside split() below) takes care of the rubble cloud
     // flying in other directions.
     game.goldCrystals.push(spawnGoldCrystalAt(a.pos, a.vel));
+  }
+  if (a.kind === "solidCrystal") {
+    // Pure-crystal rock pops 1–3 collectibles on death — the whole body was
+    // the gem, so the loot scales accordingly. Gems are placed on the next
+    // 1–3 beat-slots from the player's vantage so a coasting pilot who just
+    // rotates can rhythm-pop the whole string in a row.
+    const gemCount = 1 + Math.floor(Math.random() * 3);
+    const ship = game.ship;
+    const gems = spawnRhythmAlignedGems(
+      ship.pos,
+      ship.vel,
+      ship.heading,
+      a.pos,
+      gemCount,
+      ship.bulletSpeed,
+      BEAT_GRID,
+    );
+    for (const g of gems) game.goldCrystals.push(g);
   }
   const children = a.split({
     impactDir: killerVel,

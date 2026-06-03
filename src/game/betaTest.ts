@@ -61,6 +61,8 @@ const ELEMENTS: BetaElement[] = [
   { id: "bell", label: "Bell", group: "Special Rock", apply: (g) => spawnAsteroid(g, "bell") },
   { id: "warble", label: "Warble", group: "Special Rock", apply: (g) => spawnAsteroid(g, "warble") },
   { id: "tink", label: "Tink", group: "Special Rock", apply: (g) => spawnAsteroid(g, "tink") },
+  { id: "goldCrystal", label: "Gold Rock", group: "Special Rock", apply: (g) => spawnAsteroid(g, "goldCrystal") },
+  { id: "solidCrystal", label: "Crystal", group: "Special Rock", apply: (g) => spawnAsteroid(g, "solidCrystal") },
   {
     id: "boss",
     label: "Boss",
@@ -179,6 +181,8 @@ const iconFor = (id: string): string => {
   if (id === "bell") return `<svg viewBox="0 0 24 24"><path d="M6 16 Q6 7 12 7 Q18 7 18 16 Z M10 18 a2 2 0 0 0 4 0" fill="none" stroke="${c}" stroke-width="1.5"/></svg>`;
   if (id === "warble") return `<svg viewBox="0 0 24 24"><path d="M3 12 Q6 4 9 12 T15 12 T21 12" fill="none" stroke="${c}" stroke-width="1.5"/></svg>`;
   if (id === "tink") return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5" fill="${c}"/><path d="M12 5 L12 8 M12 16 L12 19 M5 12 L8 12 M16 12 L19 12" stroke="${c}" stroke-width="1.5"/></svg>`;
+  if (id === "goldCrystal") return `<svg viewBox="0 0 24 24"><polygon points="12,3 20,8 19,17 12,21 5,17 4,8" fill="none" stroke="${c}" stroke-width="1.5"/><polygon points="12,8 15,11 14,16 12,17 10,16 9,11" fill="${c}" opacity="0.6"/></svg>`;
+  if (id === "solidCrystal") return `<svg viewBox="0 0 24 24"><polygon points="12,3 19,8 17,16 12,21 7,16 5,8" fill="${c}" opacity="0.35" stroke="${c}" stroke-width="1.5"/><path d="M12,3 L12,21 M5,8 L19,8 M7,16 L17,16" stroke="${c}" stroke-width="0.8" opacity="0.5"/></svg>`;
   if (id === "boss") return `<svg viewBox="0 0 24 24"><polygon points="12,2 22,9 18,21 6,21 2,9" fill="none" stroke="${c}" stroke-width="1.7"/><circle cx="12" cy="13" r="3" fill="${c}"/></svg>`;
   if (id === "comet") return `<svg viewBox="0 0 24 24"><circle cx="17" cy="7" r="3" fill="${c}"/><path d="M14 10 L4 20" stroke="${c}" stroke-width="2" stroke-linecap="round"/></svg>`;
   if (id === "shockwave") return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="${c}" stroke-width="1.5"/><circle cx="12" cy="12" r="7" fill="none" stroke="${c}" stroke-width="1.5" opacity="0.6"/><circle cx="12" cy="12" r="11" fill="none" stroke="${c}" stroke-width="1.5" opacity="0.3"/></svg>`;

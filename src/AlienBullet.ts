@@ -9,7 +9,7 @@ import { BEAT_GRID } from "./game/rhythmConstants";
 // Per-size visible radius. Small bullets read as a faster, tighter pinprick;
 // medium/big stay chunky so their threat is legible at distance.
 const SIZE_BULLET_RADIUS: Record<AlienSize, number> = {
-  big: 3.8,
+  big: 2.6,
   medium: 3.4,
   small: 2.2,
 };
@@ -66,9 +66,24 @@ export class AlienBullet {
     drawGlow(ctx, this.pos.x, this.pos.y, r * 7, headHue, 0.95);
     ctx.globalAlpha = 1;
     ctx.fillStyle = `hsla(${headHue + 40}, 100%, 96%, 1)`;
-    ctx.beginPath();
-    ctx.arc(this.pos.x, this.pos.y, r, 0, TAU);
-    ctx.fill();
+    if (this.size === "big") {
+      // Pointy dart — long nose, narrow waist, short tail. Oriented along velocity.
+      const angle = Math.atan2(this.vel.y, this.vel.x);
+      ctx.translate(this.pos.x, this.pos.y);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.moveTo(r * 3.2, 0);
+      ctx.lineTo(r * 0.2, -r * 0.9);
+      ctx.lineTo(-r * 1.6, -r * 0.35);
+      ctx.lineTo(-r * 1.6, r * 0.35);
+      ctx.lineTo(r * 0.2, r * 0.9);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.arc(this.pos.x, this.pos.y, r, 0, TAU);
+      ctx.fill();
+    }
     ctx.restore();
   }
 }

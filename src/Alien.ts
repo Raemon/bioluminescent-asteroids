@@ -58,13 +58,22 @@ const SIZE_HUE: Record<AlienSize, number> = {
 // multiplies by BEAT_GRID and aligns to the global beat clock so shots fall
 // exactly on the rhythm grid the player is already listening to.
 //   small  : one shot every 4 beats — sparse, but bullets travel farther/faster
-//   medium : shot, shot, REST, REST → 2 hits then 2-beat breather (4-beat cycle)
-//   big    : every beat, no rest    → relentless 1-beat cadence
-// The "rest" is encoded as a longer gap before the next shot in the cycle.
+//   medium : shot, shot (half-beat later), REST x3 → quick double-tap then 3-beat breather (4-beat cycle)
+//   big    : 8-shot burst on the half-beat in a wide arc, then 4-beat rest
+//            before the next burst (7 × 0.5 + 4 = 7.5-beat cycle).
 export const ALIEN_FIRE_PATTERN_BEATS: Record<AlienSize, number[]> = {
   small: [4],
-  medium: [1, 3],
-  big: [1],
+  medium: [0.5, 3.5],
+  big: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 4],
+};
+
+// Big aliens spray each 8-shot burst across a wide arc centred on the player.
+// Total spread ≈ 90°; offsets are evenly spaced so the burst paints a fan.
+export const BIG_ALIEN_BURST_LEN = 8;
+const BIG_ALIEN_ARC = Math.PI / 2;
+export const bigAlienBurstAngleOffset = (i: number): number => {
+  const t = i / (BIG_ALIEN_BURST_LEN - 1);
+  return (t - 0.5) * BIG_ALIEN_ARC;
 };
 
 // Hand-built panel for the alien hull. Same idea as bassteroid modules —
@@ -325,11 +334,12 @@ export class Alien {
 
   // Fire a bullet aimed at `target`. Returns the new bullet so Game can
   // append it to the alien-bullet list. Sets fireFlash for the visual cue.
-  fireAt(target: Vec): AlienBullet {
+  // `angleOffset` lets the caller spread a burst across an arc (big aliens).
+  fireAt(target: Vec, angleOffset: number = 0): AlienBullet {
     this.fireFlash = 1;
     const dx = target.x - this.pos.x;
     const dy = target.y - this.pos.y;
-    const angle = Math.atan2(dy, dx);
+    const angle = Math.atan2(dy, dx) + angleOffset;
     const speed = SIZE_BULLET_SPEED[this.size];
     const muzzle = add(this.pos, mul(fromAngle(angle, 1), this.radius + 4));
     return new AlienBullet(muzzle, fromAngle(angle, speed), this.size, this.hue);
