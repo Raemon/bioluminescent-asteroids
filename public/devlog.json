@@ -1,1 +1,38 @@
-[]
+[
+  {
+    "id": "2026-06-03-c369430",
+    "date": "2026-06-03",
+    "title": "Solid crystals, manta aliens, and stinger bullets",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Solid crystal asteroids appear in waves — tougher than normal rocks, they shatter into fast fragments and drop collectible gems.",
+          "Alien ships now sport a sleek manta-ray silhouette with curved wings, cephalic horns, glowing structural ribs, and an animated whip tail.",
+          "Big aliens fire an 8-shot fan burst in a wide arc, then pause before the next volley.",
+          "Alien bullets now appear as slim stinger darts instead of round blobs.",
+          "The big alien's fire sound uses a sampled electric guitar."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Ship trajectory preview now shows directional chevrons instead of dots for clearer heading indication.",
+          "Aim disc rendering distinguishes between primary and secondary weapon slots.",
+          "Gold crystals shatter on ship contact with an updated sound effect."
+        ]
+      }
+    ],
+    "commits": [
+      "c369430",
+      "910f267",
+      "66b7114",
+      "dbbc27e",
+      "ff4ca70",
+      "3471d4f",
+      "4629957",
+      "783fe44",
+      "aa7e661"
+    ]
+  }
+]
