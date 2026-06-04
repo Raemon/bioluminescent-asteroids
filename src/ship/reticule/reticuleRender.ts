@@ -115,13 +115,15 @@ const effectiveBulletLife = (ship: Ship, superBoosted: boolean): number => {
 // half distance; integer-k reticules mark every beat-slot the bullet actually crosses
 // (t = beatGrid*k < life), so the count adapts to longshot/pierce/superBoosted range and to
 // the rhythm-gate tempo (eighth-grid at combo ≥ 12 or under rapid). slotIndices[k-1] points at
-// the centred k-beat reticule (anchor for that slot's hover-ring + drift-shot), or -1 when prong
-// is active (no centred shot) or that slot is out of range.
+// the k-beat reticule that anchors that slot's hover-ring + drift-shot. With prong the anchor
+// is one of the two prong reticules (the first angle offset) — drift eligibility lives at the
+// bullet level, so locking one prong gates the drift bonus for the whole shot pair.
 type ReticulePositions = { positions: Vec[]; primaryIndex: number; slotIndices: number[] };
 const computeReticulePositions = (
   ship: Ship, beatGrid: number, w: number, h: number, doubletime: boolean, superBoosted: boolean,
 ): ReticulePositions => {
   const angleOffsets = ship.prongActive ? [-PRONG_SPREAD, PRONG_SPREAD] : [0];
+  const anchorOffset = angleOffsets[0];
   const bulletLife = effectiveBulletLife(ship, superBoosted);
   const slotCount = Math.max(1, Math.floor(bulletLife / beatGrid));
   const integerFractions: number[] = [];
@@ -134,8 +136,8 @@ const computeReticulePositions = (
     for (const off of angleOffsets) {
       const idx = positions.length;
       positions.push(computeReticulePosition(ship, beatGrid, w, h, off, frac));
-      if (off === 0 && frac === 1) primaryIndex = idx;
-      if (off === 0 && Number.isInteger(frac) && frac >= 1 && frac <= slotCount) {
+      if (off === anchorOffset && frac === 1) primaryIndex = idx;
+      if (off === anchorOffset && Number.isInteger(frac) && frac >= 1 && frac <= slotCount) {
         slotIndices[frac - 1] = idx;
       }
     }
@@ -282,13 +284,12 @@ export const renderShipReticules = (
 ) => {
   if (!ship.alive) return;
   const { positions: reticulePositions, primaryIndex, slotIndices } = computeReticulePositions(ship, beatGrid, w, h, doubletime, superBoosted);
-  // trajectory preview anchors on the centred "shoot now to hit next beat" spot. With prong
-  // active there's no drawn reticule there, so compute the anchor directly from ship heading.
+  // trajectory preview anchors on the "shoot now to hit next beat" spot. primaryIndex always
+  // exists now (anchors on the first prong offset under prong), but keep the fallback for safety.
   const primaryReticule = primaryIndex >= 0
     ? reticulePositions[primaryIndex]
     : computeReticulePosition(ship, beatGrid, w, h, 0, 1);
-  // one entry per reachable on-beat slot; null where no centred reticule exists for that slot
-  // (e.g. prong fans the shot, so no slot has a centred point to hover).
+  // one entry per reachable on-beat slot; null where no reticule exists for that slot (out of range).
   const reticulePosBySlot: Array<Vec | null> = slotIndices.map(i => i >= 0 ? reticulePositions[i] : null);
   // grow the Ship's hover-ring array to match if range extended this frame; never shrink (so a
   // brief range loss doesn't wipe a partially-locked ring).
@@ -313,8 +314,8 @@ export const renderShipReticules = (
     trajectoryTracks: state.trajectoryTracks, doubletime, tutorialHighlight,
   }, targets);
   const fromTrajectory = trajectoryResult.overlapsReticule;
-  // reverse map: position-index → slot number (1-indexed). For prong, slotIndices entries are
-  // -1 so this stays -1 and the reticule uses the default tick length.
+  // reverse map: position-index → slot number (1-indexed). The non-anchor prong reticule for
+  // each slot stays -1 and uses the default tick length, so the slot cue reads off the anchor side.
   const slotByPosIndex = new Array<number>(reticulePositions.length).fill(-1);
   for (let s = 0; s < slotIndices.length; s++) {
     if (slotIndices[s] >= 0) slotByPosIndex[slotIndices[s]] = s + 1;

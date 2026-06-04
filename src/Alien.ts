@@ -1,4 +1,4 @@
-import { Vec, v, add, mul, fromAngle, rand, TAU, wrapMut } from "./vec";
+import { Vec, v, add, mul, fromAngle, rand, TAU } from "./vec";
 import { AlienBullet } from "./AlienBullet";
 import { Trail } from "./Trail";
 
@@ -9,9 +9,10 @@ import { Trail } from "./Trail";
 //   "medium" : 2 HP, fires every beat (BEAT_GRID).
 //   "small"  : 1 HP, fires every beat (BEAT_GRID).
 //
-// Aliens drift across the field on a slow lazy weave. They're not aiming for
-// the player directly — they shoot toward the player's current position when
-// the beat lands, so the player can dodge by moving.
+// Aliens fly across the field on a slow arcing curve with a lazy weave on top.
+// They don't wrap — once they drift off the far side of the screen they're gone.
+// They're not aiming for the player directly — they shoot toward the player's
+// current position when the beat lands, so the player can dodge by moving.
 export type AlienSize = "big" | "medium" | "small";
 
 const SIZE_RADIUS: Record<AlienSize, number> = {
@@ -330,6 +331,10 @@ export class Alien {
   // rather than a straight line.
   weavePhase: number;
   weaveSpeed: number;
+  // Slow rotation of the velocity vector (rad/sec). Signed, small magnitude —
+  // bends the flight path into an arc that may loop once before the alien
+  // drifts off the far side of the screen.
+  curveRate: number;
   // Rotation follows the heading (so the nose points along velocity), with
   // a small sway added in render() for life.
   rotation: number;
@@ -362,6 +367,10 @@ export class Alien {
     this.cracks = rollAlienCracks(this.maxHp);
     this.weavePhase = rand(0, TAU);
     this.weaveSpeed = rand(0.6, 1.1);
+    // 0.15–0.35 rad/sec, random sign. At ~100 px/sec that's a ~300px-radius
+    // turn — a clear arc across a 1200px field, with enough variance that some
+    // aliens loop back over their own path before exiting.
+    this.curveRate = rand(0.15, 0.35) * (Math.random() < 0.5 ? -1 : 1);
     this.rotation = Math.atan2(vel.y, vel.x);
     this.shape = buildMantaShape(size);
     this.sprite = this.buildSprite();
@@ -375,17 +384,30 @@ export class Alien {
 
   update(dt: number, w: number, h: number) {
     this.weavePhase += dt * this.weaveSpeed;
+    // Bend the velocity vector slowly so the flight path arcs (and sometimes
+    // loops) instead of going in a straight line. Rotate (vx, vy) by curveRate*dt.
+    const cosR = Math.cos(this.curveRate * dt);
+    const sinR = Math.sin(this.curveRate * dt);
+    const nvx = this.vel.x * cosR - this.vel.y * sinR;
+    const nvy = this.vel.x * sinR + this.vel.y * cosR;
+    this.vel.x = nvx;
+    this.vel.y = nvy;
     // Sideways weave perpendicular to current heading — gives the alien a
     // saucer-like sway without making it impossible to predict where it's
     // going to be in a couple of seconds.
     const heading = Math.atan2(this.vel.y, this.vel.x);
-    // perp = unit vector perpendicular to heading (rotated +π/2): (-sin, cos).
     const perpX = -Math.sin(heading);
     const perpY =  Math.cos(heading);
     const swayMag = Math.sin(this.weavePhase) * 18;
     this.pos.x += (this.vel.x + perpX * swayMag) * dt;
     this.pos.y += (this.vel.y + perpY * swayMag) * dt;
-    wrapMut(this.pos, w, h);
+    // No wrap — drift off the far side and despawn. Margin covers the sprite
+    // extent plus halo so it's fully out of view before we drop it.
+    const margin = this.radius * 2 + 40;
+    if (this.pos.x < -margin || this.pos.x > w + margin ||
+        this.pos.y < -margin || this.pos.y > h + margin) {
+      this.alive = false;
+    }
     // Nose follows the direction of travel, with a tiny weave-driven sway so
     // the silhouette breathes instead of locking rigidly to the velocity.
     this.rotation = heading + Math.sin(this.weavePhase) * 0.12;

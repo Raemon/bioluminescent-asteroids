@@ -454,6 +454,7 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   pruneDeadComets(game);
   for (const a of game.asteroids) a.update(musicDt, game.w, game.h);
   for (const al of game.aliens) al.update(musicDt, game.w, game.h);
+  pruneOffscreenAliens(game);
   tickAlienFire(game);
   for (const b of game.bullets) b.update(musicDt, game.w, game.h);
   compactInPlace(game.bullets, (b) => b.life > 0);
@@ -501,6 +502,18 @@ const pruneDeadComets = (game: Game) => {
     else game.sound.stopCometShimmer(c);
   }
   game.comets = survivingComets;
+};
+
+// Aliens fly across the field on an arc and despawn once they drift past the
+// far side. They mark themselves !alive in update(); we drop them here and
+// release their drone so the chord doesn't keep humming after they're gone.
+const pruneOffscreenAliens = (game: Game) => {
+  const surviving: typeof game.aliens = [];
+  for (const a of game.aliens) {
+    if (a.alive) surviving.push(a);
+    else game.sound.stopAlienDrone(a);
+  }
+  game.aliens = surviving;
 };
 
 // shots aim at the player's pos at fire-time — dodging works by moving between beats.
