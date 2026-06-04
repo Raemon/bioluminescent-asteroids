@@ -20,9 +20,8 @@ import {
   saveBindings,
 } from "../game/controlBindings";
 
-// Settings panel opened by the HUD gear. Three tabs:
-//   Audio    — per-channel volume (base pulse / SFX / music / vocals)
-//   Music    — rhythm latency calibration
+// Settings panel opened by the HUD gear. Two tabs:
+//   Audio    — per-channel volume + rhythm latency calibration
 //   Controls — keyboard bindings
 // Callsign sits above the tab strip so it's always editable regardless of
 // which tab is open.
@@ -32,14 +31,13 @@ const OFFSET_MAX_MS = 350;
 const OFFSET_STEP_MS = 5;
 
 type CaptureTarget = { action: ControlAction } | null;
-type Tab = "audio" | "music" | "controls";
+type Tab = "audio" | "controls";
 
 const TAB_LABELS: Record<Tab, string> = {
   audio:    "Audio",
-  music:    "Music",
   controls: "Controls",
 };
-const TAB_ORDER: readonly Tab[] = ["audio", "music", "controls"];
+const TAB_ORDER: readonly Tab[] = ["audio", "controls"];
 
 export const SettingsDialog = () => {
   const [open, setOpen] = useState(false);
@@ -208,51 +206,51 @@ export const SettingsDialog = () => {
         </div>
 
         {tab === "audio" && (
-          <section className="settings-section">
-            <div className="settings-section-head">
-              <span className="settings-section-title">Audio Mix</span>
-            </div>
-            <div className="settings-volume-grid">
-              {CHANNEL_ORDER.map((ch) => (
-                <div key={ch} className="settings-volume-row">
-                  <span className="settings-volume-label">{CHANNEL_LABELS[ch]}</span>
+          <>
+            <section className="settings-section">
+              <div className="settings-section-head">
+                <span className="settings-section-title">Audio Mix</span>
+              </div>
+              <div className="settings-volume-grid">
+                {CHANNEL_ORDER.map((ch) => (
+                  <div key={ch} className="settings-volume-row">
+                    <span className="settings-volume-label">{CHANNEL_LABELS[ch]}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={volumes[ch]}
+                      onChange={(e) => applyVolume(ch, Number(e.target.value))}
+                    />
+                    <span className="settings-volume-pct">{Math.round(volumes[ch] * 100)}%</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section-head">
+                <span className="settings-section-title">Rhythm Latency Calibration</span>
+                <button type="button" className="settings-link" onClick={resync}>Resync the beat ▸</button>
+              </div>
+              <div className="settings-row">
+                <div className="settings-latency">
+                  <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs - OFFSET_STEP_MS)}>−</button>
                   <input
                     type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={volumes[ch]}
-                    onChange={(e) => applyVolume(ch, Number(e.target.value))}
+                    min={OFFSET_MIN_MS}
+                    max={OFFSET_MAX_MS}
+                    step={OFFSET_STEP_MS}
+                    value={offsetMs}
+                    onChange={(e) => applyOffset(Number(e.target.value))}
                   />
-                  <span className="settings-volume-pct">{Math.round(volumes[ch] * 100)}%</span>
+                  <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs + OFFSET_STEP_MS)}>+</button>
+                  <span className="settings-ms">{offsetMs >= 0 ? "+" : "−"}{Math.abs(offsetMs)} ms</span>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {tab === "music" && (
-          <section className="settings-section">
-            <div className="settings-section-head">
-              <span className="settings-section-title">Rhythm Latency Calibration</span>
-              <button type="button" className="settings-link" onClick={resync}>Resync the beat ▸</button>
-            </div>
-            <div className="settings-row">
-              <div className="settings-latency">
-                <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs - OFFSET_STEP_MS)}>−</button>
-                <input
-                  type="range"
-                  min={OFFSET_MIN_MS}
-                  max={OFFSET_MAX_MS}
-                  step={OFFSET_STEP_MS}
-                  value={offsetMs}
-                  onChange={(e) => applyOffset(Number(e.target.value))}
-                />
-                <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs + OFFSET_STEP_MS)}>+</button>
-                <span className="settings-ms">{offsetMs >= 0 ? "+" : "−"}{Math.abs(offsetMs)} ms</span>
               </div>
-            </div>
-          </section>
+            </section>
+          </>
         )}
 
         {tab === "controls" && (
