@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { loadBeatOffset, clampBeatOffset } from "../game/beatCalibration";
 import { getRecentName, saveRecentName } from "../game/highscores";
+import { getVocalsEnabled, setVocalsEnabled } from "../game/vocalsPref";
 import {
   ACTION_LABELS,
   ACTION_ORDER,
@@ -30,6 +31,7 @@ export const SettingsDialog = () => {
   const [offsetMs, setOffsetMs] = useState(0);
   const [callsign, setCallsign] = useState("");
   const [bindings, setBindings] = useState<Bindings>(() => getBindings());
+  const [vocalsOn, setVocalsOn] = useState<boolean>(() => getVocalsEnabled());
   const [capture, setCapture] = useState<CaptureTarget>(null);
   const captureRef = useRef<CaptureTarget>(null);
   captureRef.current = capture;
@@ -39,6 +41,7 @@ export const SettingsDialog = () => {
     setOffsetMs(Math.round((loadBeatOffset() ?? 0) * 1000));
     setCallsign(getRecentName());
     setBindings(getBindings());
+    setVocalsOn(getVocalsEnabled());
     setCapture(null);
     setOpen(true);
     // freezes the sim if a run is in progress (see Game / updateGame).
@@ -124,6 +127,11 @@ export const SettingsDialog = () => {
     });
   };
 
+  const toggleVocals = (on: boolean) => {
+    setVocalsOn(on);
+    setVocalsEnabled(on);
+  };
+
   const resetControls = () => {
     resetBindings();
     setBindings(getBindings());
@@ -178,6 +186,17 @@ export const SettingsDialog = () => {
               <span className="settings-ms">{offsetMs >= 0 ? "+" : "−"}{Math.abs(offsetMs)} ms</span>
             </div>
           </div>
+        </section>
+
+        <section className="settings-section">
+          <label className="settings-check">
+            <input
+              type="checkbox"
+              checked={!vocalsOn}
+              onChange={(e) => toggleVocals(!e.target.checked)}
+            />
+            <span>Disable Pilot's Log vocals</span>
+          </label>
         </section>
 
         <section className="settings-section">

@@ -3,6 +3,7 @@
 // annotations on the engine struct without dragging the runtime in.
 import type * as Tone from "tone";
 import { cfgN, cfgU } from "./soundConfig";
+import { getVocalsEnabled } from "./game/vocalsPref";
 
 type ToneModule = typeof import("tone");
 let toneModulePromise: Promise<ToneModule> | null = null;
@@ -2769,6 +2770,7 @@ export class Sound {
   // the spoken word. `delaySec` lets the caller align to a downbeat.
   async playPilotLog(milestone: number, delaySec = 0, gain = 1.0): Promise<number> {
     if (!this.enabled) return 0;
+    if (!getVocalsEnabled()) return 0;
     this.ensureContext();
     if (!this.ctx || !this.bakedOut) return 0;
     const urls = pilotLogUrlsForIndex(milestone);
