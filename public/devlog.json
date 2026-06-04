@@ -1,5 +1,29 @@
 [
   {
+    "id": "2026-06-04-f05b6e2",
+    "date": "2026-06-04",
+    "title": "Prong aiming improvements and Pilot's Log vocals option",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Added a setting to disable Pilot's Log vocals while still unlocking log entries normally."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Prong shots now correctly show hover rings on both prong reticules, and drift-lock can trigger off either prong.",
+          "Aim disc tick lengths now render correctly on each individual prong reticule."
+        ]
+      }
+    ],
+    "commits": [
+      "f05b6e2",
+      "706895c"
+    ]
+  },
+  {
     "id": "2026-06-04-1d4bce6",
     "date": "2026-06-04",
     "title": "Aliens now arc and drift off-screen instead of wrapping",
