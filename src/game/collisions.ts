@@ -1,4 +1,5 @@
 import type { Game } from "../Game";
+import { rng } from "./rng";
 import { Asteroid } from "../Asteroid";
 import { Alien } from "../Alien";
 import { Comet } from "../Comet";
@@ -345,7 +346,7 @@ const crackGoldCrystalForCanister = (game: Game, g: GoldCrystal) => {
   game.sound.play("tink", 1, g.pos);
   game.shake = Math.min(game.shake + 0.25, 1.2);
   emitGoldCrystalPickup(game.particles, g);
-  if (Math.random() < GOLD_CRYSTAL_UPGRADE_CHANCE) {
+  if (rng() < GOLD_CRYSTAL_UPGRADE_CHANCE) {
     const canister = spawnCanisterFromGoldCrystal(g, game.w, game.h);
     game.canisters.push(canister);
     game.sound.play("canisterAppear", 1, g.pos);

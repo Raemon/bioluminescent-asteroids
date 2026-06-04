@@ -121,6 +121,10 @@ export const Overlay = () => {
         <button type="submit" id="score-entry-submit">Save Score</button>
         <p id="score-entry-status" className="score-entry-status" />
       </form>
+      <div id="replay-save" className="hidden">
+        <button id="replay-save-btn" type="button">Save Replay</button>
+        <p id="replay-save-status" className="score-entry-status" />
+      </div>
       <div id="leaderboard" className="hidden">
         <ol id="leaderboard-list" />
         <div id="leaderboard-footer">

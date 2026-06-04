@@ -30,6 +30,7 @@ export type HighscoreRow = {
   max_combo: number;
   kill_count: number;
   kill_summary: Record<string, number>;
+  has_replay?: boolean;
   created_at: string;
 };
 

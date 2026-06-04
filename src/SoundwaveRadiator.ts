@@ -1,4 +1,5 @@
 import type { SilhouetteSample } from "./Asteroid";
+import { rng } from "./game/rng";
 
 // Radiating-soundwave visualiser for fragmented (post-split) bassteroids.
 // Replaces the slow glow Trail once a bassteroid has been broken into mediums
@@ -266,8 +267,8 @@ export class SoundwaveRadiator {
     this.hue = hue;
     this.silhouette = silhouette;
     this.lightnessLift = isHighOctave ? 8 : 0;
-    this.lfoPhase = Math.random() * Math.PI * 2;
-    this.emitJitter = (Math.random() - 0.5) * 0.15;
+    this.lfoPhase = rng() * Math.PI * 2;
+    this.emitJitter = (rng() - 0.5) * 0.15;
     this.buf = new Float32Array(CAPACITY * STRIDE);
     // Pre-fill: emit one wave immediately so the visualiser doesn't have a
     // dead beat right after the bassteroid splits.
@@ -317,12 +318,12 @@ export class SoundwaveRadiator {
     // Small per-wave rotation so successive waves don't stamp on top of
     // each other rigidly — gives a subtle "the resonance shape rotates a
     // little each cycle" feel.
-    this.buf[base + 3] = Math.random() * Math.PI * 2;
+    this.buf[base + 3] = rng() * Math.PI * 2;
     this.buf[base + 4] = vx * VELOCITY_INHERIT;
     this.buf[base + 5] = vy * VELOCITY_INHERIT;
     this.buf[base + 6] = speed;
     this.buf[base + 7] = velAngle;
-    this.buf[base + 8] = Math.random() * Math.PI * 2;
+    this.buf[base + 8] = rng() * Math.PI * 2;
     this.head = (this.head + 1) % CAPACITY;
     if (this.count < CAPACITY) this.count += 1;
   }

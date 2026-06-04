@@ -1,4 +1,5 @@
 import { rand } from "../vec";
+import { rng } from "./rng";
 
 // one event slot type collapses canister/shockwave/comet/alien into uniform schedule entries.
 export type WaveEvent = {
@@ -25,7 +26,7 @@ export const maybeSchedule = (
   window: [number, number],
   fire: () => void,
 ) => {
-  if (Math.random() >= chance) return;
+  if (rng() >= chance) return;
   scheduleAt(sch, rand(window[0], window[1]), fire);
 };
 

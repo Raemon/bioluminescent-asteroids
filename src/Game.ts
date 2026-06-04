@@ -5,7 +5,7 @@ import { ParticleSystem } from "./Particle";
 import { Shard } from "./Shard";
 import { Starfield } from "./Starfield";
 import { Pulsar } from "./Pulsar";
-import { Input } from "./Input";
+import { Input, IInput } from "./Input";
 import { Sound } from "./Sound";
 import type { AudioChannel } from "./game/audioPrefs";
 import { Canister } from "./Canister";
@@ -29,13 +29,13 @@ import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
 // re-export so existing external imports (Ship.ts) keep working without touching their imports.
 export { BEAT_GRID } from "./game/rhythmConstants";
 
-type GameState = "title" | "playing" | "paused" | "dying" | "gameover";
+type GameState = "title" | "playing" | "paused" | "dying" | "gameover" | "replaying";
 
 // Game holds the cross-cutting state every helper in src/game/* reads; behavior lives in modules.
 export class Game implements HudElements {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
-  input: Input;
+  input: IInput;
   sound: Sound;
   starfield: Starfield;
   pulsar: Pulsar;
@@ -165,6 +165,19 @@ export class Game implements HudElements {
   // one unified list replaces four parallel `xSpawnAt` fields used to schedule mid-wave events.
   waveEvents: WaveEventSchedule = newWaveEventSchedule();
 
+  // Replay system. runSeed is the 32-bit PRNG seed minted at startGame; the
+  //   recorder buffers per-frame dt + key deltas; the player drives state ===
+  //   "replaying". lastRunReplay is the serialised gzip bytes from the most
+  //   recent run, available for upload once the player names their score.
+  runSeed = 0;
+  recorder: import("./game/replayRecorder").ReplayRecorder | null = null;
+  replayPlayer: import("./game/replayPlayer").ReplayPlayer | null = null;
+  lastRunReplay: Uint8Array | null = null;
+  // localInput is the real keyboard-bound Input; the replay path swaps `input`
+  //   to point at the player's ReplayInput while a replay is running, and we
+  //   restore localInput when returning to title.
+  localInput!: Input;
+
   scoreEl: HTMLElement;
   scoreFlashEl: HTMLElement;
   comboEl: HTMLElement;
@@ -183,6 +196,9 @@ export class Game implements HudElements {
   scoreEntryStatusEl: HTMLElement;
   leaderboardEl: HTMLElement;
   leaderboardListEl: HTMLOListElement;
+  replaySaveEl: HTMLElement;
+  replaySaveBtnEl: HTMLButtonElement;
+  replaySaveStatusEl: HTMLElement;
   debugOverlayEl: HTMLElement;
   debugFpsEl: HTMLElement;
   // backtick (`) toggles #debug-overlay. FPS readout is always visible (bottom-right).
@@ -240,7 +256,8 @@ export class Game implements HudElements {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("2D context unavailable");
     this.ctx = ctx;
-    this.input = new Input();
+    this.localInput = new Input();
+    this.input = this.localInput;
     this.sound = new Sound();
     this.resize();
     this.starfield = new Starfield(this.w, this.h);
@@ -266,6 +283,9 @@ export class Game implements HudElements {
     this.scoreEntryStatusEl = hud.scoreEntryStatusEl;
     this.leaderboardEl = hud.leaderboardEl;
     this.leaderboardListEl = hud.leaderboardListEl;
+    this.replaySaveEl = hud.replaySaveEl;
+    this.replaySaveBtnEl = hud.replaySaveBtnEl;
+    this.replaySaveStatusEl = hud.replaySaveStatusEl;
     this.debugOverlayEl = hud.debugOverlayEl;
     this.debugFpsEl = hud.debugFpsEl;
     this.debugOverlayEl.classList.toggle("hidden", !this.debugMode);

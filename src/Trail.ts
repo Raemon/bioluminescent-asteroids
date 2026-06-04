@@ -1,4 +1,5 @@
 import { drawGlow } from "./glow";
+import { rng } from "./game/rng";
 
 // Pre-baked, GC-free glow trail. Each trailed object owns one Trail; the trail
 // records (x, y, age) for the object's recent positions in a fixed-size ring
@@ -99,7 +100,7 @@ export class Trail {
     this.baseAlpha = baseAlpha;
     this.pulse = pulse;
     this.pulseRate = pulseRate;
-    this.phase = Math.random() * Math.PI * 2;
+    this.phase = rng() * Math.PI * 2;
     this.capacity = capacity;
     this.buf = new Float32Array(capacity * STRIDE);
   }

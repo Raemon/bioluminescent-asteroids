@@ -1,14 +1,20 @@
 import { Vec, v, fromAngle, rand, TAU, addScaledMut, wrapMut } from "./vec";
 import { Trail } from "./Trail";
 import { SoundwaveRadiator } from "./SoundwaveRadiator";
+import { rng } from "./game/rng";
 
 const HUE_PALETTE = [185, 200, 220, 250, 280, 310, 330];
 
-let huePaletteCursor = Math.floor(Math.random() * HUE_PALETTE.length);
+// Lazy-init so the first cursor pick comes from the seeded RNG (after startGame
+// calls seedRng) rather than module-load Math.random — replays would diverge.
+let huePaletteCursor = -1;
 export const nextWaveHue = (): number => {
-  huePaletteCursor = (huePaletteCursor + 1 + Math.floor(Math.random() * (HUE_PALETTE.length - 1))) % HUE_PALETTE.length;
+  if (huePaletteCursor < 0) huePaletteCursor = Math.floor(rng() * HUE_PALETTE.length);
+  huePaletteCursor = (huePaletteCursor + 1 + Math.floor(rng() * (HUE_PALETTE.length - 1))) % HUE_PALETTE.length;
   return HUE_PALETTE[huePaletteCursor];
 };
+
+export const resetHuePaletteCursor = (): void => { huePaletteCursor = -1; };
 
 type Harmonic = { amp: number; freq: number; phase: number };
 
@@ -469,11 +475,11 @@ const rollCracks = (count: number): AsteroidCrack[] => {
     // 3–4 jagged forks per impact, each a short zig-zag polyline radiating
     // from the impact centre. Forks are stored in local crack-space; the
     // renderer translates+rotates them into the bassteroid's frame.
-    const forkCount = 3 + Math.floor(Math.random() * 2);
+    const forkCount = 3 + Math.floor(rng() * 2);
     const branches: { points: Vec[] }[] = [];
     for (let f = 0; f < forkCount; f++) {
       const baseAngle = (f / forkCount) * TAU + rand(-0.4, 0.4);
-      const segments = 3 + Math.floor(Math.random() * 2);
+      const segments = 3 + Math.floor(rng() * 2);
       const points: Vec[] = [v(0, 0)];
       let cx = 0;
       let cy = 0;
@@ -639,7 +645,7 @@ export class Asteroid {
     // 0/1/2/3 gems — and pick local-space spots so they can be pre-baked into
     // the sprite as frosted hints and dropped at the same positions on death.
     if (kind === "solidCrystal") {
-      const gemRoll = Math.random();
+      const gemRoll = rng();
       this.embeddedGemCount = gemRoll < 0.6 ? 0 : gemRoll < 0.85 ? 1 : gemRoll < 0.95 ? 2 : 3;
       for (let i = 0; i < this.embeddedGemCount; i++) {
         const angle = rand(0, TAU);
@@ -1453,7 +1459,7 @@ export class Asteroid {
         // Broken pieces tumble. Mediums (gen-1) drift with a gentle wobble;
         // smalls (gen-2) — the lightest fragments — spin noticeably faster.
         const spinMag = childSize === "medium" ? rand(0.4, 0.9) : rand(1.4, 2.6);
-        child.rotSpeed = spinMag * (Math.random() < 0.5 ? -1 : 1);
+        child.rotSpeed = spinMag * (rng() < 0.5 ? -1 : 1);
         fragmentList.push(child);
       }
       return fragmentList;
@@ -1481,7 +1487,7 @@ export class Asteroid {
         // even a stationary parent ejects sharp shards.
         const speedMag = parentSpeed * rand(1.1, 1.5) + rand(180, 240);
         const child = new Asteroid(childPos, fromAngle(childAngle, speedMag), "small", this.hue, "solidCrystalSmall");
-        child.rotSpeed = rand(1.2, 2.4) * (Math.random() < 0.5 ? -1 : 1);
+        child.rotSpeed = rand(1.2, 2.4) * (rng() < 0.5 ? -1 : 1);
         fragmentList.push(child);
       }
       return fragmentList;
@@ -1528,7 +1534,7 @@ export class Asteroid {
     const nx = -dy, ny = dx;
 
     let hitClass: "center" | "normal" | "glancing" = "normal";
-    let perpSign = Math.random() < 0.5 ? -1 : 1;
+    let perpSign = rng() < 0.5 ? -1 : 1;
     if (impactDir && opts?.impactPos) {
       const ox = this.pos.x - opts.impactPos.x;
       const oy = this.pos.y - opts.impactPos.y;
@@ -1542,9 +1548,9 @@ export class Asteroid {
     // Rare 4-small pulverise: a flat 1-in-10 roll on any large kill. Kept
     // rare so it stays a treat rather than the default outcome.
     const PULVERISE_CHANCE = 0.1;
-    const pulverise = Math.random() < PULVERISE_CHANCE;
+    const pulverise = rng() < PULVERISE_CHANCE;
     // When the pulverise fires, pick line vs cross 50/50.
-    const pulveriseCross = pulverise && Math.random() < 0.5;
+    const pulveriseCross = pulverise && rng() < 0.5;
 
     // Mass units (small = 1, medium = 8, large = 64). Used only for the
     // momentum-balance arithmetic below, not for any other game system.
@@ -1577,7 +1583,7 @@ export class Asteroid {
       //            counter-recoils at 1/8 of the small's perp kick).
       // Both conserve momentum within the perpendicular axis and apply the
       // usual forward bullet push to the cloud's centre of mass.
-      const trio = Math.random() < 0.5;
+      const trio = rng() < 0.5;
       if (trio) {
         // 3 smalls: symmetric around the bullet axis. One straight forward
         // (perp = 0), two flanking at ±PERP. Forward push spread so the
@@ -1590,7 +1596,7 @@ export class Asteroid {
       } else {
         // 1 small + 1 medium: small kicks hard sideways, medium counter-
         // recoils at 1/8 of the small's perp magnitude (8 = mass ratio).
-        const smallSign = Math.random() < 0.5 ? -1 : 1;
+        const smallSign = rng() < 0.5 ? -1 : 1;
         const smallPerp = smallSign * PERP_BURST * 1.25;
         const medPerp = -smallPerp / massOf("medium");
         specs = [
@@ -1967,7 +1973,7 @@ export class Asteroid {
       const segs = 6;
       for (let s = 1; s <= segs; s++) {
         const t = -1 + (s / segs) * 2;
-        const jitter = (Math.random() - 0.5) * r * 0.08;
+        const jitter = (rng() - 0.5) * r * 0.08;
         px = Math.cos(a) * r * 1.2 * t + Math.cos(a + Math.PI / 2) * (offset + jitter);
         py = Math.sin(a) * r * 1.2 * t + Math.sin(a + Math.PI / 2) * (offset + jitter);
         ctx.lineTo(px, py);
@@ -2148,7 +2154,7 @@ export const spawnAsteroidAtEdge = (
   kind: AsteroidKind = "normal",
   size: AsteroidSize = "large",
 ): Asteroid => {
-  const edge = Math.floor(Math.random() * 4);
+  const edge = Math.floor(rng() * 4);
   let pos: Vec;
   if (edge === 0) pos = v(rand(0, w), -40);
   else if (edge === 1) pos = v(w + 40, rand(0, h));

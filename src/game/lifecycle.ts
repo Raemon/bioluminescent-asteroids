@@ -15,6 +15,11 @@ import { HALO_MUSIC_POOL } from "./haloMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
 import { hideGameOverIntro, showGameOverIntro } from "./gameOverIntro";
 import { hasCalibrated, CALIBRATION_BEAT_INTENSITY } from "./beatCalibration";
+import { rng, seedRng } from "./rng";
+import { ReplayRecorder } from "./replayRecorder";
+import { ReplayPlayer } from "./replayPlayer";
+import { decodeReplay } from "./replayFormat";
+import { resetHuePaletteCursor } from "../Asteroid";
 
 // React-side <FirstWaveHint> subscribes to this so the canvas/game loop stays
 //   out of layout + transitions — CSS + a single setTimeout do the dismiss work.
@@ -97,7 +102,7 @@ export const emitTutorialFireHitDone = () => {
 const shuffled = <T,>(arr: ReadonlyArray<T>): T[] => {
   const out = arr.slice();
   for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [out[i], out[j]] = [out[j], out[i]];
   }
   return out;
@@ -295,6 +300,23 @@ export const startGame = (game: Game) => {
   for (const variation of HALO_MUSIC_POOL) {
     game.sound.preloadHaloMusic(variation);
   }
+  // Seed the PRNG before anything random fires (bassOrder shuffle, wave events,
+  //   asteroid hues). Re-arming the lazy hue cursor lets the first nextWaveHue
+  //   call after this draw from the seeded RNG, not whichever cursor a previous
+  //   run left behind.
+  game.runSeed = (crypto.getRandomValues(new Uint32Array(1))[0]) >>> 0;
+  seedRng(game.runSeed);
+  resetHuePaletteCursor();
+  game.recorder = new ReplayRecorder({
+    seed: game.runSeed,
+    beatOffset: game.beatOffset,
+    w: game.w,
+    h: game.h,
+    dpr: game.dpr,
+  });
+  game.replayPlayer = null;
+  game.lastRunReplay = null;
+  game.input = game.localInput;
   game.betaMode = false;
   game.state = "playing";
   game.score = 0;
@@ -421,10 +443,27 @@ export const emitGameState = (game: Game) => {
   window.dispatchEvent(new CustomEvent("game:state", { detail: { state: game.state } }));
 };
 
+// Finalise the in-flight replay recorder (live runs only — replay-driven runs
+//   already discarded it). Bytes land on game.lastRunReplay asynchronously
+//   after gzip; the gameover overlay polls for them before showing the upload
+//   button.
+export const finalizeRecorder = (game: Game): void => {
+  if (!game.recorder) return;
+  const r = game.recorder;
+  game.recorder = null;
+  void r.serialize({
+    score: game.score,
+    wave: game.wave,
+    maxCombo: game.maxCombo,
+    killCount: Object.values(game.killTally).reduce((s, n) => s + n, 0),
+  }).then((bytes) => { game.lastRunReplay = bytes; });
+};
+
 // lets a stuck player exit cleanly via the kill-row screen without having to die out.
 export const abortMission = (game: Game) => {
   if (game.state !== "paused") return;
   game.state = "gameover";
+  finalizeRecorder(game);
   game.ship.thrustOn = false;
   game.ship.reverseThrustOn = false;
   game.ship.portThrustOn = false;
@@ -489,4 +528,26 @@ export const applyVolume = (game: Game, multiplier: number) => {
 export const toggleMute = (game: Game) => {
   const next = game.sound.volume > 0 ? 0 : lastNonZeroVolume;
   applyVolume(game, next);
+};
+
+// Start playing a recorded replay. Reuses the live startGame init path (same
+//   sim, same ship spawn, same wave 1), then immediately substitutes the
+//   recorded seed for the freshly-minted one and swaps Game.input to the
+//   ReplayPlayer's ReplayInput. From there gameUpdate's "replaying" branch
+//   drives dt + key state from the recorded frames.
+export const startReplay = async (game: Game, bytes: Uint8Array): Promise<void> => {
+  const payload = await decodeReplay(bytes);
+  startGame(game);
+  // Override seed + RNG with the recorded values so the same sim outcomes fire.
+  game.runSeed = payload.header.seed;
+  seedRng(payload.header.seed);
+  resetHuePaletteCursor();
+  // Re-roll the per-run bass intro order now that we have the right seed —
+  //   startGame already drew one with the freshly-minted seed.
+  game.bassOrder = shuffled(BASS_KINDS);
+  game.recorder = null;
+  game.replayPlayer = new ReplayPlayer(payload);
+  game.input = game.replayPlayer.input;
+  game.state = "replaying";
+  emitGameState(game);
 };

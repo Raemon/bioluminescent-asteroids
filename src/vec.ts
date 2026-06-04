@@ -36,6 +36,8 @@ export const wrapMut = (a: Vec, w: number, h: number): void => {
 
 export const TAU = Math.PI * 2;
 
-export const rand = (min: number, max: number): number => min + Math.random() * (max - min);
+import { rng } from "./game/rng";
+
+export const rand = (min: number, max: number): number => min + rng() * (max - min);
 export const randInt = (min: number, max: number): number => Math.floor(rand(min, max + 1));
-export const pick = <T>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
+export const pick = <T>(arr: readonly T[]): T => arr[Math.floor(rng() * arr.length)];

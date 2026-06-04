@@ -25,7 +25,7 @@ import {
   handleGoldCrystalPickups,
   expireGoldCrystal,
 } from "./collisions";
-import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState } from "./lifecycle";
+import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState, finalizeRecorder } from "./lifecycle";
 import { syncHud, syncPowerupHud, syncComboHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
 import { updatePopups, popupDriftBonus } from "./popups";
@@ -37,6 +37,14 @@ import { isDown, wasPressed } from "./controlBindings";
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
+  // Replay overrides dt with the recorded value and feeds inputs through
+  //   the shared ReplayInput. When the stream is exhausted we transition to
+  //   gameover so the leaderboard "your standing" UI kicks in for the watcher.
+  if (game.state === "replaying" && game.replayPlayer) {
+    const replayDt = game.replayPlayer.nextFrame();
+    if (replayDt === null) { finishReplay(game); return; }
+    dt = replayDt;
+  }
   // First-run warm-up: the run has started but the world is held — only the beat
   //   ticks while the player practices the rhythm. The same clock carries into
   //   live play when finishCalibrationIntro fires, so the pulse never restarts.
@@ -54,17 +62,24 @@ export const updateGame = (game: Game, dt: number) => {
   if (game.state === "paused") { game.input.endFrame(); return; }
   game.time += dt * 1000;
   // title/gameover/paused freeze beatTime; playing+dying defer pulsar to after tickBassBeats.
-  if (game.state !== "playing" && game.state !== "dying") game.pulsar.update(dt, game.perceivedBeatTime, BEAT_GRID);
+  if (game.state !== "playing" && game.state !== "dying" && game.state !== "replaying") game.pulsar.update(dt, game.perceivedBeatTime, BEAT_GRID);
   routeStateUpdate(game, dt);
   if (game.shake > 0) game.shake = Math.max(0, game.shake - dt * 3);
   game.input.endFrame();
+};
+
+const finishReplay = (game: Game) => {
+  game.replayPlayer = null;
+  // Treat reaching the end of the stream like the player's natural game-over so
+  //   the existing gameover overlay + leaderboard view light up unchanged.
+  transitionToGameOver(game);
 };
 
 const routeStateUpdate = (game: Game, dt: number) => {
   if (game.state === "title") updateTitle(game, dt);
   else if (game.state === "gameover") updateGameOver(game, dt);
   else if (game.state === "dying") updateDying(game, dt);
-  else updatePlaying(game, dt);
+  else updatePlaying(game, dt);  // "playing" or "replaying"
 };
 
 // First-run warm-up tick: advance the beat clock and play the bgBeat (the very
@@ -148,6 +163,7 @@ const updateDying = (game: Game, dt: number) => {
 
 const transitionToGameOver = (game: Game) => {
   game.state = "gameover";
+  finalizeRecorder(game);
   game.sound.stopAllAlienDrones();
   game.sound.stopAllBassteroidDrones();
   game.sound.stopAllCometShimmers();
@@ -299,6 +315,7 @@ const tickBeatIntensityRamp = (game: Game, dt: number) => {
 
 // ordered phases (ship → bass → world → collisions) so cause-and-effect reads top-down.
 const updatePlaying = (game: Game, dt: number) => {
+  game.recorder?.captureFrame(dt, game.input);
   tickBeatIntensityRamp(game, dt);
   tickTutorialSpawn(game);
   if (game.controlsHintActive) tickControlsGate(game);

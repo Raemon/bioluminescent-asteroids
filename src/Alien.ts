@@ -1,6 +1,7 @@
 import { Vec, v, add, mul, fromAngle, rand, TAU } from "./vec";
 import { AlienBullet } from "./AlienBullet";
 import { Trail } from "./Trail";
+import { rng } from "./game/rng";
 
 // Three sizes, each with its own role in the rhythm:
 //   "big"    : 4 HP, fires every other beat (every 2× BEAT_GRID).
@@ -286,11 +287,11 @@ const rollAlienCracks = (count: number): AlienCrack[] => {
   for (let i = 0; i < count; i++) {
     const a = rand(0, TAU);
     const r = rand(0.18, 0.7);
-    const forkCount = 3 + Math.floor(Math.random() * 2);
+    const forkCount = 3 + Math.floor(rng() * 2);
     const branches: { points: Vec[] }[] = [];
     for (let f = 0; f < forkCount; f++) {
       const baseAngle = (f / forkCount) * TAU + rand(-0.4, 0.4);
-      const segments = 3 + Math.floor(Math.random() * 2);
+      const segments = 3 + Math.floor(rng() * 2);
       const points: Vec[] = [v(0, 0)];
       let cx = 0;
       let cy = 0;
@@ -370,7 +371,7 @@ export class Alien {
     // 0.15–0.35 rad/sec, random sign. At ~100 px/sec that's a ~300px-radius
     // turn — a clear arc across a 1200px field, with enough variance that some
     // aliens loop back over their own path before exiting.
-    this.curveRate = rand(0.15, 0.35) * (Math.random() < 0.5 ? -1 : 1);
+    this.curveRate = rand(0.15, 0.35) * (rng() < 0.5 ? -1 : 1);
     this.rotation = Math.atan2(vel.y, vel.x);
     this.shape = buildMantaShape(size);
     this.sprite = this.buildSprite();
@@ -862,7 +863,7 @@ export class Alien {
 }
 
 export const spawnAlienAtEdge = (w: number, h: number, size: AlienSize): Alien => {
-  const edge = Math.floor(Math.random() * 4);
+  const edge = Math.floor(rng() * 4);
   let pos: Vec;
   if (edge === 0) pos = v(rand(0, w), -40);
   else if (edge === 1) pos = v(w + 40, rand(0, h));

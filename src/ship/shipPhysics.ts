@@ -1,6 +1,6 @@
 import type { Ship } from "../Ship";
 import { addScaledMut, scaleMut, wrapMut } from "../vec";
-import { Input } from "../Input";
+import { IInput } from "../Input";
 import { ParticleSystem } from "../Particle";
 import { Bullet } from "../Bullet";
 import { Sound } from "../Sound";
@@ -11,7 +11,7 @@ import { isDown } from "../game/controlBindings";
 // initial 1/4 speed nudge, then hold for TURN_RAMP_DELAY before ramping to full over ~0.15s.
 const TURN_RAMP_DELAY = 0;
 const TURN_INITIAL_SCALE = 0.01;
-const updateTurning = (ship: Ship, input: Input, dt: number) => {
+const updateTurning = (ship: Ship, input: IInput, dt: number) => {
   const turnLeft = isDown(input, "rotateLeft");
   const turnRight = isDown(input, "rotateRight");
   if (turnLeft || turnRight) {
@@ -28,7 +28,7 @@ const updateTurning = (ship: Ship, input: Input, dt: number) => {
 };
 
 // tap-to-nudge feel; thrust ramps in over ~0.15s so a tap barely budges and a hold accelerates fully.
-const updateThrustRamp = (ship: Ship, input: Input, dt: number) => {
+const updateThrustRamp = (ship: Ship, input: IInput, dt: number) => {
   const active = isDown(input, "thrust") || isDown(input, "reverse");
   if (active) ship.thrustRamp = Math.min(1, ship.thrustRamp + dt / 0.15);
   else ship.thrustRamp = 0;
@@ -36,7 +36,7 @@ const updateThrustRamp = (ship: Ship, input: Input, dt: number) => {
 const thrustScale = (ship: Ship) => 0.02 + 0.98 * ship.thrustRamp;
 
 // thruster has to gate sound start/stop on the edge so the loop doesn't restart every frame.
-const updateForwardThrust = (ship: Ship, input: Input, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
+const updateForwardThrust = (ship: Ship, input: IInput, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasThrusting = ship.thrustOn;
   ship.thrustOn = isDown(input, "thrust");
   if (ship.thrustOn) {
@@ -50,7 +50,7 @@ const updateForwardThrust = (ship: Ship, input: Input, particles: ParticleSystem
 };
 
 // retro-thrust mirrors forward thrust with its own audio loop and front-vented jet flames.
-const updateReverseThrust = (ship: Ship, input: Input, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
+const updateReverseThrust = (ship: Ship, input: IInput, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasReversing = ship.reverseThrustOn;
   ship.reverseThrustOn = isDown(input, "reverse");
   if (ship.reverseThrustOn) {
@@ -68,7 +68,7 @@ const updateReverseThrust = (ship: Ship, input: Input, particles: ParticleSystem
 // Gated on the sideEngines powerup; bindings are empty by default so the
 // keys only do anything once the player has picked one up (and bound them).
 // Shares one audio loop that runs while either key is held.
-const updateSideThrust = (ship: Ship, input: Input, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
+const updateSideThrust = (ship: Ship, input: IInput, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasActive = ship.portThrustOn || ship.starboardThrustOn;
   ship.portThrustOn = ship.sideEnginesActive && isDown(input, "sidePort");
   ship.starboardThrustOn = ship.sideEnginesActive && isDown(input, "sideStarboard");
@@ -94,7 +94,7 @@ const updateSideThrust = (ship: Ship, input: Input, particles: ParticleSystem, s
 };
 
 // rapid powerup halves the cooldown; both states use the same trigger gate.
-const updateFireTrigger = (ship: Ship, input: Input, bullets: Bullet[]) => {
+const updateFireTrigger = (ship: Ship, input: IInput, bullets: Bullet[]) => {
   if (!isDown(input, "fire")) return;
   if (ship.fireCooldown > 0) return;
   fireBullets(ship, bullets);
@@ -122,7 +122,7 @@ const integrateMotion = (ship: Ship, dt: number, w: number, h: number) => {
 
 // one frame's worth of player control, audio, and motion — keeps Ship.update one-line readable.
 export const tickShip = (
-  ship: Ship, dt: number, input: Input,
+  ship: Ship, dt: number, input: IInput,
   particles: ParticleSystem, bullets: Bullet[],
   w: number, h: number, t: number, sound: Sound,
 ) => {

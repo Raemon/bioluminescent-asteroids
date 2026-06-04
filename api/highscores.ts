@@ -29,6 +29,7 @@ type RowOut = {
   max_combo: number;
   kill_count: number;
   kill_summary: KillSummary;
+  has_replay: boolean;
   created_at: Date | string;
 };
 
@@ -70,6 +71,7 @@ const toRowOut = (r: {
   maxCombo: number;
   killCount: number;
   killSummary: unknown;
+  replayData?: string | null;
   createdAt: Date;
 }): RowOut => ({
   id: r.id,
@@ -79,6 +81,7 @@ const toRowOut = (r: {
   max_combo: r.maxCombo,
   kill_count: r.killCount,
   kill_summary: (r.killSummary ?? {}) as KillSummary,
+  has_replay: !!r.replayData,
   created_at: r.createdAt,
 });
 
@@ -153,14 +156,53 @@ const invalidateCaches = () => {
   topRowsCache = null;
 };
 
+// Leaderboard reads skip the heavy replay_data column and instead return a
+//   boolean — the per-row payload would balloon by ~5 KB per replay otherwise.
+//   The actual bytes are fetched on demand by /api/replays?id=N.
+const LEADERBOARD_COLUMNS = {
+  id: true,
+  name: true,
+  score: true,
+  wave: true,
+  maxCombo: true,
+  killCount: true,
+  killSummary: true,
+  createdAt: true,
+} as const;
+
+type RawRow = {
+  id: number;
+  name: string;
+  score: number;
+  wave: number;
+  maxCombo: number;
+  killCount: number;
+  killSummary: unknown;
+  createdAt: Date;
+};
+
+const withHasReplay = (rows: RawRow[], hasReplayIds: Set<number>): RowOut[] =>
+  rows.map((r) => toRowOut({ ...r, replayData: hasReplayIds.has(r.id) ? "x" : null }));
+
+const fetchHasReplayIds = async (ids: number[]): Promise<Set<number>> => {
+  if (ids.length === 0) return new Set();
+  const rows = await prisma.highscore.findMany({
+    where: { id: { in: ids }, NOT: { replayData: null } },
+    select: { id: true },
+  });
+  return new Set(rows.map((r) => r.id));
+};
+
 const fetchTopPilots = async (): Promise<RowOut[]> => {
   const cached = readCache(topPilotsCache);
   if (cached) return cached;
   const rows = await prisma.highscore.findMany({
     orderBy: [{ score: "desc" }, { createdAt: "desc" }],
     take: TOP_PILOTS_SCAN,
+    select: LEADERBOARD_COLUMNS,
   });
-  const deduped = dedupeByPilot(rows.map(toRowOut), TOP_PILOTS_LIMIT);
+  const hasReplayIds = await fetchHasReplayIds(rows.map((r) => r.id));
+  const deduped = dedupeByPilot(withHasReplay(rows, hasReplayIds), TOP_PILOTS_LIMIT);
   topPilotsCache = { value: deduped, expires: Date.now() + CACHE_TTL_MS };
   return deduped;
 };
@@ -171,8 +213,10 @@ const fetchTopRows = async (): Promise<RowOut[]> => {
   const rows = await prisma.highscore.findMany({
     orderBy: [{ score: "desc" }, { createdAt: "desc" }],
     take: TOP_ROWS_CACHE_LIMIT,
+    select: LEADERBOARD_COLUMNS,
   });
-  const mapped = rows.map(toRowOut);
+  const hasReplayIds = await fetchHasReplayIds(rows.map((r) => r.id));
+  const mapped = withHasReplay(rows, hasReplayIds);
   topRowsCache = { value: mapped, expires: Date.now() + CACHE_TTL_MS };
   return mapped;
 };
@@ -225,9 +269,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         orderBy: [{ score: "desc" }, { createdAt: "desc" }],
         take: limit,
         skip: offset,
+        select: LEADERBOARD_COLUMNS,
       });
+      const hasReplayIds = await fetchHasReplayIds(rows.map((r) => r.id));
       res.setHeader("Cache-Control", "no-store");
-      res.status(200).json({ scores: rows.map(toRowOut) });
+      res.status(200).json({ scores: withHasReplay(rows, hasReplayIds) });
     } catch (err) {
       console.error("[highscores GET] db read failed:", err);
       res.status(500).json({ error: "DB read failed" });

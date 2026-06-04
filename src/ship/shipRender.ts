@@ -1,5 +1,6 @@
 import type { Ship } from "../Ship";
 import { Vec, add, fromAngle, TAU } from "../vec";
+import { rng } from "../game/rng";
 import { POWERUP_HUE } from "../Canister";
 import { renderComboHalo } from "./shipComboHalo";
 import { haloVertices } from "./shipHitbox";
@@ -36,7 +37,7 @@ const paintShipHull = (ctx: CanvasRenderingContext2D, verts: Vec[], invuln: numb
 // thrust flame is a hot radial gradient anchored behind the ship; jitter sells active combustion.
 const paintThrustFlame = (ctx: CanvasRenderingContext2D, ship: Ship) => {
   if (!ship.thrustOn) return;
-  const back = fromAngle(ship.heading + Math.PI, ship.radius * 1.8 + Math.random() * 4);
+  const back = fromAngle(ship.heading + Math.PI, ship.radius * 1.8 + rng() * 4);
   const grad = ctx.createRadialGradient(back.x, back.y, 0, back.x, back.y, 18);
   grad.addColorStop(0, "hsla(200, 100%, 80%, 0.9)");
   grad.addColorStop(0.5, "hsla(200, 100%, 60%, 0.3)");
@@ -50,7 +51,7 @@ const paintThrustFlame = (ctx: CanvasRenderingContext2D, ship: Ship) => {
 // a single retro flare at one corner — hot white core + cyan halo, jitter for arc-light feel.
 const paintRetroCornerFlare = (ctx: CanvasRenderingContext2D, ship: Ship, cornerOffset: number, flarePulse: number) => {
   const corner = fromAngle(ship.heading + cornerOffset, ship.radius * 1.0);
-  const tip = add(corner, fromAngle(ship.heading, ship.radius * 0.55 + Math.random() * 3));
+  const tip = add(corner, fromAngle(ship.heading, ship.radius * 0.55 + rng() * 3));
   const flareR = 12 * flarePulse;
   const grad = ctx.createRadialGradient(tip.x, tip.y, 0, tip.x, tip.y, flareR);
   grad.addColorStop(0, "hsla(200, 100%, 92%, 1.0)");
@@ -69,7 +70,7 @@ const paintRetroCornerFlare = (ctx: CanvasRenderingContext2D, ship: Ship, corner
 // twin flares show the retro venting forward from both rear corners, sells "reverse" visually.
 const paintRetroFlares = (ctx: CanvasRenderingContext2D, ship: Ship) => {
   if (!ship.reverseThrustOn) return;
-  const flarePulse = 0.85 + Math.random() * 0.3;
+  const flarePulse = 0.85 + rng() * 0.3;
   for (const cornerOffset of [Math.PI * 0.78, -Math.PI * 0.78]) {
     paintRetroCornerFlare(ctx, ship, cornerOffset, flarePulse);
   }
@@ -80,8 +81,8 @@ const paintRetroFlares = (ctx: CanvasRenderingContext2D, ship: Ship) => {
 // tell which engine is firing at a glance.
 const paintSideJet = (ctx: CanvasRenderingContext2D, ship: Ship, side: "port" | "starboard") => {
   const ventAngle = ship.heading + (side === "port" ? Math.PI / 2 : -Math.PI / 2);
-  const vent = fromAngle(ventAngle, ship.radius * 0.85 + Math.random() * 3);
-  const flareR = 12 * (0.85 + Math.random() * 0.3);
+  const vent = fromAngle(ventAngle, ship.radius * 0.85 + rng() * 3);
+  const flareR = 12 * (0.85 + rng() * 0.3);
   const grad = ctx.createRadialGradient(vent.x, vent.y, 0, vent.x, vent.y, flareR);
   grad.addColorStop(0, "hsla(38, 100%, 90%, 1.0)");
   grad.addColorStop(0.4, "hsla(28, 100%, 65%, 0.55)");

@@ -1,5 +1,6 @@
 import { Vec, v, fromAngle, rand, TAU, addScaledMut } from "./vec";
 import { Trail } from "./Trail";
+import { rng } from "./game/rng";
 
 // Ethereal background event that wanders across the field over ~25-40 seconds
 // playing a slow melodic phrase locked to the bass-beat grid. Doesn't collide
@@ -167,7 +168,7 @@ export class Comet {
 export const spawnComet = (w: number, h: number): Comet => {
   // Pick an off-screen origin and a target somewhere in the central band,
   // then derive velocity to traverse between them in ~14-18 seconds.
-  const edge = Math.floor(Math.random() * 4);
+  const edge = Math.floor(rng() * 4);
   const offset = 80;
   let from: Vec;
   if (edge === 0) from = v(-offset, rand(h * 0.15, h * 0.85));

@@ -6,14 +6,15 @@ import { renderPopups } from "./popups";
 import { computeConeFrame } from "../ship/reticule/coneGeometry";
 import { pickCenterMostTargetForFocus, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
 import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
+import { rng } from "./rng";
 
 // shake is purely cosmetic; isolate its math so render() reads top-down.
 const applyScreenShake = (game: Game): { shakeX: number; shakeY: number } => {
   if (game.shake <= 0) return { shakeX: 0, shakeY: 0 };
   game.shakeSeed += 1;
   return {
-    shakeX: (Math.random() - 0.5) * game.shake * 10,
-    shakeY: (Math.random() - 0.5) * game.shake * 10,
+    shakeX: (rng() - 0.5) * game.shake * 10,
+    shakeY: (rng() - 0.5) * game.shake * 10,
   };
 };
 

@@ -1,4 +1,5 @@
 import { Vec, v, rand, TAU } from "./vec";
+import { rng } from "./game/rng";
 
 // Background pulsar + parallax planets. The pulsar spins continuously (twin
 // magnetic-axis beams sweep around the core), pulses softly on every beat,
@@ -368,8 +369,8 @@ export class Pulsar {
       // Peaks heavy at the apex so the visual tension matches the audio
       // rising into the bass drop.
       const intensity = t * t * 22;
-      x += (Math.random() - 0.5) * 2 * intensity;
-      y += (Math.random() - 0.5) * 2 * intensity;
+      x += (rng() - 0.5) * 2 * intensity;
+      y += (rng() - 0.5) * 2 * intensity;
     }
     return { x, y };
   }
@@ -383,7 +384,7 @@ export class Pulsar {
     const dy = point.y - this.shockOriginY;
     const d = Math.hypot(dx, dy);
     if (d < 1e-3) {
-      const a = Math.random() * TAU;
+      const a = rng() * TAU;
       return v(Math.cos(a), Math.sin(a));
     }
     return v(dx / d, dy / d);
@@ -400,9 +401,10 @@ export class Pulsar {
     const flare = this.flare;
 
     // Pulsar wind nebula — a soft violet/blue wash centred on the pulsar.
-    // Drawn *underneath* the planets so their silhouettes occlude it, the
-    // way the Crab pulsar sits inside its glowing remnant. Grows with the
-    // approach factor and brightens during a wave-clear flare.
+    // Drawn before the rest of the pulsar so the body sits in its own
+    // remnant, the way the Crab pulsar does. Planets render *after* the
+    // pulsar (see below) and therefore eclipse both the nebula and the
+    // pulsar disc when they cross in front.
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     const nebulaRadius = r * 14 + minDim * 0.10;
@@ -416,41 +418,6 @@ export class Pulsar {
     ctx.arc(ppx, ppy, nebulaRadius, 0, TAU);
     ctx.fill();
     ctx.restore();
-
-    // Planets — flat silhouettes occluding the nebula behind them. Saturation
-    // climbs and lightness drops as we approach, so what reads as a faint
-    // tinted disc at wave 1 becomes a deep, near-black silhouette with a
-    // strong colour cast late game. The "prominent" planet (planets[0]) has
-    // larger growthRate / satGrowth / lightDrop than the secondary one.
-    // planets[0] also doubles as the first boss; while the boss is active
-    // (or defeated and the run is still going) we skip its draw entirely so
-    // the boss-asteroid in the foreground is the only thing the player
-    // sees from that hue. During the foreshadow wave we paint it much
-    // larger and more menacing.
-    for (let pi = 0; pi < this.planets.length; pi++) {
-      const planet = this.planets[pi];
-      const isBossPlanet = pi === 0;
-      if (isBossPlanet && (this.bossPlanetState === "active" || this.bossPlanetState === "defeated")) continue;
-
-      const foreshadow = isBossPlanet ? this.bossForeshadow : 0;
-      const radiusFrac = planet.baseRadiusFrac * (1 - approach * 0.55) * (1 - foreshadow * 0.4);
-      const angle = planet.baseAngle + this.driftT * planet.angularSpeed;
-      const px = cx + Math.cos(angle) * radiusFrac * minDim;
-      const py = cy + Math.sin(angle) * radiusFrac * minDim * 0.6;
-      // Foreshadow nearly doubles the apparent size of the boss planet so it
-      // genuinely looms in the wave-9 sky. 2.0× was settled on after smaller
-      // values failed to read as "much closer" against the existing approach.
-      const size = planet.baseSize * (1 + approach * planet.growthRate) * (1 + foreshadow * 2.0);
-      const sat = planet.baseSat + approach * planet.satGrowth;
-      const light = Math.max(2, planet.baseLight - approach * planet.lightDrop);
-
-      ctx.fillStyle = `hsl(${planet.hue}, ${sat}%, ${light}%)`;
-      ctx.beginPath();
-      ctx.arc(px, py, size, 0, TAU);
-      ctx.fill();
-
-      if (isBossPlanet && foreshadow > 0.02) this.renderBossPlanetMenace(ctx, px, py, size, foreshadow, planet.hue);
-    }
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -614,7 +581,200 @@ export class Pulsar {
 
     ctx.restore();
 
+    // Planets — drawn AFTER the pulsar so they occlude it. Iterated back-
+    // to-front: planets[1] is the smaller / farther one and goes down first,
+    // planets[0] is the larger / closer one and goes on top so the two
+    // silhouettes layer correctly when they cross.
+    for (let pi = this.planets.length - 1; pi >= 0; pi--) {
+      const planet = this.planets[pi];
+      const isBossPlanet = pi === 0;
+      if (isBossPlanet && (this.bossPlanetState === "active" || this.bossPlanetState === "defeated")) continue;
+
+      const foreshadow = isBossPlanet ? this.bossForeshadow : 0;
+      const radiusFrac = planet.baseRadiusFrac * (1 - approach * 0.55) * (1 - foreshadow * 0.4);
+      const angle = planet.baseAngle + this.driftT * planet.angularSpeed;
+      const px = cx + Math.cos(angle) * radiusFrac * minDim;
+      const py = cy + Math.sin(angle) * radiusFrac * minDim * 0.6;
+      const size = planet.baseSize * (1 + approach * planet.growthRate) * (1 + foreshadow * 2.0);
+
+      this.renderPlanet(ctx, planet, px, py, size, ppx, ppy, r, approach, beat, flare);
+
+      if (isBossPlanet && foreshadow > 0.02) this.renderBossPlanetMenace(ctx, px, py, size, foreshadow, planet.hue);
+    }
+
     this.renderShockwave(ctx);
+  }
+
+  // Draw a single background planet on top of the pulsar. The disc itself is
+  // a flat tinted silhouette (saturation climbs, lightness drops as we
+  // approach); on top of that we add a crescent rim-light on the side facing
+  // the pulsar, surface detail that fades in as the planet gets larger, and
+  // an additive corona flare during an eclipse where the planet sits over
+  // the pulsar's disc.
+  private renderPlanet(
+    ctx: CanvasRenderingContext2D,
+    planet: Planet,
+    px: number,
+    py: number,
+    size: number,
+    ppx: number,
+    ppy: number,
+    pulsarR: number,
+    approach: number,
+    beat: number,
+    flare: number,
+  ) {
+    const sat = planet.baseSat + approach * planet.satGrowth;
+    const light = Math.max(2, planet.baseLight - approach * planet.lightDrop);
+
+    // Flat silhouette.
+    ctx.fillStyle = `hsl(${planet.hue}, ${sat}%, ${light}%)`;
+    ctx.beginPath();
+    ctx.arc(px, py, size, 0, TAU);
+    ctx.fill();
+
+    // Direction from planet toward pulsar — that side gets the rim light.
+    const toPulsarX = ppx - px;
+    const toPulsarY = ppy - py;
+    const distToPulsar = Math.hypot(toPulsarX, toPulsarY);
+    const nx = distToPulsar > 1e-3 ? toPulsarX / distToPulsar : 1;
+    const ny = distToPulsar > 1e-3 ? toPulsarY / distToPulsar : 0;
+
+    // Eclipse window: planet edge overlaps the pulsar's bright disc. Goes
+    // from 0 just before overlap to 1 when the planet fully covers the
+    // core. Used to push a hot corona flare around the planet's limb.
+    const overlapStart = size + pulsarR * 1.4;
+    const overlapFull = Math.max(0, size - pulsarR * 0.4);
+    let eclipse = 0;
+    if (distToPulsar < overlapStart) {
+      eclipse = Math.min(1, (overlapStart - distToPulsar) / Math.max(1, overlapStart - overlapFull));
+    }
+    // Total eclipse spike: when the planet *fully* hides the pulsar disc,
+    // ramp an extra factor so the corona blooms instead of being a steady
+    // glow. This is what makes the moment of full occlusion read as a flash.
+    const totality = distToPulsar + pulsarR < size
+      ? Math.min(1, (size - (distToPulsar + pulsarR)) / Math.max(1, pulsarR))
+      : 0;
+
+    // Rim light on the pulsar-facing crescent. A radial gradient offset
+    // toward the pulsar gives a soft falloff from the bright edge inward.
+    // Intensity climbs with size (the planet feels more 3D when it's close
+    // enough to see lighting on) and with the per-beat pulse so the rim
+    // throbs subtly in time with the music.
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.beginPath();
+    ctx.arc(px, py, size, 0, TAU);
+    ctx.clip();
+    const rimCx = px + nx * size * 0.65;
+    const rimCy = py + ny * size * 0.65;
+    const rimAlpha = Math.min(0.9, 0.18 + 0.22 * Math.min(1, size / 60) + 0.18 * beat + 0.25 * flare + 0.6 * eclipse);
+    const rimGrad = ctx.createRadialGradient(rimCx, rimCy, size * 0.05, rimCx, rimCy, size * 0.95);
+    rimGrad.addColorStop(0, `hsla(195, 100%, 92%, ${rimAlpha})`);
+    rimGrad.addColorStop(0.45, `hsla(210, 100%, 75%, ${rimAlpha * 0.45})`);
+    rimGrad.addColorStop(1, `hsla(220, 100%, 60%, 0)`);
+    ctx.fillStyle = rimGrad;
+    ctx.fillRect(px - size, py - size, size * 2, size * 2);
+    ctx.restore();
+
+    // Surface detail. Fades in as the planet grows past ~30px so distant
+    // discs stay clean silhouettes. Detail is two passes: shadow craters on
+    // the unlit (anti-pulsar) side, and a brighter terminator highlight
+    // band just inside the lit rim.
+    const detailAmount = Math.max(0, Math.min(1, (size - 30) / 70));
+    if (detailAmount > 0.02) this.renderPlanetSurface(ctx, planet, px, py, size, nx, ny, detailAmount);
+
+    // Eclipse corona — additive bloom around the planet limb when it's
+    // occluding the pulsar. Sits *outside* the disc so it reads as light
+    // bending around the planet rather than surface glow.
+    if (eclipse > 0.01) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const coronaR = size * (1.05 + 0.6 * eclipse + 0.8 * totality);
+      const coronaAlpha = Math.min(1, 0.25 * eclipse + 0.9 * totality + 0.3 * beat * eclipse + 0.4 * flare * eclipse);
+      const corona = ctx.createRadialGradient(px, py, size * 0.95, px, py, coronaR);
+      corona.addColorStop(0, `hsla(195, 100%, 95%, ${coronaAlpha})`);
+      corona.addColorStop(0.5, `hsla(210, 100%, 80%, ${coronaAlpha * 0.45})`);
+      corona.addColorStop(1, `hsla(220, 100%, 65%, 0)`);
+      ctx.fillStyle = corona;
+      ctx.beginPath();
+      ctx.arc(px, py, coronaR, 0, TAU);
+      ctx.fill();
+
+      // Diffraction spikes during totality — four crisp rays of light
+      // leaking past the limb. Only fires near full occlusion so it stays a
+      // payoff moment rather than a constant feature.
+      if (totality > 0.15) {
+        const spikeLen = size * (1.5 + 2.5 * totality);
+        const spikeAlpha = Math.min(1, 0.45 * totality + 0.35 * flare * totality);
+        ctx.strokeStyle = `hsla(195, 100%, 96%, ${spikeAlpha})`;
+        ctx.lineWidth = 1.6 + 1.4 * totality;
+        ctx.shadowColor = `hsla(200, 100%, 80%, ${spikeAlpha})`;
+        ctx.shadowBlur = 12 + 18 * totality;
+        for (let s = 0; s < 4; s++) {
+          const a = (s / 4) * TAU + Math.PI / 8;
+          ctx.beginPath();
+          ctx.moveTo(px + Math.cos(a) * size * 0.9, py + Math.sin(a) * size * 0.9);
+          ctx.lineTo(px + Math.cos(a) * spikeLen, py + Math.sin(a) * spikeLen);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+  }
+
+  // Soft surface texture for a close planet: a few large darker "maria"
+  // splotches on the night side plus a brighter sliver tracing the
+  // terminator. Cheap and deterministic — derived from the planet's hue so
+  // the same planet keeps the same surface from frame to frame.
+  private renderPlanetSurface(
+    ctx: CanvasRenderingContext2D,
+    planet: Planet,
+    px: number,
+    py: number,
+    size: number,
+    nx: number,
+    ny: number,
+    amount: number,
+  ) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(px, py, size, 0, TAU);
+    ctx.clip();
+
+    // Maria — 3 dark patches placed pseudo-randomly on the night side.
+    const seed = planet.hue * 31.7 + planet.baseSize * 7.3;
+    for (let i = 0; i < 3; i++) {
+      const r1 = ((seed * (i + 1) * 0.733) % 1);
+      const r2 = ((seed * (i + 2) * 1.913) % 1);
+      const r3 = ((seed * (i + 3) * 2.471) % 1);
+      // Bias toward the side opposite the pulsar so maria read as
+      // shadowed lowlands away from the light source.
+      const offX = (-nx * 0.35 + (r1 - 0.5) * 0.9) * size;
+      const offY = (-ny * 0.35 + (r2 - 0.5) * 0.9) * size;
+      const mr = size * (0.18 + r3 * 0.22);
+      const g = ctx.createRadialGradient(px + offX, py + offY, 0, px + offX, py + offY, mr);
+      g.addColorStop(0, `hsla(${planet.hue}, 60%, ${Math.max(1, planet.baseLight - 4)}%, ${0.55 * amount})`);
+      g.addColorStop(1, `hsla(${planet.hue}, 60%, ${planet.baseLight}%, 0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(px + offX, py + offY, mr, 0, TAU);
+      ctx.fill();
+    }
+
+    // Terminator highlight — a thin bright crescent just inside the lit
+    // edge. Drawn as an offset radial gradient clipped to the disc so it
+    // hugs the rim without leaking outside.
+    ctx.globalCompositeOperation = "lighter";
+    const tcx = px + nx * size * 0.85;
+    const tcy = py + ny * size * 0.85;
+    const tg = ctx.createRadialGradient(tcx, tcy, size * 0.02, tcx, tcy, size * 0.45);
+    tg.addColorStop(0, `hsla(195, 100%, 90%, ${0.35 * amount})`);
+    tg.addColorStop(1, `hsla(210, 100%, 70%, 0)`);
+    ctx.fillStyle = tg;
+    ctx.fillRect(px - size, py - size, size * 2, size * 2);
+
+    ctx.restore();
   }
 
   // Bright flash + expanding ring overlay drawn after the rest of the

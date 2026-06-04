@@ -1,5 +1,5 @@
 import { Vec, v } from "./vec";
-import { Input } from "./Input";
+import { IInput } from "./Input";
 import { ParticleSystem } from "./Particle";
 import { Bullet } from "./Bullet";
 import { Sound } from "./Sound";
@@ -103,7 +103,7 @@ export class Ship {
 
   // orchestrates a single frame of player control, audio, and motion in one delegated call.
   update(
-    dt: number, input: Input, particles: ParticleSystem, bullets: Bullet[],
+    dt: number, input: IInput, particles: ParticleSystem, bullets: Bullet[],
     w: number, h: number, t: number, sound: Sound,
   ) {
     tickShip(this, dt, input, particles, bullets, w, h, t, sound);

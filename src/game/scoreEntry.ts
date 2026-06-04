@@ -11,6 +11,8 @@ import {
   submitHighscore,
   type HighscoreRow,
 } from "./highscores";
+import { uploadReplay, fetchReplay } from "./replayApi";
+import { startReplay } from "./lifecycle";
 
 // one module owns the score-entry form + leaderboard so lifecycle.ts and
 // gameUpdate.ts don't have to know about DOM details or network state.
@@ -42,6 +44,7 @@ const handleSubmit = async (game: Game, ev: Event) => {
     game.scoreSubmitState = "submitted";
     setStatus(game, "Score saved. Press enter to continue.", "success");
     game.scoreEntryInputEl.blur();
+    showReplaySave(game, saved.id, rawName);
   } catch (err) {
     game.scoreSubmitState = "idle";
     game.scoreEntrySubmitEl.disabled = false;
@@ -98,6 +101,70 @@ export const showScoreEntry = (game: Game) => {
 export const hideScoreEntry = (game: Game) => {
   game.scoreEntryFormEl.classList.add("hidden");
   game.scoreEntryInputEl.blur();
+  hideReplaySave(game);
+};
+
+const setReplayStatus = (game: Game, msg: string, kind: "info" | "error" | "success" = "info") => {
+  game.replaySaveStatusEl.textContent = msg;
+  game.replaySaveStatusEl.classList.remove("error", "success");
+  if (kind === "error") game.replaySaveStatusEl.classList.add("error");
+  else if (kind === "success") game.replaySaveStatusEl.classList.add("success");
+};
+
+// Wait briefly for the recorder's gzip Promise to land. captureFrame fires in
+//   the update loop and serialize() is awaited inside finalizeRecorder — by the
+//   time the player has typed a name + clicked submit, the bytes are typically
+//   already on game.lastRunReplay. A short poll covers the edge case where the
+//   user submits within the first frame after gameover.
+const waitForReplayBytes = async (game: Game, timeoutMs = 2000): Promise<Uint8Array | null> => {
+  const start = performance.now();
+  while (!game.lastRunReplay && performance.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return game.lastRunReplay;
+};
+
+let replayBtnBound = false;
+
+const showReplaySave = (game: Game, scoreId: number, name: string) => {
+  if (!replayBtnBound) {
+    replayBtnBound = true;
+    game.replaySaveBtnEl.addEventListener("click", () => {
+      void handleReplayUpload(game);
+    });
+  }
+  // currentReplayContext is set fresh on every showReplaySave so the latest
+  //   click always targets the most-recent score id.
+  game.replaySaveBtnEl.dataset.scoreId = String(scoreId);
+  game.replaySaveBtnEl.dataset.name = name;
+  game.replaySaveBtnEl.disabled = false;
+  setReplayStatus(game, "");
+  game.replaySaveEl.classList.remove("hidden");
+};
+
+const hideReplaySave = (game: Game) => {
+  game.replaySaveEl.classList.add("hidden");
+};
+
+const handleReplayUpload = async (game: Game) => {
+  const scoreId = Number(game.replaySaveBtnEl.dataset.scoreId);
+  const name = game.replaySaveBtnEl.dataset.name ?? "";
+  if (!scoreId || !name) return;
+  game.replaySaveBtnEl.disabled = true;
+  setReplayStatus(game, "Encoding replay…");
+  const bytes = await waitForReplayBytes(game);
+  if (!bytes) {
+    setReplayStatus(game, "Replay unavailable for this run.", "error");
+    return;
+  }
+  setReplayStatus(game, "Uploading…");
+  try {
+    await uploadReplay(scoreId, name, bytes);
+    setReplayStatus(game, "Replay saved.", "success");
+  } catch (err) {
+    game.replaySaveBtnEl.disabled = false;
+    setReplayStatus(game, `Upload failed: ${(err as Error).message}`, "error");
+  }
 };
 
 // scoreSubmitState gates whether Enter restarts the game — we want the
@@ -194,9 +261,12 @@ const renderLeaderboard = (game: Game) => {
     const comboTier = combo >= 8 ? "white" : combo >= 4 ? "gold" : combo >= 2 ? "cyan" : "dim";
     const wave = row.wave ?? 1;
     const cls = i === game.leaderboardSelection ? ' class="lb-self"' : "";
+    const replayBtn = row.has_replay
+      ? `<button class="lb-replay" data-replay-id="${row.id}" title="Watch replay" type="button">▶</button>`
+      : "";
     items.push(`<li${cls}>
       <span class="lb-rank">${i + 1}</span>
-      <span class="lb-name">${safeName}</span>
+      <span class="lb-name">${safeName}${replayBtn}</span>
       <span class="lb-score">${row.score.toLocaleString()}</span>
       <span class="lb-combo lb-combo-${comboTier}">
         <span class="lb-combo-value">${combo}<span class="lb-combo-x">×</span></span>
@@ -438,13 +508,31 @@ const bindLeaderboardClicks = (game: Game) => {
   if (leaderboardClicksBound) return;
   leaderboardClicksBound = true;
   game.leaderboardListEl.addEventListener("click", (ev) => {
-    const target = (ev.target as HTMLElement | null)?.closest<HTMLElement>("[data-sort]");
-    if (!target) return;
-    const key = target.dataset.sort as Game["leaderboardSort"] | undefined;
+    const el = ev.target as HTMLElement | null;
+    if (!el) return;
+    const replayEl = el.closest<HTMLElement>("[data-replay-id]");
+    if (replayEl) {
+      ev.stopPropagation();
+      const id = Number(replayEl.dataset.replayId);
+      if (id > 0) void launchReplay(game, id);
+      return;
+    }
+    const sortEl = el.closest<HTMLElement>("[data-sort]");
+    if (!sortEl) return;
+    const key = sortEl.dataset.sort as Game["leaderboardSort"] | undefined;
     if (!key || key === game.leaderboardSort) return;
     game.leaderboardSort = key;
     applySort(game, game.leaderboardRows, game.lastRunScoreId);
   });
+};
+
+const launchReplay = async (game: Game, scoreId: number) => {
+  try {
+    const bytes = await fetchReplay(scoreId);
+    await startReplay(game, bytes);
+  } catch (err) {
+    console.error("[replay launch] failed:", err);
+  }
 };
 
 // up/down on title + gameover slide the yellow selector toward the centre of

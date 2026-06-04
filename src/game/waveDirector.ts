@@ -4,6 +4,7 @@ import { spawnComet as spawnCometAtEdge } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
 import { rand } from "../vec";
+import { rng } from "./rng";
 import { BEAT_GRID } from "./rhythmConstants";
 import { spawnAwayFromShip } from "./spawnAwayFromShip";
 import { newWaveEventSchedule, maybeSchedule } from "./waveEvents";
@@ -331,14 +332,14 @@ const rollHeadlineEvents = (game: Game) => {
 
   // randomise order so no single event always gets the un-dampened first roll.
   for (let i = rolls.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [rolls[i], rolls[j]] = [rolls[j], rolls[i]];
   }
 
   let dampen = 1;
   for (const r of rolls) {
     if (!r.gate) continue;
-    if (Math.random() >= r.baseChance * dampen) continue;
+    if (rng() >= r.baseChance * dampen) continue;
     r.fire();
     dampen *= CFG.headline.dampen;
   }
@@ -361,16 +362,16 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet) => {
   // are checked first — when one fires, the slot can't also become a gem rock.
   const slotKinds: AsteroidKind[] = [];
   for (let i = 0; i < normalCount; i++) {
-    const isSolid = game.wave > CFG.solidCrystal.firstWave && Math.random() < CFG.solidCrystal.perSpawnChance;
+    const isSolid = game.wave > CFG.solidCrystal.firstWave && rng() < CFG.solidCrystal.perSpawnChance;
     if (isSolid) { slotKinds.push("solidCrystal"); continue; }
-    const isGem = game.wave > CFG.goldCrystal.firstWave && Math.random() < CFG.goldCrystal.perSpawnChance;
+    const isGem = game.wave > CFG.goldCrystal.firstWave && rng() < CFG.goldCrystal.perSpawnChance;
     slotKinds.push(isGem ? "goldCrystal" : "normal");
   }
   if (game.wave === CFG.goldCrystal.firstWave && normalCount > 0 && !slotKinds.includes("goldCrystal")) {
-    slotKinds[Math.floor(Math.random() * normalCount)] = "goldCrystal";
+    slotKinds[Math.floor(rng() * normalCount)] = "goldCrystal";
   }
   if (game.wave === CFG.solidCrystal.firstWave && normalCount > 0 && !slotKinds.includes("solidCrystal")) {
-    slotKinds[Math.floor(Math.random() * normalCount)] = "solidCrystal";
+    slotKinds[Math.floor(rng() * normalCount)] = "solidCrystal";
   }
 
   for (const kind of slotKinds) {
@@ -386,7 +387,7 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet) => {
 
 // tink is a "treat", not a fixture; gated chance + late first-wave keeps it feeling rare.
 const rollTinkSpawn = (game: Game, claimed: BeatClaimSet) => {
-  if (game.wave >= CFG.tink.firstWave && Math.random() < CFG.tink.chancePerWave) {
+  if (game.wave >= CFG.tink.firstWave && rng() < CFG.tink.chancePerWave) {
     game.asteroids.push(spawnTink(game, claimed));
   }
 };

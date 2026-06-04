@@ -1,4 +1,4 @@
-import type { Input } from "../Input";
+import type { IInput } from "../Input";
 
 // Player-editable keyboard bindings. Each action holds up to two keys (primary +
 //   alternate) — matches how the game has always supported both arrow keys and
@@ -152,13 +152,13 @@ export const normalizeKey = (raw: string): string => {
   return k;
 };
 
-export const isDown = (input: Input, action: ControlAction): boolean => {
+export const isDown = (input: IInput, action: ControlAction): boolean => {
   const keys = getBindings()[action];
   for (let i = 0; i < keys.length; i++) if (input.down(keys[i])) return true;
   return false;
 };
 
-export const wasPressed = (input: Input, action: ControlAction): boolean => {
+export const wasPressed = (input: IInput, action: ControlAction): boolean => {
   const keys = getBindings()[action];
   for (let i = 0; i < keys.length; i++) if (input.pressed(keys[i])) return true;
   return false;
