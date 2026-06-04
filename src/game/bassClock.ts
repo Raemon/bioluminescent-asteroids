@@ -14,15 +14,9 @@ export const BASS_KIND_SOUND: Record<"bassA" | "bassB" | "bassC" | "bassD", "bas
 // smalls land on A1/E2/D2/A2 → I/vi/V/ii flavour, pairs naturally with the C-F-G groundwork.
 export const BASS_SPLIT_PITCH_RATIO = [1, 1, 0.8409] as const;
 
-// shares beatTime with bassteroids so the pulsar approach beat stays locked under slow-mo.
-// Sparkle tier (combo ≥ 12) doubles the pulse: the existing quarter-note slots still fire
-// the heavy beat, with lighter "and" eighth-note hits half-way between them. The in-between
-// eighths use playBgBeatLight, which routes the same kick voice at ~40% velocity (and a
-// semitone up) so the riff reads as "downbeat / and / offbeat / and" rather than four equal
-// kicks. At combo ≥ 16 the rhythm gate also doubles (comboGrid in rhythmGate.ts), so the
-// player can hear *and* play to the halfbeats — sound and gameplay stay aligned.
-// We walk an eighth-note grid (BEAT_GRID/2). Even eighths = the existing quarter beats;
-// odd eighths = the new in-between "and" hits, only fired while the sparkle tier is active.
+// walks an eighth-note grid; sparkle tier adds lighter "and" hits between quarters
+// so sound + rhythm gate both double at high combo. Shares beatTime so slow-mo
+// drags the pulse along with the bass voices.
 const tickBgBeats = (game: Game) => {
   const EIGHTH_GRID = BEAT_GRID / 2;
   const eighthIdx = Math.floor(game.beatTime / EIGHTH_GRID);
@@ -64,9 +58,7 @@ const tickBassAsteroids = (game: Game) => {
   }
 };
 
-// shared beat clock makes comet notes land on the same audio frame as coincident bass hits.
-// comet melody pulse is 2 BEAT_GRID per step (1.0 s) — matches the halo ambient melody's
-//   step rate so the two lines hocket cleanly instead of stuttering at different rates.
+// comet pulse matches the halo ambient melody step so the two lines hocket cleanly
 const COMET_STEP = BEAT_GRID * 2;
 const tickCometMelodies = (game: Game) => {
   for (const c of game.comets) {
@@ -86,9 +78,8 @@ export const tickBassBeats = (game: Game, musicDt: number) => {
   tickCometMelodies(game);
 };
 
-// gameover advances beatTime itself and detonates bass rocks on its own schedule, but the
-//   bgBeat sub-bass + comet notes still need to fire — this keeps the music ticking under the
-//   post-mortem parade without re-triggering the bass voices that detonation already plays.
+// keeps bgBeat + comet melody ticking under the gameover parade
+// without re-firing bass voices that the detonation schedule already plays
 export const tickAuxBeats = (game: Game) => {
   tickBgBeats(game);
   tickCometMelodies(game);

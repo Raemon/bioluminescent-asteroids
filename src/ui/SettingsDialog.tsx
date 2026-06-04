@@ -84,10 +84,8 @@ export const SettingsDialog = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // While open, swallow keys at capture so the game behind doesn't act on them
-  //   (typing in the callsign field still works — we don't preventDefault there).
-  //   When a binding capture is active, the next key press becomes the binding
-  //   instead of acting on the dialog.
+  // swallow keys at capture so the game behind doesn't act on them;
+  // when a binding capture is active, next key becomes the binding
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {

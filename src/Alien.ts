@@ -368,9 +368,7 @@ export class Alien {
     this.cracks = rollAlienCracks(this.maxHp);
     this.weavePhase = rand(0, TAU);
     this.weaveSpeed = rand(0.6, 1.1);
-    // 0.15–0.35 rad/sec, random sign. At ~100 px/sec that's a ~300px-radius
-    // turn — a clear arc across a 1200px field, with enough variance that some
-    // aliens loop back over their own path before exiting.
+    // sweeping arc with random sign; some aliens loop back over their path before exiting
     this.curveRate = rand(0.15, 0.35) * (rng() < 0.5 ? -1 : 1);
     this.rotation = Math.atan2(vel.y, vel.x);
     this.shape = buildMantaShape(size);

@@ -302,8 +302,7 @@ const tickControlsGate = (game: Game) => {
   }
 };
 
-// eases bgBeat loudness from the calibration practice level down to the wave
-//   level across the calibration→play hand-off (set by finishCalibrationIntro).
+// ease bgBeat from practice level to wave level across calibration→play
 const tickBeatIntensityRamp = (game: Game, dt: number) => {
   const r = game.beatIntensityRamp;
   if (!r) return;

@@ -23,8 +23,7 @@ const TRAJECTORY_PULSE_PERIOD_BEATS = 4;
 const TRAJECTORY_PULSE_MIN_ALPHA = 1;
 const TRAJECTORY_BEAT_DOT_RADIUS = 1;
 const TRAJECTORY_BEAT_DOT_ALPHA = 0.25;
-// in doubletime, half-beat dots interleave with the beat dots — visibly fainter and a touch
-// smaller so the on-beat dots still read as the dominant rhythm anchor.
+// doubletime: half-beat dots interleave fainter so on-beat dots stay dominant
 const TRAJECTORY_HALF_BEAT_DOT_ALPHA_FACTOR = 0.45;
 const TRAJECTORY_HALF_BEAT_DOT_RADIUS = 0.8;
 // the half-beat first dot glows like the on-beat first dot but at a reduced alpha so the
@@ -97,8 +96,7 @@ const FOCUSED_FIRST_DOT_CROSSHAIR_GAP = 3;
 const FOCUSED_FIRST_DOT_CROSSHAIR_LENGTH = 6;
 const FOCUSED_FIRST_DOT_CROSSHAIR_DASH: number[] = [2, 2];
 
-// every reticule element brightens on the beat and decays across it, so the player feels the
-// rhythm gate visually. Multiplier is PEAK at beat onset and decays to 1 by the next beat.
+// reticule brightens on beat (PEAK) and decays to 1 — visual rhythm gate
 const RETICULE_BEAT_PULSE_PEAK = 2.4;
 export const computeBeatPulseBoost = (beatTime: number, beatGrid: number): number => {
   if (beatGrid <= 0) return 1;

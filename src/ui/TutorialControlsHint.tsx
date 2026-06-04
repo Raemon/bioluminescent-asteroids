@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-// Controls hint shown at the start of every run. Each key fades to low opacity as
-//   the player uses it (driven by the game's `tutorial:controls` event); the whole
-//   hint fades out once rotate/thrust/reverse/fire are all used. Tutorial mode
-//   advances to stage 2 then; normal mode just dismisses via `controls-hint:dismiss`.
+// each key fades as the player uses it; whole hint fades once all keys are used
 
 type Controls = { rotate: boolean; thrust: boolean; back: boolean; side: boolean; fire: boolean };
 const FADE_MS = 800;

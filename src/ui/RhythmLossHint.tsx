@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-// Bottom-middle hint shown once per game, on the first meaningful rhythm loss
-// outside the tutorial. Game side (rhythmGate.loseCombo) fires
-// `rhythm-loss-hint:show`; killEffects fires `:dismiss` on the next on-beat hit.
+// shown once per game on the first out-of-tutorial rhythm loss
 const FADE_MS = 800;
 
 export const RhythmLossHint = () => {

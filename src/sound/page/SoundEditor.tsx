@@ -30,9 +30,8 @@ export const SoundEditor = () => {
     let cancelled = false;
     loadSoundConfig().then(() => {
       if (cancelled) return;
-      // bgBeat is gated on bgBeatIntensity (0 = silent), which Game ramps
-      // 0.08 → 1.0 across waves 1–30. Page has no wave clock; pin to the
-      // same wave-6 level the pulsar visual is locked to.
+      // page has no wave clock; pin bgBeatIntensity to the same level
+      // the pulsar visual is locked to here
       sound.bgBeatIntensity = 0.08 + (5 / 29) * 0.92;
       setReady(true);
     });

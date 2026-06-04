@@ -5,7 +5,6 @@ import { POWERUP_HUE } from "../Canister";
 import { renderComboHalo } from "./shipComboHalo";
 import { haloVertices } from "./shipHitbox";
 
-// per-frame jitter when invuln makes the ship visually telegraph that it can't be hit yet.
 const invulnFlicker = (ship: Ship, t: number): number =>
   ship.invuln > 0 ? 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(t * 0.025)) : 1;
 
@@ -16,8 +15,7 @@ const shipHullVertices = (ship: Ship): Vec[] => [
   fromAngle(ship.heading - Math.PI * 0.78, ship.radius * 1.0),
 ];
 
-// hull brightness sits at a baseline and snaps to peak on each beat, then fades — matches the
-//   combo halo's snap-and-fade so every ship light shares one rhythm.
+// shares the combo halo's snap-and-fade so every ship light rides one rhythm
 const paintShipHull = (ctx: CanvasRenderingContext2D, verts: Vec[], invuln: number, beatPulse: number) => {
   const beatBrightness = 0.7 + 0.3 * beatPulse;
   ctx.strokeStyle = `hsla(195, 100%, 75%, ${0.95 * beatBrightness * invuln})`;
@@ -98,7 +96,6 @@ const paintSideJets = (ctx: CanvasRenderingContext2D, ship: Ship) => {
   if (ship.starboardThrustOn) paintSideJet(ctx, ship, "starboard");
 };
 
-// rounded-corner triangle path tracing the halo polygon; cornerRadius is in local pixels.
 const traceRoundedTriangle = (
   ctx: CanvasRenderingContext2D,
   verts: Array<[number, number]>,
@@ -123,8 +120,7 @@ const traceRoundedTriangle = (
   ctx.closePath();
 };
 
-// shield draws an additional rounded-corner triangle 12px outside the ship's normal halo —
-//   purely cosmetic (hitbox stays at the base halo). Multi-pass glow sells the energy field.
+// shield ring sits outside the hitbox halo — purely cosmetic, multi-pass glow
 const paintShieldRing = (ctx: CanvasRenderingContext2D, ship: Ship, beatPulse: number) => {
   if (!ship.shieldActive) return;
   const shieldBrightness = 0.6 + 0.4 * beatPulse;
@@ -145,14 +141,13 @@ const paintShieldRing = (ctx: CanvasRenderingContext2D, ship: Ship, beatPulse: n
   ctx.shadowBlur = 0;
 };
 
-// ~8% cosmetic scale-up on the beat draws the eye to the rhythm without affecting collisions.
+// cosmetic on-beat scale-up — draws the eye to the rhythm, hitbox unchanged
 const applyBeatScale = (ctx: CanvasRenderingContext2D, beatPulse: number) => {
   if (beatPulse <= 0) return;
   const beatScale = 1 + 0.08 * beatPulse;
   ctx.scale(beatScale, beatScale);
 };
 
-// all visual layers (halo behind, hull, thrust/retro flames, shield ring) painted in one save block.
 export const renderShipBody = (ctx: CanvasRenderingContext2D, ship: Ship, t: number, beatPulse: number) => {
   if (!ship.alive) return;
   const invuln = invulnFlicker(ship, t);

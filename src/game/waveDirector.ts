@@ -30,8 +30,7 @@ const alignIncomingToRhythm = (game: Game, a: Asteroid, claimed?: BeatClaimSet) 
     beatTime: game.beatTime,
     speedRange: range,
     engageRadius: CFG.engageRadius.incoming,
-    // edge spawns sit far away — many beats out. Allowing up to 24
-    // candidate slots covers even the slowest large rock's crossing time.
+    // edge spawns sit many beats out; slot pool must cover slowest crossing
     maxBeats: 24,
     claimed,
   });

@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 
-// Fixed top-right pause button. Visible only during live play — hidden on the
-//   title/pause/gameover overlays where pressing it would be redundant or noisy.
-//   Clicking dispatches "game:togglePause", which Game.ts wires to togglePause().
+// fixed top-right pause button, visible only during live play
 export const PauseButton = () => {
   const [visible, setVisible] = useState(false);
 

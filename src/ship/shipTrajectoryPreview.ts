@@ -2,9 +2,8 @@ import type { Ship } from "../Ship";
 import { wrap } from "../vec";
 import { computeBeatPulseBoost, SHOW_SHIP_TRAJECTORY } from "./reticule/trajectoryPreview";
 
-// ship's own forecast path — small forward-pointing chevrons mark where the ship will be at
-// successive beats if it keeps its current velocity. Uses the cyan hull hue (195) so it reads
-// as "this is YOUR trajectory", and the chevron shape carries direction of motion.
+// ship's forecast chevrons — successive-beat positions if velocity holds.
+// Shares the cyan hull hue so it reads as "your" trajectory.
 const SHIP_TRAJECTORY_HSL = "195, 100%, 75%";
 const SHIP_TRAJECTORY_DOT_RADIUS = 1.6;
 const SHIP_TRAJECTORY_DOT_ALPHA = 0.6;
@@ -14,8 +13,7 @@ const SHIP_TRAJECTORY_FIRST_DOT_ALPHA = 0.85;
 const SHIP_TRAJECTORY_CHEVRON_LENGTH_FACTOR = 2.4;
 const SHIP_TRAJECTORY_CHEVRON_HALF_WIDTH_FACTOR = 1.8;
 const SHIP_TRAJECTORY_CHEVRON_LINE_WIDTH = 1;
-// how many upcoming-beat dots to render. 6 beats forward = 3 seconds at BEAT_GRID=0.5 — long
-// enough to project meaningfully, short enough that drift doesn't render the further dots noisy.
+// far enough to project usefully, close enough that drift doesn't make far dots noisy
 const SHIP_TRAJECTORY_BEAT_COUNT = 6;
 // minimum speed for the preview to render at all. Below this the ship is effectively drifting
 // in place and dots would clump on top of each other.

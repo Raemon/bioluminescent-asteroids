@@ -1,19 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-// Guided-tutorial overlay for stages 2–6 (stage 1, Controls, is <TutorialControlsHint>).
-// The game-side state machine (src/game/lifecycle.ts → setFirstWaveHintStage) owns the
-// stage number and dispatches "first-wave-hint:stage"; this component owns the cinematic
-// fade transitions and the auto-dismiss timers.
-//
-// Stages:
-//   2 — "Fire on the beat to deal more damage" — top half. Held until 3 on-beat fires.
-//   3 — "Drift alongside the asteroids" + a hover circle + "Hold your reticule … one
-//       second" + "(You can use backthrusters to help)" — bottom. Held until 1s hover.
-//   4 — "Fire and hit on the beat to build rhythm" + targeting sub-line — bottom.
-//       Held until 3 on-beat hits.
-//   5 — "Build rhythm without missing a beat" — bottom; holds once at 4x then advances.
-//   6 — "Become one with the Pulsar" — bottom; fades in, holds, dismisses the tutorial.
-//   0 / 1 — hidden here.
+// later-stage tutorial overlay; stage owned by lifecycle.ts→setFirstWaveHintStage,
+// this component just runs the fade + auto-dismiss timers
 
 type Stage = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 

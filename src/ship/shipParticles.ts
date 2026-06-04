@@ -3,7 +3,6 @@ import { add, mul, fromAngle } from "../vec";
 import { ParticleSystem } from "../Particle";
 import { rng } from "../game/rng";
 
-// continuous tail-flicker per frame sells the ship as combusting, not just translating.
 export const emitThrust = (ship: Ship, particles: ParticleSystem, t: number) => {
   const back = fromAngle(ship.heading + Math.PI, 1);
   const tail = add(ship.pos, mul(back, ship.radius * 0.9));

@@ -12,14 +12,14 @@ import type { Sound } from "../Sound";
 //   Either way the streak's median offset becomes Game.beatOffset, which slides
 //   the scoring window + visual cues onto the beat the player actually hears.
 
-const BEAT_PERIOD = 0.5; // 120 BPM — the game's quarter-note grid.
-const STREAK_TARGET = 8; // consecutive on-beat taps required (two bars of 4).
-const STREAK_TOLERANCE = 0.1; // a tap must land within 100ms of the streak's running median.
-const GAP_MIN = 0.3; // inter-tap gap floor — rejects double-taps.
-const GAP_MAX = 0.8; // …and ceiling — a skipped beat (~1s gap) breaks the streak.
-const START_DELAY = 0.8; // standalone: silence before the first scheduled beat.
-const LOOKAHEAD = 0.18; // standalone: schedule each beat this far ahead.
-const FADE_MS = 650; // overlay fade-out as the world comes alive.
+const BEAT_PERIOD = 0.5; // game's quarter-note grid
+const STREAK_TARGET = 8; // consecutive on-beat taps required (two bars of 4)
+const STREAK_TOLERANCE = 0.1; // tap tolerance around the streak's running median
+const GAP_MIN = 0.3; // inter-tap gap floor — rejects double-taps
+const GAP_MAX = 0.8; // inter-tap gap ceiling — a skipped beat breaks the streak
+const START_DELAY = 0.8; // standalone: silence before the first scheduled beat
+const LOOKAHEAD = 0.18; // standalone: schedule each beat this far ahead
+const FADE_MS = 650; // overlay fade-out as the world comes alive
 
 const median = (xs: number[]): number => {
   const s = [...xs].sort((a, b) => a - b);
