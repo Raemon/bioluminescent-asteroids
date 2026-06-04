@@ -1,5 +1,42 @@
 [
   {
+    "id": "2026-06-04-b73a06c",
+    "date": "2026-06-04",
+    "title": "Replays, per-channel audio, and visual overhaul",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Gameplay replays can now be saved and uploaded after posting a high score — watch your run from the leaderboard.",
+          "Leaderboard entries show a replay button when a recording is available.",
+          "Audio settings now have separate volume sliders for Base Pulse, Sound Effects, Music, and Vocals.",
+          "Rhythm latency calibration has moved into the Audio settings tab for easier access."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Background planets are now backlit: their bodies sit in deep shadow with a thin crescent rim-light on the pulsar-facing side, plus a corona flare during eclipses.",
+          "Planets now render in front of the pulsar disc and nebula, so they correctly occlude it when crossing."
+        ]
+      },
+      {
+        "heading": "Tuning",
+        "items": [
+          "White bullet (super-boosted) combo threshold raised from 8 to 12 — harder to reach but the yellow halo tier now lasts longer."
+        ]
+      }
+    ],
+    "commits": [
+      "b73a06c",
+      "d79a44f",
+      "ce900b1",
+      "4ae0ca6",
+      "a2e584d",
+      "5160bf0"
+    ]
+  },
+  {
     "id": "2026-06-04-f05b6e2",
     "date": "2026-06-04",
     "title": "Prong aiming improvements and Pilot's Log vocals option",
