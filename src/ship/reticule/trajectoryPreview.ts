@@ -141,9 +141,10 @@ export type TrajectoryContext = {
   h: number;
   frame: ConeFrame;
   reticulePos: Vec;
-  // one entry per reachable on-beat slot — index 0 = 1-beat reticule, 1 = 2-beat, ...
-  //   null at a slot means no centred reticule there (e.g. prong fans the shot off-axis).
-  reticulePosBySlot: Array<Vec | null>;
+  // one entry per reachable on-beat slot — index 0 = 1-beat slot, 1 = 2-beat, ...
+  //   each entry lists every reticule for that slot (1 centred, or 2 prongs). Empty array
+  //   means no reticule reaches that slot.
+  reticulesBySlot: Array<Vec[]>;
   aimCircleCenter: Vec;
   aimCircleRadius: number;
   trajectoryTracks: TrajectoryTrackMap;
@@ -377,12 +378,14 @@ const firstDotProximity01 = (px: number, py: number, retX: number, retY: number)
 };
 
 // overlapsReticule = strict hit (powers reticule lock-on visuals); slotProximities[k-1] = soft
-// 0..1 proximity between the k-beat reticule and the k-th on-beat trajectory dot, used by the
-// per-slot hover rings. Length matches the reticule-by-slot array; 0 at a slot means either no
-// reticule there or the reticule is far from the dot.
+// 0..1 proximity between the k-beat trajectory dot and whichever of the slot's reticules sits
+// closest, used by the per-slot hover rings. slotWinnerReticuleIdx[k-1] is the index INTO the
+// slot's reticule list of the winner (so renderer knows which prong to anchor the ring on);
+// -1 when no reticule is close.
 type DotWalkResult = {
   overlapsReticule: boolean;
   slotProximities: number[];
+  slotWinnerReticuleIdx: number[];
 };
 
 // the cone is computed in the apex's "virtual" frame (toroidalDelta-remapped), so dot
@@ -400,7 +403,7 @@ const wrapToCanvas = (x: number, y: number, w: number, h: number): [number, numb
 const drawBeatDotsAlongRay = (
   ctx: CanvasRenderingContext2D,
   rawStartX: number, rawStartY: number, ux: number, uy: number,
-  reticulesBySlot: Array<[number, number] | null>,
+  reticulesBySlot: Array<Array<[number, number]>>,
   sMin: number, sMax: number, dotStep: number, dotOffset: number,
   entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
   w: number, h: number, doubletime: boolean, tutorialHighlight: boolean, focused: boolean,
@@ -408,6 +411,7 @@ const drawBeatDotsAlongRay = (
   let overlapsReticule = false;
   const slotCount = reticulesBySlot.length;
   const slotProximities: number[] = new Array(slotCount).fill(0);
+  const slotWinnerReticuleIdx: number[] = new Array(slotCount).fill(-1);
   // doubletime halves the spacing and marks every other k as a half-beat (off-beat) dot.
   const step = doubletime ? dotStep * 0.5 : dotStep;
   const isHalfBeatK = (k: number): boolean => doubletime && (k % 2 === 1);
@@ -424,7 +428,7 @@ const drawBeatDotsAlongRay = (
     if (k <= 0 || k > maxSlotK) return false;
     if (doubletime && k % 2 !== 0) return false;
     const slot = doubletime ? k / 2 : k;
-    return reticulesBySlot[slot - 1] !== null;
+    return reticulesBySlot[slot - 1].length > 0;
   };
   let drawnOnBeatDots = 0;
   let drawnHalfBeatDots = 0;
@@ -454,30 +458,38 @@ const drawBeatDotsAlongRay = (
       drawnHalfBeatDots++;
     } else {
       const slotIdx = drawnOnBeatDots; // 0-based slot for this on-beat dot
-      const reticule = slotIdx < slotCount ? reticulesBySlot[slotIdx] : null;
-      if (reticule !== null) {
-        const [retXk, retYk] = reticule;
-        const proximityK = firstDotProximity01(px, py, retXk, retYk);
+      const slotReticules = slotIdx < slotCount ? reticulesBySlot[slotIdx] : [];
+      if (slotReticules.length > 0) {
+        let bestProximity = 0;
+        let bestRetIdx = -1;
+        let anyStrictOverlap = false;
+        for (let r = 0; r < slotReticules.length; r++) {
+          const [retXk, retYk] = slotReticules[r];
+          const proximityR = firstDotProximity01(px, py, retXk, retYk);
+          if (proximityR > bestProximity) { bestProximity = proximityR; bestRetIdx = r; }
+          if (slotIdx === 0 && firstDotOverlapsReticule(px, py, retXk, retYk)) anyStrictOverlap = true;
+        }
         const tickLength = slotCrosshairLengthTrajectory(slotIdx + 1);
         if (SHOW_FIRST_BEAT_DOT) {
           // tutorial highlight + the 1st-dot strict-overlap signal only apply to the 1-beat slot.
           paintFirstBeatDot(
-            ctx, drawX, drawY, proximityK, entryFlashBoost, beatPulseBoost, focusBoost,
+            ctx, drawX, drawY, bestProximity, entryFlashBoost, beatPulseBoost, focusBoost,
             1, slotIdx === 0 ? tutorialHighlight : false, slotIdx === 0 ? focused : false,
             tickLength,
           );
         }
-        if (slotIdx === 0 && firstDotOverlapsReticule(px, py, retXk, retYk)) {
-          overlapsReticule = true;
+        if (anyStrictOverlap) overlapsReticule = true;
+        if (bestProximity > slotProximities[slotIdx]) {
+          slotProximities[slotIdx] = bestProximity;
+          slotWinnerReticuleIdx[slotIdx] = bestRetIdx;
         }
-        if (proximityK > slotProximities[slotIdx]) slotProximities[slotIdx] = proximityK;
       } else {
         paintBeatDot(ctx, drawX, drawY, entryFlashBoost, focusBoost);
       }
       drawnOnBeatDots++;
     }
   }
-  return { overlapsReticule, slotProximities };
+  return { overlapsReticule, slotProximities, slotWinnerReticuleIdx };
 };
 
 const drawAimIntersectionsAlongRay = (
@@ -572,7 +584,7 @@ const computeOnBeatAim = (
 // core trajectory renderer — operates on a position/velocity snapshot, with optional cone clipping.
 // alphaMultiplier folds in entry-flash boost and exit-fade decay; clipToCone is false during fade so the
 // lingering ghost remains visible even after the target has left the radar wedge.
-const EMPTY_DOT_WALK_RESULT: DotWalkResult = { overlapsReticule: false, slotProximities: [] };
+const EMPTY_DOT_WALK_RESULT: DotWalkResult = { overlapsReticule: false, slotProximities: [], slotWinnerReticuleIdx: [] };
 
 const paintTrajectoryFromSnapshot = (
   ctx: TrajectoryContext, snap: TrajectorySnapshot, firstSeen: number,
@@ -616,8 +628,8 @@ const paintTrajectoryFromSnapshot = (
   ctx.ctx.globalAlpha = Math.min(1, TRAJECTORY_ALPHA * effectivePulse * alphaMultiplier);
 
   const [retX, retY] = remapReticuleToTarget(ctx.apex, ctx.reticulePos, ctx.w, ctx.h);
-  const reticulesBySlot: Array<[number, number] | null> = ctx.reticulePosBySlot.map(p =>
-    p === null ? null : remapReticuleToTarget(ctx.apex, p, ctx.w, ctx.h),
+  const reticulesBySlot: Array<Array<[number, number]>> = ctx.reticulesBySlot.map(slotRets =>
+    slotRets.map(p => remapReticuleToTarget(ctx.apex, p, ctx.w, ctx.h)),
   );
   const [aimCenterX, aimCenterY] = remapReticuleToTarget(ctx.apex, ctx.aimCircleCenter, ctx.w, ctx.h);
   const dotStep = speed * ctx.beatGrid;
@@ -761,21 +773,25 @@ const pickCenterMostTarget = (
 ): ReticuleTarget | null =>
   pickCenterMostTargetForFocus(ctx.apex, ctx.frame, ctx.w, ctx.h, targets);
 
-// walks every visible target; returns strict overlap (for the 1-beat reticule lock-on visual)
-// and the max soft proximity per slot (0..1, used by each slot's hover-commit ring). Slot k's
-// proximity is at index k-1; entries beyond the renderer's slot count are absent.
+// walks every visible target; returns strict overlap (for the 1-beat reticule lock-on visual),
+// the max soft proximity per slot (0..1, used by each slot's hover-commit ring), and which
+// reticule index inside the slot's reticule list won (so the renderer knows which prong to
+// anchor the hover ring on). Slot k's data is at index k-1; entries beyond the renderer's slot
+// count are absent.
 export type TrajectoryPreviewResult = {
   overlapsReticule: boolean;
   slotProximities: number[];
+  slotWinnerReticuleIdx: number[];
 };
 
 const emptySlotProximities = (n: number): number[] => new Array(n).fill(0);
+const emptyWinnerIdx = (n: number): number[] => new Array(n).fill(-1);
 
 export const paintTrajectoryPreviews = (
   ctx: TrajectoryContext, targets: ReadonlyArray<ReticuleTarget>,
 ): TrajectoryPreviewResult => {
-  const slotCount = ctx.reticulePosBySlot.length;
-  if (ctx.frame.length <= 0) return { overlapsReticule: false, slotProximities: emptySlotProximities(slotCount) };
+  const slotCount = ctx.reticulesBySlot.length;
+  if (ctx.frame.length <= 0) return { overlapsReticule: false, slotProximities: emptySlotProximities(slotCount), slotWinnerReticuleIdx: emptyWinnerIdx(slotCount) };
   ctx.ctx.save();
   ctx.ctx.setLineDash([]);
   ctx.ctx.lineWidth = 1.5;
@@ -784,16 +800,20 @@ export const paintTrajectoryPreviews = (
   const spotTarget = pickCenterMostTarget(ctx, targets);
   let overlapsReticule = false;
   const slotProximities = emptySlotProximities(slotCount);
+  const slotWinnerReticuleIdx = emptyWinnerIdx(slotCount);
   const liveByKey = new Map<object, ReticuleTarget>();
   for (const t of targets) liveByKey.set(t as unknown as object, t);
   for (const t of targets) {
     const r = previewLiveTarget(ctx, t, rendered, t === spotTarget);
     if (r.overlapsReticule) overlapsReticule = true;
     for (let i = 0; i < slotCount && i < r.slotProximities.length; i++) {
-      if (r.slotProximities[i] > slotProximities[i]) slotProximities[i] = r.slotProximities[i];
+      if (r.slotProximities[i] > slotProximities[i]) {
+        slotProximities[i] = r.slotProximities[i];
+        slotWinnerReticuleIdx[i] = r.slotWinnerReticuleIdx[i];
+      }
     }
   }
   renderFadingTrajectories(ctx, rendered, liveByKey);
   ctx.ctx.restore();
-  return { overlapsReticule, slotProximities };
+  return { overlapsReticule, slotProximities, slotWinnerReticuleIdx };
 };

@@ -114,16 +114,15 @@ const effectiveBulletLife = (ship: Ship, superBoosted: boolean): number => {
 // prong fans the aim into two angles (no centred shot); doubletime adds a half-beat preview at
 // half distance; integer-k reticules mark every beat-slot the bullet actually crosses
 // (t = beatGrid*k < life), so the count adapts to longshot/pierce/superBoosted range and to
-// the rhythm-gate tempo (eighth-grid at combo ≥ 12 or under rapid). slotIndices[k-1] points at
-// the k-beat reticule that anchors that slot's hover-ring + drift-shot. With prong the anchor
-// is one of the two prong reticules (the first angle offset) — drift eligibility lives at the
-// bullet level, so locking one prong gates the drift bonus for the whole shot pair.
-type ReticulePositions = { positions: Vec[]; primaryIndex: number; slotIndices: number[] };
+// the rhythm-gate tempo (eighth-grid at combo ≥ 12 or under rapid). slotPositionIndices[k-1]
+// lists every position index that anchors the k-beat slot — one entry for the centred shot,
+// two for prong. The slot's hover ring locks the moment the trajectory dot grazes ANY of them.
+type ReticulePositions = { positions: Vec[]; primaryIndex: number; slotPositionIndices: number[][] };
 const computeReticulePositions = (
   ship: Ship, beatGrid: number, w: number, h: number, doubletime: boolean, superBoosted: boolean,
 ): ReticulePositions => {
   const angleOffsets = ship.prongActive ? [-PRONG_SPREAD, PRONG_SPREAD] : [0];
-  const anchorOffset = angleOffsets[0];
+  const primaryOffset = angleOffsets[0];
   const bulletLife = effectiveBulletLife(ship, superBoosted);
   const slotCount = Math.max(1, Math.floor(bulletLife / beatGrid));
   const integerFractions: number[] = [];
@@ -131,18 +130,18 @@ const computeReticulePositions = (
   const beatFractions = doubletime ? [HALF_BEAT_FRACTION, ...integerFractions] : integerFractions;
   const positions: Vec[] = [];
   let primaryIndex = -1;
-  const slotIndices: number[] = new Array(slotCount).fill(-1);
+  const slotPositionIndices: number[][] = Array.from({ length: slotCount }, () => []);
   for (const frac of beatFractions) {
     for (const off of angleOffsets) {
       const idx = positions.length;
       positions.push(computeReticulePosition(ship, beatGrid, w, h, off, frac));
-      if (off === anchorOffset && frac === 1) primaryIndex = idx;
-      if (off === anchorOffset && Number.isInteger(frac) && frac >= 1 && frac <= slotCount) {
-        slotIndices[frac - 1] = idx;
+      if (off === primaryOffset && frac === 1) primaryIndex = idx;
+      if (Number.isInteger(frac) && frac >= 1 && frac <= slotCount) {
+        slotPositionIndices[frac - 1].push(idx);
       }
     }
   }
-  return { positions, primaryIndex, slotIndices };
+  return { positions, primaryIndex, slotPositionIndices };
 };
 
 // arcs fill across HOVER_RING_FILL_SEC, then a brief HOVER_FLARE_SEC arc-brightening marks
@@ -283,17 +282,19 @@ export const renderShipReticules = (
   superBoosted: boolean = false,
 ) => {
   if (!ship.alive) return;
-  const { positions: reticulePositions, primaryIndex, slotIndices } = computeReticulePositions(ship, beatGrid, w, h, doubletime, superBoosted);
+  const { positions: reticulePositions, primaryIndex, slotPositionIndices } = computeReticulePositions(ship, beatGrid, w, h, doubletime, superBoosted);
   // trajectory preview anchors on the "shoot now to hit next beat" spot. primaryIndex always
   // exists now (anchors on the first prong offset under prong), but keep the fallback for safety.
   const primaryReticule = primaryIndex >= 0
     ? reticulePositions[primaryIndex]
     : computeReticulePosition(ship, beatGrid, w, h, 0, 1);
-  // one entry per reachable on-beat slot; null where no reticule exists for that slot (out of range).
-  const reticulePosBySlot: Array<Vec | null> = slotIndices.map(i => i >= 0 ? reticulePositions[i] : null);
+  // each reachable slot may have multiple reticules (prong = 2 angles, centred = 1). The slot's
+  // hover ring locks if the trajectory dot grazes ANY of them, so the player can drift-lock off
+  // either prong.
+  const reticulesBySlot: Vec[][] = slotPositionIndices.map(idxs => idxs.map(i => reticulePositions[i]));
   // grow the Ship's hover-ring array to match if range extended this frame; never shrink (so a
   // brief range loss doesn't wipe a partially-locked ring).
-  while (state.hoverDotRings.length < slotIndices.length) {
+  while (state.hoverDotRings.length < slotPositionIndices.length) {
     state.hoverDotRings.push({ hoverStartBeatTime: null, completionBeatTime: null });
   }
   const apex = ship.pos;
@@ -310,15 +311,15 @@ export const renderShipReticules = (
   const frame = computeConeFrame(ship);
   const trajectoryResult = paintTrajectoryPreviews({
     ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule,
-    reticulePosBySlot, aimCircleCenter, aimCircleRadius,
+    reticulesBySlot, aimCircleCenter, aimCircleRadius,
     trajectoryTracks: state.trajectoryTracks, doubletime, tutorialHighlight,
   }, targets);
   const fromTrajectory = trajectoryResult.overlapsReticule;
-  // reverse map: position-index → slot number (1-indexed). The non-anchor prong reticule for
-  // each slot stays -1 and uses the default tick length, so the slot cue reads off the anchor side.
+  // reverse map: position-index → slot number (1-indexed). Every reticule that belongs to a slot
+  // tags as that slot so the aim disc renders the right tick length on each prong.
   const slotByPosIndex = new Array<number>(reticulePositions.length).fill(-1);
-  for (let s = 0; s < slotIndices.length; s++) {
-    if (slotIndices[s] >= 0) slotByPosIndex[slotIndices[s]] = s + 1;
+  for (let s = 0; s < slotPositionIndices.length; s++) {
+    for (const idx of slotPositionIndices[s]) slotByPosIndex[idx] = s + 1;
   }
   for (let i = 0; i < reticulePositions.length; i++) {
     const pos = reticulePositions[i];
@@ -332,15 +333,18 @@ export const renderShipReticules = (
   // each slot's ring uses the softer proximity halo (>0 anywhere in the dot glow ramp) so the
   // player gets feedback the moment the reticule grazes the visible circle, not just on strict
   // hit. Per-slot rings are independent; audio is collapsed into one voice that follows the
-  // strongest hover and stays locked as long as ANY ring is locked.
+  // strongest hover and stays locked as long as ANY ring is locked. Under prong, the ring
+  // renders at whichever prong reticule the trajectory dot is closest to (the winner).
   let maxIntensity = 0;
   let anyHover = false;
   let anyLocked = false;
-  for (let slot = 0; slot < slotIndices.length; slot++) {
-    const idx = slotIndices[slot];
+  for (let slot = 0; slot < slotPositionIndices.length; slot++) {
     const proximity = trajectoryResult.slotProximities[slot] ?? 0;
-    const hovering = proximity > 0 && idx >= 0;
-    const center = hovering ? reticulePositions[idx] : null;
+    const winnerIdx = trajectoryResult.slotWinnerReticuleIdx[slot] ?? -1;
+    const positionIdxs = slotPositionIndices[slot];
+    const ringPosIdx = winnerIdx >= 0 && winnerIdx < positionIdxs.length ? positionIdxs[winnerIdx] : -1;
+    const hovering = proximity > 0 && ringPosIdx >= 0;
+    const center = hovering ? reticulePositions[ringPosIdx] : null;
     const intensity = updateHoverRing(state.hoverDotRings[slot], hovering, center, ctx, beatTime, beatGrid, sound);
     if (hovering) anyHover = true;
     if (intensity > maxIntensity) maxIntensity = intensity;
