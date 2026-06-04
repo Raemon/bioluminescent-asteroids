@@ -1,5 +1,24 @@
 [
   {
+    "id": "2026-06-04-1d4bce6",
+    "date": "2026-06-04",
+    "title": "Aliens now arc and drift off-screen instead of wrapping",
+    "sections": [
+      {
+        "heading": "Changed",
+        "items": [
+          "Aliens fly a curving, arcing path across the field instead of moving in straight lines.",
+          "Aliens no longer wrap around the screen edges — they drift off and disappear.",
+          "Alien engine drone sounds stop correctly when an alien leaves the screen.",
+          "Prong reticule now properly anchors the drift-shot bonus to the first prong angle."
+        ]
+      }
+    ],
+    "commits": [
+      "1d4bce6"
+    ]
+  },
+  {
     "id": "2026-06-03-db469d9",
     "date": "2026-06-03",
     "title": "Solid crystal gem drops and fragment changes",
