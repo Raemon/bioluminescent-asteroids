@@ -3,7 +3,7 @@
 // annotations on the engine struct without dragging the runtime in.
 import type * as Tone from "tone";
 import { cfgN, cfgU } from "./soundConfig";
-import { getVocalsEnabled } from "./game/vocalsPref";
+import { getChannelVolume, type AudioChannel } from "./game/audioPrefs";
 
 type ToneModule = typeof import("tone");
 let toneModulePromise: Promise<ToneModule> | null = null;
@@ -395,8 +395,13 @@ export class Sound {
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AC) return;
     this.ctx = new AC();
-    this.master = this.ctx.createGain();
-    this.master.gain.value = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
+    // liveSum / bakedSum are the two summing buses every channel feeds into.
+    // liveSum runs through the master compressor + limiter (live voices need
+    // it; their dynamics aren't pre-baked); bakedSum goes straight to
+    // destination because pre-baked mp3s already contain the full master
+    // chain in their tail.
+    this.liveSum = this.ctx.createGain();
+    this.liveSum.gain.value = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
     // Native compressor + brick-wall limiter mirroring the settings Tone's
     // master chain used to apply (Compressor: -18/3/0.01/0.18/12; Limiter:
     // -1/20/0.003/0.01). Runtime is identical in dev and prod — Tone is only
@@ -413,15 +418,39 @@ export class Sound {
     masterLimiter.attack.value = 0.003;
     masterLimiter.release.value = 0.01;
     masterLimiter.knee.value = 0;
-    this.master.connect(masterCompressor);
+    this.liveSum.connect(masterCompressor);
     masterCompressor.connect(masterLimiter);
     masterLimiter.connect(this.ctx.destination);
-    // Direct-to-destination bus for pre-baked buffers (whose tail already
-    // contains the full Tone master chain). Mirrors the master gain level so
-    // baked and live voices sit at a comparable loudness.
-    this.bakedOut = this.ctx.createGain();
-    this.bakedOut.gain.value = Sound.BAKED_BASE_GAIN * this.volume * this.pauseFadeFactor;
-    this.bakedOut.connect(this.ctx.destination);
+
+    this.bakedSum = this.ctx.createGain();
+    this.bakedSum.gain.value = Sound.BAKED_BASE_GAIN * this.volume * this.pauseFadeFactor;
+    this.bakedSum.connect(this.ctx.destination);
+
+    // Build the four channel pairs (live + baked legs each). Each leg is a
+    // gain node whose value is the player's per-channel volume; it sits
+    // upstream of liveSum / bakedSum so the volume slider rides everything
+    // routed through that channel without re-touching individual voices.
+    const liveSum = this.liveSum;
+    const bakedSum = this.bakedSum;
+    const makeChannel = (channel: AudioChannel): [GainNode, GainNode] => {
+      const v = getChannelVolume(channel);
+      const live = this.ctx!.createGain();
+      live.gain.value = v;
+      live.connect(liveSum);
+      const baked = this.ctx!.createGain();
+      baked.gain.value = v;
+      baked.connect(bakedSum);
+      return [live, baked];
+    };
+    [this.chBasePulseLive, this.chBasePulseBaked] = makeChannel("basePulse");
+    [this.chSfxLive,       this.chSfxBaked]       = makeChannel("sfx");
+    [this.chMusicLive,     this.chMusicBaked]     = makeChannel("music");
+    [this.chVocalsLive,    this.chVocalsBaked]    = makeChannel("vocals");
+
+    // master / bakedOut alias the SFX channel so existing voice code (which
+    // connects to those fields) lands on the SFX bus with no rewiring.
+    this.master = this.chSfxLive;
+    this.bakedOut = this.chSfxBaked;
     // Pre-fill the noise-buffer cache so the first bassteroid/comet spawn
     // doesn't pay the 6-8s buffer allocation mid-gameplay. AudioBuffers can't
     // be created before the context exists, so this is the earliest we can do
@@ -628,10 +657,46 @@ export class Sound {
   // tone mode) and go straight to destination via this gain — otherwise the
   // bus chain would be applied twice.
   bakedOut: GainNode | null = null;
+  // Per-channel mix gains. Each channel has two legs — a "live" leg that
+  // routes into the master compressor/limiter chain (for hand-built voices),
+  // and a "baked" leg that goes straight to destination (pre-baked mp3s
+  // already carry the master FX chain in their tail). setChannelVolume()
+  // updates both legs of a channel together.
+  //
+  // chSfx{Live,Baked} are aliased by this.master and this.bakedOut so the
+  // existing voice methods (which connect to those fields directly) sit on
+  // the SFX channel without any per-voice rewiring. The other three channels
+  // are wired explicitly: bgBeat → chBasePulseBaked, halo music →
+  // chMusicLive, pilot log → chVocalsBaked.
+  private chBasePulseLive: GainNode | null = null;
+  private chBasePulseBaked: GainNode | null = null;
+  private chSfxLive: GainNode | null = null;
+  private chSfxBaked: GainNode | null = null;
+  private chMusicLive: GainNode | null = null;
+  private chMusicBaked: GainNode | null = null;
+  private chVocalsLive: GainNode | null = null;
+  private chVocalsBaked: GainNode | null = null;
+  // Final summing buses (after channels, before compressor/destination). Hold
+  // the master volume + pause-fade multiplier so a single slider scales
+  // everything regardless of which channel a voice lives on.
+  private liveSum: GainNode | null = null;
+  private bakedSum: GainNode | null = null;
   // Set by play() while a single dispatch is in progress, so playBaked can
   // pick up the position without per-helper plumbing. Null when the call has
   // no spatial position.
   private spatialPosForCall: Pos | null = null;
+
+  // Map a (channel, leg) pair to its underlying gain node. Used by
+  // setChannelVolume so callers don't need to know about the live/baked
+  // split.
+  private channelLeg(channel: AudioChannel, leg: "live" | "baked"): GainNode | null {
+    switch (channel) {
+      case "basePulse": return leg === "live" ? this.chBasePulseLive : this.chBasePulseBaked;
+      case "sfx":       return leg === "live" ? this.chSfxLive       : this.chSfxBaked;
+      case "music":     return leg === "live" ? this.chMusicLive     : this.chMusicBaked;
+      case "vocals":    return leg === "live" ? this.chVocalsLive    : this.chVocalsBaked;
+    }
+  }
 
   private bakedKey(name: SoundName, pitchRatio: number): string {
     // Quantize to 4 decimals so floating-point noise doesn't fragment the cache.
@@ -724,7 +789,11 @@ export class Sound {
   // a baked buffer was found and played; false if the caller should fall
   // back to live synthesis (typically while the first bake is still running).
   private playBaked(name: SoundName, pitchRatio: number): boolean {
-    if (!this.ctx || !this.bakedOut) return false;
+    if (!this.ctx) return false;
+    // Pick the channel sink: bgBeat is the background pulsar pulse and rides
+    // the basePulse slider; everything else baked is an SFX one-shot.
+    const sink = name === "bgBeat" ? this.chBasePulseBaked : this.chSfxBaked;
+    if (!sink) return false;
     const key = this.bakedKey(name, pitchRatio);
     const buf = this.bakedBuffers.get(key);
     if (buf) {
@@ -733,14 +802,14 @@ export class Sound {
       // Positional splice: if play() recorded a pos for this dispatch, route
       // the buffer through the same pan + distance-gain pair we'd use for
       // live voices. Baked buffers don't go through this.master, so we wire
-      // them straight into bakedOut.
+      // them straight into the channel sink.
       const pos = this.spatialPosForCall;
       if (pos) {
-        const spatial = this.makeSpatial(pos, this.bakedOut);
+        const spatial = this.makeSpatial(pos, sink);
         if (spatial) src.connect(spatial.panner);
-        else src.connect(this.bakedOut);
+        else src.connect(sink);
       } else {
-        src.connect(this.bakedOut);
+        src.connect(sink);
       }
       src.start();
       return true;
@@ -1015,11 +1084,12 @@ export class Sound {
   // Schedule the baked bgBeat at a precise audio-clock time, alternating
   //   downbeat / offbeat pitch like the in-game groove. Returns false if the
   //   buffer is still baking — the calibrator holds the intro until it's ready
-  //   so the first beats are steady, not clustered. Routed through bakedOut so
-  //   it tracks master volume + mute.
+  //   so the first beats are steady, not clustered. Routed through the
+  //   basePulse channel so the calibration metronome tracks the same slider
+  //   the player uses in-game.
   scheduleCalibrationBeat(atTime: number, offbeat: boolean): boolean {
     this.ensureContext();
-    if (!this.ctx || !this.bakedOut) return false;
+    if (!this.ctx || !this.chBasePulseBaked) return false;
     const pitchRatio = offbeat ? 1.122 : 1;
     const bucket = Math.round(Sound.CALIBRATION_BEAT_INTENSITY * 10) / 10;
     const pitchKey = pitchRatio * 100 + bucket;
@@ -1027,7 +1097,7 @@ export class Sound {
     if (!buf) { this.queueBake("bgBeat", pitchKey); return false; }
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
-    src.connect(this.bakedOut);
+    src.connect(this.chBasePulseBaked);
     src.start(Math.max(atTime, this.ctx.currentTime));
     return true;
   }
@@ -1104,32 +1174,51 @@ export class Sound {
     if (!on) this.stopHaloMusic();
   }
 
-  // Scales the two output buses (master for live voices, bakedOut for
-  // pre-baked buffers) by the volume multiplier. v = 0 disables playback so
-  // the per-voice early-outs gate any in-flight starts; v > 0 re-enables.
+  // Scales the global summing buses (liveSum for live voices, bakedSum for
+  // pre-baked buffers) by the volume multiplier. Per-channel mixers sit
+  // upstream, so this slider rides every channel uniformly. v = 0 disables
+  // playback so per-voice early-outs gate any in-flight starts; v > 0 re-enables.
   setVolume(v: number) {
     this.volume = Math.max(0, Math.min(2, v));
-    if (this.master) this.master.gain.value = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
-    if (this.bakedOut) this.bakedOut.gain.value = Sound.BAKED_BASE_GAIN * this.volume * this.pauseFadeFactor;
+    if (this.liveSum)  this.liveSum.gain.value  = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
+    if (this.bakedSum) this.bakedSum.gain.value = Sound.BAKED_BASE_GAIN  * this.volume * this.pauseFadeFactor;
     this.setEnabled(this.volume > 0);
   }
 
-  // Ramp the master + bakedOut buses to `target` (0..1) over `duration` seconds.
+  // Live-update a single channel's volume. Both legs (live + baked) are
+  // ramped together so a swap mid-frame stays smooth — and to dodge the
+  // "exponentialRampToValueAtTime can't hit 0" foot-gun, we use a short
+  // linear ramp instead.
+  setChannelVolume(channel: AudioChannel, v: number) {
+    const value = Math.max(0, Math.min(1, v));
+    const live = this.channelLeg(channel, "live");
+    const baked = this.channelLeg(channel, "baked");
+    if (!this.ctx || !live || !baked) return;
+    const t = this.ctx.currentTime;
+    const ramp = 0.03;
+    for (const node of [live, baked]) {
+      node.gain.cancelScheduledValues(t);
+      node.gain.setValueAtTime(node.gain.value, t);
+      node.gain.linearRampToValueAtTime(value, t + ramp);
+    }
+  }
+
+  // Ramp the liveSum + bakedSum buses to `target` (0..1) over `duration` seconds.
   // Used to fade audio out on pause and back in on resume without disturbing
   // the player's volume slider. cancelScheduledValues clears any in-flight
   // ramp so back-to-back pause/resume taps don't fight each other.
   fadeForPause(target: number, duration: number) {
     this.pauseFadeFactor = Math.max(0, Math.min(1, target));
-    if (!this.ctx || !this.master || !this.bakedOut) return;
+    if (!this.ctx || !this.liveSum || !this.bakedSum) return;
     const t = this.ctx.currentTime;
-    const masterTarget = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
+    const liveTarget = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
     const bakedTarget = Sound.BAKED_BASE_GAIN * this.volume * this.pauseFadeFactor;
-    for (const node of [this.master, this.bakedOut]) {
+    for (const node of [this.liveSum, this.bakedSum]) {
       node.gain.cancelScheduledValues(t);
       node.gain.setValueAtTime(node.gain.value, t);
     }
-    this.master.gain.linearRampToValueAtTime(masterTarget, t + duration);
-    this.bakedOut.gain.linearRampToValueAtTime(bakedTarget, t + duration);
+    this.liveSum.gain.linearRampToValueAtTime(liveTarget, t + duration);
+    this.bakedSum.gain.linearRampToValueAtTime(bakedTarget, t + duration);
   }
 
   // Start a continuous theremin-ish drone for an alien. The `key` is the
@@ -2612,7 +2701,7 @@ export class Sound {
     melodicSrc.connect(melodicGain);
     ambientGain.connect(mainGain);
     melodicGain.connect(mainGain);
-    mainGain.connect(this.master);
+    if (this.chMusicLive) mainGain.connect(this.chMusicLive);
 
     // Layer 3 is optional — only wire it up if the stem actually loaded.
     let layer3Src: AudioBufferSourceNode | null = null;
@@ -2770,21 +2859,22 @@ export class Sound {
   // the spoken word. `delaySec` lets the caller align to a downbeat.
   async playPilotLog(milestone: number, delaySec = 0, gain = 1.0): Promise<number> {
     if (!this.enabled) return 0;
-    if (!getVocalsEnabled()) return 0;
+    // Vocals channel volume gates loudness — at 0 the channel gain mutes the
+    // buffer source automatically, so no extra "vocals disabled" check needed.
     this.ensureContext();
-    if (!this.ctx || !this.bakedOut) return 0;
+    if (!this.ctx || !this.chVocalsBaked) return 0;
     const urls = pilotLogUrlsForIndex(milestone);
     if (urls.length === 0) return 0;
     const url = urls[Math.floor(Math.random() * urls.length)];
     const targetStartTime = this.ctx.currentTime + Math.max(0, delaySec);
     const buf = await this.loadPilotLogBuffer(url);
-    if (!buf || !this.ctx || !this.bakedOut) return 0;
+    if (!buf || !this.ctx || !this.chVocalsBaked) return 0;
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
     const g = this.ctx.createGain();
     g.gain.value = gain;
     src.connect(g);
-    g.connect(this.bakedOut);
+    g.connect(this.chVocalsBaked);
     src.start(Math.max(this.ctx.currentTime, targetStartTime));
     return buf.duration;
   }

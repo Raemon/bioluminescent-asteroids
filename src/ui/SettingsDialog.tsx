@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { loadBeatOffset, clampBeatOffset } from "../game/beatCalibration";
 import { getRecentName, saveRecentName } from "../game/highscores";
-import { getVocalsEnabled, setVocalsEnabled } from "../game/vocalsPref";
+import {
+  CHANNEL_LABELS,
+  CHANNEL_ORDER,
+  getChannelVolume,
+  setChannelVolume,
+  type AudioChannel,
+} from "../game/audioPrefs";
 import {
   ACTION_LABELS,
   ACTION_ORDER,
@@ -14,34 +20,53 @@ import {
   saveBindings,
 } from "../game/controlBindings";
 
-// Settings panel opened by the HUD gear. Everything here is persisted player
-//   state: the rhythm-latency offset (also editable via the tap calibrator),
-//   the pilot callsign, and the keyboard bindings. It talks to the game
-//   through events (so the running offset updates live) and reads the stored
-//   values directly when it opens.
+// Settings panel opened by the HUD gear. Three tabs:
+//   Audio    — per-channel volume (base pulse / SFX / music / vocals)
+//   Music    — rhythm latency calibration
+//   Controls — keyboard bindings
+// Callsign sits above the tab strip so it's always editable regardless of
+// which tab is open.
 
 const OFFSET_MIN_MS = -200;
 const OFFSET_MAX_MS = 350;
 const OFFSET_STEP_MS = 5;
 
 type CaptureTarget = { action: ControlAction } | null;
+type Tab = "audio" | "music" | "controls";
+
+const TAB_LABELS: Record<Tab, string> = {
+  audio:    "Audio",
+  music:    "Music",
+  controls: "Controls",
+};
+const TAB_ORDER: readonly Tab[] = ["audio", "music", "controls"];
 
 export const SettingsDialog = () => {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<Tab>("audio");
   const [offsetMs, setOffsetMs] = useState(0);
   const [callsign, setCallsign] = useState("");
   const [bindings, setBindings] = useState<Bindings>(() => getBindings());
-  const [vocalsOn, setVocalsOn] = useState<boolean>(() => getVocalsEnabled());
+  const [volumes, setVolumes] = useState<Record<AudioChannel, number>>(() => ({
+    basePulse: getChannelVolume("basePulse"),
+    sfx:       getChannelVolume("sfx"),
+    music:     getChannelVolume("music"),
+    vocals:    getChannelVolume("vocals"),
+  }));
   const [capture, setCapture] = useState<CaptureTarget>(null);
   const captureRef = useRef<CaptureTarget>(null);
   captureRef.current = capture;
 
-  // Snapshot the persisted values each time we open so the controls reflect reality.
   const openDialog = () => {
     setOffsetMs(Math.round((loadBeatOffset() ?? 0) * 1000));
     setCallsign(getRecentName());
     setBindings(getBindings());
-    setVocalsOn(getVocalsEnabled());
+    setVolumes({
+      basePulse: getChannelVolume("basePulse"),
+      sfx:       getChannelVolume("sfx"),
+      music:     getChannelVolume("music"),
+      vocals:    getChannelVolume("vocals"),
+    });
     setCapture(null);
     setOpen(true);
     // freezes the sim if a run is in progress (see Game / updateGame).
@@ -54,10 +79,6 @@ export const SettingsDialog = () => {
     window.dispatchEvent(new CustomEvent("settings:closed"));
   };
 
-  // While open, swallow keys at capture so the game behind doesn't act on them
-  //   (typing in the callsign field still works — we don't preventDefault).
-  //   When a binding capture is active, the next key press becomes the binding
-  //   instead of acting on the dialog.
   useEffect(() => {
     const onReopen = () => openDialog();
     window.addEventListener("settings:open-request", onReopen);
@@ -65,6 +86,10 @@ export const SettingsDialog = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // While open, swallow keys at capture so the game behind doesn't act on them
+  //   (typing in the callsign field still works — we don't preventDefault there).
+  //   When a binding capture is active, the next key press becomes the binding
+  //   instead of acting on the dialog.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -127,9 +152,10 @@ export const SettingsDialog = () => {
     });
   };
 
-  const toggleVocals = (on: boolean) => {
-    setVocalsOn(on);
-    setVocalsEnabled(on);
+  const applyVolume = (channel: AudioChannel, value: number) => {
+    const clamped = Math.max(0, Math.min(1, value));
+    setVolumes((prev) => ({ ...prev, [channel]: clamped }));
+    setChannelVolume(channel, clamped);
   };
 
   const resetControls = () => {
@@ -166,68 +192,100 @@ export const SettingsDialog = () => {
           </label>
         </section>
 
-        <section className="settings-section">
-          <div className="settings-section-head">
-            <span className="settings-section-title">Rhythm Latency Calibration</span>
-            <button type="button" className="settings-link" onClick={resync}>Resync the beat ▸</button>
-          </div>
-          <div className="settings-row">
-            <div className="settings-latency">
-              <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs - OFFSET_STEP_MS)}>−</button>
-              <input
-                type="range"
-                min={OFFSET_MIN_MS}
-                max={OFFSET_MAX_MS}
-                step={OFFSET_STEP_MS}
-                value={offsetMs}
-                onChange={(e) => applyOffset(Number(e.target.value))}
-              />
-              <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs + OFFSET_STEP_MS)}>+</button>
-              <span className="settings-ms">{offsetMs >= 0 ? "+" : "−"}{Math.abs(offsetMs)} ms</span>
+        <div className="settings-tabs" role="tablist">
+          {TAB_ORDER.map((t) => (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={tab === t}
+              className={`settings-tab${tab === t ? " settings-tab--active" : ""}`}
+              onClick={() => setTab(t)}
+            >
+              {TAB_LABELS[t]}
+            </button>
+          ))}
+        </div>
+
+        {tab === "audio" && (
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <span className="settings-section-title">Audio Mix</span>
             </div>
-          </div>
-        </section>
-
-        <section className="settings-section">
-          <label className="settings-check">
-            <input
-              type="checkbox"
-              checked={!vocalsOn}
-              onChange={(e) => toggleVocals(!e.target.checked)}
-            />
-            <span>Disable Pilot's Log vocals</span>
-          </label>
-        </section>
-
-        <section className="settings-section">
-          <div className="settings-section-head">
-            <span className="settings-section-title">Controls</span>
-            <button type="button" className="settings-link" onClick={resetControls}>Reset defaults ▸</button>
-          </div>
-          <div className="settings-controls-grid">
-            {ACTION_ORDER.map((action) => {
-              const k = bindings[action][0];
-              const isCapturing = capture?.action === action;
-              return (
-                <div key={action} className="settings-control-row">
-                  <span className="settings-control-label">{ACTION_LABELS[action]}</span>
-                  <button
-                    type="button"
-                    className={`settings-key-chip${isCapturing ? " settings-key-chip--listening" : ""}${!k ? " settings-key-chip--empty" : ""}`}
-                    onClick={() => setCapture({ action })}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      if (k) clearBinding(action);
-                    }}
-                    title={k ? "Click to rebind · Right-click to clear" : "Click to bind"}
-                  >
-                    {isCapturing ? "press a key…" : k ? formatKey(k) : "—"}
-                  </button>
+            <div className="settings-volume-grid">
+              {CHANNEL_ORDER.map((ch) => (
+                <div key={ch} className="settings-volume-row">
+                  <span className="settings-volume-label">{CHANNEL_LABELS[ch]}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={volumes[ch]}
+                    onChange={(e) => applyVolume(ch, Number(e.target.value))}
+                  />
+                  <span className="settings-volume-pct">{Math.round(volumes[ch] * 100)}%</span>
                 </div>
-              );
-            })}
-          </div>
-        </section>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {tab === "music" && (
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <span className="settings-section-title">Rhythm Latency Calibration</span>
+              <button type="button" className="settings-link" onClick={resync}>Resync the beat ▸</button>
+            </div>
+            <div className="settings-row">
+              <div className="settings-latency">
+                <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs - OFFSET_STEP_MS)}>−</button>
+                <input
+                  type="range"
+                  min={OFFSET_MIN_MS}
+                  max={OFFSET_MAX_MS}
+                  step={OFFSET_STEP_MS}
+                  value={offsetMs}
+                  onChange={(e) => applyOffset(Number(e.target.value))}
+                />
+                <button type="button" className="settings-step" onClick={() => applyOffset(offsetMs + OFFSET_STEP_MS)}>+</button>
+                <span className="settings-ms">{offsetMs >= 0 ? "+" : "−"}{Math.abs(offsetMs)} ms</span>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {tab === "controls" && (
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <span className="settings-section-title">Controls</span>
+              <button type="button" className="settings-link" onClick={resetControls}>Reset defaults ▸</button>
+            </div>
+            <div className="settings-controls-grid">
+              {ACTION_ORDER.map((action) => {
+                const k = bindings[action][0];
+                const isCapturing = capture?.action === action;
+                return (
+                  <div key={action} className="settings-control-row">
+                    <span className="settings-control-label">{ACTION_LABELS[action]}</span>
+                    <button
+                      type="button"
+                      className={`settings-key-chip${isCapturing ? " settings-key-chip--listening" : ""}${!k ? " settings-key-chip--empty" : ""}`}
+                      onClick={() => setCapture({ action })}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        if (k) clearBinding(action);
+                      }}
+                      title={k ? "Click to rebind · Right-click to clear" : "Click to bind"}
+                    >
+                      {isCapturing ? "press a key…" : k ? formatKey(k) : "—"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         <button type="button" className="settings-done" onClick={closeDialog}>Done</button>
       </div>

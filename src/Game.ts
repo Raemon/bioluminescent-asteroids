@@ -7,6 +7,7 @@ import { Starfield } from "./Starfield";
 import { Pulsar } from "./Pulsar";
 import { Input } from "./Input";
 import { Sound } from "./Sound";
+import type { AudioChannel } from "./game/audioPrefs";
 import { Canister } from "./Canister";
 import { GoldCrystal } from "./GoldCrystal";
 import { Comet } from "./Comet";
@@ -327,6 +328,13 @@ export class Game implements HudElements {
     });
     window.addEventListener("settings:opened", () => { this.settingsOpen = true; });
     window.addEventListener("settings:closed", () => { this.settingsOpen = false; });
+    // Per-channel audio sliders (Audio tab in Settings). The dispatcher lives
+    //   in audioPrefs.setChannelVolume; Sound applies the value to the
+    //   matching channel gain pair (live + baked legs).
+    window.addEventListener("audio-pref:changed", (e) => {
+      const { channel, value } = (e as CustomEvent).detail as { channel: AudioChannel; value: number };
+      this.sound.setChannelVolume(channel, value);
+    });
     window.addEventListener("game:togglePause", () => togglePause(this));
     // <FirstWaveHint> owns its own stage-3 auto-dismiss timer; when it fades
     //   out it asks the game to clear the stage.
