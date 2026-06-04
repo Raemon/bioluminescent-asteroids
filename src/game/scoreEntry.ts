@@ -1,6 +1,7 @@
 import type { Game } from "../Game";
 import {
   fetchHighscores,
+  fetchTopPilots,
   getCachedHighscores,
   getRecentName,
   getTopEntriesOnly,
@@ -214,7 +215,7 @@ const escapeHtml = (s: string): string =>
 // matches the API's MAX_LIMIT — fetching the full slice means a returning pilot
 //   ranked anywhere in the top tier will be found by id and the rotation has
 //   enough pilots to scroll through.
-const LEADERBOARD_FETCH_LIMIT = 50;
+const LEADERBOARD_FETCH_LIMIT = 100;
 
 // For the title-screen "Top entries only" view, keep each pilot's personal
 //   best in *each* category (score, wave, rhythm) — so a pilot whose top-score
@@ -302,6 +303,21 @@ export const showLeaderboard = (game: Game) => {
 
 export const refreshLeaderboard = async (game: Game) => {
   const selfId = game.lastRunScoreId;
+  // Two-phase: paint the deduped 20-pilots view first (small, cached server-
+  //   side, lands fast) so the title screen has rich rows immediately. Then
+  //   pull the full top-100 in the background and swap them in once available.
+  let paintedInitial = false;
+  try {
+    const initial = await fetchTopPilots();
+    paintedInitial = true;
+    saveCachedHighscores(initial);
+    game.leaderboardAllRows = initial;
+    game.leaderboardHasMore = true;
+    applySort(game, initial, selfId);
+    syncShowMoreVisibility(game);
+  } catch {
+    // fall through to the full fetch — it can still recover the view.
+  }
   try {
     const rows = await fetchHighscores(LEADERBOARD_FETCH_LIMIT);
     saveCachedHighscores(rows);
@@ -310,7 +326,7 @@ export const refreshLeaderboard = async (game: Game) => {
     applySort(game, rows, selfId);
     syncShowMoreVisibility(game);
   } catch {
-    if (game.leaderboardAllRows.length === 0) {
+    if (!paintedInitial && game.leaderboardAllRows.length === 0) {
       game.leaderboardListEl.innerHTML =
         '<li class="leaderboard-status">Leaderboard unavailable.</li>';
       game.leaderboardActive = false;

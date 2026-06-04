@@ -71,6 +71,16 @@ export const fetchHighscores = async (limit = 10, offset = 0): Promise<Highscore
   return body.scores;
 };
 
+// Server-side deduped "top N pilots" view — the initial title-screen payload.
+//   The server runs the same per-pilot best-of-category logic the client used
+//   to apply locally, so this returns far fewer rows than the raw top-100.
+export const fetchTopPilots = async (): Promise<HighscoreRow[]> => {
+  const res = await fetch("/api/highscores?mode=top-pilots", { method: "GET" });
+  if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+  const body = (await res.json()) as { scores: HighscoreRow[] };
+  return body.scores;
+};
+
 // the leaderboard row shows a compressed kill breakdown; pick the top few
 // buckets so the row stays scannable instead of dumping every category.
 export const formatKillSummary = (summary: Record<string, number>): string => {
