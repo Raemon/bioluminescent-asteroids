@@ -258,7 +258,7 @@ const renderLeaderboard = (game: Game) => {
     const row = rows[i];
     const safeName = escapeHtml(row.name);
     const combo = row.max_combo ?? 0;
-    const comboTier = combo >= 8 ? "white" : combo >= 4 ? "gold" : combo >= 2 ? "cyan" : "dim";
+    const comboTier = combo >= 12 ? "white" : combo >= 4 ? "gold" : combo >= 2 ? "cyan" : "dim";
     const wave = row.wave ?? 1;
     const cls = i === game.leaderboardSelection ? ' class="lb-self"' : "";
     const replayBtn = row.has_replay

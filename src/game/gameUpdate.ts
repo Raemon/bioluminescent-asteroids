@@ -201,7 +201,7 @@ import { BASS_MEASURE_LENGTH } from "../Asteroid";
 const syncHaloAmbient = (game: Game) => {
   const hasYellowHalo = game.beatCombo >= 4;
   const hasMelodic = game.beatCombo >= 6;
-  const hasWhiteBullets = game.beatCombo >= 8;
+  const hasWhiteBullets = game.beatCombo >= 12;
   const hasLayer3 = game.beatCombo >= 12;
 
   if (!PLAY_COMBO_MUSIC) {
@@ -232,7 +232,7 @@ const syncHaloAmbient = (game: Game) => {
       game.sound.stopHaloMusic();
     }
   } else {
-    // Legacy synthesized pad. 4x opens, 8x adds octave-up sparkle.
+    // Legacy synthesized pad. 4x opens, 12x adds octave-up sparkle.
     if (hasYellowHalo) {
       if (!game.sound.haloAmbient) game.sound.startHaloAmbient(hasWhiteBullets ? 2 : 1);
       else game.sound.setHaloAmbientTier(hasWhiteBullets ? 2 : 1);
@@ -390,9 +390,9 @@ const classifyNewBullets = (game: Game, firstNewIndex: number) => {
 const handleOnBeatFire = (game: Game, firstNewIndex: number) => {
   // boosted bullets fly while the yellow halo (combo ≥ 4, tier 2) is up.
   const boosted = game.ship.comboHaloTier >= 2;
-  // combo ≥ 8 promotes to the white "super-boosted" tier — sharper look and
+  // combo ≥ 12 promotes to the white "super-boosted" tier — sharper look and
   // 1.5× range; same hitbox as yellow so the reward is reach, not sweep.
-  const superBoosted = game.beatCombo >= 8;
+  const superBoosted = game.beatCombo >= 12;
   for (let i = firstNewIndex; i < game.bullets.length; i++) {
     const newBullet = game.bullets[i];
     newBullet.onBeat = true;

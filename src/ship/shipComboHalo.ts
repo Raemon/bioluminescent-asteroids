@@ -1,9 +1,9 @@
 import type { Ship } from "../Ship";
 import { haloVertices } from "./shipHitbox";
 
-// combo tier <2 hides halo entirely; 2–3 cyan; 4–7 gold; ≥8 white (matches white bullets).
+// combo tier <2 hides halo entirely; 2–3 cyan; 4–11 gold; ≥12 white (matches white bullets).
 export const setComboFromValue = (ship: Ship, combo: number) => {
-  if (combo >= 8) ship.comboHaloTier = 3;
+  if (combo >= 12) ship.comboHaloTier = 3;
   else if (combo >= 4) ship.comboHaloTier = 2;
   else if (combo >= 2) ship.comboHaloTier = 1;
   else ship.comboHaloTier = 0;

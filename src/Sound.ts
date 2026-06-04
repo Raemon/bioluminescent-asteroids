@@ -84,7 +84,7 @@ type CometShimmerNode = {
 };
 
 // Ambient pad that holds for the duration of a yellow-halo combo (≥4) and
-// thickens further at white-bullet tier (≥8). Voices C2/C3/G3 are common to
+// thickens further at white-bullet tier (≥12). Voices C2/C3/G3 are common to
 // both the bassteroid C-major bed and the comet's C-rooted phrygian cluster,
 // so they layer pleasantly with both. The "third voice" frequency glides
 // between E4 (major third, bright with bass field) and Eb4 (minor third,
@@ -303,7 +303,7 @@ export class Sound {
   // Per-comet shimmer pad, keyed by the Comet instance.
   cometShimmers: Map<object, CometShimmerNode> = new Map();
   // Single combo-halo ambient pad. Null when combo < 4 (no yellow halo yet).
-  // Tier rides with the halo: 1 = yellow only, 2 = white bullets (combo ≥ 8).
+  // Tier rides with the halo: 1 = yellow only, 2 = white bullets (combo ≥ 12).
   haloAmbient: HaloAmbientNode | null = null;
   haloAmbientTier = 0;
   // True while any comet is on screen — slides the pad's "third voice" from
@@ -2399,7 +2399,7 @@ export class Sound {
     oscs.push(thirdOsc);
 
     // Tier-2 (white bullet) gain — an octave-up colour layer that swells in
-    // when combo crosses 8. Wired here so the upgrade is a single gain ramp
+    // when combo crosses 12. Wired here so the upgrade is a single gain ramp
     // rather than starting a new oscillator stack mid-game.
     const tier2Gain = this.ctx.createGain();
     tier2Gain.gain.value = 0.0001;

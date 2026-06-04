@@ -31,7 +31,7 @@ export class Bullet {
   // up (combo ≥ 4). Renders yellow instead of blue and deals 2× the on-beat
   // damage so the gold-tier streak feels lethal as well as visible.
   boosted = false;
-  // True when fired at combo ≥ 8. Renders as a tight white shot and flies
+  // True when fired at combo ≥ 12. Renders as a tight white shot and flies
   // twice as far — same hitbox/core as the yellow tier, but sharper-looking
   // and with extended reach so the streak feels like a longer arm.
   superBoosted = false;
@@ -104,7 +104,7 @@ export class Bullet {
     const rangeAlpha = this.fadeStartLife > 0 && this.life < this.fadeStartLife
       ? Math.max(0, this.life / this.fadeStartLife)
       : 1;
-    // Super-boosted (combo ≥ 8): white — saturation 0 makes hue irrelevant.
+    // Super-boosted (combo ≥ 12): white — saturation 0 makes hue irrelevant.
     // Boosted on-beat: gold (hue 45) to match the tier-2 combo halo.
     // On-beat: deep saturated blue (hue 220) — sells "weightier" rhythm shot.
     // Pierce: yellow. Non-beat: pale cyan, smaller and quieter visually.
@@ -112,7 +112,7 @@ export class Bullet {
     const headHue = this.boosted ? 48 : this.onBeat ? 222 : this.pierce ? 60 : 180;
     const trailAlphaScale = this.onBeat ? 0.85 : 0.4;
     const headAlpha = this.onBeat ? 1.0 : 0.75;
-    // super-boosted (combo ≥ 8) keeps the yellow-tier core size but tightens
+    // super-boosted (combo ≥ 12) keeps the yellow-tier core size but tightens
     // the halo (6 vs 10) for a sharper, more pointed read.
     const headRadiusMul = this.superBoosted ? 6 : this.onBeat ? 10 : 6;
     const trailRadiusMul = this.superBoosted ? 3 : 5;
