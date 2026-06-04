@@ -624,10 +624,13 @@ export class Pulsar {
     beat: number,
     flare: number,
   ) {
+    // Dark silhouette — the planet is backlit, so its body sits in shadow
+    // against the starfield. Saturation still climbs with approach so the
+    // hue reads on the faint terminator detail, but the disc itself is
+    // pushed very dark.
     const sat = planet.baseSat + approach * planet.satGrowth;
-    const light = Math.max(2, planet.baseLight - approach * planet.lightDrop);
+    const light = Math.max(1, planet.baseLight * 0.35 - approach * planet.lightDrop * 0.5);
 
-    // Flat silhouette.
     ctx.fillStyle = `hsl(${planet.hue}, ${sat}%, ${light}%)`;
     ctx.beginPath();
     ctx.arc(px, py, size, 0, TAU);
@@ -656,33 +659,32 @@ export class Pulsar {
       ? Math.min(1, (size - (distToPulsar + pulsarR)) / Math.max(1, pulsarR))
       : 0;
 
-    // Rim light on the pulsar-facing crescent. A radial gradient offset
-    // toward the pulsar gives a soft falloff from the bright edge inward.
-    // Intensity climbs with size (the planet feels more 3D when it's close
-    // enough to see lighting on) and with the per-beat pulse so the rim
-    // throbs subtly in time with the music.
+    // Thin rim light hugging the pulsar-facing limb. Backlit look: the
+    // gradient origin sits just *outside* the disc on the pulsar side so
+    // only the outermost sliver of the planet picks up light. Inner stops
+    // fall to zero well before reaching the body, keeping the disc dark.
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.beginPath();
     ctx.arc(px, py, size, 0, TAU);
     ctx.clip();
-    const rimCx = px + nx * size * 0.65;
-    const rimCy = py + ny * size * 0.65;
-    const rimAlpha = Math.min(0.9, 0.18 + 0.22 * Math.min(1, size / 60) + 0.18 * beat + 0.25 * flare + 0.6 * eclipse);
-    const rimGrad = ctx.createRadialGradient(rimCx, rimCy, size * 0.05, rimCx, rimCy, size * 0.95);
-    rimGrad.addColorStop(0, `hsla(195, 100%, 92%, ${rimAlpha})`);
-    rimGrad.addColorStop(0.45, `hsla(210, 100%, 75%, ${rimAlpha * 0.45})`);
+    const rimCx = px + nx * size * 1.02;
+    const rimCy = py + ny * size * 1.02;
+    const rimAlpha = Math.min(1, 0.55 + 0.2 * Math.min(1, size / 60) + 0.2 * beat + 0.25 * flare + 0.6 * eclipse);
+    const rimGrad = ctx.createRadialGradient(rimCx, rimCy, size * 0.02, rimCx, rimCy, size * 0.42);
+    rimGrad.addColorStop(0, `hsla(195, 100%, 95%, ${rimAlpha})`);
+    rimGrad.addColorStop(0.35, `hsla(205, 100%, 78%, ${rimAlpha * 0.55})`);
     rimGrad.addColorStop(1, `hsla(220, 100%, 60%, 0)`);
     ctx.fillStyle = rimGrad;
     ctx.fillRect(px - size, py - size, size * 2, size * 2);
     ctx.restore();
 
     // Surface detail. Fades in as the planet grows past ~30px so distant
-    // discs stay clean silhouettes. Detail is two passes: shadow craters on
-    // the unlit (anti-pulsar) side, and a brighter terminator highlight
-    // band just inside the lit rim.
+    // discs stay clean silhouettes. Backlit: skip the bright terminator
+    // highlight and only render the maria splotches as subtle shadow
+    // variation across the dark body.
     const detailAmount = Math.max(0, Math.min(1, (size - 30) / 70));
-    if (detailAmount > 0.02) this.renderPlanetSurface(ctx, planet, px, py, size, nx, ny, detailAmount);
+    if (detailAmount > 0.02) this.renderPlanetSurface(ctx, planet, px, py, size, detailAmount);
 
     // Eclipse corona — additive bloom around the planet limb when it's
     // occluding the pulsar. Sits *outside* the disc so it reads as light
@@ -724,17 +726,14 @@ export class Pulsar {
   }
 
   // Soft surface texture for a close planet: a few large darker "maria"
-  // splotches on the night side plus a brighter sliver tracing the
-  // terminator. Cheap and deterministic — derived from the planet's hue so
-  // the same planet keeps the same surface from frame to frame.
+  // splotches across the silhouette. Deterministic — derived from the
+  // planet's hue so the same planet keeps the same surface frame to frame.
   private renderPlanetSurface(
     ctx: CanvasRenderingContext2D,
     planet: Planet,
     px: number,
     py: number,
     size: number,
-    nx: number,
-    ny: number,
     amount: number,
   ) {
     ctx.save();
@@ -742,37 +741,25 @@ export class Pulsar {
     ctx.arc(px, py, size, 0, TAU);
     ctx.clip();
 
-    // Maria — 3 dark patches placed pseudo-randomly on the night side.
+    // Maria — 3 dark patches placed pseudo-randomly across the body. With
+    // the planet backlit there's no "lit side", so the patches are spread
+    // across the whole disc rather than biased to the anti-pulsar side.
     const seed = planet.hue * 31.7 + planet.baseSize * 7.3;
     for (let i = 0; i < 3; i++) {
       const r1 = ((seed * (i + 1) * 0.733) % 1);
       const r2 = ((seed * (i + 2) * 1.913) % 1);
       const r3 = ((seed * (i + 3) * 2.471) % 1);
-      // Bias toward the side opposite the pulsar so maria read as
-      // shadowed lowlands away from the light source.
-      const offX = (-nx * 0.35 + (r1 - 0.5) * 0.9) * size;
-      const offY = (-ny * 0.35 + (r2 - 0.5) * 0.9) * size;
+      const offX = ((r1 - 0.5) * 1.0) * size;
+      const offY = ((r2 - 0.5) * 1.0) * size;
       const mr = size * (0.18 + r3 * 0.22);
       const g = ctx.createRadialGradient(px + offX, py + offY, 0, px + offX, py + offY, mr);
-      g.addColorStop(0, `hsla(${planet.hue}, 60%, ${Math.max(1, planet.baseLight - 4)}%, ${0.55 * amount})`);
-      g.addColorStop(1, `hsla(${planet.hue}, 60%, ${planet.baseLight}%, 0)`);
+      g.addColorStop(0, `hsla(${planet.hue}, 60%, 1%, ${0.55 * amount})`);
+      g.addColorStop(1, `hsla(${planet.hue}, 60%, 1%, 0)`);
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(px + offX, py + offY, mr, 0, TAU);
       ctx.fill();
     }
-
-    // Terminator highlight — a thin bright crescent just inside the lit
-    // edge. Drawn as an offset radial gradient clipped to the disc so it
-    // hugs the rim without leaking outside.
-    ctx.globalCompositeOperation = "lighter";
-    const tcx = px + nx * size * 0.85;
-    const tcy = py + ny * size * 0.85;
-    const tg = ctx.createRadialGradient(tcx, tcy, size * 0.02, tcx, tcy, size * 0.45);
-    tg.addColorStop(0, `hsla(195, 100%, 90%, ${0.35 * amount})`);
-    tg.addColorStop(1, `hsla(210, 100%, 70%, 0)`);
-    ctx.fillStyle = tg;
-    ctx.fillRect(px - size, py - size, size * 2, size * 2);
 
     ctx.restore();
   }
