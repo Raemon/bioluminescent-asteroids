@@ -17,3 +17,8 @@ mixaudit/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Virtual Playing Orchestra 3 samples (~620 MB) + sfizz binaries.
+# Recreate via build_r2el_violin_sfizz.py header instructions.
+samples/
+tools/

@@ -368,8 +368,10 @@ export class Alien {
     this.cracks = rollAlienCracks(this.maxHp);
     this.weavePhase = rand(0, TAU);
     this.weaveSpeed = rand(0.6, 1.1);
-    // sweeping arc with random sign; some aliens loop back over their path before exiting
-    this.curveRate = rand(0.15, 0.35) * (rng() < 0.5 ? -1 : 1);
+    // Gentle path bend — small enough that the alien still crosses to roughly
+    // the opposite side. Bigger curveRate used to make them loop and exit the
+    // same edge, which left them on-screen for only a moment.
+    this.curveRate = rand(0.04, 0.1) * (rng() < 0.5 ? -1 : 1);
     this.rotation = Math.atan2(vel.y, vel.x);
     this.shape = buildMantaShape(size);
     this.sprite = this.buildSprite();
@@ -397,7 +399,7 @@ export class Alien {
     const heading = Math.atan2(this.vel.y, this.vel.x);
     const perpX = -Math.sin(heading);
     const perpY =  Math.cos(heading);
-    const swayMag = Math.sin(this.weavePhase) * 18;
+    const swayMag = Math.sin(this.weavePhase) * 42;
     this.pos.x += (this.vel.x + perpX * swayMag) * dt;
     this.pos.y += (this.vel.y + perpY * swayMag) * dt;
     // No wrap — drift off the far side and despawn. Margin covers the sprite
@@ -863,13 +865,24 @@ export class Alien {
 export const spawnAlienAtEdge = (w: number, h: number, size: AlienSize): Alien => {
   const edge = Math.floor(rng() * 4);
   let pos: Vec;
-  if (edge === 0) pos = v(rand(0, w), -40);
-  else if (edge === 1) pos = v(w + 40, rand(0, h));
-  else if (edge === 2) pos = v(rand(0, w), h + 40);
-  else pos = v(-40, rand(0, h));
-  // Aim roughly across the field — not straight at the player, since the
-  // saucer is meant to drift through and let its bullets do the targeting.
-  const target = v(w / 2 + rand(-w * 0.25, w * 0.25), h / 2 + rand(-h * 0.25, h * 0.25));
+  let target: Vec;
+  // Aim toward a point somewhere in the OPPOSITE half of the field so the
+  // alien actually crosses the screen instead of clipping a corner and
+  // leaving from the same edge it came in. Target position is randomized
+  // within that opposite half so paths still vary.
+  if (edge === 0) {
+    pos = v(rand(0, w), -40);
+    target = v(rand(0, w), rand(h * 0.55, h * 0.95));
+  } else if (edge === 1) {
+    pos = v(w + 40, rand(0, h));
+    target = v(rand(w * 0.05, w * 0.45), rand(0, h));
+  } else if (edge === 2) {
+    pos = v(rand(0, w), h + 40);
+    target = v(rand(0, w), rand(h * 0.05, h * 0.45));
+  } else {
+    pos = v(-40, rand(0, h));
+    target = v(rand(w * 0.55, w * 0.95), rand(0, h));
+  }
   const dx = target.x - pos.x;
   const dy = target.y - pos.y;
   const norm = Math.hypot(dx, dy);

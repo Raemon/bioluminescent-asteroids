@@ -33,6 +33,7 @@
     "@prisma/client": "^7.8.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "soundfont-player": "^0.12.0",
     "tone": "^15.1.22"
   }
 }

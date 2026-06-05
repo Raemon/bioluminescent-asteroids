@@ -8,6 +8,18 @@
 // user toggles them independently.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PianoKeyboard } from "./PianoKeyboard";
+
+// Beat grid (seconds per quarter beat) and bass measure length must match the
+// game so the pulse here lines up with how it'd feel in real gameplay. See
+// src/game/rhythmConstants.ts and src/Asteroid.ts.
+const BEAT_GRID = 0.5;
+// Baked bgBeat mp3s — same files Sound.ts plays in-game. Downbeat is
+// pitchRatio 1.0, offbeat is 1.122 (whole-step lift). Both at intensity 1.0
+// (the maxed-out late-wave thud) so the pulse here matches what the player
+// hears when the pulsar is closing in.
+const BG_BEAT_DOWN_URL = "/sounds/baked/bgBeat__101.0000.mp3";
+const BG_BEAT_OFF_URL = "/sounds/baked/bgBeat__113.2000.mp3";
 
 type Variation = "r2-el" | "r2-sb" | "r3-el" | "r4-sb";
 type Layer = "ambient" | "melodic" | "layer3";
@@ -45,9 +57,9 @@ const VARIATIONS: readonly VariationInfo[] = [
   },
   {
     id: "r4-sb",
-    label: "r4-sb — 16th-note arp + calliope melody + chime",
-    blurb: "Self-built flagship: rhythmic 16th-note arp (ambient) + smooth calliope melody (melodic) + sparse chime counter-melody (layer 3).",
-    gains: { ambient: 0.25, melodic: 0.25, layer3: 0.32 },
+    label: "r4-sb — 16th-note arp + solo cello + female choir",
+    blurb: "Rhythmic 16th-note arp (ambient) + slow solo-cello sustain (melodic) + sparse female-choir 'ahh' pad (layer 3). Cello + choir onsets land only on beats so nothing reads off-grid against the bass clock.",
+    gains: { ambient: 0.25, melodic: 0.25, layer3: 0.45 },
   },
 ];
 
@@ -81,6 +93,8 @@ export const MusicMixer = () => {
     return init as Record<StemKey, number>;
   });
   const [masterGain, setMasterGain] = useState(1.0);
+  const [pulseEnabled, setPulseEnabled] = useState(true);
+  const [pulseGain, setPulseGain] = useState(1.0);
 
   const ctxRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
@@ -90,6 +104,15 @@ export const MusicMixer = () => {
   // as anything already playing. Reset whenever every stem is stopped.
   const startAtRef = useRef<number>(0);
 
+  // Background pulsar beat. Two buffers (downbeat + offbeat) fire on a 0.5s
+  // grid anchored to startAtRef, matching the in-game bassClock pattern.
+  const pulseDownBufRef = useRef<AudioBuffer | null>(null);
+  const pulseOffBufRef = useRef<AudioBuffer | null>(null);
+  const pulseGainNodeRef = useRef<GainNode | null>(null);
+  const pulseTimerRef = useRef<number | null>(null);
+  // Index of the next quarter-beat slot we'll schedule (0-based from startAt).
+  const pulseNextBeatRef = useRef<number>(0);
+
   const ensureContext = (): AudioContext => {
     if (ctxRef.current) return ctxRef.current;
     const ctx = new (window.AudioContext ||
@@ -97,9 +120,85 @@ export const MusicMixer = () => {
     const master = ctx.createGain();
     master.gain.value = masterGain;
     master.connect(ctx.destination);
+    const pulseG = ctx.createGain();
+    pulseG.gain.value = pulseEnabled ? pulseGain : 0;
+    pulseG.connect(master);
     ctxRef.current = ctx;
     masterRef.current = master;
+    pulseGainNodeRef.current = pulseG;
     return ctx;
+  };
+
+  const loadPulseBuffers = async (): Promise<void> => {
+    if (pulseDownBufRef.current && pulseOffBufRef.current) return;
+    const ctx = ensureContext();
+    const fetchOne = async (url: string): Promise<AudioBuffer | null> => {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) return null;
+        const ab = await r.arrayBuffer();
+        return await ctx.decodeAudioData(ab);
+      } catch {
+        return null;
+      }
+    };
+    const [d, o] = await Promise.all([
+      pulseDownBufRef.current ? Promise.resolve(pulseDownBufRef.current) : fetchOne(BG_BEAT_DOWN_URL),
+      pulseOffBufRef.current ? Promise.resolve(pulseOffBufRef.current) : fetchOne(BG_BEAT_OFF_URL),
+    ]);
+    if (d) pulseDownBufRef.current = d;
+    if (o) pulseOffBufRef.current = o;
+  };
+
+  // Lookahead scheduler — fires every 100ms, schedules any beats whose audio
+  // time falls in the next 200ms window. Each beat is a one-shot
+  // AudioBufferSourceNode routed through pulseGainNodeRef so the user's pulse
+  // slider rides everything. Pattern matches game/bassClock.ts: even beat
+  // indices are downbeats (pitchRatio 1.0), odd are offbeats (1.122).
+  const schedulePulseTick = () => {
+    const ctx = ctxRef.current;
+    const sink = pulseGainNodeRef.current;
+    if (!ctx || !sink) return;
+    const lookahead = 0.2;
+    const horizon = ctx.currentTime + lookahead;
+    while (true) {
+      const slotTime = startAtRef.current + pulseNextBeatRef.current * BEAT_GRID;
+      if (slotTime > horizon) break;
+      // Don't bother scheduling beats that have already passed by more than
+      // one slot (can only happen if the page was backgrounded mid-loop).
+      if (slotTime >= ctx.currentTime - BEAT_GRID) {
+        const isOffbeat = (pulseNextBeatRef.current & 1) === 1;
+        const buf = isOffbeat ? pulseOffBufRef.current : pulseDownBufRef.current;
+        if (buf) {
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(sink);
+          src.start(Math.max(slotTime, ctx.currentTime));
+        }
+      }
+      pulseNextBeatRef.current += 1;
+    }
+  };
+
+  const startPulseScheduler = async () => {
+    if (pulseTimerRef.current !== null) return;
+    await loadPulseBuffers();
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    // Snap to the same quarter-beat slot we'd be on if the music had been
+    // running all along: figure out the next slot >= now and start there.
+    const now = ctx.currentTime;
+    const elapsed = Math.max(0, now - startAtRef.current);
+    pulseNextBeatRef.current = Math.ceil(elapsed / BEAT_GRID);
+    schedulePulseTick();
+    pulseTimerRef.current = window.setInterval(schedulePulseTick, 100);
+  };
+
+  const stopPulseScheduler = () => {
+    if (pulseTimerRef.current !== null) {
+      window.clearInterval(pulseTimerRef.current);
+      pulseTimerRef.current = null;
+    }
   };
 
   const loadBuffer = async (v: Variation, l: Layer): Promise<AudioBuffer | null> => {
@@ -132,6 +231,7 @@ export const MusicMixer = () => {
     node.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
     try { node.src.stop(t + 0.55); } catch { /* already stopped */ }
     nodesRef.current.delete(key);
+    if (nodesRef.current.size === 0) stopPulseScheduler();
   };
 
   const startStem = async (v: Variation, l: Layer) => {
@@ -165,6 +265,7 @@ export const MusicMixer = () => {
     if (offset > 0) src.start(now, offset);
     else src.start(startAt);
     nodesRef.current.set(key, { src, gain });
+    void startPulseScheduler();
   };
 
   // Live gain updates — slide the slider and you hear the change immediately.
@@ -187,14 +288,27 @@ export const MusicMixer = () => {
     masterRef.current.gain.setTargetAtTime(masterGain, t, 0.05);
   }, [masterGain]);
 
+  useEffect(() => {
+    if (!pulseGainNodeRef.current || !ctxRef.current) return;
+    const t = ctxRef.current.currentTime;
+    const target = pulseEnabled ? Math.max(0.0001, pulseGain) : 0.0001;
+    pulseGainNodeRef.current.gain.cancelScheduledValues(t);
+    pulseGainNodeRef.current.gain.setTargetAtTime(target, t, 0.05);
+  }, [pulseGain, pulseEnabled]);
+
   // Preload everything in the background once the user signals readiness.
   useEffect(() => {
     if (!ready) return;
     for (const v of VARIATIONS) {
       for (const l of LAYERS) void loadBuffer(v.id, l);
     }
+    void loadPulseBuffers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
+
+  useEffect(() => {
+    return () => stopPulseScheduler();
+  }, []);
 
   const togglePlay = async (v: Variation, l: Layer) => {
     const key = stemKey(v, l);
@@ -252,6 +366,26 @@ export const MusicMixer = () => {
         </div>
         <div className="flex items-center gap-4">
           <label className="flex items-center gap-2 text-[12px] uppercase tracking-[0.18em] text-[#9bb5d6]">
+            <input
+              type="checkbox"
+              checked={pulseEnabled}
+              onChange={(e) => setPulseEnabled(e.target.checked)}
+              className="accent-[#6ad7ff]"
+            />
+            pulse
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={0.01}
+              value={pulseGain}
+              onChange={(e) => setPulseGain(parseFloat(e.target.value))}
+              disabled={!pulseEnabled}
+              className="w-32 accent-[#6ad7ff] disabled:opacity-40"
+            />
+            <span className="w-10 text-right text-[#d6ecff] tabular-nums">{pulseGain.toFixed(2)}</span>
+          </label>
+          <label className="flex items-center gap-2 text-[12px] uppercase tracking-[0.18em] text-[#9bb5d6]">
             master
             <input
               type="range"
@@ -282,6 +416,8 @@ export const MusicMixer = () => {
           peak gains. All stems share a common loop phase so re-triggering
           mid-session lines up cleanly.
         </p>
+
+        <PianoKeyboard />
 
         <div className="grid gap-5 lg:grid-cols-2">
           {VARIATIONS.map((variation) => {

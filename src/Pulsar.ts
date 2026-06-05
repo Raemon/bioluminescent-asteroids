@@ -659,32 +659,30 @@ export class Pulsar {
       ? Math.min(1, (size - (distToPulsar + pulsarR)) / Math.max(1, pulsarR))
       : 0;
 
-    // Thin rim light hugging the pulsar-facing limb. Backlit look: the
-    // gradient origin sits just *outside* the disc on the pulsar side so
-    // only the outermost sliver of the planet picks up light. Inner stops
-    // fall to zero well before reaching the body, keeping the disc dark.
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.beginPath();
-    ctx.arc(px, py, size, 0, TAU);
-    ctx.clip();
-    const rimCx = px + nx * size * 1.02;
-    const rimCy = py + ny * size * 1.02;
-    const rimAlpha = Math.min(1, 0.55 + 0.2 * Math.min(1, size / 60) + 0.2 * beat + 0.25 * flare + 0.6 * eclipse);
-    const rimGrad = ctx.createRadialGradient(rimCx, rimCy, size * 0.02, rimCx, rimCy, size * 0.42);
-    rimGrad.addColorStop(0, `hsla(195, 100%, 95%, ${rimAlpha})`);
-    rimGrad.addColorStop(0.35, `hsla(205, 100%, 78%, ${rimAlpha * 0.55})`);
-    rimGrad.addColorStop(1, `hsla(220, 100%, 60%, 0)`);
-    ctx.fillStyle = rimGrad;
-    ctx.fillRect(px - size, py - size, size * 2, size * 2);
-    ctx.restore();
-
-    // Surface detail. Fades in as the planet grows past ~30px so distant
-    // discs stay clean silhouettes. Backlit: skip the bright terminator
-    // highlight and only render the maria splotches as subtle shadow
-    // variation across the dark body.
-    const detailAmount = Math.max(0, Math.min(1, (size - 30) / 70));
-    if (detailAmount > 0.02) this.renderPlanetSurface(ctx, planet, px, py, size, detailAmount);
+    // Atmospheric scatter halo, *outside* the disc, biased toward the
+    // pulsar-facing limb (light bending around the silhouette of an
+    // unlit body). Almost invisible when the planet is far from the
+    // pulsar; blooms hard as it swings close. Drawn as an annulus via
+    // even-odd fill so the disc itself stays untouched.
+    const pulsarBias = Math.max(0, Math.min(1, 1 - distToPulsar / (size * 4 + pulsarR * 3)));
+    const haloAlpha = Math.min(1, 0.45 * pulsarBias + 0.18 * beat * pulsarBias + 0.25 * flare * pulsarBias + 0.55 * eclipse);
+    if (haloAlpha > 0.02) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const haloOuter = size * (1.18 + 0.15 * pulsarBias + 0.2 * eclipse);
+      const haloCx = px + nx * size * (0.08 + 0.1 * pulsarBias);
+      const haloCy = py + ny * size * (0.08 + 0.1 * pulsarBias);
+      const halo = ctx.createRadialGradient(haloCx, haloCy, size * 0.92, haloCx, haloCy, haloOuter);
+      halo.addColorStop(0, `hsla(195, 100%, 92%, ${haloAlpha})`);
+      halo.addColorStop(0.5, `hsla(210, 100%, 75%, ${haloAlpha * 0.4})`);
+      halo.addColorStop(1, `hsla(220, 100%, 60%, 0)`);
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(haloCx, haloCy, haloOuter, 0, TAU);
+      ctx.arc(px, py, size, 0, TAU, true);
+      ctx.fill("evenodd");
+      ctx.restore();
+    }
 
     // Eclipse corona — additive bloom around the planet limb when it's
     // occluding the pulsar. Sits *outside* the disc so it reads as light
@@ -723,45 +721,6 @@ export class Pulsar {
       }
       ctx.restore();
     }
-  }
-
-  // Soft surface texture for a close planet: a few large darker "maria"
-  // splotches across the silhouette. Deterministic — derived from the
-  // planet's hue so the same planet keeps the same surface frame to frame.
-  private renderPlanetSurface(
-    ctx: CanvasRenderingContext2D,
-    planet: Planet,
-    px: number,
-    py: number,
-    size: number,
-    amount: number,
-  ) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(px, py, size, 0, TAU);
-    ctx.clip();
-
-    // Maria — 3 dark patches placed pseudo-randomly across the body. With
-    // the planet backlit there's no "lit side", so the patches are spread
-    // across the whole disc rather than biased to the anti-pulsar side.
-    const seed = planet.hue * 31.7 + planet.baseSize * 7.3;
-    for (let i = 0; i < 3; i++) {
-      const r1 = ((seed * (i + 1) * 0.733) % 1);
-      const r2 = ((seed * (i + 2) * 1.913) % 1);
-      const r3 = ((seed * (i + 3) * 2.471) % 1);
-      const offX = ((r1 - 0.5) * 1.0) * size;
-      const offY = ((r2 - 0.5) * 1.0) * size;
-      const mr = size * (0.18 + r3 * 0.22);
-      const g = ctx.createRadialGradient(px + offX, py + offY, 0, px + offX, py + offY, mr);
-      g.addColorStop(0, `hsla(${planet.hue}, 60%, 1%, ${0.55 * amount})`);
-      g.addColorStop(1, `hsla(${planet.hue}, 60%, 1%, 0)`);
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(px + offX, py + offY, mr, 0, TAU);
-      ctx.fill();
-    }
-
-    ctx.restore();
   }
 
   // Bright flash + expanding ring overlay drawn after the rest of the

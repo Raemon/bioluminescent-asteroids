@@ -118,7 +118,7 @@ export type HaloMusicVariation =
   | "r2-el"   // ElevenLabs 32-second C-pedal cinematic bed + sustained-tone piano
   | "r2-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
   | "r3-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + layer 3
-  | "r4-sb"   // Self-built 32-second C-pedal flagship — pulsing arp + smooth calliope melody + layer 3 (rhythmic, interlocked)
+  | "r4-sb"   // 32-second C-pedal flagship — pulsing arp (ambient) + solo cello (melodic, VPO3) + female choir (layer 3, VPO3); all onsets on-beat
   | "none";   // Legacy synthesized pad (the original startHaloAmbient)
 
 type HaloMusicNode = {
@@ -2570,10 +2570,10 @@ export class Sound {
       // +6.8 dB above the ≥4 dB pass threshold. Going higher risks the
       // analog pad fighting the bass field.
       case "r3-el": return 0.22;
-      // r4-sb is the rhythmic flagship — pulsing arp + smooth calliope-synth
-      // melody that breathes in the gaps left by layer 3. Audit at gain 0.25
-      // keeps lo-mid clean by ≥8.9 dB with all three layers stacked; same gain
-      // applied across layers so the interlock stays even.
+      // r4-sb pairs the rhythmic 16th-note arp ambient with a slow solo-cello
+      // melodic line (VPO3 sustain). Every cello onset lands on a quarter-beat
+      // (mostly downbeats), so the layer never punches off-grid against the
+      // bass clock. Audit at gain 0.25 keeps lo-mid clean by +7 dB; bass +20 dB.
       case "r4-sb": return 0.25;
       default:      return 0.30;
     }
@@ -2587,10 +2587,14 @@ export class Sound {
   // build_layer3.py for the per-variation design).
   private haloMusicLayer3Gain(variation: HaloMusicVariation): number {
     switch (variation) {
-      case "r2-el": return 0.32;   // lonely viola (cinematic third voice)
+      case "r2-el": return 0.26;   // solo violin, three sustained bow strokes
       case "r2-sb": return 0.40;   // warm felt-glockenspiel arpeggio
       case "r3-el": return 0.30;   // synthwave plucked synth-bass arp
-      case "r4-sb": return 0.32;   // chime counter-melody (interlocks, low-rhythm)
+      // r4-sb layer 3 is a VPO3 female-choir "ahh" pad. Onsets only on phrase
+      // downbeats (beats 0 and 8 of each 16-beat phrase) so the slow choir
+      // attack hides any rhythmic poke. Choir RMS is very soft (-32 dBFS) so
+      // gain 0.45 still leaves +5 dB lo-mid headroom in the full 3-layer mix.
+      case "r4-sb": return 0.45;
       default:      return 0.40;
     }
   }
@@ -4680,168 +4684,97 @@ export class Sound {
     }
   }
 
-  // Solid-crystal asteroid shatter. Bright glass-breaking voice that replaces
-  // the noise explosion when the whole rock is the gem. Five layers:
-  //   1. Soft chime onset — a gentler stacked-fifth sine pair (one octave
-  //      below the rare playTink, since this fires on every solid-crystal kill)
-  //      that gives the moment of impact a warm glassy sparkle.
-  //   2. Smash transient — short bandpassed white-noise burst (5-7 kHz) giving
-  //      the percussive *crack* of glass fracturing.
-  //   3. Inharmonic ringing partials — high sines at non-octave ratios that
-  //      mimic the spectral signature of struck glass. Each one's attack is
-  //      jittered by a few ms so they cascade rather than firing as a chord;
-  //      that staggered onset is what reads as "shards tinkling apart".
-  //   4. Shard tinkle tail — a quieter band-passed noise wash decaying over
-  //      the partial decay, fills the gaps between the discrete sine partials
-  //      with the breathy hash of falling glass.
-  //   5. Long ringing bell — sub-octave + fundamental + perfect-fifth + octave
-  //      sines that swell in and decay over multiple seconds, the lingering
-  //      shimmer of a thick crystal shell ringing out. Tuned as a triad rather
-  //      than a detuned octave so it reads as a sweet bell, not a beating tone.
-  // size === "large" gets a lower base + longer tail + more partials so a big
-  // asteroid shattering feels weightier than a fragment popping.
+  // Solid-crystal asteroid shatter. Tuning-fork-on-glass voice: a pure
+  // harmonic sine stack rings out with a soft mallet onset, no fracture
+  // crack, no inharmonic beating. Three layers:
+  //   1. Mallet onset — a brief soft "tup" from a lowpassed noise pop, the
+  //      sensation of the fork's tine touching the glass rim. Quiet enough
+  //      to disappear into the ring rather than reading as a transient.
+  //   2. Fork ring — a pure harmonic series (1x, 2x, 3x, 4x) on sine waves
+  //      with a slow swell and very long exponential decay, like a struck
+  //      tuning fork held against a wine glass. Integer ratios fuse into a
+  //      single pitch instead of beating.
+  //   3. Sub-octave body — a quieter low sine that gives the ring weight on
+  //      large asteroids without muddying small chunks.
+  // size === "large" gets a lower fundamental and a longer tail so a big
+  // asteroid resonates longer than a fragment.
   private playCrystalShatter(size: "large" | "small", ringPitchRatio = 1) {
-    // ringPitchRatio === 0 sentinel: snap the ring to the nearest octave of
-    // the fireBeat pluck note (G4 = 392 Hz), so an on-beat kill rings *in
-    // tune* with the rhythm shot that landed it. Caller passes 0 for on-beat.
-    const G4 = 392;
-    const baseRingHz = size === "large" ? 880 : 1320;
+    // ringPitchRatio === 0 sentinel: on-beat kill — snap the fundamental to
+    // the fireBeat pluck note dropped an octave (G3 = 196 Hz for large, G4
+    // for small) so the fork rings in key with the rhythm shot but sits in
+    // a warmer register than the pluck itself.
+    const G3 = 196;
+    const baseHz = size === "large" ? 330 : 495;
     const snapToG = ringPitchRatio === 0;
-    const ringBaseHz = snapToG
-      ? G4 * Math.pow(2, Math.round(Math.log2(baseRingHz / G4)))
-      : baseRingHz * ringPitchRatio;
+    const fundamental = snapToG
+      ? (size === "large" ? G3 : G3 * 2)
+      : baseHz * ringPitchRatio;
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     const isLarge = size === "large";
-    const partialCount = isLarge ? 6 : 4;
-    const base = isLarge ? 1320 : 2100;
-    const decay = isLarge ? 0.55 : 0.34;
-    const peakBase = isLarge ? 0.22 : 0.18;
-    // Non-octave ratios chosen to read as struck glass — none are integer
-    // multiples, so the partials beat against each other rather than fusing
-    // into a single pitched tone.
-    const ratios = [1, 1.41, 1.89, 2.51, 3.18, 4.07];
-    for (let i = 0; i < partialCount; i++) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(base * ratios[i], t);
-      // Stagger each partial's attack 0-22 ms so they tinkle in instead of
-      // firing as one chord. Higher partials tend to come in later — that's
-      // how real shards behave (heavy pieces ring first, fine dust after).
-      const attackOffset = (i / partialCount) * 0.018 + Math.random() * 0.006;
-      const peak = (peakBase / (i + 1)) * (0.7 + Math.random() * 0.4);
-      const tail = decay * (0.55 + Math.random() * 0.5);
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(peak, t + attackOffset + 0.003);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + attackOffset + tail);
-      osc.connect(gain);
-      gain.connect(this.master);
-      osc.start(t);
-      osc.stop(t + attackOffset + tail + 0.02);
-    }
-    // Smash transient: short bandpassed noise crack at the very front, sells
-    // the actual fracture moment before the partials take over.
-    const crackDur = 0.08;
-    const crackBuf = this.makeNoiseBuffer(crackDur);
-    if (crackBuf) {
+    const ringDur = isLarge ? 3.6 : 2.4;
+    const ringPeak = isLarge ? 0.16 : 0.12;
+    // Soft mallet onset — the fork meeting the glass. Lowpassed noise pop,
+    // very brief, sits well below the partials so it's felt more than heard.
+    const tapDur = 0.05;
+    const tapBuf = this.makeNoiseBuffer(tapDur);
+    if (tapBuf) {
       const src = this.ctx.createBufferSource();
-      src.buffer = crackBuf;
-      const bp = this.ctx.createBiquadFilter();
-      bp.type = "bandpass";
-      bp.frequency.value = isLarge ? 5200 : 6800;
-      bp.Q.value = 1.4;
-      const g = this.ctx.createGain();
-      const crackPeak = isLarge ? 0.32 : 0.28;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(crackPeak, t + 0.002);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + crackDur);
-      src.connect(bp);
-      bp.connect(g);
-      g.connect(this.master);
-      src.start(t);
-      src.stop(t + crackDur);
-    }
-    // Tinkling shards tail — a softer noise wash band-limited to the same
-    // glassy band as the partials, decaying across the full tail so the gaps
-    // between sine partials are filled with the hash of falling debris.
-    const tinkleDur = decay;
-    const tinkleBuf = this.makeNoiseBuffer(tinkleDur);
-    if (tinkleBuf) {
-      const src = this.ctx.createBufferSource();
-      src.buffer = tinkleBuf;
-      const hp = this.ctx.createBiquadFilter();
-      hp.type = "highpass";
-      hp.frequency.value = isLarge ? 2200 : 3200;
+      src.buffer = tapBuf;
       const lp = this.ctx.createBiquadFilter();
       lp.type = "lowpass";
-      lp.frequency.setValueAtTime(9000, t);
-      lp.frequency.exponentialRampToValueAtTime(4000, t + tinkleDur);
+      lp.frequency.value = isLarge ? 900 : 1400;
       const g = this.ctx.createGain();
-      const tinklePeak = isLarge ? 0.12 : 0.10;
+      const tapPeak = isLarge ? 0.08 : 0.06;
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(tinklePeak, t + 0.015);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + tinkleDur);
-      src.connect(hp);
-      hp.connect(lp);
+      g.gain.exponentialRampToValueAtTime(tapPeak, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + tapDur);
+      src.connect(lp);
       lp.connect(g);
       g.connect(this.master);
       src.start(t);
-      src.stop(t + tinkleDur);
+      src.stop(t + tapDur);
     }
-    // Soft glassy onset — a gentler chime than the standalone playTink, since
-    // this fires on every solid-crystal kill rather than as a rare treat. Drop
-    // the partials an octave (880/1320 Hz instead of 1760/2637) and trim the
-    // peak so the onset reads as a warm chime, not a piercing ping. Small
-    // frags get a quieter chime so the parent's hit still leads the cascade.
-    const chimePeak = (isLarge ? 0.10 : 0.07);
-    const chimeDecay = isLarge ? 0.38 : 0.28;
-    const chimePartials = [880, 1320];
-    for (let i = 0; i < chimePartials.length; i++) {
+    // Tuning-fork harmonic series. Integer ratios (1, 2, 3, 4) lock into one
+    // pure pitch instead of beating like glass shards. Higher partials decay
+    // faster — that's how a real fork sustains, the fundamental rings on
+    // after the upper harmonics fade. Slow 40 ms swell on the fundamental
+    // avoids any percussive sting.
+    const partials: Array<{ ratio: number; gain: number; decayMul: number; attack: number }> = [
+      { ratio: 1.0, gain: 1.00, decayMul: 1.00, attack: 0.040 }, // fundamental
+      { ratio: 2.0, gain: 0.42, decayMul: 0.70, attack: 0.020 }, // octave
+      { ratio: 3.0, gain: 0.18, decayMul: 0.45, attack: 0.012 }, // octave + fifth
+      { ratio: 4.0, gain: 0.08, decayMul: 0.30, attack: 0.008 }, // two octaves
+    ];
+    for (const { ratio, gain: gMul, decayMul, attack } of partials) {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = "sine";
-      osc.frequency.setValueAtTime(chimePartials[i], t);
-      const peak = chimePeak / (i + 1);
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(peak, t + 0.008);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + chimeDecay);
-      osc.connect(gain);
-      gain.connect(this.master);
-      osc.start(t);
-      osc.stop(t + chimeDecay + 0.02);
-    }
-    // Long ringing tail — warm bell-like sustain that hangs in the air after
-    // the shatter transients die. Dropped an octave from the previous version
-    // (which read as thin/whiny in the upper register), so the fundamental
-    // sits near the fireBeat pluck. Body comes from a sub-octave partial; the
-    // upper partials follow a perfect-fifth + octave triad rather than a
-    // detuned octave — gives a sweet musical ring instead of a beating tone.
-    // Slower attack (90 ms swell) lets the bell bloom rather than sting.
-    const fundamental = ringBaseHz * 0.5;
-    const ringDur = isLarge ? 3.4 : 2.2;
-    const ringPeak = isLarge ? 0.11 : 0.08;
-    // [fundamental, sub-octave body, perfect fifth above, octave above]
-    const ringPartials: Array<{ ratio: number; gain: number; type: OscillatorType }> = [
-      { ratio: 0.5, gain: 0.7, type: "sine" },  // sub-octave: warmth/body
-      { ratio: 1.0, gain: 1.0, type: "sine" },  // fundamental
-      { ratio: 1.5, gain: 0.35, type: "sine" }, // perfect fifth: bell shimmer
-      { ratio: 2.0, gain: 0.18, type: "sine" }, // octave: gentle top
-    ];
-    for (const { ratio, gain: gMul, type } of ringPartials) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = type;
       osc.frequency.setValueAtTime(fundamental * ratio, t);
       const peak = ringPeak * gMul;
+      const tail = ringDur * decayMul;
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(peak, t + 0.09);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + ringDur);
+      gain.gain.exponentialRampToValueAtTime(peak, t + attack);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
       osc.connect(gain);
       gain.connect(this.master);
       osc.start(t);
-      osc.stop(t + ringDur + 0.02);
+      osc.stop(t + tail + 0.02);
     }
+    // Sub-octave body — adds weight to large rings without muddying small
+    // frags. Slower attack so it blooms underneath the fundamental.
+    const subPeak = ringPeak * (isLarge ? 0.55 : 0.30);
+    const subOsc = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    subOsc.type = "sine";
+    subOsc.frequency.setValueAtTime(fundamental * 0.5, t);
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(subPeak, t + 0.08);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + ringDur);
+    subOsc.connect(subGain);
+    subGain.connect(this.master);
+    subOsc.start(t);
+    subOsc.stop(t + ringDur + 0.02);
   }
 
   // Haunting bell voice for the wave-summary drain. Fires four-per-beat.

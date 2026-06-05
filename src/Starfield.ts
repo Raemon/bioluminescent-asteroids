@@ -10,6 +10,17 @@ type Star = {
   depth: number;
 };
 
+// Tiny static background stars — no twinkle, no halo, no per-frame
+// trig. Baked once into a sprite at construct/resize time so the dense
+// field costs nothing at draw time.
+type DustStar = {
+  x: number;
+  y: number;
+  size: number;
+  hue: number;
+  alpha: number;
+};
+
 type NebulaBlob = {
   x: number;
   y: number;
@@ -22,6 +33,7 @@ type NebulaBlob = {
 
 export class Starfield {
   stars: Star[] = [];
+  dust: DustStar[] = [];
   nebula: NebulaBlob[] = [];
   w: number;
   h: number;
@@ -29,6 +41,9 @@ export class Starfield {
   // so baking it once and translating the whole canvas per frame is visually
   // indistinguishable from per-frame rebuilds at a fraction of the cost.
   nebulaSprite: HTMLCanvasElement | null = null;
+  // Pre-rendered dust-star layer. Dense, faint, static — bakes once so the
+  // sub-pixel-level field is free at draw time.
+  dustSprite: HTMLCanvasElement | null = null;
 
   constructor(w: number, h: number) {
     this.w = w;
@@ -43,6 +58,19 @@ export class Starfield {
         twinklePhase: rand(0, Math.PI * 2),
         twinkleSpeed: rand(0.4, 2.0),
         depth: rand(0.2, 1.0),
+      });
+    }
+    // Dense field of pin-prick stars. ~10x the count of the twinkling layer
+    // so unlit planet silhouettes show as voids against texture rather than
+    // floating in featureless black.
+    const dustCount = Math.floor((w * h) / 240);
+    for (let i = 0; i < dustCount; i++) {
+      this.dust.push({
+        x: rand(0, w),
+        y: rand(0, h),
+        size: rand(0.25, 0.7),
+        hue: rand(180, 260),
+        alpha: rand(0.18, 0.55),
       });
     }
     const nebulaBlobsByLocation = [
@@ -64,6 +92,7 @@ export class Starfield {
       });
     }
     this.buildNebulaSprite();
+    this.buildDustSprite();
   }
 
   buildNebulaSprite() {
@@ -83,10 +112,26 @@ export class Starfield {
     this.nebulaSprite = canvas;
   }
 
+  buildDustSprite() {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.floor(this.w));
+    canvas.height = Math.max(1, Math.floor(this.h));
+    const ctx = canvas.getContext("2d")!;
+    ctx.globalCompositeOperation = "lighter";
+    for (const d of this.dust) {
+      ctx.fillStyle = `hsla(${d.hue}, 70%, 88%, ${d.alpha})`;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    this.dustSprite = canvas;
+  }
+
   resize(w: number, h: number) {
     this.w = w;
     this.h = h;
     this.buildNebulaSprite();
+    this.buildDustSprite();
   }
 
   render(ctx: CanvasRenderingContext2D, t: number) {
@@ -97,6 +142,7 @@ export class Starfield {
       const driftY = Math.cos(t * 0.00025) * 20;
       ctx.drawImage(this.nebulaSprite, driftX, driftY);
     }
+    if (this.dustSprite) ctx.drawImage(this.dustSprite, 0, 0);
     for (const starInField of this.stars) {
       const twinkle = 0.5 + 0.5 * Math.sin(t * 0.001 * starInField.twinkleSpeed + starInField.twinklePhase);
       const alpha = 0.13 + 0.32 * twinkle * starInField.depth;
