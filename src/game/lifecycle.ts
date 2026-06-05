@@ -20,6 +20,7 @@ import { ReplayRecorder } from "./replayRecorder";
 import { ReplayPlayer } from "./replayPlayer";
 import { decodeReplay } from "./replayFormat";
 import { resetHuePaletteCursor } from "../Asteroid";
+import { getBindings, normalizeBindings, setReplayBindings } from "./controlBindings";
 
 // React-side <FirstWaveHint> subscribes to this so the canvas/game loop stays
 //   out of layout + transitions — CSS + a single setTimeout do the dismiss work.
@@ -135,6 +136,10 @@ const clearComboSilently = (game: Game) => {
 
 // carries the prior run's trophy lineup so a returning player still sees what they took down.
 export const showTitle = (game: Game) => {
+  // drop any active replay-binding override (lingers when a replay ran to end-of-stream
+  //   and the player exits to title; otherwise the next live run sees the watched
+  //   pilot's bindings instead of their own).
+  setReplayBindings(null);
   game.betaMode = false;
   game.state = "title";
   game.overlayTitleEl.textContent = "Pulsar Drift";
@@ -259,7 +264,7 @@ export const finishCalibrationIntro = (game: Game) => {
   emitFirstWaveHintProgress(0);
   emitFirstWaveHintHitProgress(0);
   emitFirstWaveHintRhythmProgress(0);
-  beginFirstWaveByTutorialFlag(game);
+  beginFirstWaveByTutorialFlag(game, game.tutorialRequested, isVeteranPilot());
   syncHud(game);
 };
 
@@ -268,15 +273,15 @@ export const finishCalibrationIntro = (game: Game) => {
 //   Veteran pilots (anyone who has ever hit 6x rhythm) skip the warm-up and start on
 //   the first proper density wave instead. Used at both calibration hand-off and the
 //   direct startGame path so the two stay in sync.
-const beginFirstWaveByTutorialFlag = (game: Game) => {
+const beginFirstWaveByTutorialFlag = (game: Game, tutorial: boolean, veteran: boolean) => {
   game.tutorialControlsUsed = { rotate: false, thrust: false, back: false, side: false, fire: false };
-  if (game.tutorialRequested) {
+  if (tutorial) {
     game.tutorialActive = true;
     spawnTutorialSmall(game);
     setFirstWaveHintStage(game, 1);
   } else {
     setFirstWaveHintStage(game, 0);
-    if (isVeteranPilot()) {
+    if (veteran) {
       game.wave = 2;
       game.pulsar.setWaveLevel(game.wave);
       updateBgBeatIntensity(game);
@@ -289,7 +294,14 @@ const beginFirstWaveByTutorialFlag = (game: Game) => {
 };
 
 // per-run randomised bass intro order means the wave-2/3 picks vary between runs.
-export const startGame = (game: Game) => {
+// Overrides (set by startReplay) freeze the seed + tutorial/veteran flags so
+//   wave-1 spawn reproduces deterministically from the recording.
+export const startGame = (game: Game, overrides?: {
+  seed: number;
+  tutorial: boolean;
+  veteran: boolean;
+  recorder: false;
+}) => {
   game.sound.resume();
   game.sound.preloadPilotLog(6);
   game.sound.preloadPilotLog(12);
@@ -303,16 +315,25 @@ export const startGame = (game: Game) => {
   // Seed the PRNG before anything random fires (bassOrder shuffle, wave events,
   //   asteroid hues). Re-arming the lazy hue cursor lets the first nextWaveHue
   //   call after this draw from the seeded RNG, not whichever cursor a previous
-  //   run left behind.
-  game.runSeed = (crypto.getRandomValues(new Uint32Array(1))[0]) >>> 0;
+  //   run left behind. Replay overrides supply the recorded seed up front so the
+  //   downstream shuffle + wave spawn draw the same numbers the recording saw.
+  game.runSeed = overrides
+    ? overrides.seed
+    : (crypto.getRandomValues(new Uint32Array(1))[0]) >>> 0;
   seedRng(game.runSeed);
   resetHuePaletteCursor();
-  game.recorder = new ReplayRecorder({
+  const tutorial = overrides ? overrides.tutorial : game.tutorialRequested;
+  const veteran = overrides ? overrides.veteran : isVeteranPilot();
+  // Replay path skips the recorder — playback uses the player, not capture.
+  game.recorder = overrides ? null : new ReplayRecorder({
     seed: game.runSeed,
     beatOffset: game.beatOffset,
     w: game.w,
     h: game.h,
     dpr: game.dpr,
+    tutorial,
+    veteran,
+    bindings: getBindings(),
   });
   game.replayPlayer = null;
   game.lastRunReplay = null;
@@ -338,7 +359,7 @@ export const startGame = (game: Game) => {
   emitFirstWaveHintProgress(0);
   emitFirstWaveHintHitProgress(0);
   emitFirstWaveHintRhythmProgress(0);
-  beginFirstWaveByTutorialFlag(game);
+  beginFirstWaveByTutorialFlag(game, tutorial, veteran);
   game.overlayEl.classList.add("hidden");
   hideScoreEntry(game);
   game.leaderboardEl.classList.add("hidden");
@@ -531,24 +552,26 @@ export const toggleMute = (game: Game) => {
   applyVolume(game, next);
 };
 
-// Start playing a recorded replay. Reuses the live startGame init path (same
-//   sim, same ship spawn, same wave 1), then immediately substitutes the
-//   recorded seed for the freshly-minted one and swaps Game.input to the
-//   ReplayPlayer's ReplayInput. From there gameUpdate's "replaying" branch
-//   drives dt + key state from the recorded frames.
+// Start playing a recorded replay. startGame runs with the recorded seed +
+//   tutorial/veteran flags supplied up front, so wave-1 spawn and every
+//   downstream RNG draw match the original run. The ReplayPlayer's
+//   ReplayInput then drives dt + key state from the recorded frames.
 export const startReplay = async (game: Game, bytes: Uint8Array): Promise<void> => {
   const payload = await decodeReplay(bytes);
-  startGame(game);
-  // Override seed + RNG with the recorded values so the same sim outcomes fire.
-  game.runSeed = payload.header.seed;
-  seedRng(payload.header.seed);
-  resetHuePaletteCursor();
-  // Re-roll the per-run bass intro order now that we have the right seed —
-  //   startGame already drew one with the freshly-minted seed.
-  game.bassOrder = shuffled(BASS_KINDS);
-  game.recorder = null;
-  game.replayPlayer = new ReplayPlayer(payload);
-  game.input = game.replayPlayer.input;
+  const player = new ReplayPlayer(payload);
+  // install the recording-time bindings *before* startGame, since startGame's
+  //   recorder construction reads getBindings() (skipped on the replay path) and
+  //   the wave-spawn doesn't need bindings — but every isDown call from frame 1
+  //   onward will.
+  setReplayBindings(normalizeBindings(payload.header.bindings));
+  startGame(game, {
+    seed: payload.header.seed,
+    tutorial: payload.header.tutorial,
+    veteran: payload.header.veteran,
+    recorder: false,
+  });
+  game.replayPlayer = player;
+  game.input = player.input;
   game.state = "replaying";
   emitGameState(game);
 };

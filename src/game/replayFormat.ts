@@ -1,8 +1,10 @@
-// Replay wire format. JSON shape is stable across (v: 1) revisions; bump the
+// Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 1;
+export const REPLAY_FORMAT_VERSION = 2;
 
+// v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
+//   flags) and per-action key mapping reproduce on a different machine.
 export type ReplayHeader = {
   v: number;
   build: string;
@@ -13,6 +15,13 @@ export type ReplayHeader = {
   dpr: number;
   keyVocab: string[];
   startedAt: number;
+  // pre-sim flags that fork beginFirstWaveByTutorialFlag — without these the
+  //   watcher's localStorage decides wave 1, which can disagree with the run.
+  tutorial: boolean;
+  veteran: boolean;
+  // recorded action→keys map so the replay-time isDown lookup matches the
+  //   recording even if the watcher has rebound their controls.
+  bindings: Record<string, string[]>;
   score: number;
   wave: number;
   maxCombo: number;

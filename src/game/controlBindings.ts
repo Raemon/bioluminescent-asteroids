@@ -84,6 +84,11 @@ const sanitize = (raw: unknown): Bindings => {
   return out;
 };
 
+// Exposed for the replay path: the recorded header carries a generic
+//   Record<string,string[]> from an older or future build, and we want to drop
+//   keys we don't recognise + default any missing actions before using it.
+export const normalizeBindings = (raw: unknown): Bindings => sanitize(raw);
+
 const readFromStorage = (): Bindings => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -152,14 +157,21 @@ export const normalizeKey = (raw: string): string => {
   return k;
 };
 
+// During replay we substitute the recording's bindings so the recorded raw
+//   keys map to the same actions even if the watcher has rebound their keys.
+//   setReplayBindings(null) at end-of-replay reverts to the live bindings.
+let replayBindings: Bindings | null = null;
+export const setReplayBindings = (b: Bindings | null): void => { replayBindings = b; };
+const activeBindings = (): Bindings => replayBindings ?? getBindings();
+
 export const isDown = (input: IInput, action: ControlAction): boolean => {
-  const keys = getBindings()[action];
+  const keys = activeBindings()[action];
   for (let i = 0; i < keys.length; i++) if (input.down(keys[i])) return true;
   return false;
 };
 
 export const wasPressed = (input: IInput, action: ControlAction): boolean => {
-  const keys = getBindings()[action];
+  const keys = activeBindings()[action];
   for (let i = 0; i < keys.length; i++) if (input.pressed(keys[i])) return true;
   return false;
 };

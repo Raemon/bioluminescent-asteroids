@@ -1,4 +1,5 @@
 import type { IInput } from "../Input";
+import type { Bindings } from "./controlBindings";
 import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayFrame, type ReplayHeader } from "./replayFormat";
 
 // Build hash from Vite at compile time so playback can warn about
@@ -15,7 +16,16 @@ export class ReplayRecorder {
   private header: Omit<ReplayHeader, "score" | "wave" | "maxCombo" | "killCount" | "keyVocab">;
   private startedAt = 0;
 
-  constructor(meta: { seed: number; beatOffset: number; w: number; h: number; dpr: number }) {
+  constructor(meta: {
+    seed: number;
+    beatOffset: number;
+    w: number;
+    h: number;
+    dpr: number;
+    tutorial: boolean;
+    veteran: boolean;
+    bindings: Bindings;
+  }) {
     this.startedAt = Date.now();
     this.header = {
       v: REPLAY_FORMAT_VERSION,
@@ -25,6 +35,9 @@ export class ReplayRecorder {
       w: meta.w,
       h: meta.h,
       dpr: meta.dpr,
+      tutorial: meta.tutorial,
+      veteran: meta.veteran,
+      bindings: meta.bindings,
       startedAt: this.startedAt,
     };
   }
