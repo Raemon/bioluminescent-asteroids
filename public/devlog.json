@@ -1,5 +1,42 @@
 [
   {
+    "id": "2026-06-05-ea1fbce",
+    "date": "2026-06-05",
+    "title": "Improved visuals, audio, and enemy behavior",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Drift bonus popup now shows a '2× DAMAGE' subtitle the first time you pull off a Drift Shot in a run.",
+          "The starfield and background planets now share a coherent camera with subtle parallax and a slow roll as you progress.",
+          "The boss planetoid is now visually distinct with an oblong silhouette and updated eclipse corona effects.",
+          "Updated in-game music tracks with new orchestral cello and choir layers for later rounds."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Alien saucers now reliably cross the screen instead of clipping a corner and exiting from the same edge they entered."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Replay saving is now a checkbox preference in the score entry form instead of a one-time button.",
+          "Slow-motion effect is less extreme, making slow-mo sequences feel snappier.",
+          "Bassteroids are less durable, reducing the bullet budget required to clear them."
+        ]
+      }
+    ],
+    "commits": [
+      "ea1fbce",
+      "80e3e92",
+      "d4487e1",
+      "3c176d8",
+      "aa58c5f"
+    ]
+  },
+  {
     "id": "2026-06-04-b73a06c",
     "date": "2026-06-04",
     "title": "Replays, per-channel audio, and visual overhaul",
