@@ -1,6 +1,7 @@
 import { Vec, v, fromAngle, rand, TAU, addScaledMut } from "./vec";
 import { Trail } from "./Trail";
 import { rng } from "./game/rng";
+import { ENTITY_CONFIG } from "./game/entityConfig";
 
 // Ethereal background event that wanders across the field over ~25-40 seconds
 // playing a slow melodic phrase locked to the bass-beat grid. Doesn't collide
@@ -42,14 +43,14 @@ export class Comet {
   glowTrail: Trail;
   // How long the comet visibly fades in and out. Used for both the streak
   // bloom and the audio shimmer pad amplitude.
-  static readonly FADE_IN = 1.6;
-  static readonly FADE_OUT = 2.0;
+  static readonly FADE_IN = ENTITY_CONFIG.comet.fadeIn;
+  static readonly FADE_OUT = ENTITY_CONFIG.comet.fadeOut;
 
   // Hit radius for the head. Roughly matches the bright pin-prick + halo so
   // a bullet that visually clips the head reads as a hit. The visual halo
   // extends a bit further but isn't part of the body — only the burning
   // core counts.
-  static readonly HIT_RADIUS = 24;
+  static readonly HIT_RADIUS = ENTITY_CONFIG.comet.hitRadius;
   readonly radius = Comet.HIT_RADIUS;
 
   constructor(pos: Vec, vel: Vec, hue: number) {

@@ -1,4 +1,5 @@
 import { Vec, v, mul, sub, len, rand, pick, TAU, addScaledMut } from "./vec";
+import { ENTITY_CONFIG } from "./game/entityConfig";
 
 // Five powerup kinds, each with its own glyph so the player can read the
 // canister at a glance from across the screen. Keeping the list short
@@ -34,14 +35,14 @@ export const POWERUP_KINDS: PowerupKind[] = ["prong", "shield", "slow", "radar",
 
 // warp-out plays a brief vortex flash before the canister vanishes so the player
 //   sees a deliberate departure (not just a soft offscreen fade) when they let a pod drift past.
-const WARP_DURATION = 0.45;
+const WARP_DURATION = ENTITY_CONFIG.canister.warpDuration;
 
 export class Canister {
   pos: Vec;
   vel: Vec;
   kind: PowerupKind;
   hue: number;
-  radius = 16;
+  radius = ENTITY_CONFIG.canister.radius;
   age = 0;
   alive = true;
   // travel budget from spawn — once exceeded, warp-out triggers instead of waiting for an offscreen test.

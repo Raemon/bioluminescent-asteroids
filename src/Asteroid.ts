@@ -2,6 +2,7 @@ import { Vec, v, fromAngle, rand, TAU, addScaledMut, wrapMut } from "./vec";
 import { Trail } from "./Trail";
 import { SoundwaveRadiator } from "./SoundwaveRadiator";
 import { rng } from "./game/rng";
+import { ENTITY_CONFIG } from "./game/entityConfig";
 
 const HUE_PALETTE = [185, 200, 220, 250, 280, 310, 330];
 
@@ -48,11 +49,6 @@ export type AsteroidSize = "large" | "medium" | "small";
 // "chime", "bell", "warble" are sound-decorator asteroids that behave exactly
 // like normal ones but trigger a distinctive musical hit sound.
 //
-// "tink" is a rare one-shot crystal: spawned occasionally as a small asteroid
-// (so it can't split) and emits the sharp glassy "tink" sound on destruction.
-// Treat it as a "sometimes-found" treat — if you start seeing tink asteroids
-// every wave, lower the per-wave spawn chance in Game.
-//
 // "goldCrystal" looks like a normal large asteroid except a faintly visible
 // gold crystal is embedded inside it (blurred, low-contrast — the player has
 // to *notice* it). Killing it drops a collectible GoldCrystal where the rock
@@ -63,40 +59,27 @@ export type AsteroidSize = "large" | "medium" | "small";
 // (4× a normal large), no embedded gold tease, the whole rock IS the crystal.
 // On death it drops 1–3 collectible GoldCrystals AND splits into 4 fast-moving
 // "solidCrystalSmall" fragments (4 HP each, no further split).
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "tink" | "boss" | "goldCrystal" | "solidCrystal" | "solidCrystalSmall";
+//
+// "solidCrystalSmall" also spawns standalone as a rare "treat" — a tough
+// 4 HP shard that pays out solidCrystal.smallScore on the killing hit. Same
+// sprite + shatter sound as a parent-spawned fragment, no further split.
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "goldCrystal" | "solidCrystal" | "solidCrystalSmall";
 
 export const BASS_KINDS: ReadonlyArray<"bassA" | "bassB" | "bassC" | "bassD"> = ["bassA", "bassB", "bassC", "bassD"];
 
-const SIZE_RADIUS: Record<AsteroidSize, number> = {
-  large: 50,
-  medium: 28,
-  small: 16,
-};
+const SIZE_RADIUS = ENTITY_CONFIG.asteroid.radius;
 
 // The boss asteroid is the first end-of-arc fight: a cratered planetoid that
 // solidifies out of the looming background planet on wave 10. It's roughly
 // 3× the diameter of a large asteroid, splits into 3 medium children, and
-// each medium splits into 3 smalls (smalls don't split). HP per tier is
-// generous so a rhythm-locked player still needs a sustained engagement.
-export const BOSS_RADIUS: Record<AsteroidSize, number> = {
-  large: 160,
-  medium: 70,
-  small: 36,
-};
-export const BOSS_HP: Record<AsteroidSize, number> = {
-  large: 60,
-  medium: 18,
-  small: 6,
-};
+// each medium splits into 3 smalls (smalls don't split).
+export const BOSS_RADIUS = ENTITY_CONFIG.boss.radius;
+export const BOSS_HP = ENTITY_CONFIG.boss.hp;
 // Boss hue. Matches the menace-rim red used by the foreshadowing planet so
 // the "the planetoid just dropped in" read is unbroken. Children inherit.
-export const BOSS_HUE = 12;
+export const BOSS_HUE = ENTITY_CONFIG.boss.hue;
 
-export const SIZE_SPAWN_SPEED: Record<AsteroidSize, [number, number]> = {
-  large: [40, 90],
-  medium: [55, 105],
-  small: [60, 110],
-};
+export const SIZE_SPAWN_SPEED = ENTITY_CONFIG.asteroid.spawnSpeed;
 
 const splitChildSpeed = (parentVel: Vec, childSize: AsteroidSize): number => {
   const parentSpeed = Math.hypot(parentVel.x, parentVel.y);
@@ -104,11 +87,7 @@ const splitChildSpeed = (parentVel: Vec, childSize: AsteroidSize): number => {
   return parentSpeed * rand(1.15, 1.65) + 40;
 };
 
-const SIZE_SCORE: Record<AsteroidSize, number> = {
-  large: 20,
-  medium: 50,
-  small: 100,
-};
+const SIZE_SCORE = ENTITY_CONFIG.asteroid.score;
 
 const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   bassA: 0,
@@ -118,14 +97,13 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   chime: 52,
   bell: 285,
   warble: 130,
-  tink: 195,
   solidCrystal: 232,
   solidCrystalSmall: 232,
 };
 
 // Solid crystal large asteroids render slightly bigger than a stock large so
 // they read as a more dangerous, more robust target. Smalls keep stock size.
-const SOLID_CRYSTAL_LARGE_RADIUS = 43
+const SOLID_CRYSTAL_LARGE_RADIUS = ENTITY_CONFIG.solidCrystal.largeRadius;
 
 // Length of one musical measure (seconds). 4 beats at 120 BPM × 0.5s/beat.
 // Every bassteroid fires exactly once per measure regardless of split
@@ -155,26 +133,23 @@ export const BASS_MAX_SPLIT_LEVEL = 2;
 // 1 damage so an unsynced run needs 4/2/1 shots for a large/medium/small;
 // rhythm bullets deal 4 damage so a well-timed shot one-shots anything in
 // this table.
-export const ASTEROID_HP: Record<AsteroidSize, number> = {
-  large: 4,
-  medium: 2,
-  small: 1,
-};
+export const ASTEROID_HP = ENTITY_CONFIG.asteroid.hp;
 
-// Bassteroids are 4× tougher than the table above so the rhythm system has
-// real teeth — even a rhythm-bullet (4 damage) needs four hits to crack a
-// large bassteroid, matching the "armoured" silhouette they already wear.
-export const BASS_HP_MULTIPLIER = 4;
+// Bassteroids carry the asteroid-HP table scaled by the bass multiplier so
+// the rhythm system has real teeth — even a rhythm-bullet (4 damage) needs
+// four hits to crack a large bassteroid, matching the "armoured" silhouette.
+export const BASS_HP_MULTIPLIER = ENTITY_CONFIG.bassteroid.hpMultiplier;
 export const BASS_HP: Record<AsteroidSize, number> = {
   large: ASTEROID_HP.large * BASS_HP_MULTIPLIER,
   medium: ASTEROID_HP.medium * BASS_HP_MULTIPLIER,
   small: ASTEROID_HP.small * BASS_HP_MULTIPLIER,
 };
 
-// Solid-crystal HP: large = 16 (4× a normal large, matches the bass armouring
-// budget but with a single-tier breakdown), small fragments = 4 each.
-export const SOLID_CRYSTAL_HP_LARGE = 16;
-export const SOLID_CRYSTAL_HP_SMALL = 4;
+// Solid-crystal HP: large matches the bass-armouring budget in a single tier,
+// small fragments are tougher than a normal small (1 HP) so the splinter
+// cleanup still demands a few well-timed shots.
+export const SOLID_CRYSTAL_HP_LARGE = ENTITY_CONFIG.solidCrystal.largeHp;
+export const SOLID_CRYSTAL_HP_SMALL = ENTITY_CONFIG.solidCrystal.smallHp;
 
 // Vertex list (local-space, normalised to radius=1) for one armoured panel
 // of a bassteroid. Each kind is a fixed cluster of these panels — drawn with
@@ -695,9 +670,9 @@ export class Asteroid {
   }
 
   // Each non-bass kind gets a subtly distinct silhouette via its harmonic
-  // mix. "normal" stays the classic lumpy default; chime/bell/warble/tink
-  // each lean on different frequencies so they read as different shapes
-  // even before colour cues land.
+  // mix. "normal" stays the classic lumpy default; chime/bell/warble each
+  // lean on different frequencies so they read as different shapes even
+  // before colour cues land.
   buildHarmonicsForKind(kind: AsteroidKind): Harmonic[] {
     const out: Harmonic[] = [];
     // Per-kind frequency list and amplitude scale. Bass kinds keep the
@@ -716,10 +691,6 @@ export class Asteroid {
       // Wobbly elongated lobes: strong 3-fold + odd higher mode.
       freqs = [3, 5, 8];
       ampScale = 1.4;
-    } else if (kind === "tink") {
-      // Tiny faceted gem: very angular, many high frequencies.
-      freqs = [4, 6, 9, 13];
-      ampScale = 0.85;
     } else if (kind === "solidCrystal" || kind === "solidCrystalSmall") {
       // Pure crystal: a low harmonic count + low outlineSamples (set in the
       // constructor) make the silhouette a hard-edged polygon. Avoid any
@@ -763,7 +734,7 @@ export class Asteroid {
     ctx.globalCompositeOperation = "lighter";
     const baseHue = this.hue;
     // Normal asteroids are essentially monochrome rock — drop saturation
-    // hard so the special kinds (chime/bell/warble/tink/bass) are the only
+    // hard so the special kinds (chime/bell/warble/bass) are the only
     // things drawing the eye with colour. goldCrystal mimics a normal rock
     // (the crystal hint is painted in separately below) so it stays plain.
     const isPlain = this.kind === "normal" || this.kind === "goldCrystal";
@@ -1349,16 +1320,14 @@ export class Asteroid {
 
   scoreValue(): number {
     if (this.isBoss()) {
-      // Boss scoring rewards the sustained engagement: large piece dwarfs a
-      // normal kill, mediums and smalls are still chunky. Combo multiplier
-      // applies on top at the call site.
-      if (this.size === "large") return 2500;
-      if (this.size === "medium") return 800;
-      return 300;
+      // Boss scoring rewards the sustained engagement: large dwarfs a normal
+      // kill, mediums and smalls are still chunky. Combo multiplier applies
+      // on top at the call site.
+      return ENTITY_CONFIG.boss.score[this.size];
     }
     // Solid crystal pays out for the bullet budget it absorbs (16 HP / 4 HP).
-    if (this.kind === "solidCrystal") return 400;
-    if (this.kind === "solidCrystalSmall") return 200;
+    if (this.kind === "solidCrystal") return ENTITY_CONFIG.solidCrystal.largeScore;
+    if (this.kind === "solidCrystalSmall") return ENTITY_CONFIG.solidCrystal.smallScore;
     return SIZE_SCORE[this.size];
   }
 

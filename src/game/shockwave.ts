@@ -2,9 +2,9 @@ import type { Game } from "../Game";
 import { Asteroid } from "../Asteroid";
 import { emitExplosion, emitShockwaveSparks } from "./particleBursts";
 import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet, BeatClaimSet } from "./waveDirector";
+import { ENTITY_CONFIG } from "./entityConfig";
 
-// strong enough to redirect, weak enough to avoid an unrecoverable spin.
-const SHOCKWAVE_SHIP_IMPULSE = 320;
+const SW = ENTITY_CONFIG.shockwave;
 
 // pulsar.shockJustFired flips a frame after this, so we kick off the vibrate sequence here.
 export const startShockwave = (game: Game) => {
@@ -15,7 +15,7 @@ export const startShockwave = (game: Game) => {
 // instant-killing the boss via environment would feel cheap; we still nudge it for feedback.
 const bossWeathersShockwave = (game: Game, a: Asteroid, surviving: Asteroid[]) => {
   const kick = game.pulsar.shockwaveImpulseAt(a.pos);
-  a.vel = { x: a.vel.x + kick.x * 120, y: a.vel.y + kick.y * 120 };
+  a.vel = { x: a.vel.x + kick.x * SW.bossKick, y: a.vel.y + kick.y * SW.bossKick };
   a.flashAmount = 1;
   surviving.push(a);
 };
@@ -23,7 +23,7 @@ const bossWeathersShockwave = (game: Game, a: Asteroid, surviving: Asteroid[]) =
 // kicking children outward reads as flung-apart by the wavefront, not spawning in place.
 const kickChildFromShockwave = (game: Game, child: Asteroid) => {
   const kick = game.pulsar.shockwaveImpulseAt(child.pos);
-  child.vel = { x: child.vel.x + kick.x * 220, y: child.vel.y + kick.y * 220 };
+  child.vel = { x: child.vel.x + kick.x * SW.childKick, y: child.vel.y + kick.y * SW.childKick };
 };
 
 // bass children stay grid-aligned + inherit drones so the music keeps marching post-shatter.
@@ -77,10 +77,10 @@ const kickShipFromShockwave = (game: Game) => {
   const kick = game.pulsar.shockwaveImpulseAt(game.ship.pos);
   const d = Math.hypot(game.ship.pos.x - game.pulsar.shockOriginX, game.ship.pos.y - game.pulsar.shockOriginY);
   const falloff = Math.max(0.45, 1 - d / Math.max(game.w, game.h));
-  const mag = SHOCKWAVE_SHIP_IMPULSE * falloff;
+  const mag = SW.shipImpulse * falloff;
   game.ship.vel = { x: game.ship.vel.x + kick.x * mag, y: game.ship.vel.y + kick.y * mag };
   // grace frame avoids punishing the player for being kicked into freshly-shattered debris.
-  game.ship.invuln = Math.max(game.ship.invuln, 0.6);
+  game.ship.invuln = Math.max(game.ship.invuln, SW.shipGrace);
 };
 
 // environment event — no score / combo so the ring stays a "free-of-charge" hazard reshape.

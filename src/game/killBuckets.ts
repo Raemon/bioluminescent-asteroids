@@ -10,7 +10,6 @@ export type KillBucket =
   | "chime"
   | "bell"
   | "warble"
-  | "tink"
   | "goldCrystal"
   | "solidCrystal"
   | "alien_big"

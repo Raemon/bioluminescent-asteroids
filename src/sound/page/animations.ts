@@ -50,7 +50,6 @@ export type ObjectId =
   | "asteroid-chime"
   | "asteroid-bell"
   | "asteroid-warble"
-  | "asteroid-tink"
   | "asteroid-gold"
   | "asteroid-solidCrystal"
   | "alien-big"
@@ -383,7 +382,6 @@ export const ANIMATIONS: Record<ObjectId, () => Animator> = {
   "asteroid-chime": () => drawAsteroid("chime", "chip"),
   "asteroid-bell": () => drawAsteroid("bell", "chip"),
   "asteroid-warble": () => drawAsteroid("warble", "chip"),
-  "asteroid-tink": () => drawAsteroid("tink", "chip"),
   "asteroid-gold": () => drawAsteroid("goldCrystal", "chip"),
   "asteroid-solidCrystal": () => drawAsteroid("solidCrystal", "chip"),
   "alien-big": () => drawAlien("big"),

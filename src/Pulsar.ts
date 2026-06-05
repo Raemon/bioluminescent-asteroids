@@ -125,22 +125,20 @@ export class Pulsar {
   static readonly SHOCK_FLASH_DURATION = 0.42;
   static readonly SHOCK_EXPAND_DURATION = 1.5;
 
-  // Boss-planet state. planets[0] (the prominent blue one) doubles as the
-  // first boss: on the foreshadow wave it swells well past its normal
-  // approach curve and grows a cracked, menacing rim so the player reads
-  // it as the next threat. On the boss wave itself we hide it entirely —
-  // the planetoid has "solidified into the foreground" as the boss asteroid
-  // the gameplay system now spawns. After the fight we let it resume its
-  // normal drift so subsequent waves don't have a hole in the sky.
-  //   "idle"        — normal planet rendering, normal approach
-  //   "foreshadow"  — wave just before the boss; planet is closer and ominous
+  // Boss-planet state. planets[0] (the prominent blue oblong planetoid)
+  // doubles as the first boss. Its drift is timed so the orbit naturally
+  // carries it across the pulsar somewhere in the wave 7-9 range; that
+  // eclipse is the visual cue for the impending boss. On the boss wave
+  // itself we hide the planet entirely — the planetoid has "solidified
+  // into the foreground" as the boss asteroid the gameplay system now
+  // spawns. After the fight we keep it hidden so the shattered planetoid
+  // doesn't pop back into the sky.
+  //   "idle"        — normal planet rendering
+  //   "foreshadow"  — wave just before the boss; same rendering as idle,
+  //                   kept for any future cueing the game might want
   //   "active"      — boss is in play; planet hidden behind the asteroid
   //   "defeated"    — boss is dead; planet stays hidden until reset
   bossPlanetState: "idle" | "foreshadow" | "active" | "defeated" = "idle";
-  // 0..1 envelope for the foreshadow swell. Eases in over a couple of seconds
-  // when we enter "foreshadow" so the planet visibly bulges toward the
-  // viewer rather than snap-changing on the wave transition.
-  bossForeshadow = 0;
 
   constructor(w: number, h: number) {
     this.w = w;
@@ -151,12 +149,15 @@ export class Pulsar {
     this.baseOffsetY = -Math.min(w, h) * 0.18;
 
     this.planets = [
-      // Larger / more prominent planet. Faster size growth and stronger
-      // saturation + darkening per unit of approach, so it carries most of
-      // the parallax "we're passing close to it" feel.
+      // Larger / more prominent planet — also the boss planetoid. Deterministic
+      // baseAngle + tuned angularSpeed so its orbit naturally carries it across
+      // the pulsar somewhere around waves 7-9 for a typical run; fast players
+      // see the eclipse a wave or two later, slow players a wave or two earlier.
+      // Starting angle sits well clear of the pulsar's side of the sky; the
+      // ellipse's near-pulsar pass happens around driftT ≈ 290s (θ ≈ 3.95).
       {
-        baseAngle: rand(0.6, 1.0),
-        angularSpeed: 0.0035,
+        baseAngle: 2.5,
+        angularSpeed: 0.005,
         baseRadiusFrac: 0.38,
         baseSize: 12,
         growthRate: 11,
@@ -304,13 +305,6 @@ export class Pulsar {
     // clear. Clamped at 1 so a frame stall doesn't overshoot.
     const lerpRate = Math.min(1, dt / 2.0);
     this.displayWaveLevel += (this.targetWaveLevel - this.displayWaveLevel) * lerpRate;
-
-    // Boss foreshadow envelope. Ramps to 1 while we're in the foreshadow
-    // wave so the planet swells smoothly toward the viewer; decays once we
-    // leave that state (boss spawns or the player aborts). About a 3s time
-    // constant — slow enough that the player notices the change.
-    const foreshadowTarget = this.bossPlanetState === "foreshadow" ? 1 : 0;
-    this.bossForeshadow += (foreshadowTarget - this.bossForeshadow) * Math.min(1, dt / 3.0);
 
     // Spin phase derived directly from beatTime so it stays phase-locked to
     // the music regardless of slow-mo or frame stutter. Period = 2 beats
@@ -590,16 +584,13 @@ export class Pulsar {
       const isBossPlanet = pi === 0;
       if (isBossPlanet && (this.bossPlanetState === "active" || this.bossPlanetState === "defeated")) continue;
 
-      const foreshadow = isBossPlanet ? this.bossForeshadow : 0;
-      const radiusFrac = planet.baseRadiusFrac * (1 - approach * 0.55) * (1 - foreshadow * 0.4);
+      const radiusFrac = planet.baseRadiusFrac * (1 - approach * 0.55);
       const angle = planet.baseAngle + this.driftT * planet.angularSpeed;
       const px = cx + Math.cos(angle) * radiusFrac * minDim;
       const py = cy + Math.sin(angle) * radiusFrac * minDim * 0.6;
-      const size = planet.baseSize * (1 + approach * planet.growthRate) * (1 + foreshadow * 2.0);
+      const size = planet.baseSize * (1 + approach * planet.growthRate);
 
-      this.renderPlanet(ctx, planet, px, py, size, ppx, ppy, r, approach, beat, flare);
-
-      if (isBossPlanet && foreshadow > 0.02) this.renderBossPlanetMenace(ctx, px, py, size, foreshadow, planet.hue);
+      this.renderPlanet(ctx, planet, px, py, size, ppx, ppy, r, approach, beat, flare, isBossPlanet);
     }
 
     this.renderShockwave(ctx);
@@ -623,6 +614,7 @@ export class Pulsar {
     approach: number,
     beat: number,
     flare: number,
+    isOblongPlanetoid: boolean = false,
   ) {
     // Dark silhouette — the planet is backlit, so its body sits in shadow
     // against the starfield. Saturation still climbs with approach so the
@@ -633,7 +625,11 @@ export class Pulsar {
 
     ctx.fillStyle = `hsl(${planet.hue}, ${sat}%, ${light}%)`;
     ctx.beginPath();
-    ctx.arc(px, py, size, 0, TAU);
+    if (isOblongPlanetoid) {
+      this.tracePlanetoidSilhouette(ctx, px, py, size);
+    } else {
+      ctx.arc(px, py, size, 0, TAU);
+    }
     ctx.fill();
 
     // Direction from planet toward pulsar — that side gets the rim light.
@@ -679,7 +675,11 @@ export class Pulsar {
       ctx.fillStyle = halo;
       ctx.beginPath();
       ctx.arc(haloCx, haloCy, haloOuter, 0, TAU);
-      ctx.arc(px, py, size, 0, TAU, true);
+      if (isOblongPlanetoid) {
+        this.tracePlanetoidSilhouette(ctx, px, py, size, true);
+      } else {
+        ctx.arc(px, py, size, 0, TAU, true);
+      }
       ctx.fill("evenodd");
       ctx.restore();
     }
@@ -798,10 +798,10 @@ export class Pulsar {
   }
 
   // Game tells us where the boss-planet life-cycle sits. Idle is the default;
-  // foreshadow runs the wave before the boss spawns so the player has visual
-  // warning; active hides the planet entirely while the boss is on the field;
-  // defeated locks it hidden so the planetoid that was just shattered doesn't
-  // pop back into the sky.
+  // foreshadow is the wave just before the boss spawns (no special rendering
+  // any more — the eclipse is what cues the player); active hides the planet
+  // entirely while the boss is on the field; defeated locks it hidden so the
+  // planetoid that was just shattered doesn't pop back into the sky.
   setBossPlanetState(state: "idle" | "foreshadow" | "active" | "defeated") {
     this.bossPlanetState = state;
   }
@@ -813,8 +813,7 @@ export class Pulsar {
   bossPlanetPos(): { x: number; y: number } {
     const planet = this.planets[0];
     const approach = this.approach();
-    const foreshadow = this.bossForeshadow;
-    const radiusFrac = planet.baseRadiusFrac * (1 - approach * 0.55) * (1 - foreshadow * 0.4);
+    const radiusFrac = planet.baseRadiusFrac * (1 - approach * 0.55);
     const angle = planet.baseAngle + this.driftT * planet.angularSpeed;
     const minDim = Math.min(this.w, this.h);
     return {
@@ -823,75 +822,35 @@ export class Pulsar {
     };
   }
 
-  // Ominous overlay for the boss planet during its foreshadow wave: faint
-  // crimson rim glow, dark surface bands (suggested cracks/craters), and a
-  // bright pinprick of "core energy" that pulses with the beat. Drawn after
-  // the flat planet silhouette so all of this sits on top of the disc.
-  private renderBossPlanetMenace(ctx: CanvasRenderingContext2D, px: number, py: number, size: number, foreshadow: number, hue: number) {
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-
-    // Crimson menace rim — a fat ring of glow hugging the silhouette so the
-    // planet reads as "lit from within / about to break open". Hue shifts
-    // toward red (0..20) so the boss has a distinct colour signature from
-    // the cool blue base.
-    const rimRadius = size * (1.15 + 0.08 * foreshadow);
-    const rim = ctx.createRadialGradient(px, py, size * 0.85, px, py, rimRadius * 1.4);
-    rim.addColorStop(0, `hsla(${hue}, 70%, 30%, 0)`);
-    rim.addColorStop(0.45, `hsla(15, 95%, 50%, ${0.35 * foreshadow})`);
-    rim.addColorStop(0.75, `hsla(0, 100%, 55%, ${0.22 * foreshadow})`);
-    rim.addColorStop(1, `hsla(0, 100%, 55%, 0)`);
-    ctx.fillStyle = rim;
-    ctx.beginPath();
-    ctx.arc(px, py, rimRadius * 1.4, 0, TAU);
-    ctx.fill();
-
-    // Pulsing core — beat/flare modulated so the planet visibly throbs in
-    // time with the music while it's looming. Sits behind the dark bands so
-    // the bands read as fractures backlit by molten core light.
-    const coreAlpha = foreshadow * (0.18 + 0.45 * this.pulse + 0.25 * this.flare);
-    const coreRadius = size * (0.38 + 0.08 * this.pulse);
-    const core = ctx.createRadialGradient(px, py, 0, px, py, coreRadius);
-    core.addColorStop(0, `hsla(25, 100%, 75%, ${coreAlpha})`);
-    core.addColorStop(0.55, `hsla(10, 100%, 50%, ${coreAlpha * 0.6})`);
-    core.addColorStop(1, `hsla(0, 100%, 40%, 0)`);
-    ctx.fillStyle = core;
-    ctx.beginPath();
-    ctx.arc(px, py, coreRadius, 0, TAU);
-    ctx.fill();
-
-    // Dark fracture bands across the disc — sit on top of the menace glow as
-    // source-over so they read as deep shadow lines on the surface. Fixed
-    // angles per planet would be nice but Planet doesn't carry that state,
-    // so we derive a stable per-planet seed from the hue.
-    ctx.globalCompositeOperation = "source-over";
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.beginPath();
-    ctx.arc(0, 0, size * 0.98, 0, TAU);
-    ctx.clip();
-    ctx.strokeStyle = `rgba(8, 2, 2, ${0.55 * foreshadow})`;
-    ctx.lineCap = "round";
-    for (let i = 0; i < 4; i++) {
-      const seed = hue * 13.7 + i * 41;
-      const ang = (seed * 0.013) % TAU;
-      const offset = ((seed * 7.3) % 1 - 0.5) * size * 1.1;
-      ctx.lineWidth = 1.4 + (i % 2) * 1.2;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(ang) * -size * 1.4 + Math.cos(ang + Math.PI / 2) * offset,
-                 Math.sin(ang) * -size * 1.4 + Math.sin(ang + Math.PI / 2) * offset);
-      // Jagged 3-segment path so the bands feel like fault lines, not stripes.
-      for (let s = -1; s <= 1; s++) {
-        const t = s * size * 0.7;
-        const jx = Math.cos(ang) * t + Math.cos(ang + Math.PI / 2) * (offset + ((seed * (s + 2)) % 1 - 0.5) * size * 0.18);
-        const jy = Math.sin(ang) * t + Math.sin(ang + Math.PI / 2) * (offset + ((seed * (s + 2)) % 1 - 0.5) * size * 0.18);
-        ctx.lineTo(jx, jy);
-      }
-      ctx.lineTo(Math.cos(ang) * size * 1.4 + Math.cos(ang + Math.PI / 2) * offset,
-                 Math.sin(ang) * size * 1.4 + Math.sin(ang + Math.PI / 2) * offset);
-      ctx.stroke();
+  // Subtle Ceres-like silhouette for the boss planetoid. At small sizes the
+  // sub-pixel wobble averages out to a circle; at close range the lumps and
+  // the slight x-axis elongation become visible so the body reads as a giant
+  // asteroid rather than a perfect sphere. Shape is fixed (not animated) so
+  // the same surface features face the camera each frame — the planetoid's
+  // axial spin is suggested only by the slowly-changing illumination, not by
+  // a tumbling outline. `reverse` traces the path counter-clockwise for use
+  // as an even-odd cutout inside the halo annulus.
+  private tracePlanetoidSilhouette(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, reverse: boolean = false) {
+    // 24 samples is enough for a smooth limb at the planet's render size; the
+    // bumps are deterministic per angle index so the silhouette is stable.
+    const STEPS = 24;
+    // Subtle radial wobble — peaks at ~7% of base radius. Two sinusoids at
+    // co-prime multiples so the lumps don't repeat in obvious symmetry.
+    const wobbleAt = (i: number) => {
+      const a = (i / STEPS) * TAU;
+      return 1 + 0.045 * Math.sin(a * 3 + 0.7) + 0.035 * Math.sin(a * 5 + 2.1) + 0.02 * Math.sin(a * 7 + 4.3);
+    };
+    // Slight x-axis elongation — peanut/Eros-ish only at close range.
+    const ELONGATE = 1.08;
+    for (let i = 0; i <= STEPS; i++) {
+      const idx = reverse ? STEPS - i : i;
+      const a = (idx / STEPS) * TAU;
+      const r = size * wobbleAt(idx);
+      const x = cx + Math.cos(a) * r * ELONGATE;
+      const y = cy + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
     }
-    ctx.restore();
-    ctx.restore();
+    ctx.closePath();
   }
 }

@@ -31,7 +31,7 @@ const bumpKill = (game: Game, bucket: KillBucket) => {
 const asteroidBucket = (a: Asteroid): KillBucket => {
   if (a.kind === "boss") return "boss";
   if (a.isBass()) return "bassteroid";
-  if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble" || a.kind === "tink") return a.kind;
+  if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble") return a.kind;
   if (a.kind === "goldCrystal") return "goldCrystal";
   if (a.kind === "solidCrystal" || a.kind === "solidCrystalSmall") return "solidCrystal";
   return `asteroid_${a.size}`;
@@ -40,11 +40,10 @@ const asteroidBucket = (a: Asteroid): KillBucket => {
 // bassteroids run their own bassHit/bassEcho path; this maps the non-bass kinds to sounds.
 export const hitSoundFor = (
   a: Asteroid,
-): "explosionLarge" | "explosionMedium" | "explosionSmall" | "chime" | "bell" | "warble" | "tink" | "crystalShatterLarge" | "crystalShatterSmall" => {
+): "explosionLarge" | "explosionMedium" | "explosionSmall" | "chime" | "bell" | "warble" | "crystalShatterLarge" | "crystalShatterSmall" => {
   if (a.kind === "chime") return "chime";
   if (a.kind === "bell") return "bell";
   if (a.kind === "warble") return "warble";
-  if (a.kind === "tink") return "tink";
   // Solid crystal asteroids shatter like cut glass — the whole body IS the
   // gem, so a noise explosion would feel wrong. Large parent + small frags
   // each get their own size-scaled shatter.

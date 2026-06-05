@@ -2,6 +2,7 @@ import { Vec, v, add, mul, fromAngle, rand, TAU } from "./vec";
 import { AlienBullet } from "./AlienBullet";
 import { Trail } from "./Trail";
 import { rng } from "./game/rng";
+import { ENTITY_CONFIG } from "./game/entityConfig";
 
 // Three sizes, each with its own role in the rhythm:
 //   "big"    : 4 HP, fires every other beat (every 2× BEAT_GRID).
@@ -16,35 +17,11 @@ import { rng } from "./game/rng";
 // current position when the beat lands, so the player can dodge by moving.
 export type AlienSize = "big" | "medium" | "small";
 
-const SIZE_RADIUS: Record<AlienSize, number> = {
-  big: 38,
-  medium: 24,
-  small: 16,
-};
-
-const SIZE_HP: Record<AlienSize, number> = {
-  big: 4,
-  medium: 2,
-  small: 1,
-};
-
-const SIZE_SCORE: Record<AlienSize, number> = {
-  big: 400,
-  medium: 220,
-  small: 130,
-};
-
-const SIZE_SPEED: Record<AlienSize, [number, number]> = {
-  big: [50, 80],
-  medium: [70, 110],
-  small: [95, 140],
-};
-
-const SIZE_BULLET_SPEED: Record<AlienSize, number> = {
-  big: 220,
-  medium: 280,
-  small: 400,
-};
+const SIZE_RADIUS = ENTITY_CONFIG.alien.radius;
+const SIZE_HP = ENTITY_CONFIG.alien.hp;
+const SIZE_SCORE = ENTITY_CONFIG.alien.score;
+const SIZE_SPEED = ENTITY_CONFIG.alien.speed;
+const SIZE_BULLET_SPEED = ENTITY_CONFIG.alien.bulletSpeed;
 
 const SIZE_HUE: Record<AlienSize, number> = {
   // Deep-purple manta family — all three sizes sit in the same violet band so

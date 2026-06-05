@@ -1,13 +1,11 @@
 import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut, sub, mul, len, fromAngle } from "./vec";
 import { Canister, POWERUP_KINDS } from "./Canister";
+import { ENTITY_CONFIG } from "./game/entityConfig";
 
-// Probability that a successfully-cracked gem actually contains an upgrade.
-// The remaining fraction pays out a flat score instead — same structure as
-// comet kills, so the player reads it as a "consolation jackpot" rather than
-// a miss.
-export const GOLD_CRYSTAL_UPGRADE_CHANCE = 0.4;
-// Score awarded when a cracked gem doesn't yield an upgrade.
-export const GOLD_CRYSTAL_REVEAL_SCORE = 250;
+// Re-exports so existing imports (collisions.ts, etc.) keep working — the
+// authoritative numbers live in entityConfig.
+export const GOLD_CRYSTAL_UPGRADE_CHANCE = ENTITY_CONFIG.goldCrystal.upgradeChance;
+export const GOLD_CRYSTAL_REVEAL_SCORE = ENTITY_CONFIG.goldCrystal.revealScore;
 
 // A standalone collectible left behind by a "goldCrystal" asteroid's death.
 // The asteroid's blurred interior was the visual tease — this is the payoff,
@@ -16,14 +14,9 @@ export const GOLD_CRYSTAL_REVEAL_SCORE = 250;
 // asteroid's velocity so the gem reads as "ejected from the explosion", not
 // "teleported in". After a long lifetime it dims and warps out.
 
-// Score for collecting the gem by flying through it (the "easy" interaction —
-// no rhythm skill required, just spotting the embedded crystal).
-export const GOLD_CRYSTAL_SCORE = 2500;
+export const GOLD_CRYSTAL_SCORE = ENTITY_CONFIG.goldCrystal.pickupScore;
 
-// gem hangs around long enough that a player can reasonably swing back
-// for it after handling the surrounding rubble cloud, but not so long that an
-// uncollected gem clutters the field for the rest of the wave.
-const LIFETIME = 18;
+const LIFETIME = ENTITY_CONFIG.goldCrystal.lifetime;
 // gem explodes at full brightness when LIFETIME runs out, so no fade tail.
 const FADE_TAIL = 0;
 
@@ -33,7 +26,7 @@ export class GoldCrystal {
   hue: number;
   // Pickup radius. A touch larger than the visible gem so the player doesn't
   // feel cheated when the ship clips a corner.
-  radius = 14;
+  radius = ENTITY_CONFIG.goldCrystal.radius;
   age = 0;
   alive = true;
   // 3D-ish tumble axes mirror the canister so the gem reads as a real

@@ -11,7 +11,7 @@ import { newWaveEventSchedule, maybeSchedule } from "./waveEvents";
 import { startShockwave } from "./shockwave";
 import { emitCrackParticles } from "./particleBursts";
 import { alignVelocityToRhythm, BeatClaimSet, newBeatClaimSet } from "./rhythmTrajectory";
-import { WAVE_DIRECTOR_CONFIG as CFG } from "./waveDirectorConfig";
+import { ENTITY_CONFIG as CFG } from "./entityConfig";
 
 // snap each fresh edge-spawn so its crossing of the player's natural
 // kill range lands on a beat. Boss is exempt — it has its own slow drift.
@@ -170,9 +170,10 @@ const spawnSpecial = (game: Game, kind: AsteroidKind, claimed?: BeatClaimSet): A
   return a;
 };
 
-// tink has a fixed small size + kind so we roll it outside activeSpecialsForWave.
-const spawnTink = (game: Game, claimed?: BeatClaimSet): Asteroid =>
-  spawnAsteroidAway(game, 200, "tink", "small", claimed);
+// standalone solidCrystalSmall has a fixed small size + kind so we roll it
+// outside activeSpecialsForWave. Same "rare treat" slot the tink roll filled.
+const spawnSolidCrystalSmall = (game: Game, claimed?: BeatClaimSet): Asteroid =>
+  spawnAsteroidAway(game, 200, "solidCrystalSmall", "small", claimed);
 
 // pre-align first fire to the next BEAT_GRID slot so saucer shots lock into
 // the rhythm immediately. From there the alien advances through its own
@@ -220,9 +221,10 @@ export const spawnComet = (game: Game) => {
 };
 
 // one entry replaces the previous if/else maze covering boss/foreshadow/normal wave dispatch.
-//   One `claimed` set is shared across the wave's asteroid + tink rolls so
-//   each fresh rock takes a distinct beat slot — the result is a steady
-//   beat-by-beat target procession the player can combo through.
+//   One `claimed` set is shared across the wave's asteroid + standalone
+//   solidCrystalSmall rolls so each fresh rock takes a distinct beat slot —
+//   the result is a steady beat-by-beat target procession the player can
+//   combo through.
 // Tutorial: a single small practice rock, rhythm-aligned like a normal spawn so
 //   its first-beat dot is meaningful, with a little materialize puff so a respawn
 //   reads as "a fresh one drifts in".
@@ -253,7 +255,7 @@ export const spawnWave = (game: Game) => {
   rollWaveEvents(game);
   const claimed = newBeatClaimSet();
   spawnWaveAsteroids(game, claimed);
-  rollTinkSpawn(game, claimed);
+  rollSolidCrystalSmallSpawn(game, claimed);
 };
 
 // capture planet pos BEFORE hiding it so the boss materialises where the player last saw the planet.
@@ -347,8 +349,9 @@ const rollHeadlineEvents = (game: Game) => {
 // Wave 0 (internal wave 1): a single large rock — a gentle warm-up before density ramps.
 // Wave 1+ (internal wave 2+): 3, 3, 4, 4, 5, 5... per-wave count gives the player a wave to consolidate before density bumps.
 //   A single `claimed` set is shared across the wave's spawns (including the
-//   tink roll below — see spawnWave) so each rock targets a distinct beat
-//   slot, giving the player a sustainable beat-by-beat target procession.
+//   standalone solidCrystalSmall roll below — see spawnWave) so each rock
+//   targets a distinct beat slot, giving the player a sustainable
+//   beat-by-beat target procession.
 const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet) => {
   const totalCount = game.wave === 1 ? 1 : 3 + Math.floor((game.wave - 2) / 2);
   const activeSpecials = activeSpecialsForWave(game, game.wave);
@@ -384,9 +387,11 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet) => {
   }
 };
 
-// tink is a "treat", not a fixture; gated chance + late first-wave keeps it feeling rare.
-const rollTinkSpawn = (game: Game, claimed: BeatClaimSet) => {
-  if (game.wave >= CFG.tink.firstWave && rng() < CFG.tink.chancePerWave) {
-    game.asteroids.push(spawnTink(game, claimed));
+// solidCrystalSmall standalone is a "treat", not a fixture; gated chance + late
+// first-wave keeps it feeling rare.
+const rollSolidCrystalSmallSpawn = (game: Game, claimed: BeatClaimSet) => {
+  const cfg = CFG.solidCrystal.smallSpawn;
+  if (game.wave >= cfg.firstWave && rng() < cfg.chancePerWave) {
+    game.asteroids.push(spawnSolidCrystalSmall(game, claimed));
   }
 };

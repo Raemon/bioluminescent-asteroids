@@ -197,14 +197,6 @@ export const OBJECTS: GameObject[] = [
     ],
   },
   {
-    id: "asteroid-tink",
-    label: "tink crystal",
-    about: "rare small crystal — sharp glassy hit",
-    actions: [
-      { verb: "killed", sound: "tink", trigger: beat(4) },
-    ],
-  },
-  {
     id: "asteroid-gold",
     label: "gold crystal asteroid",
     about: "hidden gold inside — drops a collectible",
