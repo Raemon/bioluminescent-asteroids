@@ -4528,6 +4528,120 @@ export class Sound {
     }
   }
 
+  // Laser-shot weapon (the "lasershot" upgrade). Anchored on C so it stays in key
+  // with the bass field. Three voices stacked at C3 / C4 / C5 with a fast attack
+  // and a longer exponential tail — gives the "laser beam" read (rising/falling
+  // tonal sweep with a bright top) without sounding like a B-movie pew-pew. A
+  // touch of high-passed noise on the very front sells the muzzle ignition.
+  //   `damage` (1..4) scales overall gain + adds a brighter octave-up shimmer at
+  //   higher charges so a full 3-dot release sounds visibly more powerful.
+  playLaserShot(damage: number = 1) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const intensity = Math.max(0.4, Math.min(1, 0.5 + damage * 0.18));
+    const tail = 0.32 + damage * 0.04;
+    // Three sine partials on C — one octave below, fundamental, one octave above.
+    // Each gets a small downward pitch slide (a perfect fourth down over the tail)
+    // so the beam reads as "fired and travelling" rather than a static tone.
+    const partials: Array<{ hz: number; peak: number; type: OscillatorType }> = [
+      { hz: 130.81, peak: 0.18 * intensity, type: "sine" },     // C3
+      { hz: 261.63, peak: 0.22 * intensity, type: "triangle" }, // C4
+      { hz: 523.25, peak: 0.13 * intensity, type: "sine" },     // C5
+    ];
+    for (const p of partials) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = p.type;
+      osc.frequency.setValueAtTime(p.hz * 1.08, t);
+      osc.frequency.exponentialRampToValueAtTime(p.hz * 0.75, t + tail);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(p.peak, t + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      osc.stop(t + tail + 0.05);
+    }
+    // Charge-tier shimmer: an extra C6 sine on top, only audible at damage ≥ 2.
+    if (damage >= 2) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(1046.50, t);
+      osc.frequency.exponentialRampToValueAtTime(880, t + tail * 0.8);
+      const peak = 0.07 * (damage - 1) * 0.5;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + tail * 0.7);
+      osc.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      osc.stop(t + tail * 0.7 + 0.05);
+    }
+    // Muzzle ignition: a brief high-passed noise crack at t=0 gives the front
+    // of the beam an attack edge — without it the sines feel airy and timid.
+    const noiseBuf = this.makeNoiseBuffer(0.05);
+    if (noiseBuf) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "highpass";
+      filter.frequency.value = 2200;
+      filter.Q.value = 0.7;
+      const gain = this.ctx.createGain();
+      const noisePeak = 0.09 * intensity;
+      gain.gain.setValueAtTime(noisePeak, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      noise.start(t);
+      noise.stop(t + 0.08);
+    }
+  }
+
+  // Per-dot charge tick — fires when a new charge dot appears in front of the
+  // ship during a hold. Walks up a C major triad (C5 → E5 → G5) so the three
+  // dots together arpeggiate a chord, and a higher dot sounds "more charged".
+  playLaserCharge(dotIndex: number) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    // C major triad — index 1..3 map to root/third/fifth.
+    const triad = [523.25, 659.25, 783.99]; // C5, E5, G5
+    const hz = triad[Math.max(0, Math.min(triad.length - 1, dotIndex - 1))];
+    const tail = 0.22;
+    // Triangle body + sine partial at the octave above — clear pluck, no
+    // square-wave grit. Stays musical enough to read as part of the same C
+    // chord family as the beam itself.
+    const body = this.ctx.createOscillator();
+    const bodyGain = this.ctx.createGain();
+    body.type = "triangle";
+    body.frequency.value = hz;
+    bodyGain.gain.setValueAtTime(0.0001, t);
+    bodyGain.gain.exponentialRampToValueAtTime(0.12, t + 0.004);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
+    body.connect(bodyGain);
+    bodyGain.connect(this.master);
+    body.start(t);
+    body.stop(t + tail + 0.04);
+
+    const partial = this.ctx.createOscillator();
+    const partialGain = this.ctx.createGain();
+    partial.type = "sine";
+    partial.frequency.value = hz * 2;
+    partialGain.gain.setValueAtTime(0.0001, t);
+    partialGain.gain.exponentialRampToValueAtTime(0.05, t + 0.003);
+    partialGain.gain.exponentialRampToValueAtTime(0.0001, t + tail * 0.7);
+    partial.connect(partialGain);
+    partialGain.connect(this.master);
+    partial.start(t);
+    partial.stop(t + tail * 0.7 + 0.04);
+  }
+
   // Escalating melody chime — one rounded synth note per successive on-beat
   // kill. All variants open with the same three universal anchor notes on a
   // C pedal (C2 → G2 → D3 — root, fifth, ninth), then branch into a scale

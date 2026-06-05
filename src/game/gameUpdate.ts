@@ -34,6 +34,7 @@ import { musicDtForFrame } from "./slowMo";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderboardKeyRepeat } from "./scoreEntry";
 import { showGameOverIntro } from "./gameOverIntro";
 import { isDown, wasPressed } from "./controlBindings";
+import { tickLaserShot } from "./laserShot";
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
@@ -322,6 +323,7 @@ const updatePlaying = (game: Game, dt: number) => {
   game.ship.setCombo(game.beatCombo);
   syncHaloAmbient(game);
   game.ship.update(dt, game.input, game.particles, game.bullets, game.w, game.h, game.time, game.sound);
+  tickLaserShot(game);
   const musicDt = tickSlowMoTimer(game, dt);
   tickBassBeats(game, musicDt);
   // pulsar runs against perceivedBeatTime so its flash lands with the *heard* bass voices.
@@ -476,6 +478,8 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   tickAlienFire(game);
   for (const b of game.bullets) b.update(musicDt, game.w, game.h);
   compactInPlace(game.bullets, (b) => b.life > 0);
+  for (const l of game.lasers) l.update(musicDt);
+  compactInPlace(game.lasers, (l) => l.alive);
   for (const ab of game.alienBullets) ab.update(musicDt, game.w, game.h);
   compactInPlace(game.alienBullets, (ab) => ab.life > 0);
   for (const s of game.shards) s.update(musicDt);

@@ -38,6 +38,7 @@ const POWERUP_LABEL: Record<PowerupKind, string> = {
   radar: "RADAR",
   longshot: "LONGSHOT",
   sideEngines: "SIDE ENGINES",
+  lasershot: "LASER SHOT",
 };
 
 // anchors the multiplier feedback at the spot the player actually struck, not a corner pulse.
@@ -262,6 +263,47 @@ const drawKeyCap = (
   ctx.fillText(label, cx, cy + 1);
   ctx.restore();
   return w;
+};
+
+// "LASER SHOT" name + a two-line "HOLD TO CHARGE / RELEASE TO FIRE" hint so
+// the player learns the charge-up interaction at pickup time. Anchored on the
+// ship — caller passes the ship's position, not the canister's — so the hint
+// stays next to where the player is looking. Lives a bit longer than a normal
+// pickup popup since it carries more text.
+const LASER_PICKUP_LIFE = 3.0;
+export const popupLaserShotPickup = (shipPos: Vec): Popup => {
+  const hue = 195;
+  const fill = `hsl(${hue}, 95%, 75%)`;
+  const shadow = `hsla(${hue}, 95%, 65%, 0.9)`;
+  const labelFont = "700 18px 'Space Grotesk', system-ui, sans-serif";
+  const hintFont = "600 13px 'Space Grotesk', system-ui, sans-serif";
+  return {
+    pos: { x: shipPos.x, y: shipPos.y - 44 },
+    vel: { x: 0, y: -8 },
+    life: LASER_PICKUP_LIFE,
+    maxLife: LASER_PICKUP_LIFE,
+    text: "LASER SHOT",
+    font: labelFont,
+    fill,
+    shadowColor: shadow,
+    shadowBlur: 14,
+    decayX: 1, decayY: 0.97,
+    popPeak: 0.3, popDuration: 0.15,
+    holdUntil: 0.65, fadeGain: 1.2,
+    draw: (ctx) => {
+      ctx.font = labelFont;
+      ctx.fillStyle = fill;
+      ctx.shadowColor = shadow;
+      ctx.shadowBlur = 14;
+      ctx.fillText("LASER SHOT", 0, -12);
+      ctx.font = hintFont;
+      ctx.fillStyle = "#cfeaff";
+      ctx.shadowColor = "rgba(180, 230, 255, 0.7)";
+      ctx.shadowBlur = 8;
+      ctx.fillText("HOLD TO CHARGE", 0, 8);
+      ctx.fillText("RELEASE TO FIRE", 0, 24);
+    },
+  };
 };
 
 // "SIDE ENGINES (Z X)" — label text, then a parens-wrapped pair of keycaps

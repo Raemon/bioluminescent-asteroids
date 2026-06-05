@@ -94,7 +94,10 @@ const updateSideThrust = (ship: Ship, input: IInput, particles: ParticleSystem, 
 };
 
 // rapid powerup halves the cooldown; both states use the same trigger gate.
+// lasershot replaces the per-press bullet emit with hold-to-charge / release-to-fire
+// driven by game/laserShot.ts.tickLaserShot — gate the bullet path off entirely here.
 const updateFireTrigger = (ship: Ship, input: IInput, bullets: Bullet[]) => {
+  if (ship.lasershotActive) return;
   if (!isDown(input, "fire")) return;
   if (ship.fireCooldown > 0) return;
   fireBullets(ship, bullets);

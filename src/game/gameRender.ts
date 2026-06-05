@@ -6,6 +6,7 @@ import { renderPopups } from "./popups";
 import { computeConeFrame } from "../ship/reticule/coneGeometry";
 import { pickCenterMostTargetForFocus, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
 import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
+import { renderLasers, renderLaserChargeDots } from "./laserShot";
 import { rng } from "./rng";
 
 // shake is purely cosmetic; isolate its math so render() reads top-down.
@@ -71,6 +72,7 @@ const paintEntityLayers = (
   for (const al of game.aliens) al.render(ctx, game.time);
   for (const ab of game.alienBullets) ab.render(ctx);
   for (const b of game.bullets) b.render(ctx);
+  renderLasers(ctx, game.lasers);
   if (focusedTarget) paintFocusGlow(ctx, focusedTarget);
   game.particles.render(ctx);
 };
@@ -104,6 +106,7 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime, superBoosted);
   renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.perceivedBeatTime, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
+  renderLaserChargeDots(ctx, game.ship, game.beatTime);
   renderPopups(ctx, game.popups);
 };
 

@@ -16,7 +16,7 @@ import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebas
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup } from "./particleBursts";
-import { popupPickup, popupScore, popupSideEnginesPickup } from "./popups";
+import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup } from "./popups";
 import { checkBonusLife } from "./bonusLife";
 import {
   applyHitToCombo,
@@ -270,7 +270,9 @@ export const handleCanisterShots = (game: Game) => {
 // one site handles every pickup so HUD label / timer / powerup-apply stay in lockstep.
 const collectCanister = (game: Game, c: Canister) => {
   game.sound.play("powerup");
-  game.popups.push(c.kind === "sideEngines" ? popupSideEnginesPickup(c.pos) : popupPickup(c.pos, c.kind));
+  if (c.kind === "sideEngines") game.popups.push(popupSideEnginesPickup(c.pos));
+  else if (c.kind === "lasershot") game.popups.push(popupLaserShotPickup(game.ship.pos));
+  else game.popups.push(popupPickup(c.pos, c.kind));
   if (c.kind === "slow") {
     game.slowMoTimer = SLOW_MO_DURATION;
   } else {

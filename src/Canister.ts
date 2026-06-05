@@ -4,7 +4,7 @@ import { ENTITY_CONFIG } from "./game/entityConfig";
 // Five powerup kinds, each with its own glyph so the player can read the
 // canister at a glance from across the screen. Keeping the list short
 // (rather than 10+ kinds) means each one stays familiar after a few waves.
-export type PowerupKind = "prong" | "rapid" | "pierce" | "shield" | "slow" | "radar" | "longshot" | "sideEngines";
+export type PowerupKind = "prong" | "rapid" | "pierce" | "shield" | "slow" | "radar" | "longshot" | "sideEngines" | "lasershot";
 
 // Hue is kept for downstream effects (pickup burst tinting) but the canister
 // itself renders pure white so the player reads it as "incoming pod" first
@@ -18,6 +18,7 @@ export const POWERUP_HUE: Record<PowerupKind, number> = {
   radar: 30,
   longshot: 270,
   sideEngines: 25,
+  lasershot: 195,
 };
 
 const POWERUP_GLYPH: Record<PowerupKind, string> = {
@@ -29,9 +30,10 @@ const POWERUP_GLYPH: Record<PowerupKind, string> = {
   radar: "X",
   longshot: "L",
   sideEngines: "E",
+  lasershot: "B",
 };
 
-export const POWERUP_KINDS: PowerupKind[] = ["prong", "shield", "slow", "radar", "longshot", "sideEngines"];
+export const POWERUP_KINDS: PowerupKind[] = ["prong", "shield", "slow", "radar", "longshot", "sideEngines", "lasershot"];
 
 // warp-out plays a brief vortex flash before the canister vanishes so the player
 //   sees a deliberate departure (not just a soft offscreen fade) when they let a pod drift past.

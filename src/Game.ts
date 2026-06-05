@@ -15,6 +15,7 @@ import { Alien, AlienSize } from "./Alien";
 import { AlienBullet } from "./AlienBullet";
 import { v } from "./vec";
 import { Popup } from "./game/popups";
+import { LaserBeam } from "./game/laserShot";
 import { KilledSnapshot } from "./game/killSnapshot";
 import type { HighscoreRow } from "./game/highscores";
 import type { KillBucket } from "./game/killBuckets";
@@ -44,6 +45,9 @@ export class Game implements HudElements {
   ship: Ship;
   asteroids: Asteroid[] = [];
   bullets: Bullet[] = [];
+  // Laser-shot beams from the "lasershot" upgrade — one per release of the
+  //   charge. Short-lived visuals (damage resolves on spawn); see game/laserShot.ts.
+  lasers: LaserBeam[] = [];
   popups: Popup[] = [];
   // on-beat hits while the first-dot hover ring is fully locked queue a +1-beat
   //   bonus increment here. Each tick fires (or cancels) the entries whose moment has come.

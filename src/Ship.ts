@@ -64,6 +64,13 @@ export class Ship {
   radarActive = false;
   longshotActive = false;
   sideEnginesActive = false;
+  lasershotActive = false;
+  // Laser-shot charge state. Active while the player holds fire under the
+  //   lasershot upgrade; release fires a beam dealing 1 + numChargedDots damage.
+  //   See game/laserShot.ts for the charge/release logic.
+  laserChargeActive = false;
+  laserChargeStartBeatTime = 0;
+  laserLastDotIndexFired = -1;
 
   // discrete halo tier 0/1/2; intensity eases toward this target for a smooth visual response.
   comboHaloTier = 0;

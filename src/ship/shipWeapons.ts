@@ -45,4 +45,5 @@ export const applyPowerup = (ship: Ship, kind: PowerupKind) => {
   else if (kind === "radar") ship.radarActive = true;
   else if (kind === "longshot") ship.longshotActive = true;
   else if (kind === "sideEngines") ship.sideEnginesActive = true;
+  else if (kind === "lasershot") ship.lasershotActive = true;
 };
