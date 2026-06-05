@@ -36,7 +36,7 @@ export const ENTITY_CONFIG = {
   // system has real teeth — a rhythm-bullet (4 damage) needs four hits to
   // crack a large bassteroid, matching the "armoured" silhouette.
   bassteroid: {
-    hpMultiplier: 4,
+    hpMultiplier: 2,
   },
 
   canister: {
