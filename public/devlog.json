@@ -1,5 +1,23 @@
 [
   {
+    "id": "2026-06-05-68798ab",
+    "date": "2026-06-05",
+    "title": "Replay fidelity improvements",
+    "sections": [
+      {
+        "heading": "Fixed",
+        "items": [
+          "Replays now correctly reproduce wave 1 layout when the tutorial or veteran pilot setting differs between the recorder and the viewer.",
+          "Replays now use the original player's control bindings, so recorded inputs map to the correct actions even if the viewer has rebound their keys.",
+          "Returning to the title screen after watching a replay no longer leaves the viewer stuck with the recorded pilot's key bindings."
+        ]
+      }
+    ],
+    "commits": [
+      "68798ab"
+    ]
+  },
+  {
     "id": "2026-06-05-ea1fbce",
     "date": "2026-06-05",
     "title": "Improved visuals, audio, and enemy behavior",
