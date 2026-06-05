@@ -40,9 +40,9 @@ export const ENTITY_CONFIG = {
   },
 
   canister: {
-    featureFreeSpawns: false,
+    featureFreeSpawns: true,
     firstWave: 3,
-    chancePerWave: 1 / 3,
+    chancePerWave: 1 / 7,
     spawnWindow: [8, 24] as [number, number],
     radius: 16,
     // brief vortex flash before the canister vanishes — a deliberate departure

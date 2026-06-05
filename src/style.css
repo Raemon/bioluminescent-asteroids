@@ -980,7 +980,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   margin-top: 6px;
 }
 
@@ -1008,8 +1008,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   border-radius: 6px;
   outline: none;
   caret-color: #6ad7ff;
-  margin-top: 6px;
-  margin-bottom: 12px;
+  margin-top: 4px;
   text-shadow: 0 0 12px rgba(140, 220, 255, 0.55);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -1056,30 +1055,26 @@ html:has(#sound-root), body:has(> #sound-root) {
 .score-entry-status.error { color: #ffb8b8; }
 .score-entry-status.success { color: #b8f3c8; }
 
-#replay-save {
-  display: flex;
-  flex-direction: column;
+#replay-save-toggle {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-}
-#replay-save.hidden { display: none; }
-#replay-save-btn {
+  gap: 8px;
   font-size: 11px;
   letter-spacing: 0.22em;
-  text-transform: uppercase;
-  background: transparent;
   color: #6ad7ff;
-  border: 1px solid rgba(106, 215, 255, 0.45);
-  padding: 6px 14px;
+  text-transform: uppercase;
+  opacity: 0.85;
   cursor: pointer;
-  border-radius: 2px;
+  user-select: none;
 }
-#replay-save-btn:hover:not(:disabled) {
-  background: rgba(106, 215, 255, 0.12);
-  border-color: rgba(106, 215, 255, 0.85);
+#replay-save-toggle-input {
+  accent-color: #6ad7ff;
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
 }
-#replay-save-btn:disabled { opacity: 0.5; cursor: default; }
+#replay-save-toggle-input:disabled { cursor: default; }
+#replay-save-toggle-input:disabled + span { opacity: 0.5; }
 
 .lb-replay {
   pointer-events: auto;

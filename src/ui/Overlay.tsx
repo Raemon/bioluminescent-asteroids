@@ -118,13 +118,13 @@ export const Overlay = () => {
           spellCheck={false}
           autoCapitalize="characters"
         />
-        <button type="submit" id="score-entry-submit">Save Score</button>
+        <label id="replay-save-toggle">
+          <input id="replay-save-toggle-input" type="checkbox" />
+          <span>Save replay</span>
+        </label>
+        <button type="submit" id="score-entry-submit">Save</button>
         <p id="score-entry-status" className="score-entry-status" />
       </form>
-      <div id="replay-save" className="hidden">
-        <button id="replay-save-btn" type="button">Save Replay</button>
-        <p id="replay-save-status" className="score-entry-status" />
-      </div>
       <div id="leaderboard" className="hidden">
         <ol id="leaderboard-list" />
         <div id="leaderboard-footer">

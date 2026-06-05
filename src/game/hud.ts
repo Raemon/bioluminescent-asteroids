@@ -22,9 +22,7 @@ export type HudElements = {
   scoreEntryStatusEl: HTMLElement;
   leaderboardEl: HTMLElement;
   leaderboardListEl: HTMLOListElement;
-  replaySaveEl: HTMLElement;
-  replaySaveBtnEl: HTMLButtonElement;
-  replaySaveStatusEl: HTMLElement;
+  replaySaveCheckboxEl: HTMLInputElement;
   debugOverlayEl: HTMLElement;
   debugFpsEl: HTMLElement;
 };
@@ -60,9 +58,7 @@ export const bindHudElements = (): HudElements => {
     scoreEntryStatusEl: document.getElementById("score-entry-status")!,
     leaderboardEl: document.getElementById("leaderboard")!,
     leaderboardListEl: document.getElementById("leaderboard-list") as HTMLOListElement,
-    replaySaveEl: document.getElementById("replay-save")!,
-    replaySaveBtnEl: document.getElementById("replay-save-btn") as HTMLButtonElement,
-    replaySaveStatusEl: document.getElementById("replay-save-status")!,
+    replaySaveCheckboxEl: document.getElementById("replay-save-toggle-input") as HTMLInputElement,
     debugOverlayEl: document.getElementById("debug-overlay")!,
     debugFpsEl: document.getElementById("debug-fps")!,
   };

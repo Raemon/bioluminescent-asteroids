@@ -145,3 +145,24 @@ export const getTopEntriesOnly = (): boolean => true;
 export const saveTopEntriesOnly = (_on: boolean) => {
   // Intentionally no-op — see getTopEntriesOnly for the rationale.
 };
+
+const REPLAY_OPT_IN_KEY = "pulsar.saveReplay";
+
+// Default on so the replay-saving behaviour is discoverable on a first run.
+export const getSaveReplayPref = (): boolean => {
+  try {
+    const raw = localStorage.getItem(REPLAY_OPT_IN_KEY);
+    if (raw === null) return true;
+    return raw === "1";
+  } catch {
+    return true;
+  }
+};
+
+export const saveSaveReplayPref = (on: boolean) => {
+  try {
+    localStorage.setItem(REPLAY_OPT_IN_KEY, on ? "1" : "0");
+  } catch {
+    // localStorage may be blocked; the in-session checkbox state still works.
+  }
+};

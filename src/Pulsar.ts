@@ -156,11 +156,11 @@ export class Pulsar {
       // Starting angle sits well clear of the pulsar's side of the sky; the
       // ellipse's near-pulsar pass happens around driftT ≈ 290s (θ ≈ 3.95).
       {
-        baseAngle: 2.5,
+        baseAngle: 1.8,
         angularSpeed: 0.005,
         baseRadiusFrac: 0.38,
         baseSize: 12,
-        growthRate: 11,
+        growthRate: 5.5,
         hue: 245,
         baseSat: 50,
         satGrowth: 30,
@@ -683,22 +683,29 @@ export class Pulsar {
       ? Math.min(1, (size - (distToPulsar + pulsarR)) / Math.max(1, pulsarR))
       : 0;
 
-    // Atmospheric scatter halo, *outside* the disc, biased toward the
-    // pulsar-facing limb (light bending around the silhouette of an
-    // unlit body). Almost invisible when the planet is far from the
-    // pulsar; blooms hard as it swings close. Drawn as an annulus via
-    // even-odd fill so the disc itself stays untouched.
+    // Atmospheric scatter halo — a thin crescent hugging only the pulsar-
+    // facing limb (light bending around the silhouette of an unlit body).
+    // Drawn as a small radial gradient anchored *past* the planet on the
+    // pulsar side, clipped to the disc's exterior via even-odd fill. The
+    // anchor offset means the bright stop sits outside the planet on the
+    // facing side and the gradient falls off before reaching the far limb,
+    // so we get a one-sided rim rather than a full surrounding halo. As the
+    // planet approaches the pulsar the rim thins and dims (rather than
+    // blooming) — saturated proximity reads as eclipse, not a fat halo.
     const pulsarBias = Math.max(0, Math.min(1, 1 - distToPulsar / (size * 4 + pulsarR * 3)));
-    const haloAlpha = Math.min(1, 0.45 * pulsarBias + 0.18 * beat * pulsarBias + 0.25 * flare * pulsarBias + 0.55 * eclipse);
+    const proximityDamp = 1 - 0.55 * pulsarBias;
+    const haloAlpha = Math.min(1, (0.32 * pulsarBias + 0.12 * beat * pulsarBias + 0.18 * flare * pulsarBias) * proximityDamp + 0.45 * eclipse);
     if (haloAlpha > 0.02) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      const haloOuter = size * (1.18 + 0.15 * pulsarBias + 0.2 * eclipse);
-      const haloCx = px + nx * size * (0.08 + 0.1 * pulsarBias);
-      const haloCy = py + ny * size * (0.08 + 0.1 * pulsarBias);
-      const halo = ctx.createRadialGradient(haloCx, haloCy, size * 0.92, haloCx, haloCy, haloOuter);
-      halo.addColorStop(0, `hsla(195, 100%, 92%, ${haloAlpha})`);
-      halo.addColorStop(0.5, `hsla(210, 100%, 75%, ${haloAlpha * 0.4})`);
+      const rimThickness = size * (0.10 + 0.08 * eclipse);
+      const anchorOffset = size * 0.98;
+      const haloCx = px + nx * anchorOffset;
+      const haloCy = py + ny * anchorOffset;
+      const haloOuter = rimThickness * 2.2;
+      const halo = ctx.createRadialGradient(haloCx, haloCy, 0, haloCx, haloCy, haloOuter);
+      halo.addColorStop(0, `hsla(195, 100%, 90%, ${haloAlpha})`);
+      halo.addColorStop(0.6, `hsla(210, 100%, 72%, ${haloAlpha * 0.3})`);
       halo.addColorStop(1, `hsla(220, 100%, 60%, 0)`);
       ctx.fillStyle = halo;
       ctx.beginPath();
@@ -714,20 +721,30 @@ export class Pulsar {
 
     // Eclipse corona — additive bloom around the planet limb when it's
     // occluding the pulsar. Sits *outside* the disc so it reads as light
-    // bending around the planet rather than surface glow.
+    // bending around the planet rather than surface glow. Inner stop sits
+    // right at the limb (size * 1.0), not inside, so additive blending
+    // never paints onto the dark silhouette and bleaches it. Warm gold→
+    // pink→pale-blue grade reads as solar-corona scatter rather than a
+    // cyan headlamp.
     if (eclipse > 0.01) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      const coronaR = size * (1.05 + 0.6 * eclipse + 0.8 * totality);
-      const coronaAlpha = Math.min(1, 0.25 * eclipse + 0.9 * totality + 0.3 * beat * eclipse + 0.4 * flare * eclipse);
-      const corona = ctx.createRadialGradient(px, py, size * 0.95, px, py, coronaR);
-      corona.addColorStop(0, `hsla(195, 100%, 95%, ${coronaAlpha})`);
-      corona.addColorStop(0.5, `hsla(210, 100%, 80%, ${coronaAlpha * 0.45})`);
+      const coronaR = size * (1.08 + 0.6 * eclipse + 0.8 * totality);
+      const coronaAlpha = Math.min(1, 0.25 * eclipse + 0.55 * totality + 0.3 * beat * eclipse + 0.4 * flare * eclipse);
+      const corona = ctx.createRadialGradient(px, py, size, px, py, coronaR);
+      corona.addColorStop(0, `hsla(35, 100%, 80%, ${coronaAlpha})`);
+      corona.addColorStop(0.4, `hsla(20, 95%, 65%, ${coronaAlpha * 0.55})`);
+      corona.addColorStop(0.75, `hsla(330, 80%, 70%, ${coronaAlpha * 0.3})`);
       corona.addColorStop(1, `hsla(220, 100%, 65%, 0)`);
       ctx.fillStyle = corona;
       ctx.beginPath();
       ctx.arc(px, py, coronaR, 0, TAU);
-      ctx.fill();
+      if (isOblongPlanetoid) {
+        this.tracePlanetoidSilhouette(ctx, px, py, size, true);
+      } else {
+        ctx.arc(px, py, size, 0, TAU, true);
+      }
+      ctx.fill("evenodd");
 
       // Diffraction spikes during totality — four crisp rays of light
       // leaking past the limb. Only fires near full occlusion so it stays a

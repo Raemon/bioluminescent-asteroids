@@ -4,9 +4,11 @@ import {
   fetchTopPilots,
   getCachedHighscores,
   getRecentName,
+  getSaveReplayPref,
   getTopEntriesOnly,
   saveCachedHighscores,
   saveRecentName,
+  saveSaveReplayPref,
   saveTopEntriesOnly,
   submitHighscore,
   type HighscoreRow,
@@ -32,23 +34,40 @@ const handleSubmit = async (game: Game, ev: Event) => {
     setStatus(game, "Enter a name to save your score.", "error");
     return;
   }
+  const wantReplay = game.replaySaveCheckboxEl.checked;
   game.scoreSubmitState = "submitting";
   game.scoreEntrySubmitEl.disabled = true;
   game.scoreEntryInputEl.disabled = true;
+  game.replaySaveCheckboxEl.disabled = true;
   setStatus(game, "Transmitting…", "info");
   try {
     const saved = await submitHighscore(rawName, game);
     saveRecentName(rawName);
     game.lastRunScoreId = saved.id;
     game.lastRunScore = saved.score;
-    game.scoreSubmitState = "submitted";
-    setStatus(game, "Score saved. Press enter to continue.", "success");
     game.scoreEntryInputEl.blur();
-    showReplaySave(game, saved.id, rawName);
+    if (wantReplay) {
+      setStatus(game, "Uploading replay…", "info");
+      try {
+        const bytes = await waitForReplayBytes(game);
+        if (!bytes) {
+          setStatus(game, "Score saved. Replay unavailable for this run.", "success");
+        } else {
+          await uploadReplay(saved.id, rawName, bytes);
+          setStatus(game, "Score + replay saved. Press enter to continue.", "success");
+        }
+      } catch (err) {
+        setStatus(game, `Score saved. Replay upload failed: ${(err as Error).message}`, "error");
+      }
+    } else {
+      setStatus(game, "Score saved. Press enter to continue.", "success");
+    }
+    game.scoreSubmitState = "submitted";
   } catch (err) {
     game.scoreSubmitState = "idle";
     game.scoreEntrySubmitEl.disabled = false;
     game.scoreEntryInputEl.disabled = false;
+    game.replaySaveCheckboxEl.disabled = false;
     setStatus(game, `Save failed: ${(err as Error).message}`, "error");
   }
 };
@@ -76,6 +95,9 @@ const bindListeners = (game: Game) => {
   listenersBound = true;
   game.scoreEntryFormEl.addEventListener("submit", (ev) => void handleSubmit(game, ev));
   game.scoreEntryInputEl.addEventListener("keydown", (ev) => handleInputKeydown(game, ev));
+  game.replaySaveCheckboxEl.addEventListener("change", () => {
+    saveSaveReplayPref(game.replaySaveCheckboxEl.checked);
+  });
 };
 
 export const showScoreEntry = (game: Game) => {
@@ -89,6 +111,8 @@ export const showScoreEntry = (game: Game) => {
   game.scoreSubmitState = "idle";
   game.scoreEntryInputEl.disabled = false;
   game.scoreEntrySubmitEl.disabled = false;
+  game.replaySaveCheckboxEl.disabled = false;
+  game.replaySaveCheckboxEl.checked = getSaveReplayPref();
   game.scoreEntryInputEl.value = getRecentName();
   setStatus(game, "Esc to skip", "info");
   game.scoreEntryFormEl.classList.remove("hidden");
@@ -101,70 +125,19 @@ export const showScoreEntry = (game: Game) => {
 export const hideScoreEntry = (game: Game) => {
   game.scoreEntryFormEl.classList.add("hidden");
   game.scoreEntryInputEl.blur();
-  hideReplaySave(game);
 };
 
-const setReplayStatus = (game: Game, msg: string, kind: "info" | "error" | "success" = "info") => {
-  game.replaySaveStatusEl.textContent = msg;
-  game.replaySaveStatusEl.classList.remove("error", "success");
-  if (kind === "error") game.replaySaveStatusEl.classList.add("error");
-  else if (kind === "success") game.replaySaveStatusEl.classList.add("success");
-};
-
-// Wait briefly for the recorder's gzip Promise to land. captureFrame fires in
-//   the update loop and serialize() is awaited inside finalizeRecorder — by the
-//   time the player has typed a name + clicked submit, the bytes are typically
-//   already on game.lastRunReplay. A short poll covers the edge case where the
-//   user submits within the first frame after gameover.
+// captureFrame fires in the update loop and serialize() is awaited inside
+//   finalizeRecorder — by the time the player has typed a name + hit Enter,
+//   the bytes are typically already on game.lastRunReplay. A short poll
+//   covers the edge case where submit lands within the first frame after
+//   gameover.
 const waitForReplayBytes = async (game: Game, timeoutMs = 2000): Promise<Uint8Array | null> => {
   const start = performance.now();
   while (!game.lastRunReplay && performance.now() - start < timeoutMs) {
     await new Promise((r) => setTimeout(r, 50));
   }
   return game.lastRunReplay;
-};
-
-let replayBtnBound = false;
-
-const showReplaySave = (game: Game, scoreId: number, name: string) => {
-  if (!replayBtnBound) {
-    replayBtnBound = true;
-    game.replaySaveBtnEl.addEventListener("click", () => {
-      void handleReplayUpload(game);
-    });
-  }
-  // currentReplayContext is set fresh on every showReplaySave so the latest
-  //   click always targets the most-recent score id.
-  game.replaySaveBtnEl.dataset.scoreId = String(scoreId);
-  game.replaySaveBtnEl.dataset.name = name;
-  game.replaySaveBtnEl.disabled = false;
-  setReplayStatus(game, "");
-  game.replaySaveEl.classList.remove("hidden");
-};
-
-const hideReplaySave = (game: Game) => {
-  game.replaySaveEl.classList.add("hidden");
-};
-
-const handleReplayUpload = async (game: Game) => {
-  const scoreId = Number(game.replaySaveBtnEl.dataset.scoreId);
-  const name = game.replaySaveBtnEl.dataset.name ?? "";
-  if (!scoreId || !name) return;
-  game.replaySaveBtnEl.disabled = true;
-  setReplayStatus(game, "Encoding replay…");
-  const bytes = await waitForReplayBytes(game);
-  if (!bytes) {
-    setReplayStatus(game, "Replay unavailable for this run.", "error");
-    return;
-  }
-  setReplayStatus(game, "Uploading…");
-  try {
-    await uploadReplay(scoreId, name, bytes);
-    setReplayStatus(game, "Replay saved.", "success");
-  } catch (err) {
-    game.replaySaveBtnEl.disabled = false;
-    setReplayStatus(game, `Upload failed: ${(err as Error).message}`, "error");
-  }
 };
 
 // scoreSubmitState gates whether Enter restarts the game — we want the

@@ -199,9 +199,7 @@ export class Game implements HudElements {
   scoreEntryStatusEl: HTMLElement;
   leaderboardEl: HTMLElement;
   leaderboardListEl: HTMLOListElement;
-  replaySaveEl: HTMLElement;
-  replaySaveBtnEl: HTMLButtonElement;
-  replaySaveStatusEl: HTMLElement;
+  replaySaveCheckboxEl: HTMLInputElement;
   debugOverlayEl: HTMLElement;
   debugFpsEl: HTMLElement;
   // backtick (`) toggles #debug-overlay. FPS readout is always visible (bottom-right).
@@ -286,9 +284,7 @@ export class Game implements HudElements {
     this.scoreEntryStatusEl = hud.scoreEntryStatusEl;
     this.leaderboardEl = hud.leaderboardEl;
     this.leaderboardListEl = hud.leaderboardListEl;
-    this.replaySaveEl = hud.replaySaveEl;
-    this.replaySaveBtnEl = hud.replaySaveBtnEl;
-    this.replaySaveStatusEl = hud.replaySaveStatusEl;
+    this.replaySaveCheckboxEl = hud.replaySaveCheckboxEl;
     this.debugOverlayEl = hud.debugOverlayEl;
     this.debugFpsEl = hud.debugFpsEl;
     this.debugOverlayEl.classList.toggle("hidden", !this.debugMode);
