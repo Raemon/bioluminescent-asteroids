@@ -27,8 +27,10 @@ const paintBackdrop = (game: Game) => {
 };
 
 // starfield + pulsar are the "static" layers; everything else sits on top of them.
+// The starfield reads the pulsar's camera view so its parallax + roll stay locked
+// to the pulsar's dolly — the whole background reads as one coherent camera move.
 const paintBackgroundLayers = (game: Game) => {
-  game.starfield.render(game.ctx, game.time);
+  game.starfield.render(game.ctx, game.time, game.pulsar.cameraView());
   game.pulsar.render(game.ctx);
 };
 

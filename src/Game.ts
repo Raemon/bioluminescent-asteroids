@@ -111,6 +111,9 @@ export class Game implements HudElements {
   // per-wave count of fired drift bonuses, surfaced in the wave-clear summary as
   //   a separate +100/each line. Reset at the same point as maxComboThisWave.
   driftBonusesThisWave = 0;
+  // first Drift Shot of a run gets a "2× DAMAGE" subtitle on the popup so the
+  //   player learns what it's worth; later ones show just the label.
+  hasShownDriftShotLabel = false;
   // latched on off-beat fire so the punishment can land at the next beat closure (not retroactive).
   firedOffBeatSinceLastBeat = false;
   // first-ever meaningful combo loss in a run gets a labeled popup so the player learns the mechanic.

@@ -357,6 +357,7 @@ const resetRunTimers = (game: Game) => {
   game.maxCombo = 0;
   game.maxComboThisWave = 0;
   game.driftBonusesThisWave = 0;
+  game.hasShownDriftShotLabel = false;
   game.firedOffBeatSinceLastBeat = false;
   game.pendingDriftBonuses = [];
   game.slowMoTimer = 0;

@@ -134,27 +134,75 @@ export class Starfield {
     this.buildDustSprite();
   }
 
-  render(ctx: CanvasRenderingContext2D, t: number) {
+  // camera is optional so the starfield still renders fine in isolation
+  // (tests, splash screens). When supplied, the field rolls around the
+  // pulsar's focal point and the closer (lower-depth) twinkling stars fan
+  // outward from it as approach grows, so the whole scene reads as one
+  // coherent camera dolly rather than a static backdrop behind a moving
+  // pulsar. The pre-baked dust + nebula sprites get a single shared rolled-
+  // and-zoomed transform (uniform parallax for the deepest layer); the
+  // twinkling stars are repositioned per-star so their parallax scales by
+  // depth.
+  render(
+    ctx: CanvasRenderingContext2D,
+    t: number,
+    camera?: { focalX: number; focalY: number; roll: number; approach: number },
+  ) {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
+
+    const focalX = camera ? camera.focalX : this.w / 2;
+    const focalY = camera ? camera.focalY : this.h / 2;
+    const roll = camera ? camera.roll : 0;
+    const approach = camera ? camera.approach : 0;
+    // Deepest layers (nebula, dust) move the least — a small uniform zoom
+    // outward from the focal point so they still feel attached to the
+    // camera but don't streak past.
+    const farZoom = 1 + 0.06 * approach;
+    const cosR = Math.cos(roll);
+    const sinR = Math.sin(roll);
+
     if (this.nebulaSprite) {
       const driftX = Math.sin(t * 0.0003) * 20;
       const driftY = Math.cos(t * 0.00025) * 20;
-      ctx.drawImage(this.nebulaSprite, driftX, driftY);
+      ctx.save();
+      ctx.translate(focalX, focalY);
+      ctx.rotate(roll);
+      ctx.scale(farZoom, farZoom);
+      ctx.translate(-focalX + driftX, -focalY + driftY);
+      ctx.drawImage(this.nebulaSprite, 0, 0);
+      ctx.restore();
     }
-    if (this.dustSprite) ctx.drawImage(this.dustSprite, 0, 0);
+    if (this.dustSprite) {
+      ctx.save();
+      ctx.translate(focalX, focalY);
+      ctx.rotate(roll);
+      ctx.scale(farZoom, farZoom);
+      ctx.translate(-focalX, -focalY);
+      ctx.drawImage(this.dustSprite, 0, 0);
+      ctx.restore();
+    }
+
     for (const starInField of this.stars) {
       const twinkle = 0.5 + 0.5 * Math.sin(t * 0.001 * starInField.twinkleSpeed + starInField.twinklePhase);
       const alpha = 0.13 + 0.32 * twinkle * starInField.depth;
       const size = starInField.size * (0.7 + 0.3 * twinkle);
+      // Per-star parallax: closer (lower depth) stars fan outward from the
+      // focal point faster. Combined with the camera roll, the field reads
+      // as a real 3D dolly toward the pulsar.
+      const parallax = 1 + approach * (0.42 - 0.32 * starInField.depth);
+      const rx = (starInField.x - focalX) * parallax;
+      const ry = (starInField.y - focalY) * parallax;
+      const sx = focalX + rx * cosR - ry * sinR;
+      const sy = focalY + rx * sinR + ry * cosR;
       ctx.fillStyle = `hsla(${starInField.hue}, 80%, 85%, ${alpha})`;
       ctx.beginPath();
-      ctx.arc(starInField.x, starInField.y, size, 0, Math.PI * 2);
+      ctx.arc(sx, sy, size, 0, Math.PI * 2);
       ctx.fill();
       if (starInField.size > 1.3) {
         ctx.fillStyle = `hsla(${starInField.hue}, 80%, 85%, ${alpha * 0.4})`;
         ctx.beginPath();
-        ctx.arc(starInField.x, starInField.y, size * 3, 0, Math.PI * 2);
+        ctx.arc(sx, sy, size * 3, 0, Math.PI * 2);
         ctx.fill();
       }
     }

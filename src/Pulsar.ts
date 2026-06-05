@@ -369,6 +369,21 @@ export class Pulsar {
     return { x, y };
   }
 
+  // Shared camera state for any background layer that wants to feel part
+  // of the same parallax view as the pulsar. focal is the pulsar's screen
+  // position (so close stars fan out radially from it as we approach), roll
+  // is a slow continuous camera tilt accumulated over the run, and approach
+  // is the same 0..0.78 dolly factor used everywhere else.
+  cameraView(): { focalX: number; focalY: number; roll: number; approach: number } {
+    const { x, y } = this.pulsarPos();
+    const approach = this.approach();
+    // ~8° of roll across the entire approach (displayWaveLevel ~1 → ~14).
+    // Eased via approach (not displayWaveLevel directly) so the tilt rate
+    // matches the same dolly the player already feels.
+    const roll = approach * 0.14;
+    return { focalX: x, focalY: y, roll, approach };
+  }
+
   // Outward jitter direction the game applies to objects on the frame of
   // the flash. Vector from the shock origin toward the supplied point,
   // normalised; falls back to a random angle for points coincident with
@@ -579,6 +594,10 @@ export class Pulsar {
     // to-front: planets[1] is the smaller / farther one and goes down first,
     // planets[0] is the larger / closer one and goes on top so the two
     // silhouettes layer correctly when they cross.
+    // Camera roll applied to all background planets so their orbits rotate
+    // with the rest of the scene — sells "this is one coherent camera view"
+    // rather than each layer floating independently.
+    const { roll: cameraRoll } = this.cameraView();
     for (let pi = this.planets.length - 1; pi >= 0; pi--) {
       const planet = this.planets[pi];
       const isBossPlanet = pi === 0;
@@ -586,8 +605,17 @@ export class Pulsar {
 
       const radiusFrac = planet.baseRadiusFrac * (1 - approach * 0.55);
       const angle = planet.baseAngle + this.driftT * planet.angularSpeed;
-      const px = cx + Math.cos(angle) * radiusFrac * minDim;
-      const py = cy + Math.sin(angle) * radiusFrac * minDim * 0.6;
+      // Position the planet on its orbit (around screen center, slightly
+      // elliptical), then roll the resulting point around the pulsar as the
+      // shared camera focal so the planet and the starfield share rotation.
+      const orbitX = Math.cos(angle) * radiusFrac * minDim;
+      const orbitY = Math.sin(angle) * radiusFrac * minDim * 0.6;
+      const cosR = Math.cos(cameraRoll);
+      const sinR = Math.sin(cameraRoll);
+      const relX = cx + orbitX - ppx;
+      const relY = cy + orbitY - ppy;
+      const px = ppx + relX * cosR - relY * sinR;
+      const py = ppy + relX * sinR + relY * cosR;
       const size = planet.baseSize * (1 + approach * planet.growthRate);
 
       this.renderPlanet(ctx, planet, px, py, size, ppx, ppy, r, approach, beat, flare, isBossPlanet);
@@ -816,9 +844,19 @@ export class Pulsar {
     const radiusFrac = planet.baseRadiusFrac * (1 - approach * 0.55);
     const angle = planet.baseAngle + this.driftT * planet.angularSpeed;
     const minDim = Math.min(this.w, this.h);
+    // Match the rendered position: roll the orbit point around the pulsar's
+    // screen position (same camera transform the planet render uses), so the
+    // boss asteroid spawns exactly where the player saw the planet.
+    const { focalX, focalY, roll } = this.cameraView();
+    const orbitX = Math.cos(angle) * radiusFrac * minDim;
+    const orbitY = Math.sin(angle) * radiusFrac * minDim * 0.6;
+    const relX = this.w / 2 + orbitX - focalX;
+    const relY = this.h / 2 + orbitY - focalY;
+    const cosR = Math.cos(roll);
+    const sinR = Math.sin(roll);
     return {
-      x: this.w / 2 + Math.cos(angle) * radiusFrac * minDim,
-      y: this.h / 2 + Math.sin(angle) * radiusFrac * minDim * 0.6,
+      x: focalX + relX * cosR - relY * sinR,
+      y: focalY + relX * sinR + relY * cosR,
     };
   }
 

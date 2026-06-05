@@ -58,20 +58,41 @@ export const popupCombo = (pos: Vec, multiplier: number): Popup => ({
 
 // +1-beat reward for landing an on-beat hit while the first-dot hover ring is locked.
 //   Cyan to read distinctly from the gold multiplier popup it follows.
-export const popupDriftBonus = (pos: Vec): Popup => ({
-  pos: { x: pos.x, y: pos.y - 18 },
-  vel: { x: rand(-10, 10), y: -65 },
-  life: COMBO_POPUP_LIFE,
-  maxLife: COMBO_POPUP_LIFE,
-  text: "DRIFT SHOT",
-  font: "700 18px 'Space Grotesk', system-ui, sans-serif",
-  fill: "#9be8ff",
-  shadowColor: "rgba(120, 220, 255, 0.85)",
-  shadowBlur: 14,
-  decayX: 0.94, decayY: 0.94,
-  popPeak: 0.4, popDuration: 0.15,
-  holdUntil: 0, fadeGain: 1.4,
-});
+//   withSubtitle adds a "2× DAMAGE" line underneath — used the first time per run so the
+//   player learns what a Drift Shot is worth without nagging them on every subsequent one.
+export const popupDriftBonus = (pos: Vec, withSubtitle = false): Popup => {
+  const labelFont = "700 18px 'Space Grotesk', system-ui, sans-serif";
+  const subFont = "600 13px 'Space Grotesk', system-ui, sans-serif";
+  const fill = "#9be8ff";
+  const shadow = "rgba(120, 220, 255, 0.85)";
+  const life = withSubtitle ? 1.6 : COMBO_POPUP_LIFE;
+  return {
+    pos: { x: pos.x, y: pos.y - 18 },
+    vel: { x: rand(-10, 10), y: -65 },
+    life,
+    maxLife: life,
+    text: "DRIFT SHOT",
+    font: labelFont,
+    fill,
+    shadowColor: shadow,
+    shadowBlur: 14,
+    decayX: 0.94, decayY: 0.94,
+    popPeak: 0.4, popDuration: 0.15,
+    holdUntil: 0, fadeGain: 1.4,
+    draw: withSubtitle ? (ctx) => {
+      ctx.font = labelFont;
+      ctx.fillStyle = fill;
+      ctx.shadowColor = shadow;
+      ctx.shadowBlur = 14;
+      ctx.fillText("DRIFT SHOT", 0, -8);
+      ctx.font = subFont;
+      ctx.fillStyle = "#ffd86a";
+      ctx.shadowColor = "rgba(255, 200, 80, 0.85)";
+      ctx.shadowBlur = 10;
+      ctx.fillText("2× DAMAGE", 0, 12);
+    } : undefined,
+  };
+};
 
 // surfaces the streak break at the spot that caused it (ship fire / target hit).
 export const popupComboLost = (pos: Vec): Popup => ({

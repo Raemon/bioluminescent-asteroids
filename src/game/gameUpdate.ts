@@ -355,7 +355,9 @@ const tickPendingDriftBonuses = (game: Game) => {
     game.driftBonusesThisWave += 1;
     syncComboHud(game);
     game.sound.playComboChime(game.beatCombo, entry.pos);
-    game.popups.push(popupDriftBonus(entry.pos));
+    const firstOfRun = !game.hasShownDriftShotLabel;
+    game.popups.push(popupDriftBonus(entry.pos, firstOfRun));
+    if (firstOfRun) game.hasShownDriftShotLabel = true;
   }
   game.pendingDriftBonuses = keep;
 };
