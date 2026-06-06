@@ -71,6 +71,9 @@ export class Ship {
   laserChargeActive = false;
   laserChargeStartBeatTime = 0;
   laserLastDotIndexFired = -1;
+  // Set when an off-beat fire press is rejected so the fail sound only plays
+  //   once per hold — cleared when the player releases and re-presses.
+  laserChargeFailedThisHold = false;
 
   // discrete halo tier 0/1/2; intensity eases toward this target for a smooth visual response.
   comboHaloTier = 0;

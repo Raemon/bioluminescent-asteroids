@@ -4540,45 +4540,78 @@ export class Sound {
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    const intensity = Math.max(0.4, Math.min(1, 0.5 + damage * 0.18));
-    const tail = 0.32 + damage * 0.04;
-    // Three sine partials on C — one octave below, fundamental, one octave above.
-    // Each gets a small downward pitch slide (a perfect fourth down over the tail)
-    // so the beam reads as "fired and travelling" rather than a static tone.
-    const partials: Array<{ hz: number; peak: number; type: OscillatorType }> = [
-      { hz: 130.81, peak: 0.18 * intensity, type: "sine" },     // C3
-      { hz: 261.63, peak: 0.22 * intensity, type: "triangle" }, // C4
-      { hz: 523.25, peak: 0.13 * intensity, type: "sine" },     // C5
+    const intensity = Math.max(0.4, Math.min(1, 0.55 + damage * 0.18));
+    const tail = 0.42 + damage * 0.06;
+    // Four partials anchored on C, dropped an octave from the original mix so the
+    // shot reads as a chest-thump rather than a chirp. Sub (C2) + fundamental (C3)
+    // carry the body; C4 triangle is the recognisable beam-pitch; C5 sine adds air.
+    // Each gets a downward pitch slide (a fifth down over the tail) so the beam
+    // reads as "fired and travelling" rather than a static tone.
+    const partials: Array<{ hz: number; peak: number; type: OscillatorType; slide: number }> = [
+      { hz: 65.41,  peak: 0.26 * intensity, type: "sine",     slide: 0.62 }, // C2 sub
+      { hz: 130.81, peak: 0.24 * intensity, type: "triangle", slide: 0.66 }, // C3
+      { hz: 261.63, peak: 0.18 * intensity, type: "triangle", slide: 0.70 }, // C4
+      { hz: 523.25, peak: 0.10 * intensity, type: "sine",     slide: 0.78 }, // C5
     ];
     for (const p of partials) {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = p.type;
-      osc.frequency.setValueAtTime(p.hz * 1.08, t);
-      osc.frequency.exponentialRampToValueAtTime(p.hz * 0.75, t + tail);
+      osc.frequency.setValueAtTime(p.hz * 1.12, t);
+      osc.frequency.exponentialRampToValueAtTime(p.hz * p.slide, t + tail);
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(p.peak, t + 0.006);
+      gain.gain.exponentialRampToValueAtTime(p.peak, t + 0.008);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
       osc.connect(gain);
       gain.connect(this.master);
       osc.start(t);
       osc.stop(t + tail + 0.05);
     }
-    // Charge-tier shimmer: an extra C6 sine on top, only audible at damage ≥ 2.
-    if (damage >= 2) {
+    // Sub-thump impact: detuned saw pair through a lowpass for the gut-punch
+    // front edge — gives the shot a felt depth distinct from the sine partials.
+    const thumpFilter = this.ctx.createBiquadFilter();
+    thumpFilter.type = "lowpass";
+    thumpFilter.frequency.setValueAtTime(420, t);
+    thumpFilter.frequency.exponentialRampToValueAtTime(140, t + 0.18);
+    thumpFilter.Q.value = 6;
+    const thumpGain = this.ctx.createGain();
+    const thumpPeak = 0.22 * intensity;
+    thumpGain.gain.setValueAtTime(0.0001, t);
+    thumpGain.gain.exponentialRampToValueAtTime(thumpPeak, t + 0.005);
+    thumpGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    thumpFilter.connect(thumpGain);
+    thumpGain.connect(this.master);
+    for (const detune of [-7, 7]) {
       const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(1046.50, t);
-      osc.frequency.exponentialRampToValueAtTime(880, t + tail * 0.8);
-      const peak = 0.07 * (damage - 1) * 0.5;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + tail * 0.7);
-      osc.connect(gain);
-      gain.connect(this.master);
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(98, t); // G2-ish — fifth under the C body
+      osc.frequency.exponentialRampToValueAtTime(49, t + 0.18);
+      osc.detune.value = detune;
+      osc.connect(thumpFilter);
       osc.start(t);
-      osc.stop(t + tail * 0.7 + 0.05);
+      osc.stop(t + 0.24);
+    }
+    // Charge-tier shimmer: a C6 sine + C7 partial layered on top, scaling with damage.
+    if (damage >= 2) {
+      const shimmers: Array<{ hz: number; peakMult: number; tailMult: number }> = [
+        { hz: 1046.50, peakMult: 0.09, tailMult: 0.75 },
+        { hz: 1567.98, peakMult: 0.045, tailMult: 0.55 }, // G6 fifth — sparkle
+      ];
+      for (const s of shimmers) {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(s.hz, t);
+        osc.frequency.exponentialRampToValueAtTime(s.hz * 0.84, t + tail * s.tailMult);
+        const peak = s.peakMult * (damage - 1) * 0.6;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + tail * s.tailMult);
+        osc.connect(gain);
+        gain.connect(this.master);
+        osc.start(t);
+        osc.stop(t + tail * s.tailMult + 0.05);
+      }
     }
     // Muzzle ignition: a brief high-passed noise crack at t=0 gives the front
     // of the beam an attack edge — without it the sines feel airy and timid.
@@ -4588,58 +4621,175 @@ export class Sound {
       noise.buffer = noiseBuf;
       const filter = this.ctx.createBiquadFilter();
       filter.type = "highpass";
-      filter.frequency.value = 2200;
+      filter.frequency.value = 1800;
       filter.Q.value = 0.7;
       const gain = this.ctx.createGain();
-      const noisePeak = 0.09 * intensity;
+      const noisePeak = 0.11 * intensity;
       gain.gain.setValueAtTime(noisePeak, t);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
       noise.connect(filter);
       filter.connect(gain);
       gain.connect(this.master);
       noise.start(t);
-      noise.stop(t + 0.08);
+      noise.stop(t + 0.09);
+    }
+    // Low-band ignition rumble — lowpassed noise burst that supports the sub-thump.
+    const rumbleBuf = this.makeNoiseBuffer(0.18);
+    if (rumbleBuf) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = rumbleBuf;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(260, t);
+      filter.frequency.exponentialRampToValueAtTime(90, t + 0.18);
+      filter.Q.value = 0.9;
+      const gain = this.ctx.createGain();
+      const peak = 0.14 * intensity;
+      gain.gain.setValueAtTime(peak, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      noise.start(t);
+      noise.stop(t + 0.20);
     }
   }
 
   // Per-dot charge tick — fires when a new charge dot appears in front of the
-  // ship during a hold. Walks up a C major triad (C5 → E5 → G5) so the three
+  // ship during a hold. Walks up a C major triad (C3 → E3 → G3) so the three
   // dots together arpeggiate a chord, and a higher dot sounds "more charged".
+  // Each dot has a sub layer + body + filtered noise sparkle so the tick lands
+  // with weight rather than just a bright pluck.
   playLaserCharge(dotIndex: number) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    // C major triad — index 1..3 map to root/third/fifth.
-    const triad = [523.25, 659.25, 783.99]; // C5, E5, G5
-    const hz = triad[Math.max(0, Math.min(triad.length - 1, dotIndex - 1))];
-    const tail = 0.22;
-    // Triangle body + sine partial at the octave above — clear pluck, no
-    // square-wave grit. Stays musical enough to read as part of the same C
-    // chord family as the beam itself.
+    // C major triad an octave lower than the original — deeper, more "charging
+    // capacitor" than "music box". Dropped two octaves vs. the prior C5/E5/G5.
+    const triad = [130.81, 164.81, 196.00]; // C3, E3, G3
+    const idx = Math.max(0, Math.min(triad.length - 1, dotIndex - 1));
+    const hz = triad[idx];
+    const tail = 0.32 + idx * 0.04;
+    // Each successive dot gets slightly louder + brighter so the build is felt.
+    const tierBoost = 0.85 + idx * 0.18;
+
+    // Sub layer — sine at the root octave below for the felt depth.
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(hz * 0.5, t);
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.16 * tierBoost, t + 0.005);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + tail + 0.04);
+
+    // Body — triangle on the dot's chord note with a small upward chirp so the
+    // tick feels like energy being deposited rather than a static pluck.
     const body = this.ctx.createOscillator();
     const bodyGain = this.ctx.createGain();
     body.type = "triangle";
-    body.frequency.value = hz;
+    body.frequency.setValueAtTime(hz * 0.92, t);
+    body.frequency.exponentialRampToValueAtTime(hz, t + 0.05);
     bodyGain.gain.setValueAtTime(0.0001, t);
-    bodyGain.gain.exponentialRampToValueAtTime(0.12, t + 0.004);
+    bodyGain.gain.exponentialRampToValueAtTime(0.14 * tierBoost, t + 0.005);
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
     body.connect(bodyGain);
     bodyGain.connect(this.master);
     body.start(t);
     body.stop(t + tail + 0.04);
 
+    // Octave-up partial — sine on the octave above gives definition.
     const partial = this.ctx.createOscillator();
     const partialGain = this.ctx.createGain();
     partial.type = "sine";
     partial.frequency.value = hz * 2;
     partialGain.gain.setValueAtTime(0.0001, t);
-    partialGain.gain.exponentialRampToValueAtTime(0.05, t + 0.003);
-    partialGain.gain.exponentialRampToValueAtTime(0.0001, t + tail * 0.7);
+    partialGain.gain.exponentialRampToValueAtTime(0.07 * tierBoost, t + 0.004);
+    partialGain.gain.exponentialRampToValueAtTime(0.0001, t + tail * 0.65);
     partial.connect(partialGain);
     partialGain.connect(this.master);
     partial.start(t);
-    partial.stop(t + tail * 0.7 + 0.04);
+    partial.stop(t + tail * 0.65 + 0.04);
+
+    // Fifth above for chord-fill at higher tiers — dot 2/3 get a richer harmonic
+    // stack so the build sounds tonally fuller, not just louder.
+    if (idx >= 1) {
+      const fifth = this.ctx.createOscillator();
+      const fifthGain = this.ctx.createGain();
+      fifth.type = "sine";
+      fifth.frequency.value = hz * 1.5;
+      fifthGain.gain.setValueAtTime(0.0001, t);
+      fifthGain.gain.exponentialRampToValueAtTime(0.05 * tierBoost, t + 0.004);
+      fifthGain.gain.exponentialRampToValueAtTime(0.0001, t + tail * 0.7);
+      fifth.connect(fifthGain);
+      fifthGain.connect(this.master);
+      fifth.start(t);
+      fifth.stop(t + tail * 0.7 + 0.04);
+    }
+
+    // Crystalline sparkle — bandpassed noise pip on the front of the tick. Tiny
+    // but it makes the dot land with a satisfying "click" instead of a soft hum.
+    const sparkleBuf = this.makeNoiseBuffer(0.04);
+    if (sparkleBuf) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = sparkleBuf;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.value = 2400 + idx * 600;
+      filter.Q.value = 4;
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.08 * tierBoost, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      noise.start(t);
+      noise.stop(t + 0.06);
+    }
+  }
+
+  // Sad "wrrp" — played when the player tries to start charging the laser
+  // off-beat. Short descending detuned triangle pair through a closing lowpass
+  // — distinct from playComboLost (which is longer and reads as "you lost
+  // something") so it sits as "nope, try again on the beat".
+  playLaserChargeFail() {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const tail = 0.18;
+    // Two detuned triangle voices descending a fifth — A3 → D3-ish. The detune
+    // gives the buzz that reads as "wrong" vs. a clean tone.
+    const voices: Array<{ start: number; end: number; detune: number; level: number }> = [
+      { start: 220.0, end: 130.81, detune: 0,  level: 0.18 },
+      { start: 220.0, end: 130.81, detune: 18, level: 0.13 },
+    ];
+    for (const v of voices) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(v.start, t);
+      osc.frequency.exponentialRampToValueAtTime(v.end, t + tail);
+      osc.detune.value = v.detune;
+      // Lowpass closes alongside the slide for the muffled "deflated" quality.
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(1600, t);
+      filter.frequency.exponentialRampToValueAtTime(420, t + tail);
+      filter.Q.value = 1;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(v.level, t + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + tail + 0.04);
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      osc.stop(t + tail + 0.08);
+    }
   }
 
   // Escalating melody chime — one rounded synth note per successive on-beat
