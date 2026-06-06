@@ -895,17 +895,17 @@ export class Sound {
         const baseKey = isLight ? pitchRatio - 1000 : pitchRatio;
         const intensity = baseKey - Math.floor(baseKey);
         const actualPitch = Math.floor(baseKey) / 100;
-        const kick = wire(new Tone.MembraneSynth({ pitchDecay: 0.06, octaves: 6, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.45, sustain: 0, release: 0.5 }, volume: -6 }), 1, 0.1);
+        const kick = wire(new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 8, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.6, sustain: 0, release: 0.6 }, volume: -2 }), 1, 0.1);
         const isOffbeat = actualPitch !== 1;
         const offbeatMul = isOffbeat ? 0.35 + intensity * 0.45 : 1;
         const lightMul = isLight ? 0.42 : 1;
         const levelMul = (0.35 + 0.65 * intensity) * offbeatMul * lightMul;
         const velocity = (0.25 + intensity * 0.75) * levelMul;
         // Light eighths are pitched a semitone up so they sit between the
-        // main quarter-note pitches: C2 → C#2, D2 → D#2.
+        // main quarter-note pitches: A1 → A#1, B1 → C2.
         const note = isLight
-          ? (actualPitch === 1 ? "C#2" : "D#2")
-          : (actualPitch === 1 ? "C2" : "D2");
+          ? (actualPitch === 1 ? "A#1" : "C2")
+          : (actualPitch === 1 ? "A1" : "B1");
         kick.triggerAttackRelease(note, "8n", 0, velocity);
         break;
       }
@@ -2607,7 +2607,7 @@ export class Sound {
   // build_layer3.py for the per-variation design).
   private haloMusicLayer3Gain(variation: HaloMusicVariation): number {
     switch (variation) {
-      case "r2-el": return 0.26;   // solo violin, three sustained bow strokes
+      case "r2-el": return 0.22;   // solo violin, three single-pitch bow strokes (A4, C5, G4)
       case "r2-sb": return 0.40;   // warm felt-glockenspiel arpeggio
       case "r3-el": return 0.30;   // synthwave plucked synth-bass arp
       // r4-sb layer 3 is a VPO3 female-choir "ahh" pad. Onsets only on phrase

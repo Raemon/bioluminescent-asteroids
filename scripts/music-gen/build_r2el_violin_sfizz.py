@@ -118,84 +118,74 @@ def write_midi(notes, cc_events, out_path: Path, tempo_bpm: int = BPM) -> None:
 
 
 # ── Musical line ──────────────────────────────────────────────────────────
-# Bed analysis (measured: bass fundamental tracker + combined chord chroma):
-#   Bass pedal walk:
-#     0–11s   A1  (Am)
-#     12–13s  A→G chromatic slide
-#     14–19s  G1  (G in the bass — but upper voices stay in C/Am territory,
-#                  so the harmony reads as Am7/G → C/G, not pure G major)
-#     20–28s  A1  returns
-#     28–32s  E dominant suggestion (bass ambiguous, E becomes the
-#             strongest chroma — Am/E or E hint, but with C natural still
-#             prominent so NOT a clean E-major dominant)
+# Bed analysis (measured chroma per 8s phrase — superseding the earlier
+# read; the old design assumed B was the 9th of Am but B chroma is weak
+# (0.13–0.16) while F chroma is STRONG (0.25–0.41). The piano is voicing
+# C–E–F throughout, not a clean Cmaj triad — F is part of the colour):
 #
-#   Piano (melodic, 200–2k Hz)
-#     Near-continuous 8th-note figuration in C4–E4. Frequently visits
-#     C# and D# (chromatic neighbors), but every landing note is a C-maj
-#     triad tone. The piano stays in a narrow ~5-semitone window all loop.
+#   Ph1  0–8s    bass A1  | piano C, E, F   → reads as Am add♭6 / Fmaj7/A
+#   Ph2  8–16s   bass A→G | piano C, E, D   → Am7 → C/G (D appears, F fades)
+#   Ph3  16–24s  bass G1  | piano C, E, F   → C/G with Fmaj7 colour
+#   Ph4  24–32s  bass A1  | piano C, E, F   → returns to Am/F-colour
 #
-# Design principle: the piano is BUSY in a narrow mid-register window. The
-# violin should live just above it (G4–E5) and play SHORT phrases that:
-#   - use chord tones and tasteful extensions only (every note checked
-#     against the chord at that beat — see per-phrase notes below)
-#   - move in directions the piano doesn't (rising when piano is hovering,
-#     descending when piano is climbing)
-#   - keep ~50% silence so the listener registers each phrase as a "voice"
-#     event rather than a continuous line
+# Piano centroid is ~600 Hz (≈D5), peak −15.9 dBFS. Old violin sat at
+# centroid 3597 Hz — an octave brighter than the piano AND peaking
+# LOUDER (−13.4 dBFS). That alone explains "too loud, doesn't harmonize."
 #
-# Six short phrases instead of three long held notes. Same total airtime
-# (~13s of sound, ~19s of silence) but with melodic identity per phrase.
+# Safe pitches per phrase (chord tones only, avoiding F when piano has F
+# already and avoiding B which conflicts with the F):
+#   Ph1  A4, C5, E5  (root, ♭3, 5 of Am)
+#   Ph2  A4, C5, D5  (D is now safe — appears in piano; F just left)
+#   Ph3  C5, E5, G4  (root/3rd/5th of C — G4 nests under the piano)
+#   Ph4  A4, C5, E5  (same safe set as Ph1)
+#
+# Design principle for "simpler, quieter, harmonizes better":
+#   - THREE short held notes only (no sigh-down second notes, no movement).
+#     The old design had six events (3 holds + 3 descents); we halve that.
+#   - Register sits a fifth or sixth above the piano's main figure
+#     (G4–C5 instead of B4–E5). Closer to the piano = harmonizes; lower
+#     pitches = quieter sample.
+#   - Velocity capped at 38 (was 38–58). Combined with CC11 ceiling of
+#     50 (was 92), the swell never exceeds the piano's headroom.
+#   - ~9s of sound total (was ~13s). More space = more "voice from afar".
 
 def violin_notes():
     # (beat_on, beat_off, pitch, velocity)
-    # Three phrases, three slow bow strokes. Each is ONE held note that
-    # ends with a step down — a slow leaning resolution to a neighboring
-    # tone. This is the minimum motion needed to give a held note a
-    # melodic shape (a destination) without sacrificing the lonely-voice
-    # sparsity.
+    # One pitch per phrase, three phrases. Each is a single slow bow
+    # stroke whose only motion is the swell-and-release. No descents,
+    # no second notes — the piano carries all the melodic motion.
     #
-    # ~13s of sound, ~19s of silence over the 32s loop. Same total
-    # silence as a 6-phrase line, but only 3 sonic events to track.
+    # Pitch choice across the three phrases forms a gentle arch:
+    #   Ph1: A4 (root of Am, lives under the piano figure)
+    #   Ph2: C5 (root of C/G — lands ON the new bass move to G)
+    #   Ph3: G4 (5th of C/G — lower than Ph2, the breath that exhales)
+    # An A4 → C5 → G4 arch: rise, peak, settle. The settle (G4) is the
+    # lowest note of the loop and the quietest velocity — so the loop
+    # ends quieter than it began, and the seam back to A4 is a tiny
+    # half-step lift (G4→A4) that's already a familiar interval.
     line = [
-        # ── Phrase 1: "the question, half-answered" (4–10s) ───────────
-        # Over Am (bed: A pedal + C-E-F-b6 voicing).
-        #   B4 = 9th of Am — the wistful question, 5 seconds held
-        #   A4 = root        — half-step sigh down to the tonic
-        # The half-step descent B→A is the smallest interval of all
-        # three phrases — appropriate to the opening "voice clearing
-        # its throat" feel.
-        (8.0,  18.0, "B4", 54),  # 5s held — the question
-        (18.0, 20.0, "A4", 44),  # sigh resolves to root
-        # silence: 20–28 (~10–14s)
+        # ── Phrase 1: A4 over Am (4–8s) ──────────────────────────────
+        # Root of Am. Sits just below the piano's lowest C4–E4 figure
+        # in pitch space (A4 is a sixth above C4) so it harmonizes
+        # rather than overhangs. 3s held; ~9s silence after.
+        (8.0,  14.0, "A4", 38),
 
-        # ── Phrase 2: "the lift, leaning home" (14–22s) ───────────────
-        # Over Am7/G ≈ C/G (bass has walked down to G; upper voices in
-        # C territory).
-        #   D5 = 9th of C  — the bittersweet lift, 5 seconds held
-        #   C5 = root of C — whole-step lean down, lands home as the
-        #                    bed voices C
-        # Whole-step descent (a bigger interval than phrase 1) — the
-        # phrase has more harmonic "weight" matching the bed's
-        # modulation moment.
-        (28.0, 38.0, "D5", 58),  # 5s held — the lift over the modulation
-        (38.0, 41.0, "C5", 46),  # leans down to C as bed lands on C
-        # silence: 41–52 (~20.5–26s) — the longest breath, lets Am return
+        # ── Phrase 2: C5 over Am7→C/G (14–18s) ───────────────────────
+        # Lands ON the bass's move down to G; C5 is the new root.
+        # Slightly louder than Ph1 (vel 40) because this is the moment
+        # of harmonic resolution — the listener should hear the violin
+        # *agree* with the new chord.
+        (28.0, 34.0, "C5", 40),
 
-        # ── Phrase 3: "the ache that doesn't quite resolve" (26–31.5s) ─
-        # Over Am/E (Am in 2nd inversion — E is bass-prominent, C still
-        # voiced).
-        #   E5 = 5th of Am  — strong chord tone, 4 seconds held
-        #   D5 = sus4 of Am — whole-step descent that STOPS on the
-        #                     suspension, doesn't resolve
-        # Same whole-step shape as phrase 2 but lands on a non-chord
-        # tone (D5 sus4) instead of a chord tone. The pattern the ear
-        # learned in phrase 2 (descend to home) gets denied here —
-        # that's the "ache." On loop restart the D5 hangs into the
-        # brief C-chord seam where it reads as the 9th of C — soft
-        # re-entry, not jarring.
-        (52.0, 60.0, "E5", 50),  # 4s held — the strong 5th
-        (60.0, 63.5, "D5", 38),  # quietest note of the loop — fades
-        # tail: 63.5–64 silent
+        # ── Phrase 3: G4 over C/G (22–26s) ───────────────────────────
+        # 5th of C. Quietest, lowest note of the loop — the voice
+        # receding before the Am return at 24s+. Lands during the
+        # transition window so it dies into silence before Ph1 of the
+        # NEXT loop iteration begins. Half-step up to A4 at seam = the
+        # tiniest harmonic motion, ideal for a seamless loop point.
+        (44.0, 50.0, "G4", 34),
+        # silence 50–64 (~25–32s): >5s of pure piano + ambient before
+        # the loop restarts. Maximum breath = maximum loneliness.
     ]
     OVERLAP = 0.3
     notes = []
@@ -208,18 +198,12 @@ def violin_cc():
     """CC automation. CC1 = mod wheel = attack length on this SFZ
     (ampeg_attackcc1=0.5). CC11 = expression = per-sample volume curve.
 
-    Shorter notes than the previous draft, so the strategy changes:
-      - Each phrase gets ONE coherent dynamic arc (CC11 swells through
-        the phrase, then settles on the last note). The listener should
-        hear "one breath" per phrase, not three separate bows.
-      - CC1 is moderate at most attacks (40–60) — quick enough that
-        each note lands cleanly, slow enough to read as a real bow
-        stroke rather than a sharp pluck.
-      - The two longest notes (F5 alone in phrase 4, E5 in phrase 6)
-        get a slightly slower bow-in (CC1 ≈ 70) since they have time
-        to develop.
+    Three single-pitch phrases. Each gets the same shape: slow bow-in
+    (CC1 high at attack), gentle swell to the midpoint, fade out before
+    the note ends. CC11 ceiling is 50 (down from 92 in the old design)
+    so the violin never out-shouts the piano.
     """
-    events = [(0.0, VIOLIN_CH, 1, 30), (0.0, VIOLIN_CH, 11, 64)]
+    events = [(0.0, VIOLIN_CH, 1, 60), (0.0, VIOLIN_CH, 11, 30)]
 
     def ramp(start_beat, end_beat, cc, points, steps=10):
         """points = [(t_frac, value), ...]. Linear between adjacent points."""
@@ -237,32 +221,21 @@ def violin_cc():
             v = lo[1] if hi[0] == lo[0] else lo[1] + (hi[1] - lo[1]) * (t - lo[0]) / (hi[0] - lo[0])
             events.append((start_beat + t * dur, VIOLIN_CH, cc, v))
 
-    # Phrase 1: B4 held 8–18, then A4 sigh 18–20.
-    # The "voice entering" — slow bow-in (CC1 high at attack), gentle
-    # swell through the held note, soft sigh down.
-    ramp(8.0,  18.0, 1,  [(0, 110), (0.15, 70), (0.4, 35), (1.0, 30)])
-    ramp(8.0,  18.0, 11, [(0, 25), (0.35, 70), (0.55, 80), (0.8, 72), (1.0, 60)])
-    ramp(18.0, 20.0, 1,  [(0, 30), (1.0, 25)])
-    ramp(18.0, 20.0, 11, [(0, 60), (0.5, 50), (1.0, 35)])
+    # Phrase 1: A4 held 8.0–14.0 (3s). The voice entering — slow bow-in,
+    # gentle swell, fade before release. CC11 caps at 45.
+    ramp(8.0,  14.0, 1,  [(0, 110), (0.2, 65), (0.5, 35), (1.0, 30)])
+    ramp(8.0,  14.0, 11, [(0, 18), (0.35, 42), (0.6, 45), (0.85, 35), (1.0, 20)])
 
-    # Phrase 2: D5 held 28–38, then C5 lean down 38–41.
-    # The peak phrase — longest hold, biggest swell, lands on C as the
-    # bed voices C. Slightly stronger than phrase 1 (this is the moment
-    # the violin steps into the light).
-    ramp(28.0, 38.0, 1,  [(0, 95), (0.15, 65), (0.4, 40), (1.0, 35)])
-    ramp(28.0, 38.0, 11, [(0, 30), (0.4, 82), (0.6, 92), (0.85, 80), (1.0, 68)])
-    ramp(38.0, 41.0, 1,  [(0, 35), (1.0, 28)])
-    ramp(38.0, 41.0, 11, [(0, 68), (0.5, 58), (1.0, 42)])
+    # Phrase 2: C5 held 28.0–34.0 (3s). The moment the violin agrees
+    # with the new bass — slightly louder (CC11 max 50) but same shape.
+    ramp(28.0, 34.0, 1,  [(0, 100), (0.2, 60), (0.5, 35), (1.0, 30)])
+    ramp(28.0, 34.0, 11, [(0, 20), (0.35, 46), (0.6, 50), (0.85, 38), (1.0, 22)])
 
-    # Phrase 3: E5 held 52–60, then D5 fade 60–63.5.
-    # The quietest, slowest, longest-fading phrase. CC1 highest at
-    # attack (the slowest bow of all — note materializes from silence).
-    # CC11 never exceeds 70 and the D5 ends at 22 — barely audible,
-    # the voice disappearing.
-    ramp(52.0, 60.0, 1,  [(0, 120), (0.2, 80), (0.5, 50), (1.0, 45)])
-    ramp(52.0, 60.0, 11, [(0, 18), (0.4, 65), (0.65, 70), (0.85, 60), (1.0, 50)])
-    ramp(60.0, 63.5, 1,  [(0, 45), (1.0, 30)])
-    ramp(60.0, 63.5, 11, [(0, 50), (0.4, 38), (1.0, 22)])
+    # Phrase 3: G4 held 44.0–50.0 (3s). The exhale — quietest of the
+    # three (CC11 max 38), slowest bow-in (CC1 starts at 120), longest
+    # fade tail. The note dies before silence resumes at 50.
+    ramp(44.0, 50.0, 1,  [(0, 120), (0.25, 75), (0.55, 45), (1.0, 40)])
+    ramp(44.0, 50.0, 11, [(0, 15), (0.4, 35), (0.6, 38), (0.85, 28), (1.0, 14)])
 
     events.sort(key=lambda e: e[0])
     return events

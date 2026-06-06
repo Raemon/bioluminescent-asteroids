@@ -15,7 +15,8 @@
 // layer 3 introduces a single new element thematically matched to its
 // ambient + melodic stems:
 //   r2-el  ElevenLabs cinematic bed + felt piano + a lonely solo violin
-//          (FluidSynth — string section third voice).
+//          (sfizz + VPO3 — three single-pitch held notes A4/C5/G4, each
+//          a chord tone of the underlying bed at that phrase).
 //   r2-sb  Procedural sine pad + FluidSynth felt piano + slow felt-mallet
 //          glockenspiel arpeggio (warm chime, not a kit — extends the
 //          felt-piano sparkle into the upper octave).

@@ -667,49 +667,65 @@ export class Pulsar {
     const nx = distToPulsar > 1e-3 ? toPulsarX / distToPulsar : 1;
     const ny = distToPulsar > 1e-3 ? toPulsarY / distToPulsar : 0;
 
-    // Eclipse window: planet edge overlaps the pulsar's bright disc. Goes
-    // from 0 just before overlap to 1 when the planet fully covers the
-    // core. Used to push a hot corona flare around the planet's limb.
-    const overlapStart = size + pulsarR * 1.4;
-    const overlapFull = Math.max(0, size - pulsarR * 0.4);
-    let eclipse = 0;
-    if (distToPulsar < overlapStart) {
-      eclipse = Math.min(1, (overlapStart - distToPulsar) / Math.max(1, overlapStart - overlapFull));
+    // The pulsar is a brilliant point-source much smaller than the planet,
+    // so the eclipse plays out in three optically distinct phases keyed off
+    // the pulsar disc's position relative to the planet's limb:
+    //
+    //   approach  — pulsar disc still outside the planet; the planet's
+    //               leading limb forward-scatters pulsar light into a thin
+    //               brilliant arc (no soft ambient halo — proximity alone
+    //               must not glow the planet).
+    //   contact   — pulsar disc straddling the limb; a single intense
+    //               point of light leaks past the silhouette edge
+    //               ("diamond ring"). Happens on ingress and egress.
+    //   totality  — pulsar fully behind the planet; the only light reaching
+    //               us has been refracted around the limb (a thin ring
+    //               framing the entire silhouette) or transmitted through
+    //               an atmosphere (a dim red wash on the body itself, the
+    //               same Rayleigh path that turns the lunar eclipse red).
+    //
+    // ingress: 1 when pulsar disc is just touching the limb from outside,
+    //          ramping to 0 once the disc is fully inside the silhouette.
+    // totality: 0 until the pulsar disc is fully inside the silhouette,
+    //           then 1 as it crosses the planet's center.
+    const ingressStart = size + pulsarR;       // outside edges first touch
+    const ingressEnd = Math.max(0, size - pulsarR); // pulsar fully inside limb
+    let ingress = 0;
+    if (distToPulsar < ingressStart && distToPulsar > ingressEnd) {
+      ingress = (ingressStart - distToPulsar) / Math.max(1, ingressStart - ingressEnd);
+    } else if (distToPulsar <= ingressEnd) {
+      ingress = 1;
     }
-    // Total eclipse spike: when the planet *fully* hides the pulsar disc,
-    // ramp an extra factor so the corona blooms instead of being a steady
-    // glow. This is what makes the moment of full occlusion read as a flash.
-    const totality = distToPulsar + pulsarR < size
-      ? Math.min(1, (size - (distToPulsar + pulsarR)) / Math.max(1, pulsarR))
+    const totality = distToPulsar < ingressEnd
+      ? Math.min(1, (ingressEnd - distToPulsar) / Math.max(1, ingressEnd))
       : 0;
 
-    // Atmospheric scatter halo — a thin crescent hugging only the pulsar-
-    // facing limb (light bending around the silhouette of an unlit body).
-    // Drawn as a small radial gradient anchored *past* the planet on the
-    // pulsar side, clipped to the disc's exterior via even-odd fill. The
-    // anchor offset means the bright stop sits outside the planet on the
-    // facing side and the gradient falls off before reaching the far limb,
-    // so we get a one-sided rim rather than a full surrounding halo. As the
-    // planet approaches the pulsar the rim thins and dims (rather than
-    // blooming) — saturated proximity reads as eclipse, not a fat halo.
-    const pulsarBias = Math.max(0, Math.min(1, 1 - distToPulsar / (size * 4 + pulsarR * 3)));
-    const proximityDamp = 1 - 0.55 * pulsarBias;
-    const haloAlpha = Math.min(1, (0.32 * pulsarBias + 0.12 * beat * pulsarBias + 0.18 * flare * pulsarBias) * proximityDamp + 0.45 * eclipse);
-    if (haloAlpha > 0.02) {
+    // Forward-scatter arc on the leading limb during approach. The bright
+    // stop sits just inside the limb on the pulsar-facing side and the
+    // gradient is clipped to the disc's exterior, so what survives is a
+    // razor-thin crescent — the way a planet's atmosphere lights up when
+    // a point source sits right behind its edge. Falls off the moment the
+    // pulsar disc is fully behind the planet (totality takes over from
+    // here). Critically: this term is gated on geometric contact, not on
+    // ambient proximity, so a distant planet drifting near the pulsar
+    // never picks up a glow.
+    const approachBand = Math.max(0, Math.min(1, (size * 2.4 + pulsarR - distToPulsar) / Math.max(1, size * 1.4)));
+    const arcStrength = approachBand * (1 - totality);
+    if (arcStrength > 0.02) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      const rimThickness = size * (0.10 + 0.08 * eclipse);
-      const anchorOffset = size * 0.98;
-      const haloCx = px + nx * anchorOffset;
-      const haloCy = py + ny * anchorOffset;
-      const haloOuter = rimThickness * 2.2;
-      const halo = ctx.createRadialGradient(haloCx, haloCy, 0, haloCx, haloCy, haloOuter);
-      halo.addColorStop(0, `hsla(195, 100%, 90%, ${haloAlpha})`);
-      halo.addColorStop(0.6, `hsla(210, 100%, 72%, ${haloAlpha * 0.3})`);
-      halo.addColorStop(1, `hsla(220, 100%, 60%, 0)`);
-      ctx.fillStyle = halo;
+      const arcAlpha = Math.min(1, 0.55 * arcStrength + 0.35 * ingress + 0.25 * flare * arcStrength);
+      const anchor = size * 1.02;
+      const acx = px + nx * anchor;
+      const acy = py + ny * anchor;
+      const arcOuter = size * (0.32 + 0.18 * ingress);
+      const arc = ctx.createRadialGradient(acx, acy, 0, acx, acy, arcOuter);
+      arc.addColorStop(0, `hsla(48, 100%, 96%, ${arcAlpha})`);
+      arc.addColorStop(0.35, `hsla(38, 100%, 75%, ${arcAlpha * 0.65})`);
+      arc.addColorStop(1, `hsla(20, 100%, 55%, 0)`);
+      ctx.fillStyle = arc;
       ctx.beginPath();
-      ctx.arc(haloCx, haloCy, haloOuter, 0, TAU);
+      ctx.arc(acx, acy, arcOuter, 0, TAU);
       if (isOblongPlanetoid) {
         this.tracePlanetoidSilhouette(ctx, px, py, size, true);
       } else {
@@ -719,51 +735,99 @@ export class Pulsar {
       ctx.restore();
     }
 
-    // Eclipse corona — additive bloom around the planet limb when it's
-    // occluding the pulsar. Sits *outside* the disc so it reads as light
-    // bending around the planet rather than surface glow. Inner stop sits
-    // right at the limb (size * 1.0), not inside, so additive blending
-    // never paints onto the dark silhouette and bleaches it. Warm gold→
-    // pink→pale-blue grade reads as solar-corona scatter rather than a
-    // cyan headlamp.
-    if (eclipse > 0.01) {
+    // Diamond ring — the pulsar peeks past the limb at second/third
+    // contact. A single brilliant point of light sitting on the silhouette
+    // edge at the contact angle. Peaks sharply when the pulsar disc is
+    // about half-occluded, so the moment reads as a pulse rather than a
+    // sustained gleam.
+    const diamond = 4 * ingress * (1 - ingress);
+    if (diamond > 0.02 && totality < 0.5) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      const coronaR = size * (1.08 + 0.6 * eclipse + 0.8 * totality);
-      const coronaAlpha = Math.min(1, 0.25 * eclipse + 0.55 * totality + 0.3 * beat * eclipse + 0.4 * flare * eclipse);
-      const corona = ctx.createRadialGradient(px, py, size, px, py, coronaR);
-      corona.addColorStop(0, `hsla(35, 100%, 80%, ${coronaAlpha})`);
-      corona.addColorStop(0.4, `hsla(20, 95%, 65%, ${coronaAlpha * 0.55})`);
-      corona.addColorStop(0.75, `hsla(330, 80%, 70%, ${coronaAlpha * 0.3})`);
-      corona.addColorStop(1, `hsla(220, 100%, 65%, 0)`);
-      ctx.fillStyle = corona;
+      const diamondAlpha = Math.min(1, 0.9 * diamond * (1 - totality * 1.5));
+      const dcx = px + nx * size;
+      const dcy = py + ny * size;
+      const dR = pulsarR * (1.6 + 1.2 * diamond) + size * 0.05;
+      const dGrad = ctx.createRadialGradient(dcx, dcy, 0, dcx, dcy, dR);
+      dGrad.addColorStop(0, `hsla(50, 100%, 98%, ${diamondAlpha})`);
+      dGrad.addColorStop(0.35, `hsla(40, 100%, 80%, ${diamondAlpha * 0.7})`);
+      dGrad.addColorStop(1, `hsla(25, 100%, 55%, 0)`);
+      ctx.fillStyle = dGrad;
       ctx.beginPath();
-      ctx.arc(px, py, coronaR, 0, TAU);
+      ctx.arc(dcx, dcy, dR, 0, TAU);
+      ctx.fill();
+
+      // Tangential flare along the limb at the contact point — a short
+      // streak of light tracing the silhouette edge rather than radiating
+      // outward, because the source is on the limb itself.
+      const tx = -ny;
+      const ty = nx;
+      const flareLen = size * (0.35 + 0.4 * diamond);
+      ctx.strokeStyle = `hsla(45, 100%, 95%, ${Math.min(1, diamondAlpha * 0.9)})`;
+      ctx.lineWidth = 1.2 + 1.4 * diamond;
+      ctx.shadowColor = `hsla(40, 100%, 80%, ${diamondAlpha})`;
+      ctx.shadowBlur = 8 + 12 * diamond;
+      ctx.beginPath();
+      ctx.moveTo(dcx - tx * flareLen, dcy - ty * flareLen);
+      ctx.lineTo(dcx + tx * flareLen, dcy + ty * flareLen);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Totality: the pulsar is fully behind the planet. Two distinct
+    // optical contributions:
+    //
+    //   1. A thin refraction ring around the *entire* limb — light
+    //      bending around the planet via the atmosphere, framing the
+    //      silhouette evenly rather than blooming on one side. Stays
+    //      narrow and hot at the limb, falls off quickly outside.
+    //   2. A dim red wash *through* the planet itself — the Rayleigh-
+    //      scattered transmission path, the same physics that turns the
+    //      Moon copper-red during a lunar eclipse. Painted as a soft
+    //      radial gradient *clipped to the silhouette* so the body
+    //      becomes faintly, eerily visible rather than going jet black.
+    if (totality > 0.01) {
+      ctx.save();
+
+      // Red transmission glow on the body. Clipped to the silhouette and
+      // drawn with normal compositing so it tints the dark disc rather
+      // than bleaching it.
+      ctx.save();
+      ctx.beginPath();
+      if (isOblongPlanetoid) {
+        this.tracePlanetoidSilhouette(ctx, px, py, size);
+      } else {
+        ctx.arc(px, py, size, 0, TAU);
+      }
+      ctx.clip();
+      const transAlpha = Math.min(1, 0.55 * totality + 0.2 * beat * totality);
+      const trans = ctx.createRadialGradient(px, py, 0, px, py, size);
+      trans.addColorStop(0, `hsla(8, 95%, 38%, ${transAlpha})`);
+      trans.addColorStop(0.55, `hsla(15, 90%, 28%, ${transAlpha * 0.7})`);
+      trans.addColorStop(1, `hsla(0, 80%, 8%, 0)`);
+      ctx.fillStyle = trans;
+      ctx.fillRect(px - size, py - size, size * 2, size * 2);
+      ctx.restore();
+
+      // Refraction ring around the whole limb. Two concentric stops
+      // straddling size keep the bright band thin even at high totality.
+      ctx.globalCompositeOperation = "lighter";
+      const ringAlpha = Math.min(1, 0.5 * totality + 0.25 * flare * totality);
+      const ringOuter = size * (1.06 + 0.05 * totality);
+      const ringInner = size * 0.94;
+      const ring = ctx.createRadialGradient(px, py, ringInner, px, py, ringOuter);
+      ring.addColorStop(0, `hsla(20, 90%, 25%, 0)`);
+      ring.addColorStop(0.5, `hsla(35, 100%, 80%, ${ringAlpha})`);
+      ring.addColorStop(1, `hsla(15, 100%, 55%, 0)`);
+      ctx.fillStyle = ring;
+      ctx.beginPath();
+      ctx.arc(px, py, ringOuter, 0, TAU);
       if (isOblongPlanetoid) {
         this.tracePlanetoidSilhouette(ctx, px, py, size, true);
       } else {
         ctx.arc(px, py, size, 0, TAU, true);
       }
       ctx.fill("evenodd");
-
-      // Diffraction spikes during totality — four crisp rays of light
-      // leaking past the limb. Only fires near full occlusion so it stays a
-      // payoff moment rather than a constant feature.
-      if (totality > 0.15) {
-        const spikeLen = size * (1.5 + 2.5 * totality);
-        const spikeAlpha = Math.min(1, 0.45 * totality + 0.35 * flare * totality);
-        ctx.strokeStyle = `hsla(195, 100%, 96%, ${spikeAlpha})`;
-        ctx.lineWidth = 1.6 + 1.4 * totality;
-        ctx.shadowColor = `hsla(200, 100%, 80%, ${spikeAlpha})`;
-        ctx.shadowBlur = 12 + 18 * totality;
-        for (let s = 0; s < 4; s++) {
-          const a = (s / 4) * TAU + Math.PI / 8;
-          ctx.beginPath();
-          ctx.moveTo(px + Math.cos(a) * size * 0.9, py + Math.sin(a) * size * 0.9);
-          ctx.lineTo(px + Math.cos(a) * spikeLen, py + Math.sin(a) * spikeLen);
-          ctx.stroke();
-        }
-      }
       ctx.restore();
     }
   }
