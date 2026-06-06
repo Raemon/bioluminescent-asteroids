@@ -7,11 +7,21 @@ import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayDebugFrame, type Replay
 // build-version mismatches. Falls back to "dev" when not injected.
 const BUILD_HASH: string = (import.meta.env as unknown as { VITE_BUILD_HASH?: string })?.VITE_BUILD_HASH ?? "dev";
 
+// Flip to true (or set window.__replayDebug = true before starting a run) to
+//   record per-frame ship snapshots + log replay divergence. Off by default
+//   because the snapshots bloat the uploaded payload past Vercel's body cap
+//   on long runs (~5 min / 18k frames).
+export const isReplayDebugEnabled = (): boolean =>
+  (window as unknown as { __replayDebug?: boolean }).__replayDebug === true;
+
 // Captures inputs + dt per frame. Vocab grows on first sight of each key; the
 // per-frame masks reference vocab indices so the wire format stays compact.
 export class ReplayRecorder {
   private frames: ReplayFrame[] = [];
-  private debugFrames: ReplayDebugFrame[] = [];
+  // Per-frame ship snapshots, only populated when isReplayDebugEnabled() at
+  //   construction time. Packed into the serialized payload so __replayLast()
+  //   can diff replay state against the recording.
+  private debugFrames: ReplayDebugFrame[] | null = null;
   private vocab: string[] = [];
   private vocabIndex = new Map<string, number>();
   private lastKeys = new Set<string>();
@@ -29,6 +39,7 @@ export class ReplayRecorder {
     bindings: Bindings;
   }) {
     this.startedAt = Date.now();
+    if (isReplayDebugEnabled()) this.debugFrames = [];
     this.header = {
       v: REPLAY_FORMAT_VERSION,
       build: BUILD_HASH,
@@ -79,6 +90,7 @@ export class ReplayRecorder {
   }
 
   captureShip(ship: Ship, input: IInput): void {
+    if (!this.debugFrames) return;
     this.debugFrames.push({
       posX: ship.pos.x,
       posY: ship.pos.y,
@@ -100,6 +112,6 @@ export class ReplayRecorder {
       maxCombo: summary.maxCombo,
       killCount: summary.killCount,
     };
-    return await encodeReplay({ header, frames: this.frames, debugFrames: this.debugFrames });
+    return await encodeReplay({ header, frames: this.frames, debugFrames: this.debugFrames ?? undefined });
   }
 }
