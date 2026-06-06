@@ -41,7 +41,10 @@ export const updateGame = (game: Game, dt: number) => {
   // Replay overrides dt with the recorded value and feeds inputs through
   //   the shared ReplayInput. When the stream is exhausted we transition to
   //   gameover so the leaderboard "your standing" UI kicks in for the watcher.
-  if (game.state === "replaying" && game.replayPlayer) {
+  //   Driven by replayPlayer presence (not game.state) so death → dying → respawn
+  //   keeps pulling recorded frames; otherwise the sim would run on live dt with
+  //   stale ReplayInput across the death+respawn span and diverge from the run.
+  if (game.replayPlayer) {
     const replayDt = game.replayPlayer.nextFrame();
     if (replayDt === null) { finishReplay(game); return; }
     dt = replayDt;
@@ -71,6 +74,10 @@ export const updateGame = (game: Game, dt: number) => {
 
 const finishReplay = (game: Game) => {
   game.replayPlayer = null;
+  // Unlock canvas dims and resize back to the live window now that the sim
+  //   isn't pinned to the recording's resolution anymore.
+  game.replayLockedDims = null;
+  game.resize();
   // Treat reaching the end of the stream like the player's natural game-over so
   //   the existing gameover overlay + leaderboard view light up unchanged.
   transitionToGameOver(game);
@@ -323,6 +330,11 @@ const updatePlaying = (game: Game, dt: number) => {
   game.ship.setCombo(game.beatCombo);
   syncHaloAmbient(game);
   game.ship.update(dt, game.input, game.particles, game.bullets, game.w, game.h, game.time, game.sound);
+  // Debug instrumentation: capture ship state right after physics tick so the
+  //   recorded snapshot reflects the exact state the replay should reproduce.
+  //   Replay-side compares to the same snapshot and logs the first divergence.
+  game.recorder?.captureShip(game.ship, game.input);
+  game.replayPlayer?.checkShipAgainstRecording(game.ship);
   tickLaserShot(game);
   const musicDt = tickSlowMoTimer(game, dt);
   tickBassBeats(game, musicDt);

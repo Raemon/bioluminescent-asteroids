@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 2;
+export const REPLAY_FORMAT_VERSION = 3;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -28,12 +28,29 @@ export type ReplayHeader = {
   killCount: number;
 };
 
-// One frame = [dtMs, downMask, upMask]. Masks are bit-indexed against header.keyVocab.
+// One frame = [dtSeconds, downMask, upMask]. Masks are bit-indexed against
+//   header.keyVocab. dt stored as a raw float (seconds) so there's zero
+//   quantization drift between recording and replay — any rounding would
+//   compound in scale-with-dt physics like turn rate and thrust ramp.
 export type ReplayFrame = [number, number, number];
+
+// Per-frame ship snapshot for replay divergence debugging. Captured during the
+//   live recording right after ship.update and packed alongside the input frames.
+//   Replay re-captures the same snapshot post-ship.update and logs the first
+//   frame whose state differs from the recording. Strip before shipping.
+export type ReplayDebugFrame = {
+  posX: number;
+  posY: number;
+  velX: number;
+  velY: number;
+  heading: number;
+  keys: string[];
+};
 
 export type ReplayPayload = {
   header: ReplayHeader;
   frames: ReplayFrame[];
+  debugFrames?: ReplayDebugFrame[];
 };
 
 // ---------- (de)serialisation ----------

@@ -120,6 +120,7 @@ export type HaloMusicVariation =
   | "r3-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + layer 3
   | "r4-sb"   // 32-second C-pedal flagship — pulsing arp (ambient) + solo cello (melodic, VPO3) + female choir (layer 3, VPO3); all onsets on-beat
   | "r5-el"   // ElevenLabs 32-second C-pedal dawn/vaporwave — glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio
+  | "r6-el"   // ElevenLabs 32-second Outer-Wilds folk — distant A-rooted drone pad + fingerpicked G-rooted acoustic guitar + F-rooted harmonica (I-IV-V suspension over the bass field's C)
   | "none";   // Legacy synthesized pad (the original startHaloAmbient)
 
 type HaloMusicNode = {
@@ -2585,6 +2586,15 @@ export class Sound {
       // pair value is 0.27 (midpoint between the two stem gains, since
       // setHaloMusicMelodicLayer ramps the melodic gain to peakGain).
       case "r5-el": return 0.27;
+      // r6-el is the Outer-Wilds folk variation. Ambient = distant dark
+      // drone pad (HPF'd at 200 Hz to keep the bass kit clear); melodic =
+      // fingerpicked acoustic guitar in G mixolydian (G-rooted over the
+      // bass field's C — a V-over-I suspension, never resolving, which
+      // suits the haunting vibe). The ambient stem is leaner than melodic,
+      // so peakGain returns the midpoint of the ambient (0.22) and melodic
+      // (0.25) stem gains used in the audit. Full 3-layer stack leaves
+      // lo-mid +4.5 dB, bass +20 dB headroom against the bass field.
+      case "r6-el": return 0.235;
       default:      return 0.30;
     }
   }
@@ -2609,6 +2619,10 @@ export class Sound {
       // register. Audit at gain 0.32 (in the full 3-layer mix above) leaves
       // lo-mid +5.8 dB and mid +5.9 dB margin against the bass field.
       case "r5-el": return 0.32;
+      // r6-el layer3 is a slow held-note harmonica line, F-rooted, in the
+      // mid register. Audit in the full 3-layer stack at gain 0.30 leaves
+      // lo-mid +4.5 dB and mid +12.7 dB margin against the bass field.
+      case "r6-el": return 0.30;
       default:      return 0.40;
     }
   }

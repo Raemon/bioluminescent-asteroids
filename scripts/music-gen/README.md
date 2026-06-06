@@ -13,6 +13,7 @@ Stems are picked at random from `HALO_MUSIC_POOL` in `src/game/haloMusicConfig.t
 | `r3-el` | ElevenLabs end-to-end synthwave (ambient+melodic) + FluidSynth pulsed synth-bass arp on off-beats (layer 3) | Juno-pad + soft lead; layer 3 = synthwave plucked-bass motion in the gaps | 0.22 / 0.30 |
 | `r4-sb` | self-built rhythmic flagship + FluidSynth chime counter-melody (layer 3) | pulsing 16th-note arp + calliope; layer 3 = sparse glockenspiel counter-line that interlocks with the arp's rests | 0.25 / 0.32 |
 | `r5-el` | ElevenLabs Music all three stems — generated as 64s pieces, best 32s windows extracted by `find_loop_r5.py` | dawn/vaporwave: glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio; mid-upper register throughout | 0.27 / 0.32 |
+| `r6-el` | ElevenLabs Music all three stems — 64s pieces, best 32s window via `find_loop_r6.py`, melodic+layer3 onsets snapped to 8th-note grid via `quantize_to_beat.py` (piecewise rubberband stretching), ambient HPF'd at 200 Hz to keep bass kit clear | Outer-Wilds folk: distant drone pad + fingerpicked acoustic guitar (G mixolydian — V-over-I suspension) + slow held-note harmonica; haunting/gentle | 0.235 / 0.30 |
 
 Final files live in `public/sounds/halo-music/{variation}-{ambient,melodic,layer3}.mp3`.
 

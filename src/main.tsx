@@ -44,6 +44,14 @@ loadSoundConfig();
 
 const game = new Game(canvas);
 (window as any).__game = game;
+// Console hook: replay the most recently completed run without round-tripping
+//   through the leaderboard. Useful for debugging replay determinism — record
+//   a run, die, then call __replayLast() from devtools.
+(window as any).__replayLast = async () => {
+  if (!game.lastRunReplay) { console.warn("no replay bytes yet — finish a run first"); return; }
+  const { startReplay } = await import("./game/lifecycle");
+  await startReplay(game, game.lastRunReplay);
+};
 installBetaTest(game);
 installInstructionsDemos();
 

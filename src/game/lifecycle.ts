@@ -513,7 +513,7 @@ export const respawn = (game: Game) => {
   game.ship = new Ship(v(game.w / 2, game.h / 2));
   game.ship.invuln = 2.2;
   game.nextBeatToEvaluate = Math.max(0, Math.floor((game.perceivedBeatTime - beatWindow(game)) / comboGrid(game)) + 1);
-  game.state = "playing";
+  game.state = game.replayPlayer ? "replaying" : "playing";
   syncHud(game);
   emitGameState(game);
 };
@@ -564,6 +564,12 @@ export const startReplay = async (game: Game, bytes: Uint8Array): Promise<void> 
   //   the wave-spawn doesn't need bindings — but every isDown call from frame 1
   //   onward will.
   setReplayBindings(normalizeBindings(payload.header.bindings));
+  // Lock the sim to the recording's dimensions before startGame spawns the
+  //   ship — ship.pos and edge-wrap depend on game.w/h, and any mismatch
+  //   diverges motion from frame 0. resize() reads replayLockedDims to switch
+  //   into the locked-canvas + CSS-letterbox rendering mode.
+  game.replayLockedDims = { w: payload.header.w, h: payload.header.h, dpr: payload.header.dpr };
+  game.resize();
   startGame(game, {
     seed: payload.header.seed,
     tutorial: payload.header.tutorial,

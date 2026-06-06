@@ -1,6 +1,7 @@
 import type { IInput } from "../Input";
+import type { Ship } from "../Ship";
 import type { Bindings } from "./controlBindings";
-import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayFrame, type ReplayHeader } from "./replayFormat";
+import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayDebugFrame, type ReplayFrame, type ReplayHeader } from "./replayFormat";
 
 // Build hash from Vite at compile time so playback can warn about
 // build-version mismatches. Falls back to "dev" when not injected.
@@ -10,6 +11,7 @@ const BUILD_HASH: string = (import.meta.env as unknown as { VITE_BUILD_HASH?: st
 // per-frame masks reference vocab indices so the wire format stays compact.
 export class ReplayRecorder {
   private frames: ReplayFrame[] = [];
+  private debugFrames: ReplayDebugFrame[] = [];
   private vocab: string[] = [];
   private vocabIndex = new Map<string, number>();
   private lastKeys = new Set<string>();
@@ -53,8 +55,7 @@ export class ReplayRecorder {
     for (const k of this.lastKeys) {
       if (!input.keys.has(k)) upMask |= 1 << this.bitFor(k);
     }
-    const dtMs = Math.round(dt * 1000);
-    this.frames.push([dtMs, downMask, upMask]);
+    this.frames.push([dt, downMask, upMask]);
     // Snapshot current key state for next-frame diff.
     this.lastKeys.clear();
     for (const k of input.keys) this.lastKeys.add(k);
@@ -77,6 +78,17 @@ export class ReplayRecorder {
     return this.frames.length;
   }
 
+  captureShip(ship: Ship, input: IInput): void {
+    this.debugFrames.push({
+      posX: ship.pos.x,
+      posY: ship.pos.y,
+      velX: ship.vel.x,
+      velY: ship.vel.y,
+      heading: ship.heading,
+      keys: [...input.keys].sort(),
+    });
+  }
+
   // Build the final payload and gzip it. Caller provides the run summary
   // (score/wave/etc.) which only crystallises at game-over.
   async serialize(summary: { score: number; wave: number; maxCombo: number; killCount: number }): Promise<Uint8Array> {
@@ -88,6 +100,6 @@ export class ReplayRecorder {
       maxCombo: summary.maxCombo,
       killCount: summary.killCount,
     };
-    return await encodeReplay({ header, frames: this.frames });
+    return await encodeReplay({ header, frames: this.frames, debugFrames: this.debugFrames });
   }
 }

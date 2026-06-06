@@ -180,6 +180,9 @@ export class Game implements HudElements {
   recorder: import("./game/replayRecorder").ReplayRecorder | null = null;
   replayPlayer: import("./game/replayPlayer").ReplayPlayer | null = null;
   lastRunReplay: Uint8Array | null = null;
+  // Set during replay to force resize() to use recorded sim dims instead of
+  //   the live window; canvas is CSS-scaled to fit. Cleared when replay ends.
+  replayLockedDims: { w: number; h: number; dpr: number } | null = null;
   // localInput is the real keyboard-bound Input; the replay path swaps `input`
   //   to point at the player's ReplayInput while a replay is running, and we
   //   restore localInput when returning to title.
@@ -380,14 +383,40 @@ export class Game implements HudElements {
   }
 
   // DPR-aware resize keeps the canvas crisp; the starfield/pulsar need their own resize too.
+  //   During replay we lock the sim to the recorded w/h/dpr so spawn positions
+  //   and edge-wrap reproduce exactly; the canvas is CSS-scaled to fit the live
+  //   window with letterbox bars (renderer stays in logical sim coords).
   resize() {
-    this.dpr = window.devicePixelRatio || 1;
-    this.w = window.innerWidth;
-    this.h = window.innerHeight;
+    const locked = this.replayLockedDims;
+    if (locked) {
+      this.w = locked.w;
+      this.h = locked.h;
+      this.dpr = locked.dpr;
+    } else {
+      this.dpr = window.devicePixelRatio || 1;
+      this.w = window.innerWidth;
+      this.h = window.innerHeight;
+    }
     this.canvas.width = this.w * this.dpr;
     this.canvas.height = this.h * this.dpr;
-    this.canvas.style.width = `${this.w}px`;
-    this.canvas.style.height = `${this.h}px`;
+    if (locked) {
+      const liveW = window.innerWidth;
+      const liveH = window.innerHeight;
+      const scale = Math.min(liveW / this.w, liveH / this.h);
+      const cssW = this.w * scale;
+      const cssH = this.h * scale;
+      this.canvas.style.width = `${cssW}px`;
+      this.canvas.style.height = `${cssH}px`;
+      this.canvas.style.position = "absolute";
+      this.canvas.style.left = `${(liveW - cssW) / 2}px`;
+      this.canvas.style.top = `${(liveH - cssH) / 2}px`;
+    } else {
+      this.canvas.style.width = `${this.w}px`;
+      this.canvas.style.height = `${this.h}px`;
+      this.canvas.style.position = "";
+      this.canvas.style.left = "";
+      this.canvas.style.top = "";
+    }
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     if (this.starfield) this.starfield.resize(this.w, this.h);
     if (this.pulsar) this.pulsar.resize(this.w, this.h);
