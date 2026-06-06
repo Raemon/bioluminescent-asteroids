@@ -119,6 +119,7 @@ export type HaloMusicVariation =
   | "r2-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
   | "r3-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + layer 3
   | "r4-sb"   // 32-second C-pedal flagship — pulsing arp (ambient) + solo cello (melodic, VPO3) + female choir (layer 3, VPO3); all onsets on-beat
+  | "r5-el"   // ElevenLabs 32-second C-pedal dawn/vaporwave — glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio
   | "none";   // Legacy synthesized pad (the original startHaloAmbient)
 
 type HaloMusicNode = {
@@ -2575,6 +2576,15 @@ export class Sound {
       // (mostly downbeats), so the layer never punches off-grid against the
       // bass clock. Audit at gain 0.25 keeps lo-mid clean by +7 dB; bass +20 dB.
       case "r4-sb": return 0.25;
+      // r5-el is a bright EL dawn/vaporwave variation. Ambient = glassy
+      // string-choir pad in the mid-upper register; melodic = sparse felt-bell
+      // sustains. Both layers were generated to live above the bass band
+      // (ambient lo-mid 46%, melodic mid 60%) so the bass field stays clean.
+      // Full 3-layer stack at 0.25/0.28/0.32 leaves lo-mid +5.8 dB, bass
+      // +26 dB margin in the audit. peakGain controls ambient+melodic; the
+      // pair value is 0.27 (midpoint between the two stem gains, since
+      // setHaloMusicMelodicLayer ramps the melodic gain to peakGain).
+      case "r5-el": return 0.27;
       default:      return 0.30;
     }
   }
@@ -2595,6 +2605,10 @@ export class Sound {
       // attack hides any rhythmic poke. Choir RMS is very soft (-32 dBFS) so
       // gain 0.45 still leaves +5 dB lo-mid headroom in the full 3-layer mix.
       case "r4-sb": return 0.45;
+      // r5-el layer3 is a bright crystal-glockenspiel arpeggio in the upper
+      // register. Audit at gain 0.32 (in the full 3-layer mix above) leaves
+      // lo-mid +5.8 dB and mid +5.9 dB margin against the bass field.
+      case "r5-el": return 0.32;
       default:      return 0.40;
     }
   }

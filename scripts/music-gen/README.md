@@ -12,6 +12,7 @@ Stems are picked at random from `HALO_MUSIC_POOL` in `src/game/haloMusicConfig.t
 | `r2-sb` | numpy sine pad + FluidSynth felt piano + sox reverb (ambient+melodic); FluidSynth felt-mallet glockenspiel arpeggio (layer 3) | warm and round; layer 3 = slow felt-chime arpeggio that extends the felt-piano sparkle | 0.30 / 0.40 |
 | `r3-el` | ElevenLabs end-to-end synthwave (ambient+melodic) + FluidSynth pulsed synth-bass arp on off-beats (layer 3) | Juno-pad + soft lead; layer 3 = synthwave plucked-bass motion in the gaps | 0.22 / 0.30 |
 | `r4-sb` | self-built rhythmic flagship + FluidSynth chime counter-melody (layer 3) | pulsing 16th-note arp + calliope; layer 3 = sparse glockenspiel counter-line that interlocks with the arp's rests | 0.25 / 0.32 |
+| `r5-el` | ElevenLabs Music all three stems — generated as 64s pieces, best 32s windows extracted by `find_loop_r5.py` | dawn/vaporwave: glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio; mid-upper register throughout | 0.27 / 0.32 |
 
 Final files live in `public/sounds/halo-music/{variation}-{ambient,melodic,layer3}.mp3`.
 

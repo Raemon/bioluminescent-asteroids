@@ -25,6 +25,10 @@
 //   r4-sb  Self-built flagship: rhythmic 16th-note arp + smooth calliope
 //          melody + sparse chime counter-melody (interlocks with the arp's
 //          rest slots — adds bell-tone colour without doubling rhythm).
+//   r5-el  ElevenLabs dawn/vaporwave: glassy string-choir pad (ambient) +
+//          sparse felt-bell sustains (melodic) + bright crystal-glockenspiel
+//          arpeggio (layer 3). All three stems live in mid-upper register so
+//          the bass field stays clean even with all layers active.
 //
 // Every pool entry is fetched + decoded at startGame so the first 4x
 // doesn't pay fetch latency regardless of which one comes up.
@@ -36,7 +40,7 @@ import { rng } from "./rng";
 // synth pad) starts — the field stays at bass-only.
 export const PLAY_COMBO_MUSIC = true;
 
-export const HALO_MUSIC_POOL: readonly HaloMusicVariation[] = ["r2-el", "r2-sb", "r3-el", "r4-sb"];
+export const HALO_MUSIC_POOL: readonly HaloMusicVariation[] = ["r2-el", "r2-sb", "r3-el", "r4-sb", "r5-el"];
 
 // Pick a random variation from the pool, or "none" if the pool is empty
 // (which routes syncHaloAmbient to the legacy synthesized pad path).
