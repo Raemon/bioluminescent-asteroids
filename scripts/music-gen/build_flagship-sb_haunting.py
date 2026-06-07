@@ -1,8 +1,8 @@
-"""r4-sb melodic + layer3 — haunting orchestral take.
+"""flagship-sb melodic + layer3 — haunting orchestral take.
 
 Replaces the previous calliope-melody + celesta-cascade pair (which had
 off-beat attacks that distracted from the bass clock and instruments that
-didn't fit the haunting vibe of r4-sb-ambient).
+didn't fit the haunting vibe of flagship-sb-ambient).
 
 Both new stems use Virtual Playing Orchestra 3 samples rendered via sfizz.
 Every onset lands exactly on a quarter-beat boundary so nothing can read as
@@ -150,15 +150,15 @@ def build_layer3_events():
 
 
 def main():
-    print("rendering r4-sb-melodic (VPO solo cello sustain)...")
+    print("rendering flagship-sb-melodic (VPO solo cello sustain)...")
     mel_midi = build_stem(build_melodic_events(), programs={})
-    render_sfizz(mel_midi, CELLO_SFZ, OUT / "r4-sb-melodic.wav")
-    print(f"  wrote {OUT / 'r4-sb-melodic.wav'}")
+    render_sfizz(mel_midi, CELLO_SFZ, OUT / "flagship-sb-melodic.wav")
+    print(f"  wrote {OUT / 'flagship-sb-melodic.wav'}")
 
-    print("rendering r4-sb-layer3 (VPO female choir sustain)...")
+    print("rendering flagship-sb-layer3 (VPO female choir sustain)...")
     l3_midi = build_stem(build_layer3_events(), programs={})
-    render_sfizz(l3_midi, CHOIR_SFZ, OUT / "r4-sb-layer3.wav")
-    print(f"  wrote {OUT / 'r4-sb-layer3.wav'}")
+    render_sfizz(l3_midi, CHOIR_SFZ, OUT / "flagship-sb-layer3.wav")
+    print(f"  wrote {OUT / 'flagship-sb-layer3.wav'}")
 
 
 if __name__ == "__main__":

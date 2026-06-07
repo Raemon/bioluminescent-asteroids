@@ -1,4 +1,4 @@
-"""Post-process the new per-variation percussion stems (and the r2-el lonely
+"""Post-process the new per-variation percussion stems (and the cinematic-el lonely
 violin exception). Same invariants as process_r2/r4: trim to 32s, peak-
 normalize to -12 dBFS, 50 ms edge fades, sox reverb tuned per stem timbre.
 
@@ -7,13 +7,13 @@ match Sound.ts's haloMusicUrl() expectation; the wire-in step copies them
 to public/sounds/halo-music/.
 
 Reverb settings per stem:
-  r2-sb (warm/dry kit)     moderate room — kit needs a bit of air without
+  musicbox-sb (warm/dry kit)     moderate room — kit needs a bit of air without
                            losing the dry, sparse character
-  r3-el (synthwave kit)    short plate — electronic kits want tight reverb
+  synthwave-el (synthwave kit)    short plate — electronic kits want tight reverb
                            or none; a touch of plate puts them "in the mix"
-  r4-sb (interlocked kit)  short tight reverb so the 16ths stay articulated
-                           (matches the r4-sb ambient's tight verb setting)
-  r2-el (lonely violin)    moderate hall — violin wants room to breathe;
+  flagship-sb (interlocked kit)  short tight reverb so the 16ths stay articulated
+                           (matches the flagship-sb ambient's tight verb setting)
+  cinematic-el (lonely violin)    moderate hall — violin wants room to breathe;
                            matches the cinematic-strings ambient/melodic
 """
 
@@ -106,13 +106,13 @@ def main():
     results = []
     # (raw, out, reverb=(reverberance, hf_damping, room_scale, pre_delay_ms))
     plan = [
-        ("r2-sb-percussion", "r2-sb-percussion", (35, 65, 65, 20)),
-        ("r3-el-percussion", "r3-el-percussion", (25, 60, 55, 15)),
-        ("r4-sb-percussion", "r4-sb-percussion", (25, 60, 55, 15)),
+        ("musicbox-sb-percussion", "musicbox-sb-percussion", (35, 65, 65, 20)),
+        ("synthwave-el-percussion", "synthwave-el-percussion", (25, 60, 55, 15)),
+        ("flagship-sb-percussion", "flagship-sb-percussion", (25, 60, 55, 15)),
         # Lonely violin: redesigned to be simpler+quieter; reverb dialed
         # back so the bloom doesn't fill the long silences between the
         # three single-pitch phrases (was reverb=55/70/95/35).
-        ("r2-el-percussion", "r2-el-percussion", (40, 70, 75, 30)),
+        ("cinematic-el-percussion", "cinematic-el-percussion", (40, 70, 75, 30)),
     ]
     for raw, out, rev in plan:
         results.append(process_one(raw, out, rev))

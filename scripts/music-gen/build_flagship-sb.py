@@ -1,4 +1,4 @@
-"""Round-4 self-built flagship variation (r4-sb): rhythmic + interlocked.
+"""Round-4 self-built flagship variation (flagship-sb): rhythmic + interlocked.
 
 Distinct from r2/r3 — those are pads. This variation has *rhythmic content*
 in every layer so the music interlocks with the game's bass-clock identity
@@ -117,7 +117,7 @@ def r4_ambient_stereo() -> np.ndarray:
     phrase_order = ["A", "A1", "B", "A2"]
 
     # Pad bed: C2 + G2 sustained the whole loop, plus a per-phrase upper voice
-    # that drifts (G3+Eb4 vs G3+E4 vs G3+B3 — same scheme as r2-sb).
+    # that drifts (G3+Eb4 vs G3+E4 vs G3+B3 — same scheme as musicbox-sb).
     bass_pad = sine_pad(
         [hz_of("C2"), hz_of("G2"), hz_of("G3")],
         [0.18, 0.14, 0.12],
@@ -311,21 +311,21 @@ def main():
     # --- Ambient: procedural ---
     print("rendering r4 ambient (procedural arp + pad)…")
     ambient = r4_ambient_stereo()
-    a_out = OUT / "r4-sb-ambient.wav"
+    a_out = OUT / "flagship-sb-ambient.wav"
     sf.write(str(a_out), ambient, SR, subtype="PCM_16")
     print(f"  wrote {a_out}  duration {ambient.shape[0]/SR:.2f}s")
 
     # --- Melodic: FluidSynth synth lead ---
     print("rendering r4 melodic (FluidSynth lead 2 sawtooth)…")
     melodic_midi = build_stem(build_r4_melodic_events(), programs={0: 81})
-    m_out = OUT / "r4-sb-melodic.wav"
+    m_out = OUT / "flagship-sb-melodic.wav"
     render_midi(melodic_midi, m_out, gain=0.55)
     print(f"  wrote {m_out}")
 
     # --- Sparkle: FluidSynth celesta ---
     print("rendering r4 sparkle (FluidSynth celesta)…")
     sparkle_midi = build_stem(build_r4_sparkle_events(), programs={0: 8})
-    s_out = OUT / "r4-sb-sparkle.wav"
+    s_out = OUT / "flagship-sb-sparkle.wav"
     render_midi(sparkle_midi, s_out, gain=0.65)
     print(f"  wrote {s_out}")
 

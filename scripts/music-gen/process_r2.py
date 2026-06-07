@@ -100,14 +100,14 @@ def main():
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r2-el-ambient", **write_wav_and_mp3(y, sr, "r2-el-ambient")})
+    results.append({"name": "cinematic-el-ambient", **write_wav_and_mp3(y, sr, "cinematic-el-ambient")})
 
     # --- EL melodic: trim from 32s for 32s (first 32s came back as silence) ---
     y, sr = load_stereo(RAW / "r2-cinematic-melodic.mp3", offset=32.0, duration=LOOP_S)
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r2-el-melodic", **write_wav_and_mp3(y, sr, "r2-el-melodic")})
+    results.append({"name": "cinematic-el-melodic", **write_wav_and_mp3(y, sr, "cinematic-el-melodic")})
 
     # --- Self-built ambient: reverb pass ---
     reverbed = RAW / "r2-ambient-reverb.wav"
@@ -116,7 +116,7 @@ def main():
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r2-sb-ambient", **write_wav_and_mp3(y, sr, "r2-sb-ambient")})
+    results.append({"name": "musicbox-sb-ambient", **write_wav_and_mp3(y, sr, "musicbox-sb-ambient")})
 
     # --- Self-built melodic: reverb pass, then trim ---
     reverbed = RAW / "r2-melodic-reverb.wav"
@@ -125,7 +125,7 @@ def main():
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r2-sb-melodic", **write_wav_and_mp3(y, sr, "r2-sb-melodic")})
+    results.append({"name": "musicbox-sb-melodic", **write_wav_and_mp3(y, sr, "musicbox-sb-melodic")})
 
     summary = PROC / "_r2_summary.json"
     summary.write_text(json.dumps(results, indent=2))

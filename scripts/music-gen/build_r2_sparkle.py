@@ -10,9 +10,9 @@ chord-tones below mirror the build_r2 ambient pad's voicings exactly so the
 sparkle harmonically resolves with the pad at every phrase boundary.
 
 Two variations:
-  r2-sb-sparkle  glockenspiel chimes only (program 9). Clean, dry-ish, sox
+  musicbox-sb-sparkle  glockenspiel chimes only (program 9). Clean, dry-ish, sox
                  hall reverb 50/80/90 in post. Single-channel timbre.
-  r2-el-sparkle  celesta chimes (program 8) + halo-pad sustained 5th (program
+  cinematic-el-sparkle  celesta chimes (program 8) + halo-pad sustained 5th (program
                  101) for a wash. Two channels. Used as the bright companion
                  to the EL strings/piano which sit dark.
 
@@ -86,7 +86,7 @@ def build_chime_events(channel: int) -> list:
 
 def build_wash_events(channel: int) -> list:
     """Sustained C+G open fifth held the entire 32-second loop, low velocity.
-    Used by the r2-el-sparkle variation as a halo-pad air-band wash under
+    Used by the cinematic-el-sparkle variation as a halo-pad air-band wash under
     the celesta chimes. Two voices: G5 (the fifth) + C6. Phrase B briefly
     adds B5 to colour with the maj7."""
     events = [
@@ -99,14 +99,14 @@ def build_wash_events(channel: int) -> list:
 
 
 def main():
-    # --- r2-sb-sparkle: glockenspiel only ---
+    # --- musicbox-sb-sparkle: glockenspiel only ---
     sb_events = build_chime_events(channel=0)
     sb_midi = build_stem(sb_events, programs={0: 9})  # GM 9 = Glockenspiel
     sb_out = OUT / "r2-sparkle-sb.wav"
     render_midi(sb_midi, sb_out, gain=0.75)
     print(f"wrote {sb_out}")
 
-    # --- r2-el-sparkle: celesta chimes + halo-pad wash ---
+    # --- cinematic-el-sparkle: celesta chimes + halo-pad wash ---
     chime_events = build_chime_events(channel=0)
     wash_events = build_wash_events(channel=1)
     el_events = chime_events + wash_events

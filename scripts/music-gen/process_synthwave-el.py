@@ -1,7 +1,7 @@
-"""Post-process the new ElevenLabs synthwave/analog variation (r3-el).
+"""Post-process the new ElevenLabs synthwave/analog variation (synthwave-el).
 
 Three stems generated end-to-end from EL Music:
-  raw/r3-el-{ambient,melodic,sparkle}.mp3
+  raw/synthwave-el-{ambient,melodic,sparkle}.mp3
 
 All came back at ~32s, C major, with clean BPM (sparkle detected as 120;
 ambient/melodic too sustained for onset-based BPM detection but key was
@@ -81,12 +81,12 @@ def write_wav_and_mp3(y: np.ndarray, sr: int, name: str) -> dict:
 def main():
     results = []
     for layer in ("ambient", "melodic", "sparkle"):
-        y, sr = load_stereo(RAW / f"r3-el-{layer}.mp3")
+        y, sr = load_stereo(RAW / f"synthwave-el-{layer}.mp3")
         y = trim_or_pad(y, sr, LOOP_S)
         y = fade_edges(y, sr)
         y = normalize_peak(y, -12.0)
-        results.append({"name": f"r3-el-{layer}",
-                        **write_wav_and_mp3(y, sr, f"r3-el-{layer}")})
+        results.append({"name": f"synthwave-el-{layer}",
+                        **write_wav_and_mp3(y, sr, f"synthwave-el-{layer}")})
 
     summary = PROC / "_r3_summary.json"
     summary.write_text(json.dumps(results, indent=2))

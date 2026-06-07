@@ -1,4 +1,4 @@
-"""Render the r2-el lonely violin via sfizz + Virtual Playing Orchestra 3.
+"""Render the cinematic-el lonely violin via sfizz + Virtual Playing Orchestra 3.
 
 Replaces the FluidSynth GM-41 Viola path in build_percussion.py with a real
 sampled violin (No Budget Orchestra solo violin, packaged in VPO3). The
@@ -23,7 +23,7 @@ What changes vs the old path:
 Run:
    python build_r2el_violin_sfizz.py
 
-Outputs raw/r2-el-percussion.wav (same name as old path, so process_percussion.py
+Outputs raw/cinematic-el-percussion.wav (same name as old path, so process_percussion.py
 picks it up unchanged).
 
 One-time bootstrap (assets are gitignored — ~620 MB on disk):
@@ -273,7 +273,7 @@ def render(out_wav: Path, sample_rate: int = 44100) -> None:
 
 
 def main():
-    render(OUT / "r2-el-percussion.wav")
+    render(OUT / "cinematic-el-percussion.wav")
 
 
 if __name__ == "__main__":

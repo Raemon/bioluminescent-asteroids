@@ -1,7 +1,7 @@
 """Build the per-variation percussion stems that replace the sparkle layer.
 
-Three percussion stems (r2-sb, r3-el, r4-sb) + one exception:
-  r2-el-percussion is actually a lonely solo violin (matches the r2-el
+Three percussion stems (musicbox-sb, synthwave-el, flagship-sb) + one exception:
+  cinematic-el-percussion is actually a lonely solo violin (matches the cinematic-el
   cinematic-strings aesthetic; not a drum kit).
 
 All loop 32s at 120 BPM = 4 phrases x 4 bars, sharing the downbeat at sample 0
@@ -57,8 +57,8 @@ LOOP_BEATS = PHRASE_BEATS * 4           # 64 beats per loop
 DRUM_CH = 9                             # GM drum channel (0-indexed)
 
 
-# ── r2-sb percussion: warm-dry brushy kit ──────────────────────────────────
-# Pairs with the r2-sb procedural sine pad + felt piano. The pad is warm and
+# ── musicbox-sb percussion: warm-dry brushy kit ──────────────────────────────────
+# Pairs with the musicbox-sb procedural sine pad + felt piano. The pad is warm and
 # round, the piano sparse and held — drums must not poke. A soft kick on 1+3,
 # brushed/side-stick rim on 2+4, and a quiet closed-hat 8th pulse. Phrase B
 # briefly opens the hat for one bar of breath.
@@ -89,7 +89,7 @@ def build_r2_sb_events() -> list:
     return events
 
 
-# ── r3-el percussion: synthwave electronic kit ─────────────────────────────
+# ── synthwave-el percussion: synthwave electronic kit ─────────────────────────────
 # Pairs with the EL analog-synthwave Juno-pad + soft lead. Drum-machine feel:
 # Linn-ish electronic kick on 1+3, electric snare on 2+4, 16th-note closed
 # hats with off-beat ghost notes. Phrase B replaces beat 4 with an open-hat
@@ -137,8 +137,8 @@ def build_r3_el_events() -> list:
     return events
 
 
-# ── r4-sb percussion: interlocked 16th-note kit ────────────────────────────
-# Pairs with the r4-sb rhythmic flagship — pulsing arp + calliope melody. The
+# ── flagship-sb percussion: interlocked 16th-note kit ────────────────────────────
+# Pairs with the flagship-sb rhythmic flagship — pulsing arp + calliope melody. The
 # arp already drives 16ths; drums should reinforce the pulse without doubling
 # every 16th hit. Pattern: kick on 1 + 'a' of 3 (syncopated), snare on 2 + 4,
 # closed hat 16ths with the same rest-slot map as the arp (rest on slots 3
@@ -182,9 +182,9 @@ def build_r4_sb_events() -> list:
     return events
 
 
-# ── r2-el lonely violin (NOT percussion) ───────────────────────────────────
+# ── cinematic-el lonely violin (NOT percussion) ───────────────────────────────────
 # Single-line solo violin (GM 40 = Violin). Designed against the *actual*
-# harmony of the r2-el ambient + melodic mp3s as measured by deepinspect.py
+# harmony of the cinematic-el ambient + melodic mp3s as measured by deepinspect.py
 # chroma over time — not the imagined plan of the earlier draft:
 #
 #   0–3s   brief Cmaj fragment (the loop seam from the previous resolve)
@@ -225,9 +225,9 @@ def build_r4_sb_events() -> list:
 # register where the bed has almost no energy — sounded like a spotlit
 # soloist instead of a bowed voice floating *inside* the existing strings.
 # Audit numbers that drove the register choice:
-#   r2-el-ambient    band energy → 54% in 60–200 Hz, 29% in 200–500 Hz
+#   cinematic-el-ambient    band energy → 54% in 60–200 Hz, 29% in 200–500 Hz
 #                                   <0.1% in 2–6 kHz
-#   r2-el-melodic    band energy → 66% in 200–500 Hz, 24% in 500–2k Hz
+#   cinematic-el-melodic    band energy → 66% in 200–500 Hz, 24% in 500–2k Hz
 #                                   <1.6% in 2–6 kHz
 #   violin in E5–A5  band energy → 43% in 2–6 kHz (catastrophic mismatch)
 # Dropping an octave and using Viola (GM 41 — darker, less upper-harmonic
@@ -298,19 +298,19 @@ def render_violin_stem(events: list, out_wav: Path, gain: float = 0.7) -> None:
 
 
 def main():
-    out_r2sb = OUT / "r2-sb-percussion.wav"
+    out_r2sb = OUT / "musicbox-sb-percussion.wav"
     render_drum_stem(build_r2_sb_events(), out_r2sb, gain=0.75)
     print(f"wrote {out_r2sb}")
 
-    out_r3el = OUT / "r3-el-percussion.wav"
+    out_r3el = OUT / "synthwave-el-percussion.wav"
     render_drum_stem(build_r3_el_events(), out_r3el, gain=0.75)
     print(f"wrote {out_r3el}")
 
-    out_r4sb = OUT / "r4-sb-percussion.wav"
+    out_r4sb = OUT / "flagship-sb-percussion.wav"
     render_drum_stem(build_r4_sb_events(), out_r4sb, gain=0.75)
     print(f"wrote {out_r4sb}")
 
-    out_r2el = OUT / "r2-el-percussion.wav"   # named percussion for slot consistency
+    out_r2el = OUT / "cinematic-el-percussion.wav"   # named percussion for slot consistency
     render_violin_stem(build_r2_el_violin_events(), out_r2el, gain=0.65)
     print(f"wrote {out_r2el}")
 

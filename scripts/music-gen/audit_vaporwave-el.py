@@ -1,4 +1,4 @@
-"""Deep audit for the r5-el stems.
+"""Deep audit for the vaporwave-el stems.
 
 Three checks:
   1. Loop quality — does each stem loop cleanly when played end-to-end?
@@ -162,7 +162,7 @@ def cosine(a: np.ndarray, b: np.ndarray) -> float:
 
 def main():
     stems = ["ambient", "melodic", "layer3"]
-    paths = {s: PROC / f"r5-el-{s}.mp3" for s in stems}
+    paths = {s: PROC / f"vaporwave-el-{s}.mp3" for s in stems}
     loaded = {s: load(paths[s]) for s in stems}
 
     report = {"loops": {}, "onsets": {}, "compat": {}}

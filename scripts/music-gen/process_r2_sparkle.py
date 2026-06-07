@@ -103,7 +103,7 @@ def main():
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r2-sb-sparkle", **write_wav_and_mp3(y, sr, "r2-sb-sparkle")})
+    results.append({"name": "musicbox-sb-sparkle", **write_wav_and_mp3(y, sr, "musicbox-sb-sparkle")})
 
     # --- EL sparkle: celesta + halo-pad wash — moderate reverb ---
     rev = RAW / "r2-sparkle-el-reverb.wav"
@@ -113,7 +113,7 @@ def main():
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r2-el-sparkle", **write_wav_and_mp3(y, sr, "r2-el-sparkle")})
+    results.append({"name": "cinematic-el-sparkle", **write_wav_and_mp3(y, sr, "cinematic-el-sparkle")})
 
     summary = PROC / "_r2_sparkle_summary.json"
     summary.write_text(json.dumps(results, indent=2))

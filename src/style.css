@@ -14,7 +14,7 @@
 html, body {
   width: 100%;
   height: 100%;
-  background: #02030a;
+  background: #000;
   color: #d8f3ff;
   font-family: "Space Grotesk", system-ui, sans-serif;
   overflow: hidden;
@@ -38,10 +38,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 #stage {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
+  position: absolute;
   display: block;
   background: radial-gradient(ellipse at 50% 60%, #0a1230 0%, #02030a 60%, #000005 100%);
   cursor: crosshair;

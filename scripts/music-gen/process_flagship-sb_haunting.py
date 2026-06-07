@@ -1,4 +1,4 @@
-"""Post-process for r4-sb-melodic + r4-sb-layer3 (haunting take).
+"""Post-process for flagship-sb-melodic + flagship-sb-layer3 (haunting take).
 
 Same invariants as the other processors: trim to 32 s, 50 ms edge fades,
 peak-normalize to -12 dBFS, write wav + mp3 to processed/. Sox reverb tuned
@@ -84,24 +84,24 @@ def main():
     results = []
 
     # Melodic: cello + moderate plate for ghostly air
-    rev = RAW / "r4-sb-melodic-reverb.wav"
-    sox_reverb(RAW / "r4-sb-melodic.wav", rev, 45, 65, 75, pre_delay_ms=25)
+    rev = RAW / "flagship-sb-melodic-reverb.wav"
+    sox_reverb(RAW / "flagship-sb-melodic.wav", rev, 45, 65, 75, pre_delay_ms=25)
     y, sr = load_stereo(rev)
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r4-sb-melodic",
-                    **write_wav_and_mp3(y, sr, "r4-sb-melodic")})
+    results.append({"name": "flagship-sb-melodic",
+                    **write_wav_and_mp3(y, sr, "flagship-sb-melodic")})
 
     # Layer 3: choir + big hall so the "ahh" voicings bloom
-    rev = RAW / "r4-sb-layer3-reverb.wav"
-    sox_reverb(RAW / "r4-sb-layer3.wav", rev, 60, 70, 90, pre_delay_ms=35)
+    rev = RAW / "flagship-sb-layer3-reverb.wav"
+    sox_reverb(RAW / "flagship-sb-layer3.wav", rev, 60, 70, 90, pre_delay_ms=35)
     y, sr = load_stereo(rev)
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r4-sb-layer3",
-                    **write_wav_and_mp3(y, sr, "r4-sb-layer3")})
+    results.append({"name": "flagship-sb-layer3",
+                    **write_wav_and_mp3(y, sr, "flagship-sb-layer3")})
 
     summary = PROC / "_r4_haunting_summary.json"
     summary.write_text(json.dumps(results, indent=2))

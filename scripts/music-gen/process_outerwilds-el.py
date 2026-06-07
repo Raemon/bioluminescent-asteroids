@@ -1,20 +1,21 @@
-"""Post-process the r6-el (Outer Wilds) variation.
+"""Post-process the outerwilds-el (Outer Wilds) variation.
 
 Three EL stems were generated at 64 seconds. We:
-  1. Extract the best 32s window per stem (from find_loop_r6.py).
+  1. Extract the best 32s window per stem (from find_loop_outerwilds-el.py).
   2. Snap musical attacks to the 8th-note grid (250 ms) using
      quantize_to_beat.py — guitar plucks and harmonica breaths get
      pulled onto grid via piecewise rubberband stretching.
   3. Trim to exactly 32.000s, fade edges 50ms, normalize peak to -12 dBFS.
 
-Best 32s windows (find_loop_r6.py):
-  ambient: offset 2.75s
+Best 32s windows (find_loop_outerwilds-el.py):
+  ambient: offset 14.00s (RMS-matched seam, not chroma-best)
   melodic: offset 7.25s
-  layer3:  offset 2.75s
+  layer3:  offset 4.75s  (v2: pump organ, replaces v1 harmonica)
 
-Only the melodic and layer3 get quantized — the ambient is sustained
-pad with no real attacks, so quantization is a no-op (and the high-
-delta threshold filters out its vibrato/swell texture).
+Only the melodic gets quantized. The ambient is a sustained pad with
+no real attacks. The layer3 (pump organ, sustained held notes) also
+has no crisp attacks — running the quantizer on it created audible
+clicks at piecewise-stretch segment boundaries, so it's off.
 """
 
 from __future__ import annotations
@@ -40,17 +41,25 @@ BPM = 120
 SUBDIV = 8  # 8th-note grid
 
 OFFSETS = {
-    "ambient": 2.75,
+    "ambient": 14.0,
     "melodic": 7.25,
-    "layer3": 2.75,
+    "layer3": 4.75,
 }
 
-# Per-stem: should we apply beat-quantization? ambient pad has no real
-# attacks so it's a no-op; melodic guitar and layer3 harmonica do.
+# Quantize only the melodic guitar — sustained-note instruments have
+# no crisp attacks, and the piecewise rubberband stretcher creates
+# audible click artifacts at segment boundaries on them.
 QUANTIZE = {
     "ambient": False,
     "melodic": True,
-    "layer3": True,
+    "layer3": False,
+}
+
+# Allow per-stem override of the raw file name (v2 pump organ replaces v1 harmonica).
+RAW_NAME = {
+    "ambient": "outerwilds-el-ambient.mp3",
+    "melodic": "outerwilds-el-melodic.mp3",
+    "layer3": "outerwilds-el-layer3-v2.mp3",
 }
 
 
@@ -113,7 +122,7 @@ def main():
     for layer in ("ambient", "melodic", "layer3"):
         # Read 33s window (one extra second of headroom) so quantization
         # can shrink without leaving gaps at the end.
-        y, sr = load_stereo(RAW / f"r6-el-{layer}.mp3",
+        y, sr = load_stereo(RAW / RAW_NAME[layer],
                             offset=OFFSETS[layer], duration=LOOP_S + 1.0)
 
         q_report = None
@@ -127,9 +136,9 @@ def main():
         y = fade_edges(y, sr)
         y = normalize_peak(y, -12.0)
 
-        entry = {"name": f"r6-el-{layer}", "offset_s": OFFSETS[layer],
+        entry = {"name": f"outerwilds-el-{layer}", "offset_s": OFFSETS[layer],
                  "quantized": QUANTIZE[layer],
-                 **write_wav_and_mp3(y, sr, f"r6-el-{layer}")}
+                 **write_wav_and_mp3(y, sr, f"outerwilds-el-{layer}")}
         if q_report:
             entry["quantization_report"] = q_report
         results.append(entry)

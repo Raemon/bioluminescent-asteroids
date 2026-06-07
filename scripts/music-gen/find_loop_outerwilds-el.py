@@ -1,6 +1,6 @@
 """Find the best 32s window inside a 64s ElevenLabs r6 stem.
 
-Same approach as find_loop_r5, but the harmonic constraint is different:
+Same approach as find_loop_vaporwave-el, but the harmonic constraint is different:
 r6 accepts G-rooted (V) melodic, A-rooted (vi) ambient, F-rooted (IV)
 layer3 against the C bass field. Penalize only truly-clashing pitches
 (F#, C#, D#, G#).

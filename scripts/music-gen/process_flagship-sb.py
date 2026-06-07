@@ -1,4 +1,4 @@
-"""Round-4 post-process: rhythmic self-built flagship (r4-sb).
+"""Round-4 post-process: rhythmic self-built flagship (flagship-sb).
 
 Same invariants as r2/r3: trim to 32s, peak-normalize to -12 dBFS, 50 ms
 edge fades. Sox reverb pass on each layer tuned for the timbre:
@@ -85,31 +85,31 @@ def main():
     results = []
 
     # Ambient: tight reverb keeps the arp punch
-    rev = RAW / "r4-sb-ambient-reverb.wav"
-    sox_reverb(RAW / "r4-sb-ambient.wav", rev, 25, 60, 55, pre_delay_ms=15)
+    rev = RAW / "flagship-sb-ambient-reverb.wav"
+    sox_reverb(RAW / "flagship-sb-ambient.wav", rev, 25, 60, 55, pre_delay_ms=15)
     y, sr = load_stereo(rev)
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r4-sb-ambient", **write_wav_and_mp3(y, sr, "r4-sb-ambient")})
+    results.append({"name": "flagship-sb-ambient", **write_wav_and_mp3(y, sr, "flagship-sb-ambient")})
 
     # Melodic: moderate plate for the saw lead
-    rev = RAW / "r4-sb-melodic-reverb.wav"
-    sox_reverb(RAW / "r4-sb-melodic.wav", rev, 40, 65, 75, pre_delay_ms=25)
+    rev = RAW / "flagship-sb-melodic-reverb.wav"
+    sox_reverb(RAW / "flagship-sb-melodic.wav", rev, 40, 65, 75, pre_delay_ms=25)
     y, sr = load_stereo(rev)
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r4-sb-melodic", **write_wav_and_mp3(y, sr, "r4-sb-melodic")})
+    results.append({"name": "flagship-sb-melodic", **write_wav_and_mp3(y, sr, "flagship-sb-melodic")})
 
     # Sparkle: hall reverb for celesta bloom
-    rev = RAW / "r4-sb-sparkle-reverb.wav"
-    sox_reverb(RAW / "r4-sb-sparkle.wav", rev, 55, 70, 85, pre_delay_ms=30)
+    rev = RAW / "flagship-sb-sparkle-reverb.wav"
+    sox_reverb(RAW / "flagship-sb-sparkle.wav", rev, 55, 70, 85, pre_delay_ms=30)
     y, sr = load_stereo(rev)
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r4-sb-sparkle", **write_wav_and_mp3(y, sr, "r4-sb-sparkle")})
+    results.append({"name": "flagship-sb-sparkle", **write_wav_and_mp3(y, sr, "flagship-sb-sparkle")})
 
     summary = PROC / "_r4_summary.json"
     summary.write_text(json.dumps(results, indent=2))

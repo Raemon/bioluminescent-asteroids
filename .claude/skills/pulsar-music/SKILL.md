@@ -130,6 +130,17 @@ If lo-mid fails, the music is fighting the bass. Two fixes: lower gain (cheap, m
 
 If sub fails (music has too much 20–60 Hz energy), trim the lowest voice. Pads don't need sub.
 
+## Variation naming convention
+
+**Use vibe-based names, not iteration numbers.** Variation IDs describe the *sound* (`cinematic-el`, `musicbox-sb`, `synthwave-el`, `flagship-sb`, `vaporwave-el`, `outerwilds-el`) — never `r2`, `r3`, `roundN`, or other version stamps. The `-el` / `-sb` suffix marks the source (`el` = ElevenLabs Music API; `sb` = self-built / procedural via FluidSynth + numpy). Two variations can share a vibe word only if they pair as `-el` / `-sb`; otherwise, pick a more specific vibe.
+
+**During iteration** you may use working names (`new-variation`, `wip-1`, etc.) but **before merging to the pool, rename to a vibe**. If asked to "add a new variation," propose a vibe name in your first reply and use it throughout the pipeline so the audio files, code references, and pool entry all match.
+
+Good: `vaporwave-el`, `musicbox-sb`, `outerwilds-el`.
+Bad: `r7`, `round7-el`, `experiment-3`.
+
+If you can't find a vibe word that fits, that's a signal the variation isn't distinct enough from the existing pool — flag it back to the user rather than shipping a generic name.
+
 ## Integration patterns
 
 ### Adding a new variation to the pool
@@ -137,15 +148,17 @@ If sub fails (music has too much 20–60 Hz energy), trim the lowest voice. Pads
 1. Add the variation to the `HaloMusicVariation` union in `src/Sound.ts`:
    ```ts
    export type HaloMusicVariation =
-     | "r2-el" | "r2-sb" | "your-new-variation" | "none";
+     | "cinematic-el" | "musicbox-sb" | "your-new-vibe-el" | "none";
    ```
 2. Add a gain target in `haloMusicGain`:
    ```ts
-   case "your-new-variation": return 0.28;  // from the audit
+   case "your-new-vibe-el": return 0.28;  // from the audit
    ```
-3. Drop stems into `sounds/halo-music/{your-new-variation}-{ambient,melodic}.mp3`.
+3. Drop stems into `sounds/halo-music/{your-new-vibe-el}-{ambient,melodic,layer3}.mp3`.
 4. Add to `HALO_MUSIC_POOL` in `src/game/haloMusicConfig.ts` to enable random selection.
-5. Type-check: `./node_modules/.bin/tsc -b`.
+5. Add an entry to `VARIATION_META` in `src/music/page/MusicMixer.tsx` (label + blurb + gains) so the /music page knows what to display.
+6. Add an entry to `public/sounds/music-config.json` mirroring the audit-tuned gains.
+7. Type-check: `./node_modules/.bin/tsc -b`.
 
 `startGame` in `lifecycle.ts` already preloads every pool entry — no change needed there.
 

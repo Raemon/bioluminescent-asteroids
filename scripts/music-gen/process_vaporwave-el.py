@@ -1,17 +1,17 @@
-"""Post-process the r5-el variation.
+"""Post-process the vaporwave-el variation.
 
 Three EL Music stems were generated at 64 seconds each (asked EL for the
 32-second phrase played twice, EL ignored that and gave through-composed
-64s pieces). We trim each to the best 32s window found by find_loop_r5.py,
+64s pieces). We trim each to the best 32s window found by find_loop_vaporwave-el.py,
 fade the edges so the loop seam doesn't click, and peak-normalize to
 -12 dBFS so the bass field stays dominant.
 
-Best 32s windows (from find_loop_r5.py):
+Best 32s windows (from find_loop_vaporwave-el.py):
   ambient: offset 3.5s
   melodic: offset 12.5s
   layer3:  offset 0.5s
 
-Same invariants as process_r3 — trim to 32s, 50 ms edge fades, normalize
+Same invariants as process_synthwave-el — trim to 32s, 50 ms edge fades, normalize
 peak to -12 dBFS. No sox reverb pass (EL output is already reverby).
 """
 
@@ -90,12 +90,12 @@ def write_wav_and_mp3(y: np.ndarray, sr: int, name: str) -> dict:
 def main():
     results = []
     for layer, offset in OFFSETS.items():
-        y, sr = load_stereo(RAW / f"r5-el-{layer}.mp3", offset=offset, duration=LOOP_S + 0.1)
+        y, sr = load_stereo(RAW / f"vaporwave-el-{layer}.mp3", offset=offset, duration=LOOP_S + 0.1)
         y = trim_or_pad(y, sr, LOOP_S)
         y = fade_edges(y, sr)
         y = normalize_peak(y, -12.0)
-        results.append({"name": f"r5-el-{layer}", "offset_s": offset,
-                        **write_wav_and_mp3(y, sr, f"r5-el-{layer}")})
+        results.append({"name": f"vaporwave-el-{layer}", "offset_s": offset,
+                        **write_wav_and_mp3(y, sr, f"vaporwave-el-{layer}")})
 
     summary = PROC / "_r5_summary.json"
     summary.write_text(json.dumps(results, indent=2))

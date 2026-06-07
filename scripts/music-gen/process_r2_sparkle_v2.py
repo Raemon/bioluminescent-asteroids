@@ -4,11 +4,11 @@ Same shape as process_r2_sparkle.py but with reverb settings tuned for the
 denser 16th-note material (heavy hall on dense arps blurs the rhythmic
 read — we want clarity, not wash):
 
-  r2-el-sparkle  New Age synth + halo wash. Mild plate-ish reverb so the
+  cinematic-el-sparkle  New Age synth + halo wash. Mild plate-ish reverb so the
                  arp reads as cinematic-synthwave, not concert hall. The
                  wash voices already provide the "atmospheric depth".
 
-  r2-sb-sparkle  Steel-string fast-pluck. Light reverb so the 16ths stay
+  musicbox-sb-sparkle  Steel-string fast-pluck. Light reverb so the 16ths stay
                  articulated. Heavier reverb than EL since SB has no wash
                  underneath providing ambience.
 
@@ -94,7 +94,7 @@ def sox_reverb(in_wav: Path, out_wav: Path,
 def main():
     results = []
 
-    # --- r2-sb-sparkle: steel-string fast-pluck — moderate reverb ---
+    # --- musicbox-sb-sparkle: steel-string fast-pluck — moderate reverb ---
     rev = RAW / "r2-sparkle-sb-v2-reverb.wav"
     sox_reverb(RAW / "r2-sparkle-sb-v2.wav", rev,
                reverberance=40, hf_damping=65, room_scale=75, pre_delay_ms=25)
@@ -102,10 +102,10 @@ def main():
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r2-sb-sparkle",
-                    **write_wav_and_mp3(y, sr, "r2-sb-sparkle")})
+    results.append({"name": "musicbox-sb-sparkle",
+                    **write_wav_and_mp3(y, sr, "musicbox-sb-sparkle")})
 
-    # --- r2-el-sparkle: New Age synth + halo wash — mild reverb ---
+    # --- cinematic-el-sparkle: New Age synth + halo wash — mild reverb ---
     rev = RAW / "r2-sparkle-el-v2-reverb.wav"
     sox_reverb(RAW / "r2-sparkle-el-v2.wav", rev,
                reverberance=30, hf_damping=70, room_scale=60, pre_delay_ms=20)
@@ -113,8 +113,8 @@ def main():
     y = trim_or_pad(y, sr, LOOP_S)
     y = fade_edges(y, sr)
     y = normalize_peak(y, -12.0)
-    results.append({"name": "r2-el-sparkle",
-                    **write_wav_and_mp3(y, sr, "r2-el-sparkle")})
+    results.append({"name": "cinematic-el-sparkle",
+                    **write_wav_and_mp3(y, sr, "cinematic-el-sparkle")})
 
     summary = PROC / "_r2_sparkle_v2_summary.json"
     summary.write_text(json.dumps(results, indent=2))

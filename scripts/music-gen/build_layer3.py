@@ -6,19 +6,19 @@ build_percussion.py) was rejected — drums fought the bass clock and the
 existing instrumental palette. This version stays inside each variation's
 own voice family.
 
-  r2-sb  felt-mallet glockenspiel arpeggio (slow, sparse, on-beat).
+  musicbox-sb  felt-mallet glockenspiel arpeggio (slow, sparse, on-beat).
          Extends the felt-piano's sparkle into the upper octave. Not a drum
          — chime tones falling in a major-7th-coloured ascending pattern.
-  r3-el  pulsed synth-bass arp on the off-beats (8th-note plucked saw at
+  synthwave-el  pulsed synth-bass arp on the off-beats (8th-note plucked saw at
          G2/B2/E3, mode-invariant; sits between the kick register and the
          soft lead). Synthwave-appropriate motion that vibes with the Juno
          pad without doubling the lead.
-  r4-sb  glockenspiel counter-melody that plays in the gaps of the arp
+  flagship-sb  glockenspiel counter-melody that plays in the gaps of the arp
          (slots 3/7/11/15 — the rest sixteenths). Same 16th grid, but the
          arp and layer 3 never strike together, so they read as one
          interlocked instrument.
 
-r2-el's layer 3 is the lonely solo violin built in build_percussion.py
+cinematic-el's layer 3 is the lonely solo violin built in build_percussion.py
 (file kept; this script does not rebuild it). It already shipped and the
 user approved it.
 
@@ -60,8 +60,8 @@ PROG_CELESTA = 8        # Celesta — softer than glock, more "felt"
 PROG_SYNTHBASS = 39     # Synth Bass 2 — plucked sawtooth-ish, synthwave bread-and-butter
 
 
-# ── r2-sb layer 3: felt-mallet glockenspiel arpeggio ──────────────────────
-# Pairs with the r2-sb procedural sine pad + felt piano. The pad is warm and
+# ── musicbox-sb layer 3: felt-mallet glockenspiel arpeggio ──────────────────────
+# Pairs with the musicbox-sb procedural sine pad + felt piano. The pad is warm and
 # slow, the piano holds long notes. Layer 3 introduces *motion in the upper
 # octave* via a slow ascending bell figure — one note per beat, octave above
 # the felt piano so it sits clearly above without fighting the melodic
@@ -112,7 +112,7 @@ def build_r2_sb_events() -> list:
     return events
 
 
-# ── r3-el layer 3: pulsed synth-bass arp on the off-beats ────────────────
+# ── synthwave-el layer 3: pulsed synth-bass arp on the off-beats ────────────────
 # Pairs with the EL synthwave Juno pad + soft lead. Synthwave loves a
 # pulsing sequencer — that's the "rhythmic where appropriate" the user
 # asked for. The new element is a plucked synth-bass voice that plays an
@@ -169,8 +169,8 @@ def build_r3_el_events() -> list:
     return events
 
 
-# ── r4-sb layer 3: glockenspiel counter-melody in the arp's rest slots ───
-# Pairs with the r4-sb 16th-note arp (slot pattern: hits on slots 0/1/2,
+# ── flagship-sb layer 3: glockenspiel counter-melody in the arp's rest slots ───
+# Pairs with the flagship-sb 16th-note arp (slot pattern: hits on slots 0/1/2,
 # rest on slot 3, repeat per beat). The arp already saturates the rhythmic
 # field; layer 3 must NOT add more 16ths. Instead it plays only on the
 # slots the arp leaves empty (slot 3 of each beat = the "a" of the beat),
@@ -236,22 +236,22 @@ def render_pitched_stem(events: list, programs: dict[int, int],
 
 
 def main():
-    # r2-sb: felt glockenspiel
-    out_r2sb = OUT / "r2-sb-layer3.wav"
+    # musicbox-sb: felt glockenspiel
+    out_r2sb = OUT / "musicbox-sb-layer3.wav"
     render_pitched_stem(build_r2_sb_events(),
                         programs={GLOCK_CH: PROG_GLOCK},
                         out_wav=out_r2sb, gain=0.7)
     print(f"wrote {out_r2sb}")
 
-    # r3-el: synth-bass arp
-    out_r3el = OUT / "r3-el-layer3.wav"
+    # synthwave-el: synth-bass arp
+    out_r3el = OUT / "synthwave-el-layer3.wav"
     render_pitched_stem(build_r3_el_events(),
                         programs={SYNTHBASS_CH: PROG_SYNTHBASS},
                         out_wav=out_r3el, gain=0.7)
     print(f"wrote {out_r3el}")
 
-    # r4-sb: glockenspiel counter-melody
-    out_r4sb = OUT / "r4-sb-layer3.wav"
+    # flagship-sb: glockenspiel counter-melody
+    out_r4sb = OUT / "flagship-sb-layer3.wav"
     render_pitched_stem(build_r4_sb_events(),
                         programs={GLOCK2_CH: PROG_GLOCK},
                         out_wav=out_r4sb, gain=0.7)

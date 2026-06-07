@@ -8,12 +8,12 @@ Stems are picked at random from `HALO_MUSIC_POOL` in `src/game/haloMusicConfig.t
 
 | name | source | aesthetic | playback gain (ambient·melodic / layer3) |
 |------|--------|-----------|------------------------------------------|
-| `r2-el` | ElevenLabs Music (ambient+melodic) / FluidSynth solo violin (layer 3) | cinematic strings + felt piano, with a lonely violin third voice | 0.25 / 0.45 |
-| `r2-sb` | numpy sine pad + FluidSynth felt piano + sox reverb (ambient+melodic); FluidSynth felt-mallet glockenspiel arpeggio (layer 3) | warm and round; layer 3 = slow felt-chime arpeggio that extends the felt-piano sparkle | 0.30 / 0.40 |
-| `r3-el` | ElevenLabs end-to-end synthwave (ambient+melodic) + FluidSynth pulsed synth-bass arp on off-beats (layer 3) | Juno-pad + soft lead; layer 3 = synthwave plucked-bass motion in the gaps | 0.22 / 0.30 |
-| `r4-sb` | self-built rhythmic flagship + FluidSynth chime counter-melody (layer 3) | pulsing 16th-note arp + calliope; layer 3 = sparse glockenspiel counter-line that interlocks with the arp's rests | 0.25 / 0.32 |
-| `r5-el` | ElevenLabs Music all three stems — generated as 64s pieces, best 32s windows extracted by `find_loop_r5.py` | dawn/vaporwave: glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio; mid-upper register throughout | 0.27 / 0.32 |
-| `r6-el` | ElevenLabs Music all three stems — 64s pieces, best 32s window via `find_loop_r6.py`, melodic+layer3 onsets snapped to 8th-note grid via `quantize_to_beat.py` (piecewise rubberband stretching), ambient HPF'd at 200 Hz to keep bass kit clear | Outer-Wilds folk: distant drone pad + fingerpicked acoustic guitar (G mixolydian — V-over-I suspension) + slow held-note harmonica; haunting/gentle | 0.235 / 0.30 |
+| `cinematic-el` | ElevenLabs Music (ambient+melodic) / FluidSynth solo violin (layer 3) | cinematic strings + felt piano, with a lonely violin third voice | 0.25 / 0.45 |
+| `musicbox-sb` | numpy sine pad + FluidSynth felt piano + sox reverb (ambient+melodic); FluidSynth felt-mallet glockenspiel arpeggio (layer 3) | warm and round; layer 3 = slow felt-chime arpeggio that extends the felt-piano sparkle | 0.30 / 0.40 |
+| `synthwave-el` | ElevenLabs end-to-end synthwave (ambient+melodic) + FluidSynth pulsed synth-bass arp on off-beats (layer 3) | Juno-pad + soft lead; layer 3 = synthwave plucked-bass motion in the gaps | 0.22 / 0.30 |
+| `flagship-sb` | self-built rhythmic flagship + FluidSynth chime counter-melody (layer 3) | pulsing 16th-note arp + calliope; layer 3 = sparse glockenspiel counter-line that interlocks with the arp's rests | 0.25 / 0.32 |
+| `vaporwave-el` | ElevenLabs Music all three stems — generated as 64s pieces, best 32s windows extracted by `find_loop_vaporwave-el.py` | dawn/vaporwave: glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio; mid-upper register throughout | 0.27 / 0.32 |
+| `outerwilds-el` | ElevenLabs Music all three stems — 64s pieces, best 32s window via `find_loop_outerwilds-el.py`. Melodic guitar onsets snapped to 8th-note grid via `quantize_to_beat.py` (piecewise rubberband). Ambient HPF'd at 200 Hz, layer3 HPF'd at 500 Hz to keep bass kit clear. Layer3 is **not** quantized — the stretcher created audible clicks on diffuse sustained-note attacks. | Outer-Wilds folk: distant drone pad + fingerpicked acoustic guitar (G mixolydian — V-over-I suspension) + sparse held-note pump organ (Cmaj7 voicing); haunting/gentle | 0.235 / 0.30 |
 
 Final files live in `public/sounds/halo-music/{variation}-{ambient,melodic,layer3}.mp3`.
 
@@ -89,11 +89,11 @@ venv/bin/python process_r2.py
 # audit a stem against the synthesized in-game bass bed
 venv/bin/python ingame_mix.py render-bed mixaudit/bed.wav
 venv/bin/python ingame_mix.py analyze-mix \
-  mixaudit/bed.wav processed/r2-sb-ambient.mp3 mixaudit/check.wav --gain 0.30
+  mixaudit/bed.wav processed/musicbox-sb-ambient.mp3 mixaudit/check.wav --gain 0.30
 
 # inspect any wav/mp3
-venv/bin/python analyze.py inspect processed/r2-el-ambient.mp3
-venv/bin/python deepinspect.py processed/r2-el-ambient.mp3
+venv/bin/python analyze.py inspect processed/cinematic-el-ambient.mp3
+venv/bin/python deepinspect.py processed/cinematic-el-ambient.mp3
 
 # copy finals into the game's assets dir
 cp processed/r2-{el,sb}-{ambient,melodic}.mp3 ../../public/sounds/halo-music/

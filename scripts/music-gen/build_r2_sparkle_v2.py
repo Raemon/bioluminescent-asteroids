@@ -12,15 +12,15 @@ arp breathes — every 4th slot is a rest, landing on weak partials). 16 bars =
 Two variations (kept from v1 — same harmonic plan, same upper-voice melody
 across phrases; only the rhythm + timbre change):
 
-  r2-el-sparkle  Synth-arp ostinato on GM 88 (New Age Pad — bell attack +
+  cinematic-el-sparkle  Synth-arp ostinato on GM 88 (New Age Pad — bell attack +
                  short sustain, reads as cinematic-synthwave arp). Halo-pad
                  wash kept underneath (GM 101) for atmospheric depth so the
                  arp doesn't sound dry against EL's cinematic ambient.
 
-  r2-sb-sparkle  Mandolin tremolo / fast-pluck on GM 25 (Steel String Guitar)
+  musicbox-sb-sparkle  Mandolin tremolo / fast-pluck on GM 25 (Steel String Guitar)
                  driven at 16th-note speed — the "fast-pluck FluidSynth
                  ostinato" alternative to glockenspiel chimes. No wash; the
-                 r2-sb ambient is already a warm sine pad providing depth.
+                 musicbox-sb ambient is already a warm sine pad providing depth.
 
 Phrase harmony mirrors the v1 sparkle + the build_r2 ambient pad voicing:
   A   Cmaj + E top
@@ -118,7 +118,7 @@ def build_arp_events(channel: int, vel_base: int, vel_peak_phrase: int = 2,
 
 def build_wash_events(channel: int) -> list:
     """Sustained C+G open fifth held the entire 32-second loop, low velocity.
-    Used only by the r2-el-sparkle variation to give the arp atmospheric
+    Used only by the cinematic-el-sparkle variation to give the arp atmospheric
     depth (matches v1's halo-pad wash strategy). Phrase B briefly adds B5
     for the maj7 colour."""
     return [
@@ -129,7 +129,7 @@ def build_wash_events(channel: int) -> list:
 
 
 def main():
-    # --- r2-el-sparkle v2: synth arp + halo-pad wash ---
+    # --- cinematic-el-sparkle v2: synth arp + halo-pad wash ---
     # GM 88 = Pad 1 (New Age) — bell attack + short sustain. Sits at "synth
     # arpeggio" rather than "bell chime". Pairs cleanly with EL's cinematic
     # strings + felt piano.
@@ -142,10 +142,10 @@ def main():
     render_midi(el_midi, el_out, gain=0.7)
     print(f"wrote {el_out}  ({len(el_arp)} arp + {len(el_wash)} wash events)")
 
-    # --- r2-sb-sparkle v2: mandolin/fast-pluck ostinato ---
+    # --- musicbox-sb-sparkle v2: mandolin/fast-pluck ostinato ---
     # GM 25 = Steel String Guitar (warm fast pluck — readable as a tremolo
     # mandolin when driven at 16th-note speed). Drier voicing; no wash
-    # because the r2-sb ambient already provides warm-sine atmosphere.
+    # because the musicbox-sb ambient already provides warm-sine atmosphere.
     # Slightly higher vel_base than EL since the SB ambient/melodic stack
     # is also drier and we want the sparkle to cut through.
     sb_arp = build_arp_events(channel=0, vel_base=72,

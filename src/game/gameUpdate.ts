@@ -189,13 +189,14 @@ const transitionToGameOver = (game: Game) => {
   emitGameState(game);
 };
 
-import { HALO_MUSIC_POOL, PLAY_COMBO_MUSIC, pickHaloMusicVariation } from "./haloMusicConfig";
+import { HALO_MUSIC_POOL, PLAY_COMBO_MUSIC, pickHaloMusicVariation, pickHaloMusicVariationExcluding } from "./haloMusicConfig";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
 
 // yellow-halo (combo ≥ 4) opens the ambient pad; combo ≥ 6 adds the
 //   melodic layer; combo ≥ 12 adds layer 3 (a single new musical element per
 //   variation — lonely violin / felt glockenspiel / synth-bass arp / chime
-//   counter-melody); white-bullet tier (≥ 8) thickens the legacy synth pad
+//   counter-melody); combo ≥ 24 crossfades to a fresh random variation as
+//   the climax tier; white-bullet tier (≥ 8) thickens the legacy synth pad
 //   with an octave-up sparkle layer. Comet presence slides the colour-third
 //   from E→Eb so the pad stays consonant with the comet's phrygian shimmer
 //   instead of fighting it.
@@ -205,12 +206,17 @@ import { BASS_MEASURE_LENGTH } from "../Asteroid";
 //   same wave don't always sound the same. The chosen variation persists on
 //   game.sound.haloMusic.variation, so the 6x melodic-layer and 12x layer-3
 //   toggles use the same variation's stems (no half-EL/half-self-built
-//   mash-ups).
+//   mash-ups). At 24x we pick a *second* variation (excluding the current)
+//   and crossfade — that swap sticks until the next combo break, so
+//   dropping back below 24x but staying ≥ 4 doesn't bounce back.
 const syncHaloAmbient = (game: Game) => {
   const hasYellowHalo = game.beatCombo >= 4;
   const hasMelodic = game.beatCombo >= 6;
   const hasWhiteBullets = game.beatCombo >= 12;
   const hasLayer3 = game.beatCombo >= 12;
+  // 24x climax: crossfade to a fresh random variation. Sticks for the rest
+  // of the halo's life (no fallback if combo drops below 24x but stays ≥ 4).
+  const hasClimax = game.beatCombo >= 24;
 
   if (!PLAY_COMBO_MUSIC) {
     if (game.sound.haloMusic) game.sound.stopHaloMusic();
@@ -235,6 +241,12 @@ const syncHaloAmbient = (game: Game) => {
       } else {
         game.sound.setHaloMusicMelodicLayer(hasMelodic);
         game.sound.setHaloMusicLayer3(hasLayer3);
+        if (hasClimax && !game.sound.haloMusic.climaxActive) {
+          const next = pickHaloMusicVariationExcluding(game.sound.haloMusic.variation);
+          const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
+          const measureAlignDelay = nextDownbeat - game.beatTime;
+          void game.sound.crossfadeHaloMusic(next, measureAlignDelay);
+        }
       }
     } else if (game.sound.haloMusic) {
       game.sound.stopHaloMusic();

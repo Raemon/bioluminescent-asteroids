@@ -1,8 +1,8 @@
-"""Sum the r2-el ambient + melodic + new violin at game-realistic gains and
+"""Sum the cinematic-el ambient + melodic + new violin at game-realistic gains and
 analyze the result. Substitutes for ears: if the spectrum makes sense and
 the violin shows up at the right times without smashing the bed, we're OK.
 
-Game gain for r2-el is haloMusicGain (Sound.ts) — about 0.35 for ambient,
+Game gain for cinematic-el is haloMusicGain (Sound.ts) — about 0.35 for ambient,
 0.40 for melodic. Violin layer (layer3) target gain we set in Sound.ts.
 """
 from __future__ import annotations
@@ -50,8 +50,8 @@ def band_rms_db(y: np.ndarray, sr: int) -> dict[str, float]:
 
 
 def main(violin_path: str, violin_gain: float = 0.30):
-    ambient = load(PUB / "r2-el-ambient.mp3")
-    melodic = load(PUB / "r2-el-melodic.mp3")
+    ambient = load(PUB / "cinematic-el-ambient.mp3")
+    melodic = load(PUB / "cinematic-el-melodic.mp3")
     violin = load(Path(violin_path))
 
     # Match lengths
@@ -60,7 +60,7 @@ def main(violin_path: str, violin_gain: float = 0.30):
     melodic = melodic[:, :n]
     violin = violin[:, :n]
 
-    # Game-realistic gains (Sound.ts haloMusicGain for r2-el is ~0.35)
+    # Game-realistic gains (Sound.ts haloMusicGain for cinematic-el is ~0.35)
     G_AMB = 0.35
     G_MEL = 0.40
     G_VIO = violin_gain
@@ -85,12 +85,12 @@ def main(violin_path: str, violin_gain: float = 0.30):
         print(f"{band:<16} {b_without[band]:>9.2f} {b_with[band]:>9.2f} {delta:>+7.2f}")
 
     # Write the summed result so it can be auditioned by a listener
-    out = HERE / "mixaudit" / f"r2-el-stack-newviolin-g{int(violin_gain*100):03d}.wav"
+    out = HERE / "mixaudit" / f"cinematic-el-stack-newviolin-g{int(violin_gain*100):03d}.wav"
     sf.write(str(out), summed.T, SR, subtype="PCM_16")
     print(f"\nwrote {out}")
 
 
 if __name__ == "__main__":
-    violin_path = sys.argv[1] if len(sys.argv) > 1 else "processed/r2-el-percussion.mp3"
+    violin_path = sys.argv[1] if len(sys.argv) > 1 else "processed/cinematic-el-percussion.mp3"
     violin_gain = float(sys.argv[2]) if len(sys.argv) > 2 else 0.30
     main(violin_path, violin_gain)

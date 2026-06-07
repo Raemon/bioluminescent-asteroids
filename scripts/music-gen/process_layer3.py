@@ -8,10 +8,10 @@ Sound.ts's haloMusicUrl() expectation; the wire-in step copies them to
 public/sounds/halo-music/.
 
 Reverb settings per stem:
-  r2-sb (felt glockenspiel)   long warm hall — bells want room to ring
-  r3-el (synth-bass arp)      short plate — synth-bass wants tight low end
+  musicbox-sb (felt glockenspiel)   long warm hall — bells want room to ring
+  synthwave-el (synth-bass arp)      short plate — synth-bass wants tight low end
                               so it doesn't smear the kick register
-  r4-sb (counter-melody glock) short tight reverb so chime notes stay
+  flagship-sb (counter-melody glock) short tight reverb so chime notes stay
                               articulated and interlock cleanly with the
                               arp's 16ths
 """
@@ -104,12 +104,12 @@ def process_one(raw_name: str, out_name: str,
 def main():
     results = []
     plan = [
-        # r2-sb glock: long warm hall lets the bell tones ring into each other
-        ("r2-sb-layer3", "r2-sb-layer3", (55, 65, 80, 30)),
-        # r3-el synth-bass: tight short plate — keep low end articulate
-        ("r3-el-layer3", "r3-el-layer3", (15, 50, 40, 10)),
-        # r4-sb counter-glock: short tight verb — must interlock with arp
-        ("r4-sb-layer3", "r4-sb-layer3", (25, 60, 50, 15)),
+        # musicbox-sb glock: long warm hall lets the bell tones ring into each other
+        ("musicbox-sb-layer3", "musicbox-sb-layer3", (55, 65, 80, 30)),
+        # synthwave-el synth-bass: tight short plate — keep low end articulate
+        ("synthwave-el-layer3", "synthwave-el-layer3", (15, 50, 40, 10)),
+        # flagship-sb counter-glock: short tight verb — must interlock with arp
+        ("flagship-sb-layer3", "flagship-sb-layer3", (25, 60, 50, 15)),
     ]
     for raw, out, rev in plan:
         results.append(process_one(raw, out, rev))

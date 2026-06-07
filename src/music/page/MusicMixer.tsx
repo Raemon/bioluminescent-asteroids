@@ -9,6 +9,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PianoKeyboard } from "./PianoKeyboard";
+import { HALO_MUSIC_POOL } from "../../game/haloMusicConfig";
+import type { HaloMusicVariation } from "../../Sound";
 
 // Beat grid (seconds per quarter beat) and bass measure length must match the
 // game so the pulse here lines up with how it'd feel in real gameplay. See
@@ -21,13 +23,16 @@ const BEAT_GRID = 0.5;
 const BG_BEAT_DOWN_URL = "/sounds/baked/bgBeat__101.0000.mp3";
 const BG_BEAT_OFF_URL = "/sounds/baked/bgBeat__113.2000.mp3";
 
-type Variation = "r2-el" | "r2-sb" | "r3-el" | "r4-sb";
+// Driven off the canonical HALO_MUSIC_POOL so adding a variation in
+// haloMusicConfig.ts auto-surfaces here. Per-variation labels/blurbs/gains
+// still live in this map — add an entry when introducing a new variation
+// or the page falls back to a placeholder row.
+type Variation = Exclude<HaloMusicVariation, "none">;
 type Layer = "ambient" | "melodic" | "layer3";
 
 type StemKey = `${Variation}::${Layer}`;
 
 type VariationInfo = {
-  id: Variation;
   label: string;
   blurb: string;
   // In-game peak gains — shown as the slider defaults so the page mirrors
@@ -36,32 +41,49 @@ type VariationInfo = {
   gains: Record<Layer, number>;
 };
 
-const VARIATIONS: readonly VariationInfo[] = [
-  {
-    id: "r2-el",
-    label: "r2-el — cinematic bed + felt piano + lonely violin",
+const VARIATION_META: Record<Variation, VariationInfo> = {
+  "cinematic-el": {
+    label: "cinematic-el — cinematic bed + felt piano + lonely violin",
     blurb: "ElevenLabs cinematic bed (ambient) + felt piano (melodic) + a lonely solo violin (layer 3, FluidSynth strings).",
     gains: { ambient: 0.25, melodic: 0.25, layer3: 0.45 },
   },
-  {
-    id: "r2-sb",
-    label: "r2-sb — sine pad + felt piano + felt glockenspiel",
+  "musicbox-sb": {
+    label: "musicbox-sb — sine pad + felt piano + felt glockenspiel",
     blurb: "Procedural sine pad (ambient) + FluidSynth felt piano (melodic) + slow felt-mallet glockenspiel arpeggio (layer 3).",
     gains: { ambient: 0.30, melodic: 0.30, layer3: 0.40 },
   },
-  {
-    id: "r3-el",
-    label: "r3-el — Juno pad + soft lead + synth-bass arp",
+  "synthwave-el": {
+    label: "synthwave-el — Juno pad + soft lead + synth-bass arp",
     blurb: "ElevenLabs analog-synthwave Juno pad (ambient) + soft lead (melodic) + pulsed synth-bass arp on off-beats (layer 3).",
     gains: { ambient: 0.22, melodic: 0.22, layer3: 0.30 },
   },
-  {
-    id: "r4-sb",
-    label: "r4-sb — 16th-note arp + solo cello + female choir",
+  "flagship-sb": {
+    label: "flagship-sb — 16th-note arp + solo cello + female choir",
     blurb: "Rhythmic 16th-note arp (ambient) + slow solo-cello sustain (melodic) + sparse female-choir 'ahh' pad (layer 3). Cello + choir onsets land only on beats so nothing reads off-grid against the bass clock.",
     gains: { ambient: 0.25, melodic: 0.25, layer3: 0.45 },
   },
-];
+  "vaporwave-el": {
+    label: "vaporwave-el — glassy string-choir pad + felt bells + crystal glockenspiel",
+    blurb: "ElevenLabs dawn/vaporwave: glassy string-choir pad (ambient) + sparse felt-bell sustains (melodic) + bright crystal-glockenspiel arpeggio (layer 3). All stems live mid-upper register so the bass field stays clean.",
+    gains: { ambient: 0.25, melodic: 0.28, layer3: 0.32 },
+  },
+  "outerwilds-el": {
+    label: "outerwilds-el — drone pad + fingerpicked guitar + harmonica",
+    blurb: "ElevenLabs Outer-Wilds folk: distant drone pad (ambient) + fingerpicked acoustic guitar in G mixolydian (melodic, plucks quantized to the 8th-note grid) + slow held-note harmonica (layer 3). G-rooted melodic over the bass field's C — V-over-I suspension that never resolves.",
+    gains: { ambient: 0.22, melodic: 0.25, layer3: 0.30 },
+  },
+};
+
+const PLACEHOLDER_META: VariationInfo = {
+  label: "(missing label — add entry to VARIATION_META)",
+  blurb: "This variation is in HALO_MUSIC_POOL but has no metadata in MusicMixer.tsx. Defaults of 0.25 / 0.25 / 0.30 are used.",
+  gains: { ambient: 0.25, melodic: 0.25, layer3: 0.30 },
+};
+
+const VARIATIONS: readonly (VariationInfo & { id: Variation })[] = HALO_MUSIC_POOL.map((id) => ({
+  id: id as Variation,
+  ...(VARIATION_META[id as Variation] ?? PLACEHOLDER_META),
+}));
 
 const LAYERS: readonly Layer[] = ["ambient", "melodic", "layer3"];
 
@@ -409,7 +431,7 @@ export const MusicMixer = () => {
         </div>
       </header>
 
-      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
+      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-4 py-6">
         <p className="text-[13px] leading-relaxed text-[#9bb5d6]">
           Toggle any combination of variation × layer to hear them at once.
           Sliders adjust each layer&apos;s gain live; defaults match the in-game
@@ -419,27 +441,38 @@ export const MusicMixer = () => {
 
         <PianoKeyboard />
 
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="flex flex-col gap-3">
           {VARIATIONS.map((variation) => {
             const allOn = LAYERS.every((l) => playing[stemKey(variation.id, l)]);
             const anyOn = LAYERS.some((l) => playing[stemKey(variation.id, l)]);
+            // Split the label "rN-xx — descriptive name" into id + descriptor
+            // so the id can act as a stable left-edge anchor while the rest
+            // of the label flows into the blurb column.
+            const labelParts = variation.label.split(" — ");
+            const variationId = labelParts[0];
+            const variationDescriptor = labelParts.slice(1).join(" — ");
             return (
               <section
                 key={variation.id}
-                className="rounded-lg border border-[rgba(106,215,255,0.22)] bg-[rgba(106,215,255,0.04)] p-4 shadow-[0_0_24px_rgba(106,215,255,0.06)_inset]"
+                className="rounded-lg border border-[rgba(106,215,255,0.22)] bg-[rgba(106,215,255,0.04)] px-4 py-3 shadow-[0_0_24px_rgba(106,215,255,0.06)_inset]"
               >
-                <header className="mb-3 flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-[15px] font-semibold tracking-[0.14em] text-[#b8ecff]">
-                      {variation.label}
-                    </h2>
-                    <p className="mt-1 text-[12px] leading-relaxed text-[#9bb5d6]">{variation.blurb}</p>
+                <header className="mb-2 flex items-baseline gap-4">
+                  <h2 className="w-16 shrink-0 text-[15px] font-semibold tracking-[0.12em] text-[#b8ecff]">
+                    {variationId}
+                  </h2>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12px] font-medium tracking-[0.04em] text-[#d6ecff]">
+                      {variationDescriptor}
+                    </div>
+                    <p className="truncate text-[11px] leading-snug text-[#7a92b0]" title={variation.blurb}>
+                      {variation.blurb}
+                    </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => (allOn ? stopWholeVariation(variation.id) : playWholeVariation(variation.id))}
                     className={
-                      "shrink-0 rounded border px-3 py-1 text-[11px] uppercase tracking-[0.18em] " +
+                      "shrink-0 self-center rounded border px-3 py-1 text-[11px] uppercase tracking-[0.18em] " +
                       (anyOn
                         ? "border-[rgba(255,200,120,0.5)] bg-[rgba(255,200,120,0.1)] text-[#ffd49b]"
                         : "border-[rgba(106,215,255,0.4)] bg-[rgba(106,215,255,0.08)] text-[#6ad7ff]")
@@ -449,19 +482,27 @@ export const MusicMixer = () => {
                   </button>
                 </header>
 
-                <div className="flex flex-col gap-2">
+                <div className="grid grid-cols-3 gap-3 pl-20">
                   {LAYERS.map((layer) => {
                     const key = stemKey(variation.id, layer);
                     const status = bufStatus[key];
                     const isPlaying = !!playing[key];
+                    const statusColor =
+                      status === "ready"
+                        ? "bg-[#7bd58e]"
+                        : status === "loading"
+                          ? "bg-[#ffd49b] animate-pulse"
+                          : status === "error"
+                            ? "bg-[#ff9b9b]"
+                            : "bg-[#3a4a5f]";
                     return (
                       <div
                         key={layer}
                         className={
-                          "flex items-center gap-3 rounded border px-3 py-2 " +
+                          "grid grid-cols-[3.5rem_4.5rem_1fr_auto] items-center gap-2 rounded border px-2.5 py-1.5 " +
                           (isPlaying
                             ? "border-[rgba(106,215,255,0.45)] bg-[rgba(106,215,255,0.08)]"
-                            : "border-[rgba(106,215,255,0.12)] bg-[rgba(8,12,20,0.6)]")
+                            : "border-[rgba(106,215,255,0.12)] bg-[rgba(8,12,20,0.5)]")
                         }
                       >
                         <button
@@ -469,7 +510,7 @@ export const MusicMixer = () => {
                           onClick={() => void togglePlay(variation.id, layer)}
                           disabled={status === "error"}
                           className={
-                            "w-20 shrink-0 rounded border px-2 py-1 text-[11px] uppercase tracking-[0.18em] " +
+                            "rounded border px-1 py-0.5 text-[10px] uppercase tracking-[0.16em] " +
                             (isPlaying
                               ? "border-[rgba(255,200,120,0.5)] bg-[rgba(255,200,120,0.18)] text-[#ffd49b]"
                               : "border-[rgba(106,215,255,0.4)] bg-[rgba(106,215,255,0.08)] text-[#6ad7ff]") +
@@ -478,9 +519,15 @@ export const MusicMixer = () => {
                         >
                           {isPlaying ? "stop" : "play"}
                         </button>
-                        <span className="w-20 shrink-0 text-[12px] uppercase tracking-[0.18em] text-[#9bb5d6]">
-                          {layer}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={"inline-block h-1.5 w-1.5 shrink-0 rounded-full " + statusColor}
+                            title={status}
+                          />
+                          <span className="text-[10px] uppercase tracking-[0.16em] text-[#9bb5d6]">
+                            {layer}
+                          </span>
+                        </div>
                         <input
                           type="range"
                           min={0}
@@ -490,33 +537,16 @@ export const MusicMixer = () => {
                           onChange={(e) =>
                             setGains((g) => ({ ...g, [key]: parseFloat(e.target.value) }))
                           }
-                          className="flex-1 accent-[#6ad7ff]"
+                          className="min-w-0 accent-[#6ad7ff]"
                         />
-                        <span className="w-12 shrink-0 text-right text-[12px] tabular-nums text-[#d6ecff]">
-                          {gains[key].toFixed(3)}
-                        </span>
                         <button
                           type="button"
                           onClick={() => setGains((g) => ({ ...g, [key]: variation.gains[layer] }))}
                           title={`Reset to in-game default (${variation.gains[layer].toFixed(3)})`}
-                          className="w-14 shrink-0 rounded border border-[rgba(106,215,255,0.2)] bg-transparent px-1 py-1 text-[10px] uppercase tracking-[0.14em] text-[#9bb5d6] hover:text-[#d6ecff]"
+                          className="w-12 shrink-0 text-right text-[11px] tabular-nums text-[#d6ecff] hover:text-[#6ad7ff]"
                         >
-                          reset
+                          {gains[key].toFixed(3)}
                         </button>
-                        <span
-                          className={
-                            "w-16 shrink-0 text-right text-[10px] uppercase tracking-[0.14em] " +
-                            (status === "ready"
-                              ? "text-[#7bd58e]"
-                              : status === "loading"
-                                ? "text-[#ffd49b]"
-                                : status === "error"
-                                  ? "text-[#ff9b9b]"
-                                  : "text-[#5a7593]")
-                          }
-                        >
-                          {status}
-                        </span>
                       </div>
                     );
                   })}

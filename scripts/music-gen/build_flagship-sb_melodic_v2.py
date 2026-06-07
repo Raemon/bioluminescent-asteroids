@@ -1,7 +1,7 @@
-"""Replacement r4-sb-melodic: smooth synth (GM 82 Calliope) with a new
+"""Replacement flagship-sb-melodic: smooth synth (GM 82 Calliope) with a new
 melodic line that breathes in the gaps left by the sparkle cascade.
 
-Constraints inherited from r4-sb:
+Constraints inherited from flagship-sb:
   - 32s loop, 4 phrases x 4 bars at 120 BPM
   - Phrase order A / A' / B / A2 (B = Cmaj7 colour, others minor-3rd)
   - C-pedal harmony, sits above the arp (above G4) and below sparkle C6 peak
@@ -84,9 +84,9 @@ def build_melodic_v2_events():
 
 
 def main():
-    print("rendering r4-sb-melodic v2 (FluidSynth GM 82 calliope)...")
+    print("rendering flagship-sb-melodic v2 (FluidSynth GM 82 calliope)...")
     midi = build_stem(build_melodic_v2_events(), programs={0: 82})
-    out = OUT / "r4-sb-melodic.wav"
+    out = OUT / "flagship-sb-melodic.wav"
     render_midi(midi, out, gain=0.60)
     print(f"  wrote {out}")
 

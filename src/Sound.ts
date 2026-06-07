@@ -115,13 +115,13 @@ type HaloAmbientNode = {
 // The user picks one at HALO_MUSIC_VARIATION; "none" falls back to the legacy
 // synthesized startHaloAmbient pad.
 export type HaloMusicVariation =
-  | "r2-el"   // ElevenLabs 32-second C-pedal cinematic bed + sustained-tone piano
-  | "r2-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
-  | "r3-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + layer 3
-  | "r4-sb"   // 32-second C-pedal flagship — pulsing arp (ambient) + solo cello (melodic, VPO3) + female choir (layer 3, VPO3); all onsets on-beat
-  | "r5-el"   // ElevenLabs 32-second C-pedal dawn/vaporwave — glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio
-  | "r6-el"   // ElevenLabs 32-second Outer-Wilds folk — distant A-rooted drone pad + fingerpicked G-rooted acoustic guitar + F-rooted harmonica (I-IV-V suspension over the bass field's C)
-  | "none";   // Legacy synthesized pad (the original startHaloAmbient)
+  | "cinematic-el"   // ElevenLabs 32-second C-pedal cinematic bed + sustained-tone piano
+  | "musicbox-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
+  | "synthwave-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + layer 3
+  | "flagship-sb"    // 32-second C-pedal flagship — pulsing arp (ambient) + solo cello (melodic, VPO3) + female choir (layer 3, VPO3); all onsets on-beat
+  | "vaporwave-el"   // ElevenLabs 32-second C-pedal dawn/vaporwave — glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio
+  | "outerwilds-el"  // ElevenLabs 32-second Outer-Wilds folk — distant drone pad + fingerpicked G-rooted acoustic guitar + C-rooted pump-organ held notes (V-over-I suspension on the guitar over the bass field's C)
+  | "none";          // Legacy synthesized pad (the original startHaloAmbient)
 
 type HaloMusicNode = {
   // Three looping AudioBufferSourceNodes — ambient runs whenever music is
@@ -146,6 +146,11 @@ type HaloMusicNode = {
   melodicActive: boolean;
   // Whether layer 3 is currently ducked-up (combo ≥ 12) or down.
   layer3Active: boolean;
+  // True once the 24x climax crossfade has fired for this halo. Sticks until
+  // the halo tears down (combo break) so the swap doesn't re-trigger every
+  // tick combo stays ≥ 24, and so dropping back below 24 (but still ≥ 4)
+  // doesn't bounce back to the old variation.
+  climaxActive: boolean;
 };
 
 // Optional pan + distance-falloff splice. When a sound (one-shot or drone)
@@ -2565,19 +2570,19 @@ export class Sound {
   // touch less gain to match perceived loudness with the self-built stems.
   private haloMusicGain(variation: HaloMusicVariation): number {
     switch (variation) {
-      case "r2-el": return 0.25;
-      case "r2-sb": return 0.30;
-      // r3-el is an EL-generated analog synth pad with 42% energy in 60-200
+      case "cinematic-el": return 0.25;
+      case "musicbox-sb": return 0.30;
+      // synthwave-el is an EL-generated analog synth pad with 42% energy in 60-200
       // and 44% in 200-500. At gain 0.22 the melodic layer's lo-mid sits
       // +6.8 dB above the ≥4 dB pass threshold. Going higher risks the
       // analog pad fighting the bass field.
-      case "r3-el": return 0.22;
-      // r4-sb pairs the rhythmic 16th-note arp ambient with a slow solo-cello
+      case "synthwave-el": return 0.22;
+      // flagship-sb pairs the rhythmic 16th-note arp ambient with a slow solo-cello
       // melodic line (VPO3 sustain). Every cello onset lands on a quarter-beat
       // (mostly downbeats), so the layer never punches off-grid against the
       // bass clock. Audit at gain 0.25 keeps lo-mid clean by +7 dB; bass +20 dB.
-      case "r4-sb": return 0.25;
-      // r5-el is a bright EL dawn/vaporwave variation. Ambient = glassy
+      case "flagship-sb": return 0.25;
+      // vaporwave-el is a bright EL dawn/vaporwave variation. Ambient = glassy
       // string-choir pad in the mid-upper register; melodic = sparse felt-bell
       // sustains. Both layers were generated to live above the bass band
       // (ambient lo-mid 46%, melodic mid 60%) so the bass field stays clean.
@@ -2585,8 +2590,8 @@ export class Sound {
       // +26 dB margin in the audit. peakGain controls ambient+melodic; the
       // pair value is 0.27 (midpoint between the two stem gains, since
       // setHaloMusicMelodicLayer ramps the melodic gain to peakGain).
-      case "r5-el": return 0.27;
-      // r6-el is the Outer-Wilds folk variation. Ambient = distant dark
+      case "vaporwave-el": return 0.27;
+      // outerwilds-el is the Outer-Wilds folk variation. Ambient = distant dark
       // drone pad (HPF'd at 200 Hz to keep the bass kit clear); melodic =
       // fingerpicked acoustic guitar in G mixolydian (G-rooted over the
       // bass field's C — a V-over-I suspension, never resolving, which
@@ -2594,7 +2599,7 @@ export class Sound {
       // so peakGain returns the midpoint of the ambient (0.22) and melodic
       // (0.25) stem gains used in the audit. Full 3-layer stack leaves
       // lo-mid +4.5 dB, bass +20 dB headroom against the bass field.
-      case "r6-el": return 0.235;
+      case "outerwilds-el": return 0.235;
       default:      return 0.30;
     }
   }
@@ -2607,22 +2612,23 @@ export class Sound {
   // build_layer3.py for the per-variation design).
   private haloMusicLayer3Gain(variation: HaloMusicVariation): number {
     switch (variation) {
-      case "r2-el": return 0.22;   // solo violin, three single-pitch bow strokes (A4, C5, G4)
-      case "r2-sb": return 0.40;   // warm felt-glockenspiel arpeggio
-      case "r3-el": return 0.30;   // synthwave plucked synth-bass arp
-      // r4-sb layer 3 is a VPO3 female-choir "ahh" pad. Onsets only on phrase
+      case "cinematic-el": return 0.22;   // solo violin, three single-pitch bow strokes (A4, C5, G4)
+      case "musicbox-sb": return 0.40;   // warm felt-glockenspiel arpeggio
+      case "synthwave-el": return 0.30;   // synthwave plucked synth-bass arp
+      // flagship-sb layer 3 is a VPO3 female-choir "ahh" pad. Onsets only on phrase
       // downbeats (beats 0 and 8 of each 16-beat phrase) so the slow choir
       // attack hides any rhythmic poke. Choir RMS is very soft (-32 dBFS) so
       // gain 0.45 still leaves +5 dB lo-mid headroom in the full 3-layer mix.
-      case "r4-sb": return 0.45;
-      // r5-el layer3 is a bright crystal-glockenspiel arpeggio in the upper
+      case "flagship-sb": return 0.45;
+      // vaporwave-el layer3 is a bright crystal-glockenspiel arpeggio in the upper
       // register. Audit at gain 0.32 (in the full 3-layer mix above) leaves
       // lo-mid +5.8 dB and mid +5.9 dB margin against the bass field.
-      case "r5-el": return 0.32;
-      // r6-el layer3 is a slow held-note harmonica line, F-rooted, in the
-      // mid register. Audit in the full 3-layer stack at gain 0.30 leaves
-      // lo-mid +4.5 dB and mid +12.7 dB margin against the bass field.
-      case "r6-el": return 0.30;
+      case "vaporwave-el": return 0.32;
+      // outerwilds-el layer3 is sparse held-note pump organ (3 long notes per
+      // 32s loop), C-rooted in the upper register (C5/E5/G5/B5 = Cmaj7
+      // voicing). HPF'd at 500 Hz so the organ's lo-mid overtones clear
+      // the bass kit. Full 3-layer stack at gain 0.30 leaves lo-mid +3.1 dB.
+      case "outerwilds-el": return 0.30;
       default:      return 0.40;
     }
   }
@@ -2765,6 +2771,111 @@ export class Sound {
       ambientGain, melodicGain, layer3Gain, mainGain,
       variation, melodicActive,
       layer3Active: layer3Active && layer3Src !== null,
+      climaxActive: false,
+    };
+  }
+
+  // 24x climax crossfade. Builds a fresh HaloMusicNode for `variation` and
+  // swaps it in over a symmetric ~2s crossfade — the outgoing track fades to
+  // silence on its mainGain while the new track fades up on its per-layer
+  // gains. Both tracks play simultaneously through the crossfade window, then
+  // the outgoing buffer sources are stopped.
+  //
+  // The new track starts at full layer stack (ambient + melodic + layer3 all
+  // active) because the climax tier is gated at combo ≥ 24, which is above
+  // every existing layer threshold.
+  //
+  // Aligned to the next bass-measure boundary so the new track's downbeat
+  // lands on the bass clock, same as startHaloMusic.
+  async crossfadeHaloMusic(variation: HaloMusicVariation,
+                           measureAlignDelay: number = 0): Promise<void> {
+    if (variation === "none") return;
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    if (!this.haloMusic) return;
+    if (this.haloMusic.variation === variation) return;
+
+    const outgoing = this.haloMusic;
+    // Reserve the climax slot synchronously so a re-entrant call (or a
+    // rapid combo bounce) doesn't kick off a second crossfade while the
+    // buffers for this one are still loading.
+    outgoing.climaxActive = true;
+
+    const [ambientBuf, melodicBuf, layer3Buf] = await Promise.all([
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient")),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic")),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3")),
+    ]);
+    if (!this.ctx || !this.master) return;
+    if (!ambientBuf || !melodicBuf) return;
+    // Outgoing was torn down (combo broke) while we awaited the decode —
+    // bail without starting the new track so we don't strand it.
+    if (this.haloMusic !== outgoing) return;
+
+    const CROSSFADE_SEC = 2.0;
+    const t = this.ctx.currentTime;
+    const startAt = t + Math.max(0, measureAlignDelay);
+    const ambientSrc = this.ctx.createBufferSource();
+    const melodicSrc = this.ctx.createBufferSource();
+    ambientSrc.buffer = ambientBuf;
+    melodicSrc.buffer = melodicBuf;
+    ambientSrc.loop = true;
+    melodicSrc.loop = true;
+
+    const peakGain = this.haloMusicGain(variation);
+
+    const ambientGain = this.ctx.createGain();
+    ambientGain.gain.setValueAtTime(0.0001, startAt);
+    ambientGain.gain.exponentialRampToValueAtTime(peakGain, startAt + CROSSFADE_SEC);
+
+    const melodicGain = this.ctx.createGain();
+    melodicGain.gain.setValueAtTime(0.0001, startAt);
+    melodicGain.gain.exponentialRampToValueAtTime(peakGain, startAt + CROSSFADE_SEC);
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.value = 1.0;
+
+    ambientSrc.connect(ambientGain);
+    melodicSrc.connect(melodicGain);
+    ambientGain.connect(mainGain);
+    melodicGain.connect(mainGain);
+    if (this.chMusicLive) mainGain.connect(this.chMusicLive);
+
+    let layer3Src: AudioBufferSourceNode | null = null;
+    let layer3Gain: GainNode | null = null;
+    if (layer3Buf) {
+      const layer3Peak = this.haloMusicLayer3Gain(variation);
+      layer3Src = this.ctx.createBufferSource();
+      layer3Src.buffer = layer3Buf;
+      layer3Src.loop = true;
+      layer3Gain = this.ctx.createGain();
+      layer3Gain.gain.setValueAtTime(0.0001, startAt);
+      layer3Gain.gain.exponentialRampToValueAtTime(layer3Peak, startAt + CROSSFADE_SEC);
+      layer3Src.connect(layer3Gain);
+      layer3Gain.connect(mainGain);
+    }
+
+    ambientSrc.start(startAt);
+    melodicSrc.start(startAt);
+    if (layer3Src) layer3Src.start(startAt);
+
+    // Fade the outgoing track out over the same window, then stop its sources.
+    outgoing.mainGain.gain.cancelScheduledValues(t);
+    outgoing.mainGain.gain.setValueAtTime(outgoing.mainGain.gain.value, t);
+    outgoing.mainGain.gain.setValueAtTime(outgoing.mainGain.gain.value, startAt);
+    outgoing.mainGain.gain.exponentialRampToValueAtTime(0.0001, startAt + CROSSFADE_SEC);
+    const outgoingStopAt = startAt + CROSSFADE_SEC + 0.1;
+    outgoing.ambientSrc.stop(outgoingStopAt);
+    outgoing.melodicSrc.stop(outgoingStopAt);
+    if (outgoing.layer3Src) outgoing.layer3Src.stop(outgoingStopAt);
+
+    this.haloMusic = {
+      ambientSrc, melodicSrc, layer3Src,
+      ambientGain, melodicGain, layer3Gain, mainGain,
+      variation, melodicActive: true,
+      layer3Active: layer3Src !== null,
+      climaxActive: true,
     };
   }
 
@@ -4824,10 +4935,10 @@ export class Sound {
   // kill. All variants open with the same three universal anchor notes on a
   // C pedal (C2 → G2 → D3 — root, fifth, ninth), then branch into a scale
   // that matches the currently-playing halo music's modal colour:
-  //   r2-sb / r2-el / r4-sb → C minor / dorian-leaning (haunting Eb, Bb)
-  //   r3-el                 → C major pentatonic (open, hopeful)
+  //   musicbox-sb / cinematic-el / flagship-sb → C minor / dorian-leaning (haunting Eb, Bb)
+  //   synthwave-el                 → C major pentatonic (open, hopeful)
   //   no music (default)    → C dorian without 3rd (mode-neutral)
-  // r4-sb additionally drifts toward Cmaj7 colour at higher combos so the line
+  // flagship-sb additionally drifts toward Cmaj7 colour at higher combos so the line
   // crosses the same major/minor ambiguity its arp does.
   // Voice: soft sine pad — slow attack, long round decay, gentle detune for
   // analog-synth warmth. No spatial panning: a melody should sit centered in
@@ -4864,7 +4975,7 @@ export class Sound {
     ];
     const TAIL_BITTERSWEET: number[] = [
       // E, G, Bb, C, Eb, F, G, Bb, C, D, Eb, G, Bb — smears Eb (minor3) with
-      // E natural and Bb (Cmaj7 longing). r4-sb cycles all three colours, so
+      // E natural and Bb (Cmaj7 longing). flagship-sb cycles all three colours, so
       // the chime crosses them too instead of committing to one.
       164.81, 196.00, 233.08, 261.63, 311.13,
       349.23, 392.00, 466.16, 523.25, 587.33,
@@ -4880,9 +4991,9 @@ export class Sound {
     ];
     const tailFor = (): number[] => {
       const v = this.haloMusic?.variation;
-      if (v === "r3-el") return TAIL_MAJOR;
-      if (v === "r4-sb") return TAIL_BITTERSWEET;
-      if (v === "r2-sb" || v === "r2-el") return TAIL_MINOR_DORIAN;
+      if (v === "synthwave-el") return TAIL_MAJOR;
+      if (v === "flagship-sb") return TAIL_BITTERSWEET;
+      if (v === "musicbox-sb" || v === "cinematic-el") return TAIL_MINOR_DORIAN;
       return TAIL_NO_3RD;
     };
     const scale = [...ANCHOR_HZ, ...tailFor()];

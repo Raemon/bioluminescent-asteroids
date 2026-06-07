@@ -30,6 +30,12 @@ import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
 // re-export so existing external imports (Ship.ts) keep working without touching their imports.
 export { BEAT_GRID } from "./game/rhythmConstants";
 
+// Fixed 16:9 logical playfield. Every entity (ship, bullets, asteroids, stars)
+// sizes itself against game.w/game.h, so locking these to constants keeps the
+// relative scale of the world identical at any window size or browser zoom.
+export const LOGICAL_W = 1920;
+export const LOGICAL_H = 1080;
+
 type GameState = "title" | "playing" | "paused" | "dying" | "gameover" | "replaying";
 
 // Game holds the cross-cutting state every helper in src/game/* reads; behavior lives in modules.
@@ -382,10 +388,11 @@ export class Game implements HudElements {
     showTitle(this);
   }
 
-  // DPR-aware resize keeps the canvas crisp; the starfield/pulsar need their own resize too.
-  //   During replay we lock the sim to the recorded w/h/dpr so spawn positions
-  //   and edge-wrap reproduce exactly; the canvas is CSS-scaled to fit the live
-  //   window with letterbox bars (renderer stays in logical sim coords).
+  // Fixed-resolution renderer: the sim always runs at LOGICAL_W x LOGICAL_H,
+  //   and the canvas is CSS-scaled to the largest 16:9 box that fits the live
+  //   window (centered, with black letterbox/pillar bars filling the rest).
+  //   Backing store stays DPR-crisp. Replay locks to the recorded dims and
+  //   uses the same fit-and-center math.
   resize() {
     const locked = this.replayLockedDims;
     if (locked) {
@@ -394,29 +401,22 @@ export class Game implements HudElements {
       this.dpr = locked.dpr;
     } else {
       this.dpr = window.devicePixelRatio || 1;
-      this.w = window.innerWidth;
-      this.h = window.innerHeight;
+      this.w = LOGICAL_W;
+      this.h = LOGICAL_H;
     }
     this.canvas.width = this.w * this.dpr;
     this.canvas.height = this.h * this.dpr;
-    if (locked) {
-      const liveW = window.innerWidth;
-      const liveH = window.innerHeight;
-      const scale = Math.min(liveW / this.w, liveH / this.h);
-      const cssW = this.w * scale;
-      const cssH = this.h * scale;
-      this.canvas.style.width = `${cssW}px`;
-      this.canvas.style.height = `${cssH}px`;
-      this.canvas.style.position = "absolute";
-      this.canvas.style.left = `${(liveW - cssW) / 2}px`;
-      this.canvas.style.top = `${(liveH - cssH) / 2}px`;
-    } else {
-      this.canvas.style.width = `${this.w}px`;
-      this.canvas.style.height = `${this.h}px`;
-      this.canvas.style.position = "";
-      this.canvas.style.left = "";
-      this.canvas.style.top = "";
-    }
+    const liveW = window.innerWidth;
+    const liveH = window.innerHeight;
+    const scale = Math.min(liveW / this.w, liveH / this.h);
+    const cssW = this.w * scale;
+    const cssH = this.h * scale;
+    this.canvas.style.width = `${cssW}px`;
+    this.canvas.style.height = `${cssH}px`;
+    this.canvas.style.position = "absolute";
+    this.canvas.style.inset = "auto";
+    this.canvas.style.left = `${(liveW - cssW) / 2}px`;
+    this.canvas.style.top = `${(liveH - cssH) / 2}px`;
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     if (this.starfield) this.starfield.resize(this.w, this.h);
     if (this.pulsar) this.pulsar.resize(this.w, this.h);
