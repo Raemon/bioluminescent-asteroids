@@ -9,6 +9,7 @@ import {
   spawnBeatDebugPopup,
   evaluateClosedBeats,
   currentBeatPulse,
+  comboGrid,
 } from "./rhythmGate";
 import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } from "./bassClock";
 import { tickWaveEvents } from "./waveEvents";
@@ -491,6 +492,27 @@ const compactInPlace = <T>(arr: T[], alive: (item: T) => boolean): void => {
   arr.length = write;
 };
 
+// reticules sit at integer multiples of the rhythm grid out from the muzzle, so a bullet
+// "crosses" its Nth reticule when its age passes N * grid. Each unseen crossing samples the
+// beat window — if on-beat, flash white. Crossings are tracked per-bullet so a flash only
+// triggers once per slot, and we count up to whatever the bullet's age has reached.
+const FLASH_DURATION_SEC = 0.12;
+const tickBulletReticuleCrossings = (game: Game) => {
+  const grid = comboGrid(game);
+  if (grid <= 0) return;
+  for (const b of game.bullets) {
+    const age = b.maxLife - b.life;
+    const expected = Math.floor(age / grid);
+    if (expected > b.reticuleCrossings) {
+      // grid can halve mid-flight (combo crossing 16); snap to the new count without
+      // firing a burst of phantom flashes for the past.
+      b.reticuleCrossings = expected;
+      const crossingTime = b.firedAtBeatTime + expected * grid;
+      if (isInBeatWindow(game, crossingTime)) b.flashTimer = FLASH_DURATION_SEC;
+    }
+  }
+};
+
 // slow-mo slows the whole world via musicDt — asteroids, comets, aliens, bullets, shards, canisters.
 //   Ship stays on wall-clock dt (updated earlier) so player reactions feel responsive.
 const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
@@ -501,6 +523,7 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   pruneOffscreenAliens(game);
   tickAlienFire(game);
   for (const b of game.bullets) b.update(musicDt, game.w, game.h);
+  tickBulletReticuleCrossings(game);
   compactInPlace(game.bullets, (b) => b.life > 0);
   for (const l of game.lasers) l.update(musicDt);
   compactInPlace(game.lasers, (l) => l.alive);

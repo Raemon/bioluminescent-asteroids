@@ -9,6 +9,18 @@ import {
   paintAimDiscs,
 } from "./aimDisc";
 import { PRONG_SPREAD } from "../shipWeapons";
+import { BULLET_HIT_RADIUS_ON_BEAT } from "./trajectoryPreview";
+import { toroidalDelta } from "./coneGeometry";
+
+// stationary hover probe — drives the same per-slot ring lock / hum stack as a moving target,
+// but proximity is measured directly against the probe's current position (no trajectory walk),
+// so parked gems still trigger "First Dot" feedback the trajectory system would miss.
+export type ReticuleHoverProbe = { pos: Vec; radius: number };
+// matches the dot-trajectory walk's overlap band (BULLET_HIT_RADIUS_ON_BEAT + probe radius);
+// the smoothstep pad mirrors TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD so probe-locks feel the
+// same as target-locks.
+const PROBE_PROXIMITY_PAD = 24;
+const PROBE_ZONE_RADIUS = 75;
 
 // hitbox alpha for the not-hovering reticule — this IS the final alpha (no hidden downstream
 // multipliers), so tweak these to brighten/dim the resting reticule directly.
@@ -281,6 +293,9 @@ export const renderShipReticules = (
   //   heard mix on the true grid, so the caller passes the raw clock separately.
   audioBeatTime: number = beatTime,
   superBoosted: boolean = false,
+  // stationary "First Dot" probes (e.g. gold crystals). Trajectory walk skips speed<1
+  // targets, so parked objects need a direct reticule-proximity pass.
+  hoverProbes: ReadonlyArray<ReticuleHoverProbe> = [],
 ) => {
   if (!ship.alive) return;
   const { positions: reticulePositions, primaryIndex, slotPositionIndices } = computeReticulePositions(ship, beatGrid, w, h, doubletime, superBoosted);
@@ -341,13 +356,18 @@ export const renderShipReticules = (
   //   zoneIntensity (75px approach zone) → soft outer C4 hum + contracting approach ring
   //   anyHover (tight target area)       → octave-up C5 hum + the dashed lock ring begins filling
   //   anyLocked (ring finished filling)  → the perfect-fifth G4 hum joins
+  // probe pass: fold each stationary probe's reticule-proximity into the same per-slot
+  // arrays the trajectory walk produced, so a parked gem drives the same lock + hum stack.
+  const probeMerged = mergeProbeProximities(
+    trajectoryResult, hoverProbes, reticulesBySlot, w, h,
+  );
   let zoneIntensity = 0;
   let anyHover = false;
   let anyLocked = false;
   for (let slot = 0; slot < slotPositionIndices.length; slot++) {
-    const proximity = trajectoryResult.slotProximities[slot] ?? 0;
-    const within75 = trajectoryResult.slotWithin75[slot] ?? false;
-    const winnerIdx = trajectoryResult.slotWinnerReticuleIdx[slot] ?? -1;
+    const proximity = probeMerged.slotProximities[slot] ?? 0;
+    const within75 = probeMerged.slotWithin75[slot] ?? false;
+    const winnerIdx = probeMerged.slotWinnerReticuleIdx[slot] ?? -1;
     const positionIdxs = slotPositionIndices[slot];
     const ringPosIdx = winnerIdx >= 0 && winnerIdx < positionIdxs.length ? positionIdxs[winnerIdx] : -1;
     const ringState = state.hoverDotRings[slot];
@@ -377,6 +397,57 @@ export const renderShipReticules = (
     else sound.stopFirstDotLockHum();
   }
   ctx.restore();
+};
+
+// smoothstep proximity ramp from "touching the probe" (1) out to PROBE_PROXIMITY_PAD past it (0).
+// Mirrors firstDotProximity01 in trajectoryPreview, but uses the probe's own radius so the lock
+// fires when the reticule grazes the visible gem rather than a fixed dot-size budget.
+const probeProximity01 = (retX: number, retY: number, px: number, py: number, probeRadius: number): number => {
+  const dx = px - retX;
+  const dy = py - retY;
+  const dist = Math.hypot(dx, dy);
+  const overlapDist = BULLET_HIT_RADIUS_ON_BEAT + probeRadius;
+  if (dist <= overlapDist) return 1;
+  const outerDist = overlapDist + PROBE_PROXIMITY_PAD;
+  if (dist >= outerDist) return 0;
+  const t = 1 - (dist - overlapDist) / PROBE_PROXIMITY_PAD;
+  return t * t * (3 - 2 * t);
+};
+
+// merge probe contributions into the trajectory result's per-slot proximity/zone/winner arrays.
+// Each probe is tested against every reticule of every slot; the maximum proximity wins. Uses
+// toroidalDelta so probes near the wrapped edge still register against the corresponding reticule.
+const mergeProbeProximities = (
+  base: { slotProximities: number[]; slotWithin75: boolean[]; slotWinnerReticuleIdx: number[] },
+  probes: ReadonlyArray<ReticuleHoverProbe>,
+  reticulesBySlot: Vec[][],
+  w: number, h: number,
+): { slotProximities: number[]; slotWithin75: boolean[]; slotWinnerReticuleIdx: number[] } => {
+  if (probes.length === 0) return base;
+  const slotCount = reticulesBySlot.length;
+  const slotProximities = base.slotProximities.slice();
+  const slotWithin75 = base.slotWithin75.slice();
+  const slotWinnerReticuleIdx = base.slotWinnerReticuleIdx.slice();
+  for (let slot = 0; slot < slotCount; slot++) {
+    const reticules = reticulesBySlot[slot];
+    if (reticules.length === 0) continue;
+    for (let r = 0; r < reticules.length; r++) {
+      const ret = reticules[r];
+      for (const probe of probes) {
+        const [dx, dy] = toroidalDelta(probe.pos.x - ret.x, probe.pos.y - ret.y, w, h);
+        const px = ret.x + dx;
+        const py = ret.y + dy;
+        const proximity = probeProximity01(ret.x, ret.y, px, py, probe.radius);
+        if (proximity > slotProximities[slot]) {
+          slotProximities[slot] = proximity;
+          slotWinnerReticuleIdx[slot] = r;
+        }
+        const zoneEdge = PROBE_ZONE_RADIUS + probe.radius;
+        if (dx * dx + dy * dy <= zoneEdge * zoneEdge) slotWithin75[slot] = true;
+      }
+    }
+  }
+  return { slotProximities, slotWithin75, slotWinnerReticuleIdx };
 };
 
 // soft swell 0→1 from time-in-zone: holds silent for DELAY (so a passing graze doesn't ping),

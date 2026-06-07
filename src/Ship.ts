@@ -10,7 +10,7 @@ import { tickShip } from "./ship/shipPhysics";
 import { fireBullets, applyPowerup } from "./ship/shipWeapons";
 import { setComboFromValue } from "./ship/shipComboHalo";
 import { renderShipBody } from "./ship/shipRender";
-import { renderShipReticules } from "./ship/reticule/reticuleRender";
+import { renderShipReticules, ReticuleHoverProbe } from "./ship/reticule/reticuleRender";
 import { ReticuleTarget, TrajectoryTrackMap } from "./ship/reticule/trajectoryPreview";
 
 // BEAT_GRID is re-exported from Game.ts for backwards compatibility; Ship code reads it directly here.
@@ -135,8 +135,9 @@ export class Ship {
     targets: ReadonlyArray<ReticuleTarget> = [], beatTime: number = 0, doubletime: boolean = false,
     tutorialHighlight: boolean = false, sound: Sound | null = null, audioBeatTime: number = beatTime,
     superBoosted: boolean = false,
+    hoverProbes: ReadonlyArray<ReticuleHoverProbe> = [],
   ) {
-    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRings: this.hoverDotRingStates }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight, sound, audioBeatTime, superBoosted);
+    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRings: this.hoverDotRingStates }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight, sound, audioBeatTime, superBoosted, hoverProbes);
   }
 
   // hull + thrust + retro + shield + combo halo all composite together in one save/restore block.

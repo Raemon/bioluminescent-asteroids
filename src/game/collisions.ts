@@ -13,6 +13,7 @@ import {
   spawnCanisterFromGoldCrystal,
 } from "../GoldCrystal";
 import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebaseBeatEval } from "./rhythmGate";
+import { BEAT_GRID } from "./rhythmConstants";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup } from "./particleBursts";
@@ -313,8 +314,10 @@ export const handleGoldCrystalPickups = (game: Game) => {
       const onBeat = isHitOnBeat(game, b);
       const dmg = b.damage();
       applyHitToCombo(game, onBeat, b.pos);
-      if (onBeat && dmg >= 4) crackGoldCrystalForCanister(game, g);
-      else wasteGoldCrystal(game, g);
+      if (onBeat && dmg >= 4) {
+        crackGoldCrystalForCanister(game, g);
+        if (b.driftEligibleAtHit()) queueDriftBonusForGem(game, g);
+      } else wasteGoldCrystal(game, g);
       continue;
     }
     if (game.ship.alive && game.ship.invuln <= 0 && g.collidesWith(game.ship.pos, game.ship.radius * 0.9)) {
@@ -358,6 +361,17 @@ const crackGoldCrystalForCanister = (game: Game, g: GoldCrystal) => {
   }
   syncHud(game);
   checkBonusLife(game);
+};
+
+// Drift-locked on-beat crack: same pending-bonus pattern as asteroid drift shots — queues a
+// +1 combo bump one beat later (cancelled if the streak breaks in the meantime) and plays the
+// drift-shot fanfare immediately so the reward reads at the hit, not just at the popup.
+const queueDriftBonusForGem = (game: Game, g: GoldCrystal) => {
+  game.pendingDriftBonuses.push({
+    fireAt: game.perceivedBeatTime + BEAT_GRID,
+    pos: { x: g.pos.x, y: g.pos.y },
+  });
+  game.sound.playDriftShotHit();
 };
 
 // Off-beat / weak shot: same "wasted upgrade" feedback as shooting a canister

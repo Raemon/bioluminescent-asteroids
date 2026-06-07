@@ -52,6 +52,11 @@ export class Bullet {
   // 1-beat slot, 1 = 2-beat, ...). Any true entry makes this bullet drift-eligible — the
   // on-beat rhythm-grace is already enforced separately at fire-time.
   driftLockedSlots: boolean[] = [];
+  // counts the integer-beat reticule lines the bullet has already crossed (incremented by
+  // gameUpdate). Each new crossing samples the rhythm window; if on-beat, flashTimer fires.
+  reticuleCrossings = 0;
+  // seconds of white-flash remaining — set when a crossing happens on-beat, decays in update().
+  flashTimer = 0;
 
   constructor(pos: Vec, vel: Vec, life: number) {
     this.pos = { ...pos };
@@ -92,6 +97,7 @@ export class Bullet {
 
   update(dt: number, w: number, h: number) {
     this.life -= dt;
+    if (this.flashTimer > 0) this.flashTimer = Math.max(0, this.flashTimer - dt);
     this.trail.push({ ...this.pos });
     if (this.trail.length > 8) this.trail.shift();
     addScaledMut(this.pos, this.vel, dt);
@@ -108,6 +114,7 @@ export class Bullet {
     // Boosted on-beat: gold (hue 45) to match the tier-2 combo halo.
     // On-beat: deep saturated blue (hue 220) — sells "weightier" rhythm shot.
     // Pierce: yellow. Non-beat: pale cyan, smaller and quieter visually.
+    const flashing = this.flashTimer > 0;
     const trailHue = this.boosted ? 45 : this.onBeat ? 220 : this.pierce ? 60 : 180;
     const headHue = this.boosted ? 48 : this.onBeat ? 222 : this.pierce ? 60 : 180;
     const trailAlphaScale = this.onBeat ? 0.85 : 0.4;
@@ -124,11 +131,22 @@ export class Bullet {
       drawGlow(ctx, p.x, p.y, r * trailRadiusMul, trailHue, trailAlphaScale * segmentT * rangeAlpha, this.superBoosted);
     }
 
-    drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul, headHue, headAlpha * rangeAlpha, this.superBoosted);
+    drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul, headHue, headAlpha * rangeAlpha, this.superBoosted || flashing);
+    if (flashing) {
+      // sharp attack, tail-off — peak brightness lands on the first frame of the flash.
+      const flashEnv = Math.min(1, this.flashTimer / 0.06);
+      // outer halo: huge soft bloom so the flash reads from across the screen.
+      drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul * 3.0, 0, 0.7 * flashEnv * rangeAlpha, true);
+      // mid bloom: stacked twice for extra punch where the lighter composite peaks.
+      drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul * 1.8, 0, 1.0 * flashEnv * rangeAlpha, true);
+      drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul * 1.2, 0, 1.0 * flashEnv * rangeAlpha, true);
+    }
     ctx.globalAlpha = rangeAlpha;
     // Bright core dot — for on-beat use a near-white blue-tinted highlight so
     // the deep-blue halo reads as the carrier and the core still pops.
-    ctx.fillStyle = this.superBoosted
+    ctx.fillStyle = flashing
+      ? "hsla(0, 0%, 100%, 1)"
+      : this.superBoosted
       ? "hsla(0, 0%, 100%, 1)"
       : this.boosted
         ? "hsla(50, 100%, 90%, 1)"
@@ -137,8 +155,11 @@ export class Bullet {
           : this.pierce
             ? "hsla(60, 100%, 96%, 1)"
             : "hsla(180, 100%, 98%, 1)";
+    const coreDrawRadius = flashing
+      ? coreRadius * (1 + 2.0 * Math.min(1, this.flashTimer / 0.06))
+      : coreRadius;
     ctx.beginPath();
-    ctx.arc(this.pos.x, this.pos.y, coreRadius, 0, TAU);
+    ctx.arc(this.pos.x, this.pos.y, coreDrawRadius, 0, TAU);
     ctx.fill();
     ctx.restore();
   }
