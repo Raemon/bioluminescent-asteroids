@@ -114,6 +114,12 @@ export const ENTITY_CONFIG = {
     perSpawnChance: 0.12,
     // large variant renders slightly oversized to feel more dangerous.
     largeRadius: 43,
+    // Large solid crystals are heavy — they drift in noticeably slower than
+    // their size band would suggest, so the player has time to read the tough
+    // target and line up. Fed to the rhythm aligner as a scaled speed band
+    // (not applied post-hoc) so the crystal still crosses the kill range on a
+    // beat, just later and more ponderously.
+    largeSpawnSpeedMul: 0.5,
     largeHp: 16,
     largeScore: 400,
     smallHp: 4,

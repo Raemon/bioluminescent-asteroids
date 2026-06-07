@@ -172,6 +172,10 @@ export class Game implements HudElements {
   alienBullets: AlienBullet[] = [];
   alienSpawnSize: AlienSize = "small";
   waveElapsed = 0;
+  // false until the run's opening wave spawns; the first spawnWave (or the
+  //   tutorial's first practice rock) consumes it. Gates the centre-out
+  //   "drift away from the player" spawn that only the first level uses.
+  hasSpawnedFirstLevel = false;
   slowMoTimer = 0;
   // per-game randomised bass-kind intro order so the wave-2/3 picks vary between runs.
   bassOrder: AsteroidKind[] = [];

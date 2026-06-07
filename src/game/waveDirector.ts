@@ -1,9 +1,9 @@
 import type { Game } from "../Game";
-import { Asteroid, AsteroidKind, BASS_MEASURE_LENGTH, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
+import { Asteroid, AsteroidKind, AsteroidSize, BASS_MEASURE_LENGTH, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
 import { spawnComet as spawnCometAtEdge } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
-import { rand } from "../vec";
+import { rand, v, TAU } from "../vec";
 import { rng } from "./rng";
 import { BEAT_GRID } from "./rhythmConstants";
 import { spawnAwayFromShip } from "./spawnAwayFromShip";
@@ -21,9 +21,22 @@ import { ENTITY_CONFIG as CFG } from "./entityConfig";
 // left where it was. Using the screen centre as the encounter anchor means
 // the timing is stable: the player can position themselves anywhere near
 // the centre and still get a predictable beat-aligned procession of rocks.
+// Spawn speed band for an asteroid, scaled per kind. Large solid crystals
+// drift in slower than their size band (see CFG.solidCrystal.largeSpawnSpeedMul)
+// — handing the aligner a slowed band keeps them beat-aligned at the lower
+// speed rather than just decelerating a stock rock after the fact.
+const spawnSpeedRange = (a: Asteroid): [number, number] => {
+  const [lo, hi] = SIZE_SPAWN_SPEED[a.size];
+  if (a.kind === "solidCrystal") {
+    const m = CFG.solidCrystal.largeSpawnSpeedMul;
+    return [lo * m, hi * m];
+  }
+  return [lo, hi];
+};
+
 const alignIncomingToRhythm = (game: Game, a: Asteroid, claimed?: BeatClaimSet) => {
   if (a.isBoss()) return;
-  const range = SIZE_SPAWN_SPEED[a.size];
+  const range = spawnSpeedRange(a);
   const centre = { x: game.w / 2, y: game.h / 2 };
   alignVelocityToRhythm(a.pos, a.vel, {
     refPos: centre,
@@ -158,6 +171,14 @@ const spawnAsteroidAway = (
   claimed?: BeatClaimSet,
 ) => {
   const a = spawnAwayFromShip(() => spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size), game.ship.pos, minDist);
+  // Heavy solid crystals drift slower; pre-scale before alignment so even a
+  //   no-candidate fallback keeps the ponderous speed. The aligner works in
+  //   the matching slowed band (see spawnSpeedRange), so a successful match
+  //   stays slow too.
+  if (a.kind === "solidCrystal") {
+    a.vel.x *= CFG.solidCrystal.largeSpawnSpeedMul;
+    a.vel.y *= CFG.solidCrystal.largeSpawnSpeedMul;
+  }
   alignIncomingToRhythm(game, a, claimed);
   applyRhythmSpeed(game, a.vel);
   return a;
@@ -229,6 +250,9 @@ export const spawnComet = (game: Game) => {
 //   its first-beat dot is meaningful, with a little materialize puff so a respawn
 //   reads as "a fresh one drifts in".
 export const spawnTutorialSmall = (game: Game) => {
+  // The guided tutorial is the rookie's "first level"; consume the flag so the
+  //   first real density wave after graduation streaks in normally.
+  game.hasSpawnedFirstLevel = true;
   const a = spawnAsteroidAway(game, 240, undefined, "small", newBeatClaimSet());
   game.asteroids.push(a);
   emitCrackParticles(game.particles, a, true);
@@ -250,11 +274,18 @@ export const spawnWave = (game: Game) => {
   game.waveEvents = newWaveEventSchedule();
   game.waveElapsed = 0;
 
+  // First wave the player actually flies (display wave 0 on a normal start,
+  //   display wave 1 for a veteran who skips the warm-up). Consumed here so
+  //   only that opener gets the centre-out drift spawn — every later wave
+  //   resumes streaking in from the edges.
+  const isFirstLevel = !game.hasSpawnedFirstLevel;
+  game.hasSpawnedFirstLevel = true;
+
   if (handleBossWave(game)) return;
   setForeshadowState(game);
   rollWaveEvents(game);
   const claimed = newBeatClaimSet();
-  spawnWaveAsteroids(game, claimed);
+  spawnWaveAsteroids(game, claimed, isFirstLevel);
   rollSolidCrystalSmallSpawn(game, claimed);
 };
 
@@ -346,13 +377,69 @@ const rollHeadlineEvents = (game: Game) => {
   }
 };
 
+// First level only. Instead of streaking in from a screen edge, the opening
+// wave's rocks materialise in a loose ring around the centre — right where the
+// ship spawns — and drift gently *outward*. Each one sits a little past the
+// resting reticule's reach, so one soft thrust is enough to glide after it and
+// bring its first-beat target dot under the crosshair. It's the calmest
+// possible introduction to lining a shot up on the beat.
+const FIRST_LEVEL_DRIFT = {
+  // ring radius (fraction of the incoming engage ring) the rocks spawn at.
+  //   Kept inside the ring so the centre-anchored aligner still finds the
+  //   outward crossing, but far enough out that the rock isn't on the ship.
+  ringFrac: 0.82,
+  // per-rock radial jitter (px) so a multi-rock opener doesn't sit on a
+  //   perfect circle.
+  ringJitter: 28,
+  // slow, ponderous outward drift — a calm, readable target to chase.
+  speed: [30, 46] as [number, number],
+};
+
+// Spawn one opening-wave rock drifting straight out from the centre. `index`
+// / `total` fan the rocks evenly around the ship so they read as "drifting
+// away on all sides" rather than a marching column.
+const spawnFirstLevelDrifter = (
+  game: Game,
+  index: number,
+  total: number,
+  kind: AsteroidKind | undefined,
+  size: AsteroidSize,
+  claimed: BeatClaimSet,
+): Asteroid => {
+  const cx = game.w / 2;
+  const cy = game.h / 2;
+  const engage = CFG.engageRadius.incoming;
+  const angle = (index / Math.max(1, total)) * TAU + rand(-0.3, 0.3);
+  const dist = engage * FIRST_LEVEL_DRIFT.ringFrac + rand(-FIRST_LEVEL_DRIFT.ringJitter, FIRST_LEVEL_DRIFT.ringJitter);
+  const pos = v(cx + Math.cos(angle) * dist, cy + Math.sin(angle) * dist);
+  // Heavy solid crystals keep their slowdown multiplier on top of the already
+  //   gentle opener band.
+  const mul = kind === "solidCrystal" ? CFG.solidCrystal.largeSpawnSpeedMul : 1;
+  const band: [number, number] = [FIRST_LEVEL_DRIFT.speed[0] * mul, FIRST_LEVEL_DRIFT.speed[1] * mul];
+  const speed = rand(band[0], band[1]);
+  const vel = v(Math.cos(angle) * speed, Math.sin(angle) * speed);
+  const a = new Asteroid(pos, vel, size, undefined, kind ?? "normal");
+  // Beat-align the outward crossing of the engage ring (anchored at centre) so
+  //   the rock's trajectory dots fall on the grid. The slow band means the
+  //   aligner only nudges the ponderous drift, never speeds it up.
+  alignVelocityToRhythm(a.pos, a.vel, {
+    refPos: { x: cx, y: cy },
+    beatTime: game.beatTime,
+    speedRange: band,
+    engageRadius: engage,
+    maxBeats: 24,
+    claimed,
+  });
+  return a;
+};
+
 // Wave 0 (internal wave 1): a single large rock — a gentle warm-up before density ramps.
 // Wave 1+ (internal wave 2+): 3, 3, 4, 4, 5, 5... per-wave count gives the player a wave to consolidate before density bumps.
 //   A single `claimed` set is shared across the wave's spawns (including the
 //   standalone solidCrystalSmall roll below — see spawnWave) so each rock
 //   targets a distinct beat slot, giving the player a sustainable
 //   beat-by-beat target procession.
-const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet) => {
+const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boolean) => {
   const totalCount = game.wave === 1 ? 1 : 3 + Math.floor((game.wave - 2) / 2);
   const activeSpecials = activeSpecialsForWave(game, game.wave);
   const normalCount = Math.max(0, totalCount - activeSpecials.length);
@@ -376,12 +463,15 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet) => {
     slotKinds[Math.floor(rng() * normalCount)] = "solidCrystal";
   }
 
-  for (const kind of slotKinds) {
+  slotKinds.forEach((kind, slotIndex) => {
     const k = kind === "normal" ? undefined : kind;
     // Solid crystal is a medium-sized gem; everything else from this loop spawns large.
-    const size = kind === "solidCrystal" ? "medium" : "large";
-    game.asteroids.push(spawnAsteroidAway(game, 200, k, size, claimed));
-  }
+    const size: AsteroidSize = kind === "solidCrystal" ? "medium" : "large";
+    const rock = isFirstLevel
+      ? spawnFirstLevelDrifter(game, slotIndex, slotKinds.length, k, size, claimed)
+      : spawnAsteroidAway(game, 200, k, size, claimed);
+    game.asteroids.push(rock);
+  });
   for (const kind of activeSpecials) {
     game.asteroids.push(spawnSpecial(game, kind, claimed));
   }

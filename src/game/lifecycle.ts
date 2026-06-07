@@ -390,6 +390,7 @@ const resetRunTimers = (game: Game) => {
   game.tutorialFireHitDone = false;
   game.controlsHintActive = false;
   game.beatIntensityRamp = null;
+  game.hasSpawnedFirstLevel = false;
 };
 
 // parade + drones from the previous title screen must be torn down before the new run runs.
