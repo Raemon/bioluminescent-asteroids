@@ -31,6 +31,7 @@ const HALF_BEAT_FRACTION = 0.5;
 type HoverRingState = {
   hoverStartBeatTime: number | null;
   completionBeatTime: number | null;
+  zoneEnterBeatTime: number | null;
 };
 type ReticuleState = {
   trajectoryTracks: TrajectoryTrackMap;
@@ -295,7 +296,7 @@ export const renderShipReticules = (
   // grow the Ship's hover-ring array to match if range extended this frame; never shrink (so a
   // brief range loss doesn't wipe a partially-locked ring).
   while (state.hoverDotRings.length < slotPositionIndices.length) {
-    state.hoverDotRings.push({ hoverStartBeatTime: null, completionBeatTime: null });
+    state.hoverDotRings.push({ hoverStartBeatTime: null, completionBeatTime: null, zoneEnterBeatTime: null });
   }
   const apex = ship.pos;
   const { center: aimCircleCenter, radius: aimCircleRadius } = computeAimCircle(ship, beatGrid);
@@ -313,6 +314,7 @@ export const renderShipReticules = (
     ctx, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule,
     reticulesBySlot, aimCircleCenter, aimCircleRadius,
     trajectoryTracks: state.trajectoryTracks, doubletime, tutorialHighlight,
+    hoverZoneEnterBySlot: state.hoverDotRings.map(r => r.zoneEnterBeatTime),
   }, targets);
   const fromTrajectory = trajectoryResult.overlapsReticule;
   // reverse map: position-index → slot number (1-indexed). Every reticule that belongs to a slot
@@ -335,45 +337,67 @@ export const renderShipReticules = (
   // hit. Per-slot rings are independent; audio is collapsed into one voice that follows the
   // strongest hover and stays locked as long as ANY ring is locked. Under prong, the ring
   // renders at whichever prong reticule the trajectory dot is closest to (the winner).
-  let maxIntensity = 0;
+  // three escalating tiers of feedback as the reticule closes in on a dot:
+  //   zoneIntensity (75px approach zone) → soft outer C4 hum + contracting approach ring
+  //   anyHover (tight target area)       → octave-up C5 hum + the dashed lock ring begins filling
+  //   anyLocked (ring finished filling)  → the perfect-fifth G4 hum joins
+  let zoneIntensity = 0;
   let anyHover = false;
   let anyLocked = false;
   for (let slot = 0; slot < slotPositionIndices.length; slot++) {
     const proximity = trajectoryResult.slotProximities[slot] ?? 0;
+    const within75 = trajectoryResult.slotWithin75[slot] ?? false;
     const winnerIdx = trajectoryResult.slotWinnerReticuleIdx[slot] ?? -1;
     const positionIdxs = slotPositionIndices[slot];
     const ringPosIdx = winnerIdx >= 0 && winnerIdx < positionIdxs.length ? positionIdxs[winnerIdx] : -1;
+    const ringState = state.hoverDotRings[slot];
+    // stamp the zone-entry beat on the rising edge so the approach ring launches on a clean beat;
+    // clear it the moment the reticule leaves the zone so re-entry re-arms a fresh contraction.
+    if (within75) {
+      if (ringState.zoneEnterBeatTime === null) ringState.zoneEnterBeatTime = beatTime;
+    } else {
+      ringState.zoneEnterBeatTime = null;
+    }
+    if (ringState.zoneEnterBeatTime !== null) {
+      zoneIntensity = Math.max(zoneIntensity, hoverSwell(beatTime - ringState.zoneEnterBeatTime));
+    }
     const hovering = proximity > 0 && ringPosIdx >= 0;
     const center = hovering ? reticulePositions[ringPosIdx] : null;
-    const intensity = updateHoverRing(state.hoverDotRings[slot], hovering, center, ctx, beatTime, beatGrid, sound);
+    updateHoverRing(ringState, hovering, center, ctx, beatTime, beatGrid, sound);
     if (hovering) anyHover = true;
-    if (intensity > maxIntensity) maxIntensity = intensity;
-    if (state.hoverDotRings[slot].completionBeatTime !== null) anyLocked = true;
+    if (ringState.completionBeatTime !== null) anyLocked = true;
   }
   if (sound) {
-    if (anyHover) {
-      const beatPhase01 = ((audioBeatTime % beatGrid) + beatGrid) % beatGrid / beatGrid;
-      sound.updateFirstDotHum(maxIntensity, beatPhase01, beatGrid);
-      if (anyLocked) sound.updateFirstDotLockHum(beatPhase01, beatGrid);
-    } else {
-      sound.updateFirstDotHum(0);
-      sound.stopFirstDotLockHum();
-    }
+    const beatPhase01 = ((audioBeatTime % beatGrid) + beatGrid) % beatGrid / beatGrid;
+    if (zoneIntensity > 0) sound.updateFirstDotHum(zoneIntensity, beatPhase01, beatGrid);
+    else sound.updateFirstDotHum(0);
+    if (anyHover) sound.updateFirstDotOctaveHum(beatPhase01, beatGrid);
+    else sound.stopFirstDotOctaveHum();
+    if (anyLocked) sound.updateFirstDotLockHum(beatPhase01, beatGrid);
+    else sound.stopFirstDotLockHum();
   }
   ctx.restore();
 };
 
-// per-ring state machine + visual paint. Returns the hum intensity contributed by this ring
-// (0 when not hovering). Audio mixing is left to the caller so a single voice covers both rings.
+// soft swell 0→1 from time-in-zone: holds silent for DELAY (so a passing graze doesn't ping),
+// then smoothsteps in over RAMP. Drives the outer C4 hum's gain off the 75px approach zone.
+const hoverSwell = (elapsed: number): number => {
+  const afterDelay = Math.max(0, elapsed - HOVER_HUM_DELAY_SEC);
+  const swellLinear = Math.min(1, afterDelay / HOVER_HUM_RAMP_SEC);
+  return swellLinear * swellLinear * (3 - 2 * swellLinear);
+};
+
+// per-ring state machine + visual paint for the tight target-area lock ring. Drives the dashed
+// clockwise fill and stamps completionBeatTime + fires the fifth (lock) hum on the rising edge.
 const updateHoverRing = (
   ring: { hoverStartBeatTime: number | null; completionBeatTime: number | null },
   hovering: boolean, ringCenter: Vec | null,
   ctx: CanvasRenderingContext2D, beatTime: number, beatGrid: number, sound: Sound | null,
-): number => {
+): void => {
   if (!hovering || ringCenter === null) {
     ring.hoverStartBeatTime = null;
     ring.completionBeatTime = null;
-    return 0;
+    return;
   }
   if (ring.hoverStartBeatTime === null) {
     ring.hoverStartBeatTime = beatTime;
@@ -385,7 +409,4 @@ const updateHoverRing = (
     ring.completionBeatTime = beatTime;
     if (sound) sound.startFirstDotLockHum();
   }
-  const afterDelay = Math.max(0, elapsed - HOVER_HUM_DELAY_SEC);
-  const swellLinear = Math.min(1, afterDelay / HOVER_HUM_RAMP_SEC);
-  return swellLinear * swellLinear * (3 - 2 * swellLinear);
 };

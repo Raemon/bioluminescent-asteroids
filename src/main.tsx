@@ -56,12 +56,23 @@ installBetaTest(game);
 installInstructionsDemos();
 
 let last = performance.now();
+// Anchor the sim clock to the AudioContext hardware clock whenever audio is running, so beatTime
+// (and the on-beat hum/bass scheduling that rides it) stays locked to the looping music instead
+// of slowly drifting against it the way performance.now() does over a long run. Falls back to
+// performance.now() before audio starts or while the context is suspended. lastAudio is the
+// previous frame's audio-clock reading (null when audio wasn't running last frame).
+let lastAudio: number | null = null;
 // Rolling FPS — count frames over a window then publish; cheaper than smoothing per-frame dts.
 const FPS_WINDOW_MS = 500;
 let fpsWindowStart = last;
 let fpsFrames = 0;
 const tick = (now: number) => {
-  const dt = Math.min((now - last) / 1000, 0.05);
+  const audioNow = game.sound.runningAudioTime();
+  // 50ms clamp guards physics from a huge step after a stall/background, on either clock.
+  const dt = audioNow !== null && lastAudio !== null && audioNow > lastAudio
+    ? Math.min(audioNow - lastAudio, 0.05)
+    : Math.min((now - last) / 1000, 0.05);
+  lastAudio = audioNow;
   last = now;
   game.update(dt);
   game.render();

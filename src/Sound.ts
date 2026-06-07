@@ -299,8 +299,11 @@ export class Sound {
   // Single soft hum held while the reticule hovers the first-beat dot. Null
   // when not hovering. Gain target rides the hover intensity each frame.
   private firstDotHum: FirstDotHumNode | null = null;
-  // Octave-up companion hum that joins the moment the hover ring fills, with a
-  // sharper attack that settles into the same chill on-beat pulse as the base hum.
+  // Octave-up companion hum (C5) that joins the instant the reticule crosses onto the tight
+  // target area (the same moment the dashed lock ring begins filling). On/off with the hover.
+  private firstDotOctaveHum: FirstDotHumNode | null = null;
+  // Perfect-fifth companion hum (G4) that joins the moment the hover ring finishes filling, with
+  // a sharper attack that settles into the same chill on-beat pulse as the base hum.
   // Null until startFirstDotLockHum fires; cleared by stopFirstDotLockHum on hover loss.
   private firstDotLockHum: FirstDotHumNode | null = null;
   // Per-bassteroid ambient drone, keyed by the Asteroid instance. Only
@@ -1082,6 +1085,15 @@ export class Sound {
     return this.ctx ? this.ctx.currentTime : 0;
   }
 
+  // Audio-clock "now" ONLY while the context is actively running; null when there's no context
+  // yet or it's suspended (before the first user gesture / tab blur). Deliberately does NOT call
+  // ensureContext so reading it can't create a context before the unlock gesture. The main loop
+  // anchors the sim clock to this so beatTime — and the on-beat hum/bass scheduling that rides it
+  // — can't slowly drift away from the looping music, which runs on this same hardware clock.
+  runningAudioTime(): number | null {
+    return this.ctx && this.ctx.state === "running" ? this.ctx.currentTime : null;
+  }
+
   // The calibrator's metronome is the game's own bgBeat pulse, so the screen
   //   feels like the run is already easing in rather than a separate UI bleep.
   //   A clearly-audible intensity (vs the near-silent 0.08 of wave 1) is baked
@@ -1174,6 +1186,7 @@ export class Sound {
     if (!on && this.sideThrustNode) this.stopSideThrust();
     if (!on) this.stopAllAlienDrones();
     if (!on) this.stopFirstDotHum();
+    if (!on) this.stopFirstDotOctaveHum();
     if (!on) this.stopFirstDotLockHum();
     if (!on) this.stopAllBassteroidDrones();
     if (!on) this.stopAllCometShimmers();
@@ -1357,6 +1370,65 @@ export class Sound {
   // filter sweep adds a touch of "ah" vowel on the beat, settling back to "mm" — colour, not gain.
   private static readonly FIRST_DOT_HUM_FILTER_TROUGH_HZ = 700;
   private static readonly FIRST_DOT_HUM_FILTER_PEAK_HZ = 950;
+
+  // shared voice builder for the three first-dot hums: two detuned sines (chorus beating) through
+  // a bandpass "mm" formant, a slow vibrato, a pulseGain for the on-beat accent and a mainGain for
+  // the hover swell. The node starts effectively silent; the caller ramps mainGain to taste.
+  private createHumVoice(
+    baseFreq: number, vibratoRate: number, vibratoDepthRatio: number, filterStartHz: number,
+  ): FirstDotHumNode | null {
+    if (!this.ctx || !this.master) return null;
+    const t = this.ctx.currentTime;
+    const detuneRatio = 1.0035;
+    const oscA = this.ctx.createOscillator();
+    const oscB = this.ctx.createOscillator();
+    oscA.type = "sine";
+    oscB.type = "sine";
+    oscA.frequency.value = baseFreq;
+    oscB.frequency.value = baseFreq * detuneRatio;
+    const vibratoLfo = this.ctx.createOscillator();
+    vibratoLfo.type = "sine";
+    vibratoLfo.frequency.value = vibratoRate;
+    const vibratoDepth = this.ctx.createGain();
+    vibratoDepth.gain.value = baseFreq * vibratoDepthRatio;
+    vibratoLfo.connect(vibratoDepth);
+    vibratoDepth.connect(oscA.frequency);
+    vibratoDepth.connect(oscB.frequency);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = filterStartHz;
+    filter.Q.value = 1.4;
+    const pulseGain = this.ctx.createGain();
+    pulseGain.gain.setValueAtTime(Sound.FIRST_DOT_HUM_PULSE_TROUGH, t);
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.setValueAtTime(0.0001, t);
+    oscA.connect(filter);
+    oscB.connect(filter);
+    filter.connect(pulseGain);
+    pulseGain.connect(mainGain);
+    mainGain.connect(this.master);
+    oscA.start(t);
+    oscB.start(t);
+    vibratoLfo.start(t);
+    return {
+      oscA, oscB, vibratoLfo, vibratoDepth, filter, pulseGain, mainGain,
+      lastScheduledBeatAudioTime: -Infinity, releasing: false, releaseCleanupTimer: null,
+    };
+  }
+
+  // re-hover during a two-stage release: cancel the scheduled fade-out and resume from whatever
+  // gain we'd faded to, so a brief mouse-off doesn't pop the voice back to full volume.
+  private resumeHumIfReleasing(node: FirstDotHumNode, t: number) {
+    if (!node.releasing) return;
+    if (node.releaseCleanupTimer !== null) {
+      clearTimeout(node.releaseCleanupTimer);
+      node.releaseCleanupTimer = null;
+    }
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.releasing = false;
+  }
+
   updateFirstDotHum(intensity01: number, beatPhase01: number = 0, beatGrid: number = 0) {
     if (!this.enabled) return;
     const i = Math.max(0, Math.min(1, intensity01));
@@ -1365,73 +1437,25 @@ export class Sound {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     if (!this.firstDotHum) {
-      // C4 = 261.63 Hz. Detune partner ~6 cents apart for slow chorus beating.
-      const baseFreq = 261.63;
-      const detuneRatio = 1.0035;
-      const oscA = this.ctx.createOscillator();
-      const oscB = this.ctx.createOscillator();
-      oscA.type = "sine";
-      oscB.type = "sine";
-      oscA.frequency.value = baseFreq;
-      oscB.frequency.value = baseFreq * detuneRatio;
-      const vibratoLfo = this.ctx.createOscillator();
-      vibratoLfo.type = "sine";
-      vibratoLfo.frequency.value = 4.2;
-      const vibratoDepth = this.ctx.createGain();
-      vibratoDepth.gain.value = baseFreq * 0.004;
-      vibratoLfo.connect(vibratoDepth);
-      vibratoDepth.connect(oscA.frequency);
-      vibratoDepth.connect(oscB.frequency);
-      // bandpass near 700 Hz emphasises the "mm" first-formant region so the
-      // hum reads as a closed-mouth hum, not a bare sine.
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = "bandpass";
-      filter.frequency.value = 700;
-      filter.Q.value = 1.4;
-      const pulseGain = this.ctx.createGain();
-      pulseGain.gain.setValueAtTime(Sound.FIRST_DOT_HUM_PULSE_TROUGH, t);
-      // start filter at trough freq so the first attack opens the formant noticeably.
-      filter.frequency.setValueAtTime(Sound.FIRST_DOT_HUM_FILTER_TROUGH_HZ, t);
-      const mainGain = this.ctx.createGain();
-      mainGain.gain.setValueAtTime(0.0001, t);
-      oscA.connect(filter);
-      oscB.connect(filter);
-      filter.connect(pulseGain);
-      pulseGain.connect(mainGain);
-      mainGain.connect(this.master);
-      oscA.start(t);
-      oscB.start(t);
-      vibratoLfo.start(t);
-      this.firstDotHum = {
-        oscA, oscB, vibratoLfo, vibratoDepth, filter, pulseGain, mainGain,
-        lastScheduledBeatAudioTime: -Infinity,
-        releasing: false,
-        releaseCleanupTimer: null,
-      };
+      // C4 = 261.63 Hz, slow vibrato, bandpass near 700 Hz for the closed-mouth "mm" formant.
+      this.firstDotHum = this.createHumVoice(261.63, 4.2, 0.004, Sound.FIRST_DOT_HUM_FILTER_TROUGH_HZ);
+      if (!this.firstDotHum) return;
     }
-    // re-hover during a two-stage release: cancel the scheduled fade-out and resume the swell
-    // from whatever gain we'd faded to, so a brief mouse-off doesn't pop back to full volume.
     const node = this.firstDotHum;
-    if (node.releasing) {
-      if (node.releaseCleanupTimer !== null) {
-        clearTimeout(node.releaseCleanupTimer);
-        node.releaseCleanupTimer = null;
-      }
-      node.mainGain.gain.cancelScheduledValues(t);
-      node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
-      node.releasing = false;
-    }
+    this.resumeHumIfReleasing(node, t);
     const target = Sound.FIRST_DOT_HUM_PEAK_GAIN * i;
     node.mainGain.gain.setTargetAtTime(target, t, Sound.FIRST_DOT_HUM_GAIN_TC);
-    if (beatGrid > 0) this.scheduleFirstDotHumBeatPulse(node, t, beatPhase01, beatGrid);
+    if (beatGrid > 0) this.scheduleHumBeatPulse(node, t, beatPhase01, beatGrid, Sound.FIRST_DOT_HUM_FILTER_TROUGH_HZ, Sound.FIRST_DOT_HUM_FILTER_PEAK_HZ);
   }
 
-  // schedule one percussive envelope per beat on pulseGain (and a matching filter sweep): fast
-  // linear attack that LANDS on the beat onset, then exponential decay back to trough. Caller
-  // passes beatPhase01 (0 = on the beat, 1 = right before next); we translate to audio-clock and
-  // only re-schedule once per beat so the in-flight decay isn't restarted every frame.
-  private scheduleFirstDotHumBeatPulse(
+  // schedule one percussive envelope per beat on pulseGain (and a matching filter sweep between
+  // the passed bands): fast linear attack that LANDS on the beat onset, then exponential decay
+  // back to trough. Caller passes beatPhase01 (0 = on the beat, 1 = right before next); we
+  // translate to audio-clock and only re-schedule once per beat so the in-flight decay isn't
+  // restarted every frame. Shared by all three first-dot hum voices.
+  private scheduleHumBeatPulse(
     node: FirstDotHumNode, audioNow: number, beatPhase01: number, beatGrid: number,
+    filterTroughHz: number, filterPeakHz: number,
   ) {
     const secondsUntilNextBeat = (1 - beatPhase01) * beatGrid;
     const nextBeatAudioTime = audioNow + secondsUntilNextBeat;
@@ -1454,8 +1478,8 @@ export class Sound {
     freqParam.cancelScheduledValues(audioNow);
     freqParam.setValueAtTime(freqParam.value, audioNow);
     freqParam.setValueAtTime(freqParam.value, attackStart);
-    freqParam.linearRampToValueAtTime(Sound.FIRST_DOT_HUM_FILTER_PEAK_HZ, nextBeatAudioTime);
-    freqParam.setTargetAtTime(Sound.FIRST_DOT_HUM_FILTER_TROUGH_HZ, nextBeatAudioTime, decayTC);
+    freqParam.linearRampToValueAtTime(filterPeakHz, nextBeatAudioTime);
+    freqParam.setTargetAtTime(filterTroughHz, nextBeatAudioTime, decayTC);
     node.lastScheduledBeatAudioTime = nextBeatAudioTime;
   }
 
@@ -1465,86 +1489,88 @@ export class Sound {
   private static readonly FIRST_DOT_HUM_RELEASE_DROP_SEC = 0.12;
   private static readonly FIRST_DOT_HUM_RELEASE_DROP_LEVEL = 0.18;
   private static readonly FIRST_DOT_HUM_RELEASE_TAIL_SEC = 0.6;
-  stopFirstDotHum() {
-    if (!this.ctx || !this.firstDotHum) return;
-    const node = this.firstDotHum;
-    if (node.releasing) return;
+  // shared two-stage release: fast drop to RELEASE_LOW reads as "you lost it", then a slow tail
+  // to 0 smooths over flicker so repeatedly grazing the first-dot doesn't feel jarring.
+  // Oscillators are torn down via setTimeout (not osc.stop) so a re-hover during the tail can
+  // resume cleanly. isCurrent() guards against tearing down a node that was already replaced;
+  // clear() nulls the owning field once the tail finishes.
+  private releaseHumVoice(
+    node: FirstDotHumNode, peakGain: number, isCurrent: () => boolean, clear: () => void,
+  ) {
+    if (!this.ctx || node.releasing) return;
     const t = this.ctx.currentTime;
     const dropEnd = t + Sound.FIRST_DOT_HUM_RELEASE_DROP_SEC;
     const tailEnd = dropEnd + Sound.FIRST_DOT_HUM_RELEASE_TAIL_SEC;
-    const dropLevel = Sound.FIRST_DOT_HUM_PEAK_GAIN * Sound.FIRST_DOT_HUM_RELEASE_DROP_LEVEL;
+    const dropLevel = peakGain * Sound.FIRST_DOT_HUM_RELEASE_DROP_LEVEL;
     node.mainGain.gain.cancelScheduledValues(t);
     node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
     node.mainGain.gain.linearRampToValueAtTime(dropLevel, dropEnd);
     node.mainGain.gain.exponentialRampToValueAtTime(0.0001, tailEnd);
     node.releasing = true;
-    const me = node;
     node.releaseCleanupTimer = setTimeout(() => {
-      if (this.firstDotHum !== me) return;
+      if (!isCurrent()) return;
       const stopAt = this.ctx ? this.ctx.currentTime + 0.02 : 0;
-      try { me.oscA.stop(stopAt); } catch {}
-      try { me.oscB.stop(stopAt); } catch {}
-      try { me.vibratoLfo.stop(stopAt); } catch {}
-      this.firstDotHum = null;
+      try { node.oscA.stop(stopAt); } catch {}
+      try { node.oscB.stop(stopAt); } catch {}
+      try { node.vibratoLfo.stop(stopAt); } catch {}
+      clear();
     }, Math.ceil((Sound.FIRST_DOT_HUM_RELEASE_DROP_SEC + Sound.FIRST_DOT_HUM_RELEASE_TAIL_SEC) * 1000) + 30);
   }
 
-  // Octave-up companion hum (C5) that joins the C4 hover hum the instant the hover ring fills.
-  // Same vowel + bandpass character so it reads as the same voice an octave brighter, but the
-  // initial gain ramp is faster (LOCK_ATTACK_SEC) so it "lands" with the visual flare, then
-  // sustains and pulses on the beat like the base hum until the player breaks hover.
+  stopFirstDotHum() {
+    if (!this.firstDotHum) return;
+    const node = this.firstDotHum;
+    this.releaseHumVoice(node, Sound.FIRST_DOT_HUM_PEAK_GAIN, () => this.firstDotHum === node, () => { this.firstDotHum = null; });
+  }
+
+  // Octave-up companion hum (C5) that joins the C4 hover hum the instant the reticule crosses
+  // onto the tight target area (the same moment the dashed lock ring begins filling). On/off with
+  // the hover — same vowel + bandpass character so it reads as the base voice an octave brighter.
+  private static readonly FIRST_DOT_OCTAVE_HUM_PEAK_GAIN = 0.05;
+  private static readonly FIRST_DOT_OCTAVE_HUM_GAIN_TC = 0.08;
+  private static readonly FIRST_DOT_OCTAVE_HUM_FILTER_TROUGH_HZ = 1100;
+  private static readonly FIRST_DOT_OCTAVE_HUM_FILTER_PEAK_HZ = 1500;
+  updateFirstDotOctaveHum(beatPhase01: number = 0, beatGrid: number = 0) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    if (!this.firstDotOctaveHum) {
+      this.firstDotOctaveHum = this.createHumVoice(523.25, 4.6, 0.003, Sound.FIRST_DOT_OCTAVE_HUM_FILTER_TROUGH_HZ);
+      if (!this.firstDotOctaveHum) return;
+    }
+    const node = this.firstDotOctaveHum;
+    this.resumeHumIfReleasing(node, t);
+    node.mainGain.gain.setTargetAtTime(Sound.FIRST_DOT_OCTAVE_HUM_PEAK_GAIN, t, Sound.FIRST_DOT_OCTAVE_HUM_GAIN_TC);
+    if (beatGrid > 0) this.scheduleHumBeatPulse(node, t, beatPhase01, beatGrid, Sound.FIRST_DOT_OCTAVE_HUM_FILTER_TROUGH_HZ, Sound.FIRST_DOT_OCTAVE_HUM_FILTER_PEAK_HZ);
+  }
+
+  stopFirstDotOctaveHum() {
+    if (!this.firstDotOctaveHum) return;
+    const node = this.firstDotOctaveHum;
+    this.releaseHumVoice(node, Sound.FIRST_DOT_OCTAVE_HUM_PEAK_GAIN, () => this.firstDotOctaveHum === node, () => { this.firstDotOctaveHum = null; });
+  }
+
+  // Perfect-fifth companion hum (G4) that joins the moment the hover ring finishes filling. Sits a
+  // fifth above the C4 root, filling the C4+C5 octave into an open chord. Sharper attack
+  // (LOCK_ATTACK_SEC) so it "lands" with the visual flare, then sustains and pulses on the beat.
   private static readonly FIRST_DOT_LOCK_HUM_PEAK_GAIN = 0.05;
   // 0.25s attack matches the flare animation: rises sharply, settles into the chill pulse.
   private static readonly FIRST_DOT_LOCK_HUM_ATTACK_SEC = 0.25;
-  // brighter formant on top of the C5 to keep the "ah" colour the on-beat pulse opens to.
-  private static readonly FIRST_DOT_LOCK_HUM_FILTER_TROUGH_HZ = 1100;
-  private static readonly FIRST_DOT_LOCK_HUM_FILTER_PEAK_HZ = 1500;
+  // formant band that brightens on the beat, sitting between the base and octave voices.
+  private static readonly FIRST_DOT_LOCK_HUM_FILTER_TROUGH_HZ = 900;
+  private static readonly FIRST_DOT_LOCK_HUM_FILTER_PEAK_HZ = 1250;
   startFirstDotLockHum() {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     if (this.firstDotLockHum) return;
     const t = this.ctx.currentTime;
-    const baseFreq = 523.25;
-    const detuneRatio = 1.0035;
-    const oscA = this.ctx.createOscillator();
-    const oscB = this.ctx.createOscillator();
-    oscA.type = "sine";
-    oscB.type = "sine";
-    oscA.frequency.value = baseFreq;
-    oscB.frequency.value = baseFreq * detuneRatio;
-    const vibratoLfo = this.ctx.createOscillator();
-    vibratoLfo.type = "sine";
-    vibratoLfo.frequency.value = 4.6;
-    const vibratoDepth = this.ctx.createGain();
-    vibratoDepth.gain.value = baseFreq * 0.003;
-    vibratoLfo.connect(vibratoDepth);
-    vibratoDepth.connect(oscA.frequency);
-    vibratoDepth.connect(oscB.frequency);
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.frequency.value = Sound.FIRST_DOT_LOCK_HUM_FILTER_TROUGH_HZ;
-    filter.Q.value = 1.4;
-    const pulseGain = this.ctx.createGain();
-    pulseGain.gain.setValueAtTime(Sound.FIRST_DOT_HUM_PULSE_TROUGH, t);
-    const mainGain = this.ctx.createGain();
+    // G4 = 392.00 Hz — a perfect fifth above the C4 root hum.
+    this.firstDotLockHum = this.createHumVoice(392.00, 4.4, 0.0035, Sound.FIRST_DOT_LOCK_HUM_FILTER_TROUGH_HZ);
+    if (!this.firstDotLockHum) return;
     // sharper attack: linear ramp from silence to peak across LOCK_ATTACK_SEC.
-    mainGain.gain.setValueAtTime(0.0001, t);
-    mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_LOCK_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_LOCK_HUM_ATTACK_SEC);
-    oscA.connect(filter);
-    oscB.connect(filter);
-    filter.connect(pulseGain);
-    pulseGain.connect(mainGain);
-    mainGain.connect(this.master);
-    oscA.start(t);
-    oscB.start(t);
-    vibratoLfo.start(t);
-    this.firstDotLockHum = {
-      oscA, oscB, vibratoLfo, vibratoDepth, filter, pulseGain, mainGain,
-      lastScheduledBeatAudioTime: -Infinity,
-      releasing: false,
-      releaseCleanupTimer: null,
-    };
+    this.firstDotLockHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_LOCK_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_LOCK_HUM_ATTACK_SEC);
   }
 
   updateFirstDotLockHum(beatPhase01: number, beatGrid: number) {
@@ -1552,56 +1578,13 @@ export class Sound {
     const node = this.firstDotLockHum;
     if (node.releasing) return;
     const t = this.ctx.currentTime;
-    this.scheduleFirstDotLockHumBeatPulse(node, t, beatPhase01, beatGrid);
-  }
-
-  // same per-beat shape as the base hum but with the brighter formant sweep band, so the
-  // octave-up voice opens an "ah" colour each beat that sits a fifth+octave above the base.
-  private scheduleFirstDotLockHumBeatPulse(
-    node: FirstDotHumNode, audioNow: number, beatPhase01: number, beatGrid: number,
-  ) {
-    const secondsUntilNextBeat = (1 - beatPhase01) * beatGrid;
-    const nextBeatAudioTime = audioNow + secondsUntilNextBeat;
-    if (nextBeatAudioTime <= node.lastScheduledBeatAudioTime + beatGrid * 0.5) return;
-    const attackStart = Math.max(audioNow, nextBeatAudioTime - Sound.FIRST_DOT_HUM_PULSE_ATTACK_SEC);
-    const decayTC = Math.max(0.01, beatGrid * Sound.FIRST_DOT_HUM_PULSE_DECAY_TC_FRAC);
-    const gainParam = node.pulseGain.gain;
-    gainParam.cancelScheduledValues(audioNow);
-    gainParam.setValueAtTime(gainParam.value, audioNow);
-    gainParam.setValueAtTime(gainParam.value, attackStart);
-    gainParam.linearRampToValueAtTime(Sound.FIRST_DOT_HUM_PULSE_PEAK, nextBeatAudioTime);
-    gainParam.setTargetAtTime(Sound.FIRST_DOT_HUM_PULSE_TROUGH, nextBeatAudioTime, decayTC);
-    const freqParam = node.filter.frequency;
-    freqParam.cancelScheduledValues(audioNow);
-    freqParam.setValueAtTime(freqParam.value, audioNow);
-    freqParam.setValueAtTime(freqParam.value, attackStart);
-    freqParam.linearRampToValueAtTime(Sound.FIRST_DOT_LOCK_HUM_FILTER_PEAK_HZ, nextBeatAudioTime);
-    freqParam.setTargetAtTime(Sound.FIRST_DOT_LOCK_HUM_FILTER_TROUGH_HZ, nextBeatAudioTime, decayTC);
-    node.lastScheduledBeatAudioTime = nextBeatAudioTime;
+    this.scheduleHumBeatPulse(node, t, beatPhase01, beatGrid, Sound.FIRST_DOT_LOCK_HUM_FILTER_TROUGH_HZ, Sound.FIRST_DOT_LOCK_HUM_FILTER_PEAK_HZ);
   }
 
   stopFirstDotLockHum() {
-    if (!this.ctx || !this.firstDotLockHum) return;
+    if (!this.firstDotLockHum) return;
     const node = this.firstDotLockHum;
-    if (node.releasing) return;
-    const t = this.ctx.currentTime;
-    const dropEnd = t + Sound.FIRST_DOT_HUM_RELEASE_DROP_SEC;
-    const tailEnd = dropEnd + Sound.FIRST_DOT_HUM_RELEASE_TAIL_SEC;
-    const dropLevel = Sound.FIRST_DOT_LOCK_HUM_PEAK_GAIN * Sound.FIRST_DOT_HUM_RELEASE_DROP_LEVEL;
-    node.mainGain.gain.cancelScheduledValues(t);
-    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
-    node.mainGain.gain.linearRampToValueAtTime(dropLevel, dropEnd);
-    node.mainGain.gain.exponentialRampToValueAtTime(0.0001, tailEnd);
-    node.releasing = true;
-    const me = node;
-    node.releaseCleanupTimer = setTimeout(() => {
-      if (this.firstDotLockHum !== me) return;
-      const stopAt = this.ctx ? this.ctx.currentTime + 0.02 : 0;
-      try { me.oscA.stop(stopAt); } catch {}
-      try { me.oscB.stop(stopAt); } catch {}
-      try { me.vibratoLfo.stop(stopAt); } catch {}
-      this.firstDotLockHum = null;
-    }, Math.ceil((Sound.FIRST_DOT_HUM_RELEASE_DROP_SEC + Sound.FIRST_DOT_HUM_RELEASE_TAIL_SEC) * 1000) + 30);
+    this.releaseHumVoice(node, Sound.FIRST_DOT_LOCK_HUM_PEAK_GAIN, () => this.firstDotLockHum === node, () => { this.firstDotLockHum = null; });
   }
 
   // Ambient drone played for the lifetime of a broken-open bassteroid. There

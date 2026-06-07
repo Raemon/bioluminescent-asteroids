@@ -397,21 +397,41 @@ const FIRST_LEVEL_DRIFT = {
 
 // Random bearings + distances that tend to spread (one closer, one farther).
 //   Sample `count` uniform distances, sort them, jitter each — on average
-//   that lands noticeably different radii without hardcoding tiers. Pair each
-//   distance with an independent random angle so the layout isn't an even
-//   polygon.
+//   that lands noticeably different radii without hardcoding tiers. Angles
+//   are sampled with a minimum angular separation so rocks don't visually
+//   overlap at the engage ring; with the largest plausible opener count
+//   (~5 on a veteran skip) and ~30° min spacing the budget is comfortable.
+const FIRST_LEVEL_MIN_ANGLE_SEP = (30 * Math.PI) / 180;
 const sampleFirstLevelPlacements = (count: number, engage: number): Array<{ angle: number; dist: number }> => {
   const minDist = engage * FIRST_LEVEL_DRIFT.distMinFrac;
   const maxDist = engage * FIRST_LEVEL_DRIFT.distMaxFrac;
   const distSamples: number[] = [];
   for (let i = 0; i < count; i++) distSamples.push(minDist + rng() * (maxDist - minDist));
   distSamples.sort((a, b) => a - b);
+  // Shrink the floor if the budget can't fit — keeps us robust to large counts
+  //   while preserving the visual goal in the common case.
+  const sep = Math.min(FIRST_LEVEL_MIN_ANGLE_SEP, (TAU / Math.max(count, 1)) * 0.9);
+  const angles: number[] = [];
+  for (let i = 0; i < count; i++) {
+    let chosen = rng() * TAU;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const candidate = rng() * TAU;
+      if (angles.every(a => angularDist(a, candidate) >= sep)) { chosen = candidate; break; }
+      if (attempt === 0) chosen = candidate;
+    }
+    angles.push(chosen);
+  }
   const placements: Array<{ angle: number; dist: number }> = [];
   for (let i = 0; i < count; i++) {
     const dist = Math.max(minDist, Math.min(maxDist, distSamples[i] + rand(-FIRST_LEVEL_DRIFT.distJitter, FIRST_LEVEL_DRIFT.distJitter)));
-    placements.push({ angle: rng() * TAU, dist });
+    placements.push({ angle: angles[i], dist });
   }
   return placements;
+};
+
+const angularDist = (a: number, b: number): number => {
+  const d = Math.abs(((a - b) % TAU + TAU) % TAU);
+  return Math.min(d, TAU - d);
 };
 
 // Spawn one opening-wave rock drifting straight out from the centre.

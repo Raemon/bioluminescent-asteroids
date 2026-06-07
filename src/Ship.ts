@@ -91,10 +91,14 @@ export class Ship {
   //   Grown lazily by the renderer as longshot/superBoosted/etc. extend bullet range.
   //   hoverDotRingState aliases slot-1 so the tutorial's drift/hold gate keeps reading the
   //   same field it always has.
+  //   zoneEnterBeatTime stamps when the reticule first entered the wider 75px "approach"
+  //   zone for this slot (cleared on leaving), driving the soft outer hum + the contracting
+  //   approach ring; distinct from hoverStartBeatTime, which only arms on the tight target area.
   hoverDotRingStates: Array<{
     hoverStartBeatTime: number | null;
     completionBeatTime: number | null;
-  }> = [{ hoverStartBeatTime: null, completionBeatTime: null }];
+    zoneEnterBeatTime: number | null;
+  }> = [{ hoverStartBeatTime: null, completionBeatTime: null, zoneEnterBeatTime: null }];
   get hoverDotRingState() { return this.hoverDotRingStates[0]; }
 
   constructor(pos: Vec) { this.pos = pos; }

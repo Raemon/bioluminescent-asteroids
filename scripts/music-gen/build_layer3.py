@@ -112,60 +112,70 @@ def build_r2_sb_events() -> list:
     return events
 
 
-# ── synthwave-el layer 3: pulsed synth-bass arp on the off-beats ────────────────
-# Pairs with the EL synthwave Juno pad + soft lead. Synthwave loves a
-# pulsing sequencer — that's the "rhythmic where appropriate" the user
-# asked for. The new element is a plucked synth-bass voice that plays an
-# 8th-note off-beat arp (the "and" of every beat), one octave below the
-# soft lead, so it fills the sequencer-shaped hole between the lead's
-# longer notes without competing for the melodic register.
+# ── synthwave-el layer 3: pulsed synth-bass arp ON the beats ────────────────────
+# Pairs with the EL synthwave Juno pad + soft lead. Previous version played the
+# arp on 8th-note off-beats ("and" of every beat); that pattern had no on-beat
+# anchor in this layer and read as rhythmically lost against the bass field's
+# quarter-note kicks. This version places every note on a quarter-note beat
+# (the 0.5s BEAT_GRID) so the sequencer pulses *with* the kick rather than in
+# the cracks. Velocity contour (beat 1 strongest, 3 medium, 2/4 lighter) gives
+# the groove without sacrificing on-beat placement.
 #
-# Pitches stay on mode-invariant chord tones (C/G/E or C/G/Eb) so it
-# survives whatever colour the EL melodic layer happens to be in at any
-# given moment — same defense as the legacy halo pad's C+G open fifth.
+# Pitches stay on mode-invariant chord tones (C/G/E or C/G/Eb) so it survives
+# whatever colour the EL melodic layer happens to be in at any given moment —
+# same defense as the legacy halo pad's C+G open fifth.
 #
-# Phrase voicings:
-#   A:  G2 → E3 → G2 → C3     (open fifth + major third)
-#   A': G2 → Eb3 → G2 → C3    (minor third shift)
-#   B:  G2 → E3 → B2 → C3     (Cmaj7 — the maj7 in the arp itself)
-#   A': G2 → Eb3 → G2 → C3
+# Pattern per measure: 4 quarter-note arp tones. Shape walks root → fifth →
+# colour-tone → fifth (alberti-like figure), one octave between bottom and
+# colour. Measures 1/3 of each phrase use the low voicing, measures 2/4 reach
+# up an octave on the colour-tone for breath inside the phrase.
 #
-# Pattern is 8 notes per bar (one on each off-beat). Synth Bass 2 (GM 39)
-# has a short plucked envelope — releases before the next note hits, so
-# each pulse stands alone. Bass register (G2 = 98 Hz, C3 = 131 Hz) so it
-# lives in the 60-200 Hz / lo-mid band — needs the in-game audit to keep
-# it from masking the kick. Velocity stays low for the same reason.
+# Phrase voicings (colour-tone shifts with the harmony):
+#   A:  C2 G2 E3 G2 / C2 G2 E4 G2   (maj 3rd)
+#   A': C2 G2 Eb3 G2 / C2 G2 Eb4 G2 (min 3rd shadow)
+#   B:  C2 G2 B3 G2 / C2 G2 E4 G2   (Cmaj7 — maj7 colour, lift on m2/m4)
+#   A': C2 G2 Eb3 G2 / C2 G2 Eb4 G2 (settle)
+#
+# Synth Bass 2 (GM 39) has a short plucked envelope — releases before the next
+# beat lands, so each pulse stands alone. Bass register (C2 = 65 Hz, G2 = 98 Hz)
+# sits in the 60-200 Hz band — the in-game audit keeps it from masking the kick.
 SYNTHBASS_CH = 3
 
-def _r3_el_phrase_pitches(phrase_idx: int) -> list[str]:
-    # 4 notes per bar (one per off-beat); we cycle them
-    if phrase_idx == 0:                 # A: maj 3rd
-        return ["G2", "E3", "G2", "C3"]
-    if phrase_idx == 1 or phrase_idx == 3:  # A': min 3rd
-        return ["G2", "Eb3", "G2", "C3"]
-    return ["G2", "E3", "B2", "C3"]     # B: Cmaj7
+def _r3_el_phrase_pitches(phrase_idx: int, measure_idx: int) -> list[str]:
+    """4 quarter-note pitches per measure. Colour tone is the 3rd note.
+    Even measures use the lower colour octave; odd measures reach up one
+    octave on the colour for internal phrase breath."""
+    if phrase_idx == 0:                     # A: maj 3rd
+        colour = "E3" if measure_idx % 2 == 0 else "E4"
+    elif phrase_idx == 2:                   # B: Cmaj7 — maj7 on m1/m3, maj3 lift on m2/m4
+        colour = "B3" if measure_idx % 2 == 0 else "E4"
+    else:                                   # A': min 3rd (phrases 1 and 3)
+        colour = "Eb3" if measure_idx % 2 == 0 else "Eb4"
+    return ["C2", "G2", colour, "G2"]
+
+# Per-beat velocity contour (length 4): beat 1 anchor, beat 3 medium, 2/4 lighter
+_BEAT_VEL_CONTOUR = (0, -10, -4, -12)
 
 def build_r3_el_events() -> list:
     events = []
-    phrase_vel = [62, 54, 68, 56]
+    phrase_vel = [62, 54, 68, 56]   # A, A', B, A'
     for phrase_idx in range(4):
         phrase_start = phrase_idx * PHRASE_BEATS
-        v = phrase_vel[phrase_idx]
-        pitches = _r3_el_phrase_pitches(phrase_idx)
+        v_base = phrase_vel[phrase_idx]
         for measure in range(4):
             m_start = phrase_start + measure * MEASURE_BEATS
-            # 8th-note off-beats only — the "and" of each beat. 4 hits per bar.
-            # Each beat 0..3 → the off-beat lands at beat + 0.5
+            pitches = _r3_el_phrase_pitches(phrase_idx, measure)
             for beat_idx in range(4):
-                t = m_start + beat_idx + 0.5
+                t = m_start + beat_idx          # integer beat = 0.5s grid
                 p = pitches[beat_idx]
-                # Short duration so the pluck releases before the next note.
+                v = max(20, v_base + _BEAT_VEL_CONTOUR[beat_idx])
+                # Slightly shy of a full quarter so the pluck releases cleanly
+                # before the next beat hits — keeps each pulse articulate.
                 events.append((t, 0.45, SYNTHBASS_CH, midi_note(p), v))
-        # Phrase B lift: add one downbeat-of-measure-3 root hit (C2 — octave
-        # below the arp) so the peak phrase feels grounded.
+        # Phrase B lift: extra sub-octave root on measure-3 downbeat for weight.
         if phrase_idx == 2:
             events.append((phrase_start + 2 * MEASURE_BEATS, 1.0, SYNTHBASS_CH,
-                           midi_note("C2"), 64))
+                           midi_note("C2"), 72))
     return events
 
 

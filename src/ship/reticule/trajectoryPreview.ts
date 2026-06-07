@@ -44,6 +44,14 @@ const TRAJECTORY_FIRST_BEAT_DOT_LIT_MIN_ALPHA = 0.6;
 // how far outside the on-beat hit radius the proximity glow starts ramping up — this is
 // the "near" band where the first-dot already reads as bright before a direct overlap.
 const TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD = 24;
+// approach zone: the wider radius (reticule-center → dot-center) at which a very faint ring
+// begins contracting inward toward the dot, plus the soft outer hum starts. Independent of the
+// tight proximity-glow band above so the early "you're on the right track" cue reads well before
+// the actual target lock. The ring restarts every HOVER_ZONE_RING_PERIOD_BEATS on the beat.
+const HOVER_ZONE_RADIUS = 75;
+const HOVER_ZONE_RING_PERIOD_BEATS = 1;
+const HOVER_ZONE_RING_ALPHA = 0.13;
+const HOVER_ZONE_RING_LINE_WIDTH = 1;
 // faint dashed halo around the first-beat dot — subtle "this is the next-beat lock" cue.
 // Picks up the same beat-pulse boost as the dot itself so it brightens on the beat in sync.
 const TRAJECTORY_FIRST_BEAT_HALO_RADIUS = 6;
@@ -148,6 +156,9 @@ export type TrajectoryContext = {
   trajectoryTracks: TrajectoryTrackMap;
   doubletime: boolean;
   tutorialHighlight: boolean;
+  // per-slot beat-time the reticule first entered that slot's 75px approach zone (null = not in
+  // zone). Drives the contracting approach ring's beat-aligned launch. Index 0 = 1-beat slot.
+  hoverZoneEnterBySlot: Array<number | null>;
 };
 
 // dots pulse from 0→1 the first beat, then sinusoidally — gives a "lock-on" feel as targets enter.
@@ -375,6 +386,35 @@ const firstDotProximity01 = (px: number, py: number, retX: number, retY: number)
   return t * t * (3 - 2 * t);
 };
 
+// true when a reticule sits within the wider approach zone of a dot (center-to-center).
+const withinApproachZone = (px: number, py: number, retX: number, retY: number): boolean => {
+  const ddx = px - retX;
+  const ddy = py - retY;
+  return ddx * ddx + ddy * ddy <= HOVER_ZONE_RADIUS * HOVER_ZONE_RADIUS;
+};
+
+// faint ring that appears at the 75px approach radius and contracts inward to the dot center,
+// restarting every HOVER_ZONE_RING_PERIOD_BEATS on the beat. The first contraction is held at the
+// outer radius until zoneEnter's next beat-grid line so it always launches cleanly on a beat
+// rather than mid-flight when the reticule first enters the zone.
+const paintContractingZoneRing = (
+  ctx: CanvasRenderingContext2D, px: number, py: number,
+  beatTime: number, beatGrid: number, zoneEnter: number,
+) => {
+  if (beatGrid <= 0) return;
+  const period = beatGrid * HOVER_ZONE_RING_PERIOD_BEATS;
+  const contractStart = (Math.floor(zoneEnter / beatGrid) + 1) * beatGrid;
+  const elapsed = beatTime - contractStart;
+  const phase = elapsed < 0 ? 0 : (elapsed % period) / period;
+  const radius = HOVER_ZONE_RADIUS * (1 - phase);
+  ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${HOVER_ZONE_RING_ALPHA})`;
+  ctx.lineWidth = HOVER_ZONE_RING_LINE_WIDTH;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(px, py, Math.max(0.5, radius), 0, TAU);
+  ctx.stroke();
+};
+
 // overlapsReticule = strict hit (powers reticule lock-on visuals); slotProximities[k-1] = soft
 // 0..1 proximity between the k-beat trajectory dot and whichever of the slot's reticules sits
 // closest, used by the per-slot hover rings. slotWinnerReticuleIdx[k-1] is the index INTO the
@@ -384,6 +424,9 @@ type DotWalkResult = {
   overlapsReticule: boolean;
   slotProximities: number[];
   slotWinnerReticuleIdx: number[];
+  // slotWithin75[k-1] = true when any of slot k's reticules sits inside the wider 75px approach
+  // zone of that slot's on-beat dot — drives the soft outer hum + the contracting approach ring.
+  slotWithin75: boolean[];
 };
 
 // the cone is computed in the apex's "virtual" frame (toroidalDelta-remapped), so dot
@@ -405,11 +448,13 @@ const drawBeatDotsAlongRay = (
   sMin: number, sMax: number, dotStep: number, dotOffset: number,
   entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
   w: number, h: number, doubletime: boolean, tutorialHighlight: boolean, focused: boolean,
+  beatTime: number, beatGrid: number, hoverZoneEnterBySlot: Array<number | null>,
 ): DotWalkResult => {
   let overlapsReticule = false;
   const slotCount = reticulesBySlot.length;
   const slotProximities: number[] = new Array(slotCount).fill(0);
   const slotWinnerReticuleIdx: number[] = new Array(slotCount).fill(-1);
+  const slotWithin75: boolean[] = new Array(slotCount).fill(false);
   // doubletime halves the spacing and marks every other k as a half-beat (off-beat) dot.
   const step = doubletime ? dotStep * 0.5 : dotStep;
   const isHalfBeatK = (k: number): boolean => doubletime && (k % 2 === 1);
@@ -461,11 +506,20 @@ const drawBeatDotsAlongRay = (
         let bestProximity = 0;
         let bestRetIdx = -1;
         let anyStrictOverlap = false;
+        let within75 = false;
         for (let r = 0; r < slotReticules.length; r++) {
           const [retXk, retYk] = slotReticules[r];
           const proximityR = firstDotProximity01(px, py, retXk, retYk);
           if (proximityR > bestProximity) { bestProximity = proximityR; bestRetIdx = r; }
           if (slotIdx === 0 && firstDotOverlapsReticule(px, py, retXk, retYk)) anyStrictOverlap = true;
+          if (withinApproachZone(px, py, retXk, retYk)) within75 = true;
+        }
+        if (within75) slotWithin75[slotIdx] = true;
+        // contracting approach ring sits under the dot; only once the slot's zone-entry beat is
+        // stamped (set by the renderer on the rising edge) so it launches on a clean beat.
+        const zoneEnter = slotIdx < hoverZoneEnterBySlot.length ? hoverZoneEnterBySlot[slotIdx] : null;
+        if (within75 && zoneEnter !== null) {
+          paintContractingZoneRing(ctx, drawX, drawY, beatTime, beatGrid, zoneEnter);
         }
         const tickLength = slotCrosshairLengthTrajectory(slotIdx + 1);
         if (SHOW_FIRST_BEAT_DOT) {
@@ -487,7 +541,7 @@ const drawBeatDotsAlongRay = (
       drawnOnBeatDots++;
     }
   }
-  return { overlapsReticule, slotProximities, slotWinnerReticuleIdx };
+  return { overlapsReticule, slotProximities, slotWinnerReticuleIdx, slotWithin75 };
 };
 
 const drawAimIntersectionsAlongRay = (
@@ -582,7 +636,7 @@ const computeOnBeatAim = (
 // core trajectory renderer — operates on a position/velocity snapshot, with optional cone clipping.
 // alphaMultiplier folds in entry-flash boost and exit-fade decay; clipToCone is false during fade so the
 // lingering ghost remains visible even after the target has left the radar wedge.
-const EMPTY_DOT_WALK_RESULT: DotWalkResult = { overlapsReticule: false, slotProximities: [], slotWinnerReticuleIdx: [] };
+const EMPTY_DOT_WALK_RESULT: DotWalkResult = { overlapsReticule: false, slotProximities: [], slotWinnerReticuleIdx: [], slotWithin75: [] };
 
 const paintTrajectoryFromSnapshot = (
   ctx: TrajectoryContext, snap: TrajectorySnapshot, firstSeen: number,
@@ -644,6 +698,7 @@ const paintTrajectoryFromSnapshot = (
     ctx.ctx, rawStartX, rawStartY, ux, uy, reticulesBySlot,
     sMin, sMax, dotStep, dotOffset, entryFlashBoost, beatPulseBoost, focusBoost,
     ctx.w, ctx.h, ctx.doubletime, ctx.tutorialHighlight, showOnRhythmSpot,
+    ctx.beatTime, ctx.beatGrid, ctx.hoverZoneEnterBySlot,
   );
   if (SHOW_ON_RHYTHM_RETICULE && showOnRhythmSpot) {
     const aim = computeOnBeatAim(
@@ -780,16 +835,18 @@ export type TrajectoryPreviewResult = {
   overlapsReticule: boolean;
   slotProximities: number[];
   slotWinnerReticuleIdx: number[];
+  slotWithin75: boolean[];
 };
 
 const emptySlotProximities = (n: number): number[] => new Array(n).fill(0);
 const emptyWinnerIdx = (n: number): number[] => new Array(n).fill(-1);
+const emptyWithin75 = (n: number): boolean[] => new Array(n).fill(false);
 
 export const paintTrajectoryPreviews = (
   ctx: TrajectoryContext, targets: ReadonlyArray<ReticuleTarget>,
 ): TrajectoryPreviewResult => {
   const slotCount = ctx.reticulesBySlot.length;
-  if (ctx.frame.length <= 0) return { overlapsReticule: false, slotProximities: emptySlotProximities(slotCount), slotWinnerReticuleIdx: emptyWinnerIdx(slotCount) };
+  if (ctx.frame.length <= 0) return { overlapsReticule: false, slotProximities: emptySlotProximities(slotCount), slotWinnerReticuleIdx: emptyWinnerIdx(slotCount), slotWithin75: emptyWithin75(slotCount) };
   ctx.ctx.save();
   ctx.ctx.setLineDash([]);
   ctx.ctx.lineWidth = 1.5;
@@ -799,6 +856,7 @@ export const paintTrajectoryPreviews = (
   let overlapsReticule = false;
   const slotProximities = emptySlotProximities(slotCount);
   const slotWinnerReticuleIdx = emptyWinnerIdx(slotCount);
+  const slotWithin75 = emptyWithin75(slotCount);
   const liveByKey = new Map<object, ReticuleTarget>();
   for (const t of targets) liveByKey.set(t as unknown as object, t);
   for (const t of targets) {
@@ -809,9 +867,10 @@ export const paintTrajectoryPreviews = (
         slotProximities[i] = r.slotProximities[i];
         slotWinnerReticuleIdx[i] = r.slotWinnerReticuleIdx[i];
       }
+      if (i < r.slotWithin75.length && r.slotWithin75[i]) slotWithin75[i] = true;
     }
   }
   renderFadingTrajectories(ctx, rendered, liveByKey);
   ctx.ctx.restore();
-  return { overlapsReticule, slotProximities, slotWinnerReticuleIdx };
+  return { overlapsReticule, slotProximities, slotWinnerReticuleIdx, slotWithin75 };
 };

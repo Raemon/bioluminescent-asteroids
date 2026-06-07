@@ -91,12 +91,13 @@ def sox_reverb(in_wav, out_wav, reverberance, hf_damping, room_scale, pre_delay_
 
 
 def process_one(raw_name: str, out_name: str,
-                reverb: tuple[int, int, int, int]) -> dict:
+                reverb: tuple[int, int, int, int],
+                fade_ms: float = 50.0) -> dict:
     rev_path = RAW / f"{raw_name}-reverb.wav"
     sox_reverb(RAW / f"{raw_name}.wav", rev_path, *reverb)
     y, sr = load_stereo(rev_path)
     y = trim_or_pad(y, sr, LOOP_S)
-    y = fade_edges(y, sr)
+    y = fade_edges(y, sr, fade_ms=fade_ms)
     y = normalize_peak(y, -12.0)
     return {"name": out_name, **write_wav_and_mp3(y, sr, out_name)}
 
