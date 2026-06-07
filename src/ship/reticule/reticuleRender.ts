@@ -106,6 +106,75 @@ const HOVER_LOCK_WAVE_LINE_WIDTH = 2.8;
 // gold hue at the peak — drift the dash colour toward warm/white so the lock reads as "reward".
 const HOVER_FLARE_WARM_HSL = "48, 100%, 70%";
 
+// one-shot hint that surfaces the first time the player ever holds a hover long enough to
+// complete the lock ring fill. Persistence via localStorage so it only appears on the player's
+// very first Drift Shot lock-in, ever — re-runs after that show nothing.
+const DRIFT_LOCK_HINT_KEY = "pulsar.driftLockHintSeen";
+const DRIFT_LOCK_HINT_LINES = ["Drift and hold", "for x2 damage"] as const;
+const DRIFT_LOCK_HINT_FONT = "400 18px 'Space Grotesk', system-ui, sans-serif";
+const DRIFT_LOCK_HINT_FILL_HSL = "197, 100%, 86%";
+const DRIFT_LOCK_HINT_SHADOW = "rgba(0, 0, 0, 0.8)";
+const DRIFT_LOCK_HINT_LINE_HEIGHT = 22;
+const DRIFT_LOCK_HINT_OFFSET_Y = HOVER_DOT_RING_RADIUS + 22;
+const DRIFT_LOCK_HINT_FADE_IN_SEC = 0.15;
+const DRIFT_LOCK_HINT_HOLD_SEC = 2.5;
+const DRIFT_LOCK_HINT_FADE_OUT_SEC = 1.2;
+let driftLockHintAnchor: { x: number; y: number } | null = null;
+let driftLockHintShownAt: number | null = null;
+const driftLockHintAlreadySeen = (): boolean => {
+  try { return localStorage.getItem(DRIFT_LOCK_HINT_KEY) === "1"; }
+  catch { return false; }
+};
+const markDriftLockHintSeen = () => {
+  try { localStorage.setItem(DRIFT_LOCK_HINT_KEY, "1"); } catch {}
+};
+const tryClaimDriftLockHint = (center: Vec, beatTime: number) => {
+  if (driftLockHintAlreadySeen()) return;
+  if (driftLockHintAnchor !== null) return;
+  driftLockHintAnchor = { x: center.x, y: center.y + DRIFT_LOCK_HINT_OFFSET_Y };
+  driftLockHintShownAt = beatTime;
+  markDriftLockHintSeen();
+};
+const paintDriftLockHint = (ctx: CanvasRenderingContext2D, beatTime: number) => {
+  if (driftLockHintAnchor === null || driftLockHintShownAt === null) return;
+  const since = beatTime - driftLockHintShownAt;
+  const total = DRIFT_LOCK_HINT_FADE_IN_SEC + DRIFT_LOCK_HINT_HOLD_SEC + DRIFT_LOCK_HINT_FADE_OUT_SEC;
+  if (since >= total) { driftLockHintAnchor = null; driftLockHintShownAt = null; return; }
+  let alpha: number;
+  if (since < DRIFT_LOCK_HINT_FADE_IN_SEC) {
+    alpha = since / DRIFT_LOCK_HINT_FADE_IN_SEC;
+  } else if (since < DRIFT_LOCK_HINT_FADE_IN_SEC + DRIFT_LOCK_HINT_HOLD_SEC) {
+    alpha = 1;
+  } else {
+    const t = (since - DRIFT_LOCK_HINT_FADE_IN_SEC - DRIFT_LOCK_HINT_HOLD_SEC) / DRIFT_LOCK_HINT_FADE_OUT_SEC;
+    alpha = Math.max(0, 1 - t) * Math.max(0, 1 - t);
+  }
+  const prevFont = ctx.font;
+  const prevFill = ctx.fillStyle;
+  const prevAlign = ctx.textAlign;
+  const prevBaseline = ctx.textBaseline;
+  const prevShadowColor = ctx.shadowColor;
+  const prevShadowBlur = ctx.shadowBlur;
+  const prevComposite = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.font = DRIFT_LOCK_HINT_FONT;
+  ctx.fillStyle = `hsla(${DRIFT_LOCK_HINT_FILL_HSL}, ${0.95 * alpha})`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = DRIFT_LOCK_HINT_SHADOW;
+  ctx.shadowBlur = 6;
+  for (let i = 0; i < DRIFT_LOCK_HINT_LINES.length; i++) {
+    ctx.fillText(DRIFT_LOCK_HINT_LINES[i], driftLockHintAnchor.x, driftLockHintAnchor.y + i * DRIFT_LOCK_HINT_LINE_HEIGHT);
+  }
+  ctx.font = prevFont;
+  ctx.fillStyle = prevFill;
+  ctx.textAlign = prevAlign;
+  ctx.textBaseline = prevBaseline;
+  ctx.shadowColor = prevShadowColor;
+  ctx.shadowBlur = prevShadowBlur;
+  ctx.globalCompositeOperation = prevComposite;
+};
+
 // the aim circle = locus of bullet endpoints at t=beatGrid over all headings. Single source
 // of truth so the reticule painter and the gameRender red-tint check agree on geometry.
 export const computeAimCircle = (ship: Ship, beatGrid: number) => ({
@@ -423,6 +492,7 @@ export const renderShipReticules = (
   }
   expireHoverZoneHintIfHoverEnded(state.hoverDotRings.map(r => r.zoneEnterBeatTime), beatTime);
   paintHoverZoneHint(ctx, beatTime);
+  paintDriftLockHint(ctx, beatTime);
   if (sound) {
     const beatPhase01 = ((audioBeatTime % beatGrid) + beatGrid) % beatGrid / beatGrid;
     if (zoneIntensity > 0) sound.updateFirstDotHum(zoneIntensity, beatPhase01, beatGrid);
@@ -515,5 +585,6 @@ const updateHoverRing = (
   if (fillJustCompleted && ring.completionBeatTime === null) {
     ring.completionBeatTime = beatTime;
     if (sound) sound.startFirstDotLockHum();
+    tryClaimDriftLockHint(ringCenter, beatTime);
   }
 };
