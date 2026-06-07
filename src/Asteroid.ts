@@ -2116,6 +2116,11 @@ export const spawnBossAt = (
   return new Asteroid({ x: pos.x, y: pos.y }, vel, "large", undefined, "boss");
 };
 
+// min sin of angle between trajectory and the spawn edge. sin(30°) = 0.5 — at
+// shallower angles an edge spawn skims along its own edge for a long time
+// before drifting inward, which reads as the rock briefly hugging the border.
+const EDGE_SPAWN_MIN_INWARD = 0.5;
+
 export const spawnAsteroidAtEdge = (
   w: number,
   h: number,
@@ -2125,15 +2130,34 @@ export const spawnAsteroidAtEdge = (
 ): Asteroid => {
   const edge = Math.floor(rng() * 4);
   let pos: Vec;
-  if (edge === 0) pos = v(rand(0, w), -40);
-  else if (edge === 1) pos = v(w + 40, rand(0, h));
-  else if (edge === 2) pos = v(rand(0, w), h + 40);
-  else pos = v(-40, rand(0, h));
+  let inwardAxis: "x" | "y";
+  let inwardSign: 1 | -1;
+  if (edge === 0)      { pos = v(rand(0, w), -40);       inwardAxis = "y"; inwardSign = 1;  }
+  else if (edge === 1) { pos = v(w + 40, rand(0, h));    inwardAxis = "x"; inwardSign = -1; }
+  else if (edge === 2) { pos = v(rand(0, w), h + 40);    inwardAxis = "y"; inwardSign = -1; }
+  else                 { pos = v(-40, rand(0, h));       inwardAxis = "x"; inwardSign = 1;  }
   const center = v(w / 2 + rand(-w * 0.2, w * 0.2), h / 2 + rand(-h * 0.2, h * 0.2));
-  const dirX = center.x - pos.x;
-  const dirY = center.y - pos.y;
+  let dirX = center.x - pos.x;
+  let dirY = center.y - pos.y;
   const norm = Math.hypot(dirX, dirY);
+  dirX /= norm;
+  dirY /= norm;
+  // enforce minimum steepness off the spawning edge. component along the
+  // outward-edge axis is what determines how shallow the angle is; scale up
+  // until its absolute value matches the min threshold.
+  const inwardComp = inwardAxis === "x" ? dirX * inwardSign : dirY * inwardSign;
+  if (inwardComp < EDGE_SPAWN_MIN_INWARD) {
+    if (inwardAxis === "x") {
+      dirX = inwardSign * EDGE_SPAWN_MIN_INWARD;
+      const tangentMag = Math.sqrt(1 - EDGE_SPAWN_MIN_INWARD * EDGE_SPAWN_MIN_INWARD);
+      dirY = Math.sign(dirY) * tangentMag;
+    } else {
+      dirY = inwardSign * EDGE_SPAWN_MIN_INWARD;
+      const tangentMag = Math.sqrt(1 - EDGE_SPAWN_MIN_INWARD * EDGE_SPAWN_MIN_INWARD);
+      dirX = Math.sign(dirX) * tangentMag;
+    }
+  }
   const [speedMin, speedMax] = SIZE_SPAWN_SPEED[size];
   const speed = rand(speedMin, speedMax);
-  return new Asteroid(pos, v((dirX / norm) * speed, (dirY / norm) * speed), size, hue, kind);
+  return new Asteroid(pos, v(dirX * speed, dirY * speed), size, hue, kind);
 };
