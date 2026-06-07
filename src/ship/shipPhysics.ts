@@ -8,6 +8,8 @@ import { emitThrust, emitReverseThrust, emitSideThrust } from "./shipParticles";
 import { fireBullets } from "./shipWeapons";
 import { isDown } from "../game/controlBindings";
 
+const ENGINE_SOUNDS_ENABLED = false;
+
 // initial 1/4 speed nudge, then hold for TURN_RAMP_DELAY before ramping to full over ~0.15s.
 const TURN_RAMP_DELAY = 0;
 const TURN_INITIAL_SCALE = 0.01;
@@ -45,7 +47,7 @@ const updateForwardThrust = (ship: Ship, input: IInput, particles: ParticleSyste
     ship.vel.y += Math.sin(ship.heading) * a;
     emitThrust(ship, particles, t);
     ship.lastThrustActiveAt = t / 1000;
-    if (!wasThrusting) sound.play("thrust");
+    if (ENGINE_SOUNDS_ENABLED && !wasThrusting) sound.play("thrust");
   } else if (wasThrusting) sound.stopThrust();
 };
 
@@ -60,7 +62,7 @@ const updateReverseThrust = (ship: Ship, input: IInput, particles: ParticleSyste
     ship.vel.y += Math.sin(h) * a;
     emitReverseThrust(ship, particles, t);
     ship.lastThrustActiveAt = t / 1000;
-    if (!wasReversing) sound.play("reverseThrust");
+    if (ENGINE_SOUNDS_ENABLED && !wasReversing) sound.play("reverseThrust");
   } else if (wasReversing) sound.stopReverseThrust();
 };
 
@@ -89,7 +91,7 @@ const updateSideThrust = (ship: Ship, input: IInput, particles: ParticleSystem, 
     ship.lastThrustActiveAt = t / 1000;
   }
   const isActive = ship.portThrustOn || ship.starboardThrustOn;
-  if (isActive && !wasActive) sound.play("sideThrust");
+  if (ENGINE_SOUNDS_ENABLED && isActive && !wasActive) sound.play("sideThrust");
   else if (!isActive && wasActive) sound.stopSideThrust();
 };
 

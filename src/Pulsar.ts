@@ -766,7 +766,7 @@ export class Pulsar {
     // hot bloom centred on the source. Peaks during ingress/egress and
     // decays smoothly across early totality so the disappearance reads as
     // a flare blooming and then snuffing out.
-    const flarePhase = Math.max(diamond, totality < 0.35 ? (1 - totality / 0.35) * 0.7 : 0);
+    const flarePhase = Math.max(diamond, totality > 0 && totality < 0.35 ? (1 - totality / 0.35) * 0.7 : 0);
     if (flarePhase > 0.04) {
       // Anchor sits at the contact point during ingress and slides back
       // toward the planet centre as the pulsar buries — that's where the
