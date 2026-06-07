@@ -756,21 +756,73 @@ export class Pulsar {
       ctx.beginPath();
       ctx.arc(dcx, dcy, dR, 0, TAU);
       ctx.fill();
+      ctx.restore();
+    }
 
-      // Tangential flare along the limb at the contact point — a short
-      // streak of light tracing the silhouette edge rather than radiating
-      // outward, because the source is on the limb itself.
-      const tx = -ny;
-      const ty = nx;
-      const flareLen = size * (0.35 + 0.4 * diamond);
-      ctx.strokeStyle = `hsla(45, 100%, 95%, ${Math.min(1, diamondAlpha * 0.9)})`;
-      ctx.lineWidth = 1.2 + 1.4 * diamond;
-      ctx.shadowColor = `hsla(40, 100%, 80%, ${diamondAlpha})`;
-      ctx.shadowBlur = 8 + 12 * diamond;
+    // Lens flare — when the pulsar is at the limb (ingress/egress) or
+    // freshly disappeared behind it, we're effectively pointing the camera
+    // at a brilliant point source partially occluded by a much larger dark
+    // body. Real optics respond with an anamorphic horizontal streak and
+    // hot bloom centred on the source. Peaks during ingress/egress and
+    // decays smoothly across early totality so the disappearance reads as
+    // a flare blooming and then snuffing out.
+    const flarePhase = Math.max(diamond, totality < 0.35 ? (1 - totality / 0.35) * 0.7 : 0);
+    if (flarePhase > 0.04) {
+      // Anchor sits at the contact point during ingress and slides back
+      // toward the planet centre as the pulsar buries — that's where the
+      // last sliver of light is coming from.
+      const anchor = size * (1 - 0.55 * totality);
+      const fcx = px + nx * anchor;
+      const fcy = py + ny * anchor;
+      const fAlpha = Math.min(1, 0.85 * flarePhase * (1 - totality * 0.6));
+
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+
+      // Hot bloom — radial, warm-white core falling to gold.
+      const bloomR = size * (0.55 + 0.45 * flarePhase) + pulsarR * 2.0;
+      const bloom = ctx.createRadialGradient(fcx, fcy, 0, fcx, fcy, bloomR);
+      bloom.addColorStop(0, `hsla(55, 100%, 98%, ${fAlpha})`);
+      bloom.addColorStop(0.25, `hsla(45, 100%, 85%, ${fAlpha * 0.6})`);
+      bloom.addColorStop(0.65, `hsla(30, 100%, 60%, ${fAlpha * 0.18})`);
+      bloom.addColorStop(1, `hsla(20, 100%, 50%, 0)`);
+      ctx.fillStyle = bloom;
       ctx.beginPath();
-      ctx.moveTo(dcx - tx * flareLen, dcy - ty * flareLen);
-      ctx.lineTo(dcx + tx * flareLen, dcy + ty * flareLen);
-      ctx.stroke();
+      ctx.arc(fcx, fcy, bloomR, 0, TAU);
+      ctx.fill();
+
+      // Anamorphic horizontal streak — the classic lens-flare bar, drawn
+      // as a wide, very short-height linear gradient. Always horizontal
+      // (camera-relative) rather than tangent to the limb.
+      const streakLen = size * (3.2 + 2.0 * flarePhase);
+      const streakH = Math.max(2, pulsarR * 0.9 + size * 0.025);
+      const streak = ctx.createLinearGradient(fcx - streakLen, fcy, fcx + streakLen, fcy);
+      const streakAlpha = fAlpha * 0.85;
+      streak.addColorStop(0, `hsla(200, 100%, 80%, 0)`);
+      streak.addColorStop(0.35, `hsla(195, 100%, 90%, ${streakAlpha * 0.45})`);
+      streak.addColorStop(0.5, `hsla(190, 100%, 98%, ${streakAlpha})`);
+      streak.addColorStop(0.65, `hsla(195, 100%, 90%, ${streakAlpha * 0.45})`);
+      streak.addColorStop(1, `hsla(200, 100%, 80%, 0)`);
+      ctx.fillStyle = streak;
+      ctx.fillRect(fcx - streakLen, fcy - streakH, streakLen * 2, streakH * 2);
+
+      // Tiny secondary ghost on the opposite side of the frame centre —
+      // sells the "lens" read by hinting at internal reflections.
+      const fcxCenter = this.w / 2;
+      const fcyCenter = this.h / 2;
+      const ghostDx = (fcx - fcxCenter) * -0.45;
+      const ghostDy = (fcy - fcyCenter) * -0.45;
+      const gx = fcxCenter + ghostDx;
+      const gy = fcyCenter + ghostDy;
+      const ghostR = size * 0.35 * flarePhase + 6;
+      const ghost = ctx.createRadialGradient(gx, gy, 0, gx, gy, ghostR);
+      ghost.addColorStop(0, `hsla(180, 80%, 80%, ${fAlpha * 0.18})`);
+      ghost.addColorStop(1, `hsla(220, 80%, 60%, 0)`);
+      ctx.fillStyle = ghost;
+      ctx.beginPath();
+      ctx.arc(gx, gy, ghostR, 0, TAU);
+      ctx.fill();
+
       ctx.restore();
     }
 
