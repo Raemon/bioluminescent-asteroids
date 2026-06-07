@@ -384,24 +384,41 @@ const rollHeadlineEvents = (game: Game) => {
 // bring its first-beat target dot under the crosshair. It's the calmest
 // possible introduction to lining a shot up on the beat.
 const FIRST_LEVEL_DRIFT = {
-  // ring radius (fraction of the incoming engage ring) the rocks spawn at.
-  //   Kept inside the ring so the centre-anchored aligner still finds the
-  //   outward crossing, but far enough out that the rock isn't on the ship.
-  ringFrac: 0.82,
-  // per-rock radial jitter (px) so a multi-rock opener doesn't sit on a
-  //   perfect circle.
-  ringJitter: 28,
+  // spawn distance band as fractions of the incoming engage ring. Pushed
+  //   further out than the original single ringFrac so the opener needs a
+  //   gentle chase; the max can sit slightly past the ring.
+  distMinFrac: 0.9,
+  distMaxFrac: 1.1,
+  // nudge after the sorted-distance spread so rocks aren't perfectly ordered.
+  distJitter: 22,
   // slow, ponderous outward drift — a calm, readable target to chase.
   speed: [30, 46] as [number, number],
 };
 
-// Spawn one opening-wave rock drifting straight out from the centre. `index`
-// / `total` fan the rocks evenly around the ship so they read as "drifting
-// away on all sides" rather than a marching column.
+// Random bearings + distances that tend to spread (one closer, one farther).
+//   Sample `count` uniform distances, sort them, jitter each — on average
+//   that lands noticeably different radii without hardcoding tiers. Pair each
+//   distance with an independent random angle so the layout isn't an even
+//   polygon.
+const sampleFirstLevelPlacements = (count: number, engage: number): Array<{ angle: number; dist: number }> => {
+  const minDist = engage * FIRST_LEVEL_DRIFT.distMinFrac;
+  const maxDist = engage * FIRST_LEVEL_DRIFT.distMaxFrac;
+  const distSamples: number[] = [];
+  for (let i = 0; i < count; i++) distSamples.push(minDist + rng() * (maxDist - minDist));
+  distSamples.sort((a, b) => a - b);
+  const placements: Array<{ angle: number; dist: number }> = [];
+  for (let i = 0; i < count; i++) {
+    const dist = Math.max(minDist, Math.min(maxDist, distSamples[i] + rand(-FIRST_LEVEL_DRIFT.distJitter, FIRST_LEVEL_DRIFT.distJitter)));
+    placements.push({ angle: rng() * TAU, dist });
+  }
+  return placements;
+};
+
+// Spawn one opening-wave rock drifting straight out from the centre.
 const spawnFirstLevelDrifter = (
   game: Game,
-  index: number,
-  total: number,
+  angle: number,
+  dist: number,
   kind: AsteroidKind | undefined,
   size: AsteroidSize,
   claimed: BeatClaimSet,
@@ -409,8 +426,6 @@ const spawnFirstLevelDrifter = (
   const cx = game.w / 2;
   const cy = game.h / 2;
   const engage = CFG.engageRadius.incoming;
-  const angle = (index / Math.max(1, total)) * TAU + rand(-0.3, 0.3);
-  const dist = engage * FIRST_LEVEL_DRIFT.ringFrac + rand(-FIRST_LEVEL_DRIFT.ringJitter, FIRST_LEVEL_DRIFT.ringJitter);
   const pos = v(cx + Math.cos(angle) * dist, cy + Math.sin(angle) * dist);
   // Heavy solid crystals keep their slowdown multiplier on top of the already
   //   gentle opener band.
@@ -463,12 +478,15 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
     slotKinds[Math.floor(rng() * normalCount)] = "solidCrystal";
   }
 
+  const firstLevelPlacements = isFirstLevel
+    ? sampleFirstLevelPlacements(slotKinds.length, CFG.engageRadius.incoming)
+    : null;
   slotKinds.forEach((kind, slotIndex) => {
     const k = kind === "normal" ? undefined : kind;
     // Solid crystal is a medium-sized gem; everything else from this loop spawns large.
     const size: AsteroidSize = kind === "solidCrystal" ? "medium" : "large";
-    const rock = isFirstLevel
-      ? spawnFirstLevelDrifter(game, slotIndex, slotKinds.length, k, size, claimed)
+    const rock = isFirstLevel && firstLevelPlacements
+      ? spawnFirstLevelDrifter(game, firstLevelPlacements[slotIndex].angle, firstLevelPlacements[slotIndex].dist, k, size, claimed)
       : spawnAsteroidAway(game, 200, k, size, claimed);
     game.asteroids.push(rock);
   });
