@@ -9,6 +9,7 @@ import { spawnWave, updateBgBeatIntensity, spawnTutorialSmall, isVeteranPilot } 
 import { newWaveEventSchedule } from "./waveEvents";
 import { stopParade } from "./killedParade";
 import { renderKilledRow } from "./killedParade";
+import { snapshotShipKill } from "./killSnapshot";
 import { emitShipDebris } from "./particleBursts";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showLeaderboard, showScoreEntry } from "./scoreEntry";
 import { HALO_MUSIC_POOL } from "./haloMusicConfig";
@@ -504,6 +505,8 @@ export const abortMission = (game: Game) => {
   game.overlayStartEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
+  const shipSnap = snapshotShipKill(game.ship, "death");
+  if (shipSnap) game.killedSnapshots.push(shipSnap);
   renderKilledRow(game, "vertical");
   showGameOverIntro(game, "aborted");
   showScoreEntry(game);

@@ -29,6 +29,7 @@ import {
 import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState, finalizeRecorder } from "./lifecycle";
 import { syncHud, syncPowerupHud, syncComboHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
+import { snapshotShipKill } from "./killSnapshot";
 import { updatePopups, popupDriftBonus } from "./popups";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
@@ -184,6 +185,8 @@ const transitionToGameOver = (game: Game) => {
   game.overlayStartEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
+  const shipSnap = snapshotShipKill(game.ship, "death");
+  if (shipSnap) game.killedSnapshots.push(shipSnap);
   renderKilledRow(game, "vertical");
   showGameOverIntro(game, "gameover");
   showScoreEntry(game);

@@ -3,6 +3,7 @@ import { SoundName } from "../Sound";
 import { Asteroid } from "../Asteroid";
 import { Alien } from "../Alien";
 import { Comet } from "../Comet";
+import { Ship } from "../Ship";
 
 // post-mission parade replays every kill at full size with the original kill sound.
 //   `bassDrone` is set for bassteroid kills whose voice has a longrunning drone
@@ -90,4 +91,34 @@ export const snapshotCometKill = (c: Comet, killSound: SoundName, scoreEarned: n
   if (!cnv) return null;
   // maxHp=4 paces the parade as one beat of breathing room after the comet sprite.
   return { full: cnv, fullRadius: c.radius, killSound, maxHp: 4, scoreEarned };
+};
+
+// tile fits the shield ring + ~28px shadowBlur halo with margin to spare.
+// renderShipBody bails on !alive, so flip the flag inside the freeze.
+export const snapshotShipKill = (ship: Ship, killSound: SoundName): KilledSnapshot | null => {
+  const ringExtent = ship.radius * 1.4 + ship.haloOffset + ship.shieldRingOffset;
+  const tile = Math.ceil((ringExtent + 36) * 2);
+  const cnv = captureToCanvas(tile, (cx) => {
+    const prevPos = ship.pos, prevAlive = ship.alive;
+    const prevThrust = ship.thrustOn, prevReverse = ship.reverseThrustOn;
+    const prevPort = ship.portThrustOn, prevStarboard = ship.starboardThrustOn;
+    const prevInvuln = ship.invuln;
+    ship.pos = v(0, 0);
+    ship.alive = true;
+    ship.thrustOn = false;
+    ship.reverseThrustOn = false;
+    ship.portThrustOn = false;
+    ship.starboardThrustOn = false;
+    ship.invuln = 0;
+    ship.render(cx, 0, 0);
+    ship.pos = prevPos;
+    ship.alive = prevAlive;
+    ship.thrustOn = prevThrust;
+    ship.reverseThrustOn = prevReverse;
+    ship.portThrustOn = prevPort;
+    ship.starboardThrustOn = prevStarboard;
+    ship.invuln = prevInvuln;
+  });
+  if (!cnv) return null;
+  return { full: cnv, fullRadius: ship.radius, killSound, maxHp: 4, scoreEarned: 0 };
 };
