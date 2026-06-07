@@ -68,12 +68,20 @@ const HOVER_ARC_FADE_IN_SEC = HOVER_RING_SLOT_SEC * 0.9;
 const HOVER_DOT_PULSE_PEAK_ALPHA = 1.0;
 const HOVER_DOT_PULSE_MIN_ALPHA = 0.28;
 const HOVER_DOT_PULSE_PERIOD_SEC = 2.0;
+// after the lock flare resolves, the dashed dot ring fades to a low resting alpha so the
+// player's eye is no longer drawn to the wider circle — the actual hit zone is the inner
+// aim disc, and the soundwaves carry the rhythmic pulse.
+const HOVER_DOT_RESTING_ALPHA = 0.18;
+const HOVER_DOT_FADE_SEC = 0.4;
 const HOVER_DOT_HSL = RETICULE_DASH_HSL;
 // lock flare: brightens the dot-ring arcs briefly at lock acquisition. Marks "lock acquired"
 // — the octave-up hum starts here too. Tutorial gate fires on elapsed >= TUTORIAL_HOVER_SEC
 // independently; the flare visual can outrun it.
 const HOVER_FLARE_SEC = 0.7;
 const HOVER_FLARE_PEAK_BOOST = 4.0;
+// white center-flash on lock — short, peaks at lock-acquire and tails off so the eye lands
+// on the bullet-sized hit zone instead of the wider dashed dot ring.
+const HOVER_CENTER_FLASH_SEC = 0.35;
 // soundwave rings: one new concentric ring emitted every WAVE_PERIOD_BEATS while the player
 // holds hover. Each ring expands outward from the dot ring and fades — reads as a radar ping
 // pulsing in time with the music. WAVE_LIFETIME_BEATS controls how long a single wave lives
@@ -83,7 +91,10 @@ const HOVER_WAVE_LIFETIME_BEATS = 3.0;
 // fire the first soundwave one beat before the ring finishes filling — the pulse anticipates
 // the lock instead of trailing it.
 const HOVER_WAVE_LEAD_BEATS = 1;
-const HOVER_WAVE_START_R = HOVER_DOT_RING_RADIUS + 2;
+// soundwaves emanate from the inner aim disc (bullet-sized) so the radar ping reads as
+// "this is the actual hit zone" — not the larger dashed dot-ring, which used to misleadingly
+// suggest a wider target.
+const HOVER_WAVE_START_R = BULLET_HIT_RADIUS_ON_BEAT;
 const HOVER_WAVE_END_R = HOVER_DOT_RING_RADIUS + 44;
 const HOVER_WAVE_LINE_WIDTH = 2.0;
 const HOVER_WAVE_PEAK_ALPHA = 0.7;
@@ -175,8 +186,13 @@ const paintHoverDotRing = (
   const burstEnvelope = flareT > 0 && flareT < 1
     ? Math.pow(Math.sin(flareT * Math.PI), 0.6) * Math.pow(1 - flareT, 0.5)
     : 0;
+  // pulsing alpha while filling/flaring; once the flare resolves, ease down to a low resting
+  // alpha so the dashed ring stops competing with the inner bullet-sized reticule for the eye.
+  const postFlareAge = fullyBuilt ? Math.max(0, elapsed - fillCompleteSec - HOVER_FLARE_SEC) : 0;
+  const fadeT = Math.min(1, postFlareAge / HOVER_DOT_FADE_SEC);
+  const pulsing = cosineEnvelope(beatTime, HOVER_DOT_PULSE_PERIOD_SEC, HOVER_DOT_PULSE_MIN_ALPHA, HOVER_DOT_PULSE_PEAK_ALPHA);
   const baseAlpha = fullyBuilt
-    ? cosineEnvelope(beatTime, HOVER_DOT_PULSE_PERIOD_SEC, HOVER_DOT_PULSE_MIN_ALPHA, HOVER_DOT_PULSE_PEAK_ALPHA)
+    ? pulsing + (HOVER_DOT_RESTING_ALPHA - pulsing) * fadeT
     : HOVER_DOT_BUILDING_ALPHA;
   const arcAlphaBoost = 1 + (HOVER_FLARE_PEAK_BOOST - 1) * burstEnvelope;
   const arcHsl = burstEnvelope > 0
@@ -188,6 +204,24 @@ const paintHoverDotRing = (
   const wavesStartSec = fillCompleteSec - HOVER_WAVE_LEAD_BEATS * beatGrid;
   if (elapsed >= wavesStartSec) {
     paintSoundwaves(ctx, center, elapsed - wavesStartSec, beatTime, beatGrid);
+  }
+  // white center flash on lock acquisition — sized to the bullet's on-beat hit radius so the
+  // moment of lock visually anchors on the actual hit zone, not the wider dashed dot ring.
+  if (flareAge >= 0 && flareAge < HOVER_CENTER_FLASH_SEC) {
+    const t = flareAge / HOVER_CENTER_FLASH_SEC;
+    const env = Math.pow(1 - t, 1.5);
+    ctx.save();
+    ctx.fillStyle = `hsla(0, 0%, 100%, ${0.9 * env})`;
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, BULLET_HIT_RADIUS_ON_BEAT, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = `hsla(0, 0%, 100%, ${env})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, BULLET_HIT_RADIUS_ON_BEAT * (1 + 0.4 * t), 0, TAU);
+    ctx.stroke();
+    ctx.restore();
   }
   ctx.lineWidth = HOVER_ARC_LINE_WIDTH;
   ctx.lineCap = "round";

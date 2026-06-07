@@ -13,6 +13,22 @@ export const BULLET_DAMAGE_BEAT = 4;
 // halo is up (combo ≥ 4). Doubles the on-beat damage to reward the streak.
 export const BULLET_DAMAGE_BEAT_BOOSTED = 8;
 
+// Seconds over which an on-beat flash's ballooned core shrinks back to its
+// resting size. The flash itself lasts longer (FLASH_DURATION_SEC in
+// gameUpdate); this shorter tail makes the envelope hold at full size for the
+// first half of the flash and decay over the final 0.06s.
+const CORE_FLASH_TAIL_SEC = 0.06;
+// Peak extra core growth at full flash — the bright core swells to
+// (1 + CORE_FLASH_GROWTH)× its resting radius when flashEnv = 1.
+const CORE_FLASH_GROWTH = 2.0;
+// Fraction of the painted head-glow radius out to which the hitbox extends.
+// The glow gradient (see glow.ts) holds a solid-looking blob until its
+// addColorStop(0.6, …0.15) knot, then fades to fully transparent over the
+// final stretch. 0.6 puts the hitbox right at that knot — the edge of the
+// visibly-glowing zone — so a shot connects anywhere the bullet reads as lit,
+// without claiming the faint outer halo.
+const GLOW_VISIBLE_FRACTION = 0.6;
+
 export class Bullet {
   pos: Vec;
   vel: Vec;
@@ -89,10 +105,34 @@ export class Bullet {
     return this.onBeat ? this.radius * 2.38 : this.radius;
   }
 
-  // Collision radius — larger than the visible core so glancing shots that
-  // look like they should connect (inside the glow) actually register.
+  // Radius of the bright painted core dot. Balloons during an on-beat flash
+  // and settles back over CORE_FLASH_TAIL_SEC. render() paints exactly this,
+  // and hitRadius() reuses it so the collision box tracks the visible core's
+  // growth instead of duplicating the size math.
+  coreDrawRadius(): number {
+    if (this.flashTimer <= 0) return this.effectiveRadius();
+    const flashEnv = Math.min(1, this.flashTimer / CORE_FLASH_TAIL_SEC);
+    return this.effectiveRadius() * (1 + CORE_FLASH_GROWTH * flashEnv);
+  }
+
+  // Multiplier on the core radius for the painted head-glow halo. render()
+  // draws the glow at effectiveRadius() × this, and hitRadius() reuses it so
+  // the collision box scales with the glow rather than duplicating the number.
+  // super-boosted (combo ≥ 12) keeps the yellow-tier core size but tightens the
+  // halo (6 vs 10) for a sharper, more pointed read.
+  headGlowRadiusMul(): number {
+    return this.superBoosted ? 6 : this.onBeat ? 10 : 6;
+  }
+
+  // Collision radius — reaches out to the edge of the visibly-glowing zone
+  // (GLOW_VISIBLE_FRACTION of the painted head-glow radius) so a shot connects
+  // anywhere the bullet reads as lit. Never smaller than the actual painted
+  // core (coreDrawRadius), which balloons when the bullet flashes at a beat
+  // reticule, so the player's read of "I'm clearly inside the bullet" always
+  // lands.
   hitRadius(): number {
-    return this.effectiveRadius() * 2.5;
+    const glowVisibleRadius = this.effectiveRadius() * this.headGlowRadiusMul() * GLOW_VISIBLE_FRACTION;
+    return Math.max(glowVisibleRadius, this.coreDrawRadius());
   }
 
   update(dt: number, w: number, h: number) {
@@ -119,9 +159,7 @@ export class Bullet {
     const headHue = this.boosted ? 48 : this.onBeat ? 222 : this.pierce ? 60 : 180;
     const trailAlphaScale = this.onBeat ? 0.85 : 0.4;
     const headAlpha = this.onBeat ? 1.0 : 0.75;
-    // super-boosted (combo ≥ 12) keeps the yellow-tier core size but tightens
-    // the halo (6 vs 10) for a sharper, more pointed read.
-    const headRadiusMul = this.superBoosted ? 6 : this.onBeat ? 10 : 6;
+    const headRadiusMul = this.headGlowRadiusMul();
     const trailRadiusMul = this.superBoosted ? 3 : 5;
     const coreRadius = this.effectiveRadius();
     for (let i = 0; i < this.trail.length; i++) {
@@ -134,7 +172,7 @@ export class Bullet {
     drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul, headHue, headAlpha * rangeAlpha, this.superBoosted || flashing);
     if (flashing) {
       // sharp attack, tail-off — peak brightness lands on the first frame of the flash.
-      const flashEnv = Math.min(1, this.flashTimer / 0.06);
+      const flashEnv = Math.min(1, this.flashTimer / CORE_FLASH_TAIL_SEC);
       // outer halo: huge soft bloom so the flash reads from across the screen.
       drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul * 3.0, 0, 0.7 * flashEnv * rangeAlpha, true);
       // mid bloom: stacked twice for extra punch where the lighter composite peaks.
@@ -155,9 +193,7 @@ export class Bullet {
           : this.pierce
             ? "hsla(60, 100%, 96%, 1)"
             : "hsla(180, 100%, 98%, 1)";
-    const coreDrawRadius = flashing
-      ? coreRadius * (1 + 2.0 * Math.min(1, this.flashTimer / 0.06))
-      : coreRadius;
+    const coreDrawRadius = this.coreDrawRadius();
     ctx.beginPath();
     ctx.arc(this.pos.x, this.pos.y, coreDrawRadius, 0, TAU);
     ctx.fill();
