@@ -96,10 +96,20 @@ const playerIsVeteran = (): boolean => {
 // controls hint panel — we don't want to stack a second instructional overlay on top of the
 // first. gameUpdate emits "tutorial:controls" every time a key transitions to used.
 let allCoreControlsUsed = false;
+// also gate behind FirstWaveHint stage 4 ("Fire (and hit) on the beat") — the drift cue only
+// makes sense once the player has been taught the rhythm-hit loop it's optimizing for.
+// lifecycle.ts broadcasts "first-wave-hint:stage" every transition; stages are monotonic, so
+// remembering the high-water mark is enough.
+const HOVER_ZONE_HINT_REQUIRED_FIRST_WAVE_STAGE = 4;
+let fireAndHitStageReached = false;
 if (typeof window !== "undefined") {
   window.addEventListener("tutorial:controls", (e: Event) => {
     const d = (e as CustomEvent<{ rotate: boolean; thrust: boolean; back: boolean; fire: boolean }>).detail;
     if (d && d.rotate && d.thrust && d.back && d.fire) allCoreControlsUsed = true;
+  });
+  window.addEventListener("first-wave-hint:stage", (e: Event) => {
+    const stage = (e as CustomEvent<{ stage: number }>).detail?.stage ?? 0;
+    if (stage >= HOVER_ZONE_HINT_REQUIRED_FIRST_WAVE_STAGE) fireAndHitStageReached = true;
   });
 }
 // called once per frame by the renderer after slot zone-entry stamps have been updated; stamps
@@ -544,8 +554,8 @@ const paintApproachCrosshair = (
   // hint: only claim the anchor for the very first hover of this session, and freeze it on the
   // first paint of that hover. Veterans skip the hint pipeline; pre-veterans only see it once
   // they've cleared the controls hint (rotate + thrust + reverse + fire each used at least once)
-  // so it doesn't stack on the start-of-run controls panel.
-  if (zoneEnter !== null && !playerIsVeteran() && allCoreControlsUsed && hoverZoneHintZoneEnter === null) {
+  // AND reached the FirstWaveHint "Fire (and hit) on the beat" stage so the cues don't stack.
+  if (zoneEnter !== null && !playerIsVeteran() && allCoreControlsUsed && fireAndHitStageReached && hoverZoneHintZoneEnter === null) {
     hoverZoneHintZoneEnter = zoneEnter;
     hoverZoneHintAnchor = { x: px + outer + HOVER_ZONE_HINT_OFFSET_X, y: py };
     hoverZoneHintShownAt = beatTime;
