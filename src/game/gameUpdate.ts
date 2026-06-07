@@ -55,6 +55,10 @@ export const updateGame = (game: Game, dt: number) => {
   //   ticks while the player practices the rhythm. The same clock carries into
   //   live play when finishCalibrationIntro fires, so the pulse never restarts.
   if (game.calibrationIntro) { updateCalibration(game, dt); return; }
+  // Pilot's-log / "Latency calibrated" intro screens hold the world the same way —
+  //   the bgBeat ticks under a black overlay while <IntroSequence> drives its
+  //   beat-locked fade-ins.
+  if (game.introOverlayActive) { updateCalibration(game, dt); return; }
   // A full-screen menu (settings dialog / standalone recalibrator) is up mid-run —
   //   freeze the sim so the ship can't drift or die behind it. The modal owns the
   //   keys (it stops propagation), so input is already shielded; we just hold the

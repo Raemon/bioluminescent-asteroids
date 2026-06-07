@@ -22,7 +22,7 @@ import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
-import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro, togglePause } from "./game/lifecycle";
+import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro, advanceIntroOverlay, unfreezeIntroWorld, togglePause } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
@@ -97,6 +97,17 @@ export class Game implements HudElements {
   //   rhythm (see updateCalibration). Distinct from `calibrating`, which also
   //   covers the standalone recalibrator that doesn't run the game's beat.
   calibrationIntro = false;
+  // True while the new-day / post-calibration text-overlay sequence is on
+  //   screen — beat keeps ticking but the world is held and fire is gated off,
+  //   same shape as `calibrationIntro`. Drives <IntroSequence>.
+  introOverlayActive = false;
+  // Which leg of the intro chain is on screen. The post-calibration path runs
+  //   "latency" → "fullHints" → finalize; the daily-intro path is just one
+  //   leg ("fullHints" or "shortHint") → finalize. Null between sequences.
+  introOverlayStep: null | "latency" | "fullHints" | "shortHint" = null;
+  // Hints picked at the start of the intro chain, so the latency→fullHints
+  //   hand-off reuses the same triplet instead of re-rolling.
+  introOverlayHints: string[] = [];
   // one-shot lerp of bgBeatIntensity (calibration loudness → wave level) so the
   //   beat eases in volume across the calibration→play hand-off instead of jumping.
   beatIntensityRamp: { from: number; to: number; t: number; dur: number } | null = null;
@@ -374,6 +385,11 @@ export class Game implements HudElements {
       const { channel, value } = (e as CustomEvent).detail as { channel: AudioChannel; value: number };
       this.sound.setChannelVolume(channel, value);
     });
+    // <IntroSequence> fires unfreeze the moment its bg starts revealing the
+    //   world (4 beats before the text finishes fading out) so the player can
+    //   move during the fade-in; `done` fires when the overlay is fully gone.
+    window.addEventListener("intro-sequence:unfreeze", () => unfreezeIntroWorld(this));
+    window.addEventListener("intro-sequence:done", () => advanceIntroOverlay(this));
     window.addEventListener("game:togglePause", () => togglePause(this));
     // <FirstWaveHint> owns its own stage-3 auto-dismiss timer; when it fades
     //   out it asks the game to clear the stage.

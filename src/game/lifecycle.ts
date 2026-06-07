@@ -16,6 +16,8 @@ import { HALO_MUSIC_POOL } from "./haloMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
 import { hideGameOverIntro, showGameOverIntro } from "./gameOverIntro";
 import { hasCalibrated, CALIBRATION_BEAT_INTENSITY } from "./beatCalibration";
+import { pickIntroHints } from "./introHints";
+import { isNewDaySession, markSessionStart } from "./sessionTracker";
 import { rng, seedRng } from "./rng";
 import { ReplayRecorder } from "./replayRecorder";
 import { ReplayPlayer } from "./replayPlayer";
@@ -188,14 +190,45 @@ export const showTitle = (game: Game) => {
 //   the live Tone fallback (which crashes on some browsers' stubbed Web Audio)
 //   is never exercised during gameplay.
 export const requestStart = (game: Game) => {
-  if (game.calibrating || game.calibrationIntro || game.startPending) return;
+  if (game.calibrating || game.calibrationIntro || game.introOverlayActive || game.startPending) return;
   game.sound.resume();
   game.startPending = true;
   void game.sound.bakedCacheReady().then(() => {
     game.startPending = false;
-    if (hasCalibrated()) startGame(game);
-    else startCalibrationIntro(game);
+    if (!hasCalibrated()) {
+      startCalibrationIntro(game);
+      return;
+    }
+    // Already-calibrated players get a pilot's-log opener instead of jumping
+    //   straight in. New day (>=4h) → full triplet + "Become one with the
+    //   Pulsar"; otherwise → one hint as a quick fade. Same shape for veterans
+    //   and rookies on same-day re-entry.
+    if (isNewDaySession()) {
+      startGameWithIntro(game, "fullHints");
+    } else {
+      startGameWithIntro(game, "shortHint");
+    }
   });
+};
+
+// Spin up a real run, but with the intro overlay riding on top — the world is
+//   held by updateGame's introOverlayActive short-circuit while the beat ticks
+//   under the black overlay. When IntroSequence fires `intro-sequence:done`,
+//   we drop the flag and play takes over from the same beat clock.
+const startGameWithIntro = (game: Game, kind: "fullHints" | "shortHint") => {
+  markSessionStart();
+  startGame(game);
+  // startGame set state=playing and spawned the wave; immediately hide the
+  //   world behind the intro and gate fire off via introOverlayActive.
+  game.introOverlayActive = true;
+  game.introOverlayStep = kind;
+  game.introOverlayHints = pickIntroHints(kind === "fullHints" ? 3 : 1);
+  game.ship.invuln = Math.max(game.ship.invuln, 2.0);
+  // Hold the bgBeat at calibration loudness for the intro and ramp down once
+  //   play actually begins; same pattern as the post-calibration hand-off.
+  game.sound.bgBeatIntensity = CALIBRATION_BEAT_INTENSITY;
+  game.beatIntensityRamp = null;
+  window.dispatchEvent(new CustomEvent("intro-sequence:start", { detail: { kind, hints: game.introOverlayHints } }));
 };
 
 // Recalibration only (settings "Resync the beat"): the standalone calibrator
@@ -245,28 +278,77 @@ export const startCalibrationIntro = (game: Game) => {
   window.dispatchEvent(new CustomEvent("beat-calibrator:open", { detail: { sound: game.sound, intro: true } }));
 };
 
-// Player locked in: bring the world to life on the same beat. Spawns wave 1 +
-//   tutorial exactly like startGame, but leaves beatTime untouched (continuous
-//   pulse) and ramps the bgBeat from the loud practice level down to the wave
-//   level over a couple seconds so the loudness eases rather than drops.
+// Player locked in: hand off the calibrator's beat clock to the pilot's-log
+//   intro overlay. The world stays held (introOverlayActive shares the same
+//   short-circuit path calibrationIntro uses) and beat keeps ticking under the
+//   "Latency calibrated" beat and the 3-hint sequence. When the intro fires
+//   `intro-sequence:done`, finalizeIntroToPlay brings wave 1 to life.
 export const finishCalibrationIntro = (game: Game) => {
   game.calibrationIntro = false;
   game.calibrating = false;
-  game.ship.invuln = 2.0;
-  updateBgBeatIntensity(game);
-  const waveTarget = game.sound.bgBeatIntensity;
+  game.introOverlayActive = true;
+  game.introOverlayStep = "latency";
+  game.introOverlayHints = pickIntroHints(3);
+  game.ship.invuln = Math.max(game.ship.invuln, 2.0);
+  markSessionStart();
+  // First-ever calibration always counts as a fresh day — kick off the latency
+  //   announcement and queue the pilot's log triplet right after. The chain
+  //   latency → fullHints → finalize is advanced by the Game.ts handler for
+  //   `intro-sequence:done` (it re-fires `intro-sequence:start` for fullHints).
+  window.dispatchEvent(new CustomEvent("intro-sequence:start", { detail: { kind: "latency", hints: game.introOverlayHints } }));
+};
+
+// Called by the Game-level `intro-sequence:done` handler to advance the chain.
+//   For the post-calibration chain, "latency" hands off to "fullHints"; for
+//   any single-leg chain (daily fullHints or shortHint, or the trailing
+//   fullHints of the post-calibration chain), the next done finalizes play.
+export const advanceIntroOverlay = (game: Game) => {
+  if (game.introOverlayStep === "latency") {
+    // Chain hands off to the pilot's-log triplet — keep the world frozen, the
+    //   bg stays black, the beat keeps ticking under the new leg.
+    game.introOverlayStep = "fullHints";
+    window.dispatchEvent(new CustomEvent("intro-sequence:start", { detail: { kind: "fullHints", hints: game.introOverlayHints } }));
+    return;
+  }
+  // shortHint or fullHints leg's text has fully faded out — the unfreeze
+  //   already fired mid-fade, so this is just bookkeeping.
+  finalizeIntroToPlay(game);
+};
+
+// Fired the moment IntroSequence begins fading from black — the world wakes up
+//   *during* the fade-in instead of after it, so the player can move as soon as
+//   the screen starts revealing. The bgBeat stays at the intro's loudness
+//   (CALIBRATION_BEAT_INTENSITY) so the pulse doesn't dip when play starts; the
+//   wave director will set per-wave levels on wave changes from there on.
+export const unfreezeIntroWorld = (game: Game) => {
+  if (!game.introOverlayActive) return;
+  game.introOverlayActive = false;
+  game.beatIntensityRamp = null;
   game.sound.bgBeatIntensity = CALIBRATION_BEAT_INTENSITY;
-  game.beatIntensityRamp = { from: CALIBRATION_BEAT_INTENSITY, to: waveTarget, t: 0, dur: 2.5 };
-  game.firstWaveOnBeatFireCount = 0;
-  game.firstWaveOnBeatHitCount = 0;
-  game.tutorialActive = false;
-  game.tutorialHoverDone = false;
-  game.tutorialFireHitDone = false;
-  emitFirstWaveHintProgress(0);
-  emitFirstWaveHintHitProgress(0);
-  emitFirstWaveHintRhythmProgress(0);
-  beginFirstWaveByTutorialFlag(game, game.tutorialRequested, isVeteranPilot());
+  // Post-calibration chain only: spawn wave 1 + tutorial if we haven't yet.
+  //   startGameWithIntro already spawned the wave; in that case `hasSpawnedFirstLevel`
+  //   is true and beginFirstWaveByTutorialFlag is skipped.
+  if (!game.hasSpawnedFirstLevel) {
+    game.firstWaveOnBeatFireCount = 0;
+    game.firstWaveOnBeatHitCount = 0;
+    game.tutorialActive = false;
+    game.tutorialHoverDone = false;
+    game.tutorialFireHitDone = false;
+    emitFirstWaveHintProgress(0);
+    emitFirstWaveHintHitProgress(0);
+    emitFirstWaveHintRhythmProgress(0);
+    beginFirstWaveByTutorialFlag(game, game.tutorialRequested, isVeteranPilot());
+  }
   syncHud(game);
+};
+
+// Final cleanup after IntroSequence's last leg fades out completely. The world
+//   has already been awake since `unfreezeIntroWorld` fired earlier in the
+//   fade-in; this just clears the residual chain state.
+export const finalizeIntroToPlay = (game: Game) => {
+  unfreezeIntroWorld(game); // no-op if unfreeze already fired
+  game.introOverlayStep = null;
+  game.introOverlayHints = [];
 };
 
 // Tutorial button → guided tutorial (single practice rock + stage 1 controls hint);
