@@ -134,7 +134,7 @@ export const IntroSequence = () => {
       const op2 = envelope(beat, 9, 2, null, 0);
       const opClose = envelope(beat, 13, 2, null, 0);
       const holdEnd = 19; // 13 close-start + 2 fade-in + 4 hold
-      const textFadeOutBeats = 8;
+      const textFadeOutBeats = 4;
       const outFrac = Math.max(0, Math.min(1, (beat - holdEnd) / textFadeOutBeats));
       const outMul = 1 - smooth(outFrac);
       setLines([
@@ -143,8 +143,8 @@ export const IntroSequence = () => {
         { text: detail.hints?.[2] ?? "", opacity: op2 * outMul },
         { text: "Become one with the Pulsar", opacity: opClose * outMul },
       ]);
-      const bgStart = holdEnd + 4; // 4 beats (2s) into the text fade-out
-      const bgFade = 4; // 2s, ends with the text
+      const bgStart = holdEnd + 4; 
+      const bgFade = 4; 
       if (beat >= bgStart) fireUnfreeze();
       const bgFrac = Math.max(0, Math.min(1, (beat - bgStart) / bgFade));
       setBgOpacity(1 - smooth(bgFrac));
@@ -154,7 +154,7 @@ export const IntroSequence = () => {
       //   runs 4 beats. The bg fade-in runs alongside the text fade-out
       //   (same 4 beats), ending together — the world wakes up the moment the
       //   text starts fading.
-      const op = envelope(beat, 0, 1, 4, 4);
+      const op = envelope(beat, 0, 1, 4, 2);
       setLines([{ text: detail.hints?.[0] ?? "", opacity: op }]);
       const bgStart = 4;
       const bgFade = 4;

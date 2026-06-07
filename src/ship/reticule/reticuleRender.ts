@@ -79,9 +79,10 @@ const HOVER_DOT_HSL = RETICULE_DASH_HSL;
 // independently; the flare visual can outrun it.
 const HOVER_FLARE_SEC = 0.7;
 const HOVER_FLARE_PEAK_BOOST = 4.0;
-// white center-flash on lock — short, peaks at lock-acquire and tails off so the eye lands
-// on the bullet-sized hit zone instead of the wider dashed dot ring.
-const HOVER_CENTER_FLASH_SEC = 0.35;
+// white center-flash on lock — soft swell rather than a hard pop so the player's ear stays
+// anchored to the song beat instead of treating the flash as a "fire NOW" cue.
+const HOVER_CENTER_FLASH_SEC = 0.55;
+const HOVER_CENTER_FLASH_PEAK_ALPHA = 0.5;
 // soundwave rings: one new concentric ring emitted every WAVE_PERIOD_BEATS while the player
 // holds hover. Each ring expands outward from the dot ring and fades — reads as a radar ping
 // pulsing in time with the music. WAVE_LIFETIME_BEATS controls how long a single wave lives
@@ -278,14 +279,16 @@ const paintHoverDotRing = (
   // moment of lock visually anchors on the actual hit zone, not the wider dashed dot ring.
   if (flareAge >= 0 && flareAge < HOVER_CENTER_FLASH_SEC) {
     const t = flareAge / HOVER_CENTER_FLASH_SEC;
-    const env = Math.pow(1 - t, 1.5);
+    // sin-shaped swell-and-fade instead of front-loaded pop, so the flash reads as a glow
+    // settling in rather than a strobe.
+    const env = Math.sin(t * Math.PI);
     ctx.save();
-    ctx.fillStyle = `hsla(0, 0%, 100%, ${0.9 * env})`;
+    ctx.fillStyle = `hsla(0, 0%, 100%, ${HOVER_CENTER_FLASH_PEAK_ALPHA * env})`;
     ctx.beginPath();
     ctx.arc(center.x, center.y, BULLET_HIT_RADIUS_ON_BEAT, 0, TAU);
     ctx.fill();
-    ctx.strokeStyle = `hsla(0, 0%, 100%, ${env})`;
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = `hsla(0, 0%, 100%, ${0.6 * env})`;
+    ctx.lineWidth = 1.5;
     ctx.setLineDash([]);
     ctx.beginPath();
     ctx.arc(center.x, center.y, BULLET_HIT_RADIUS_ON_BEAT * (1 + 0.4 * t), 0, TAU);
@@ -564,6 +567,23 @@ const hoverSwell = (elapsed: number): number => {
   return swellLinear * swellLinear * (3 - 2 * swellLinear);
 };
 
+// snap forward to the next song-grid boundary. Used to defer the lock-cue trigger so the
+// lock flare/hum/wave land on a downbeat instead of whenever the fill mechanically finished.
+const snapToNextBeat = (beatTime: number, beatGrid: number): number => {
+  if (beatGrid <= 0) return beatTime;
+  return Math.ceil(beatTime / beatGrid) * beatGrid;
+};
+
+// snap backward to the previous quarter-of-a-beat tick. Used as the fill animation's anchor
+// so each arc-tick is phase-aligned to a fine sub-beat grid without causing more than a tiny
+// visible "pre-fill jump" when hover starts mid-beat (worst case ~2 arcs at quarter snap).
+const HOVER_FILL_SNAP_FRACTION = 1 / 4;
+const snapToPrevSubBeat = (beatTime: number, beatGrid: number): number => {
+  if (beatGrid <= 0) return beatTime;
+  const step = beatGrid * HOVER_FILL_SNAP_FRACTION;
+  return Math.floor(beatTime / step) * step;
+};
+
 // per-ring state machine + visual paint for the tight target-area lock ring. Drives the dashed
 // clockwise fill and stamps completionBeatTime + fires the fifth (lock) hum on the rising edge.
 const updateHoverRing = (
@@ -577,13 +597,19 @@ const updateHoverRing = (
     return;
   }
   if (ring.hoverStartBeatTime === null) {
-    ring.hoverStartBeatTime = beatTime;
+    // anchor the fill's internal clock to the previous quarter-of-a-beat tick so each arc-tick
+    // is phase-aligned to the song's sub-beat grid. Snapping backward (vs forward) avoids any
+    // draw delay; using a 1/4-beat fraction keeps the "pre-fill jump" to at most ~2 arcs.
+    ring.hoverStartBeatTime = snapToPrevSubBeat(beatTime, beatGrid);
     ring.completionBeatTime = null;
   }
   const elapsed = beatTime - ring.hoverStartBeatTime;
   const { fillJustCompleted } = paintHoverDotRing(ctx, ringCenter, elapsed, beatTime, beatGrid);
   if (fillJustCompleted && ring.completionBeatTime === null) {
-    ring.completionBeatTime = beatTime;
+    // defer the lock cue (flare + hum + bright wave) to the next beat boundary so it lands
+    // on-grid even if the fill mechanically finished mid-beat. With the back-snap above the
+    // fill *should* already complete on a beat, but this is a guard against subgrid drift.
+    ring.completionBeatTime = snapToNextBeat(beatTime, beatGrid);
     if (sound) sound.startFirstDotLockHum();
     tryClaimDriftLockHint(ringCenter, beatTime);
   }

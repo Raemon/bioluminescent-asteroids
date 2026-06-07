@@ -2646,7 +2646,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 .intro-sequence__line {
-  font-weight: 400;
+  font-weight: 500;
   color: #c8efff;
   letter-spacing: 0.18em;
   transform: scaleX(0.82);
@@ -2655,15 +2655,13 @@ html:has(#sound-root), body:has(> #sound-root) {
   line-height: 1.4;
   font-size: clamp(13px, 1.45vw, 24px);
   text-shadow: 0 0 18px rgba(76, 182, 255, 0.35);
-  /* opacity is driven per-frame from JS to lock fade-ins to the beat. */
   will-change: opacity;
 }
 
 .intro-sequence__line--close {
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.32em;
   font-size: clamp(17px, 1.95vw, 30px);
-  text-transform: uppercase;
   color: #eafaff;
   text-shadow: 0 0 22px rgba(76, 182, 255, 0.6), 0 0 56px rgba(76, 182, 255, 0.35);
   margin-top: 8px;

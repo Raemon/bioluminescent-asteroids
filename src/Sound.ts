@@ -1614,11 +1614,12 @@ export class Sound {
   }
 
   // Perfect-fifth companion hum (G4) that joins the moment the hover ring finishes filling. Sits a
-  // fifth above the C4 root, filling the C4+C5 octave into an open chord. Sharper attack
-  // (LOCK_ATTACK_SEC) so it "lands" with the visual flare, then sustains and pulses on the beat.
+  // fifth above the C4 root, filling the C4+C5 octave into an open chord. Soft swell-attack
+  // (LOCK_ATTACK_SEC) so it eases in under the song's beat rather than punching across it.
   private static readonly FIRST_DOT_LOCK_HUM_PEAK_GAIN = 0.05;
-  // 0.25s attack matches the flare animation: rises sharply, settles into the chill pulse.
-  private static readonly FIRST_DOT_LOCK_HUM_ATTACK_SEC = 0.25;
+  // slower attack — swells in over the flare instead of punching, so the player's ear stays
+  // on the song beat rather than treating the lock as a percussive "fire NOW" hit.
+  private static readonly FIRST_DOT_LOCK_HUM_ATTACK_SEC = 0.55;
   // formant band that brightens on the beat, sitting between the base and octave voices.
   private static readonly FIRST_DOT_LOCK_HUM_FILTER_TROUGH_HZ = 900;
   private static readonly FIRST_DOT_LOCK_HUM_FILTER_PEAK_HZ = 1250;
@@ -1631,7 +1632,8 @@ export class Sound {
     // G4 = 392.00 Hz — a perfect fifth above the C4 root hum.
     this.firstDotLockHum = this.createHumVoice(392.00, 4.4, 0.0035, Sound.FIRST_DOT_LOCK_HUM_FILTER_TROUGH_HZ);
     if (!this.firstDotLockHum) return;
-    // sharper attack: linear ramp from silence to peak across LOCK_ATTACK_SEC.
+    // linear ramp from silence to peak across LOCK_ATTACK_SEC — soft enough that the lock
+    // reads as a swell joining the chord rather than a percussive accent on its own clock.
     this.firstDotLockHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_LOCK_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_LOCK_HUM_ATTACK_SEC);
   }
 
