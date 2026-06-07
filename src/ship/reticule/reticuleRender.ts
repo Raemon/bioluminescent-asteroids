@@ -3,7 +3,7 @@ import type { Sound } from "../../Sound";
 import { Vec, add, mul, fromAngle, wrap, TAU } from "../../vec";
 import { computeConeFrame } from "./coneGeometry";
 import { paintConeBackground, paintRangeArcs, RETICULE_DASH_HSL } from "./radarCone";
-import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost } from "./trajectoryPreview";
+import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost, expireHoverZoneHintIfHoverEnded, paintHoverZoneHint } from "./trajectoryPreview";
 import {
   reticuleOverlapsAnyTarget,
   paintAimDiscs,
@@ -387,6 +387,8 @@ export const renderShipReticules = (
     if (hovering) anyHover = true;
     if (ringState.completionBeatTime !== null) anyLocked = true;
   }
+  expireHoverZoneHintIfHoverEnded(state.hoverDotRings.map(r => r.zoneEnterBeatTime), beatTime);
+  paintHoverZoneHint(ctx, beatTime);
   if (sound) {
     const beatPhase01 = ((audioBeatTime % beatGrid) + beatGrid) % beatGrid / beatGrid;
     if (zoneIntensity > 0) sound.updateFirstDotHum(zoneIntensity, beatPhase01, beatGrid);

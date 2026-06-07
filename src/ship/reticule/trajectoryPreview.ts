@@ -44,14 +44,118 @@ const TRAJECTORY_FIRST_BEAT_DOT_LIT_MIN_ALPHA = 0.6;
 // how far outside the on-beat hit radius the proximity glow starts ramping up — this is
 // the "near" band where the first-dot already reads as bright before a direct overlap.
 const TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD = 24;
-// approach zone: the wider radius (reticule-center → dot-center) at which a very faint ring
-// begins contracting inward toward the dot, plus the soft outer hum starts. Independent of the
-// tight proximity-glow band above so the early "you're on the right track" cue reads well before
-// the actual target lock. The ring restarts every HOVER_ZONE_RING_PERIOD_BEATS on the beat.
-const HOVER_ZONE_RADIUS = 75;
+// approach zone: the wider radius (reticule-center → dot-center) at which giant crosshairs
+// appear centered on the dot, plus the soft outer hum starts. Independent of the tight
+// proximity-glow band above so the early "you're on the right track" cue reads well before the
+// actual target lock. A small white pulse runs inward along each crosshair arm on every beat,
+// pointing at the target.
+const HOVER_ZONE_RADIUS = 100;
 const HOVER_ZONE_RING_PERIOD_BEATS = 1;
-const HOVER_ZONE_RING_ALPHA = 0.13;
-const HOVER_ZONE_RING_LINE_WIDTH = 1;
+const HOVER_ZONE_CROSSHAIR_ARM = 60;
+const HOVER_ZONE_CROSSHAIR_INNER_GAP = 8;
+const HOVER_ZONE_CROSSHAIR_ALPHA = 0.1;
+const HOVER_ZONE_CROSSHAIR_LINE_WIDTH = 1;
+const HOVER_ZONE_PULSE_LENGTH = 10;
+const HOVER_ZONE_PULSE_LINE_WIDTH = 1.6;
+const HOVER_ZONE_PULSE_HSL = "0, 0%, 25%";
+const HOVER_ZONE_FADE_IN_SEC = 0.05;
+// hint text that appears alongside the first crosshair shown per game session — only for
+// pre-veteran pilots (anyone who has never hit 6x rhythm). Veterans skip the hint entirely;
+// non-veterans see it once per run, anchored to the spot of first appearance, and fade out
+// gently after the originating hover ends.
+const HOVER_ZONE_HINT_LINES = ["Aim at the target", "to hit on the beat"] as const;
+const HOVER_ZONE_HINT_LINE_HEIGHT = 22;
+// font size matches FirstWaveHint__line (~18px) so the in-canvas hint reads as part of the
+// same hint family rather than a smaller secondary annotation.
+const HOVER_ZONE_HINT_FONT = "400 18px 'Space Grotesk', system-ui, sans-serif";
+const HOVER_ZONE_HINT_FILL_HSL = "197, 100%, 86%"; // matches #c8efff used by .first-wave-hint__line
+const HOVER_ZONE_HINT_SHADOW = "rgba(0, 0, 0, 0.8)";
+const HOVER_ZONE_HINT_OFFSET_X = 18;
+const HOVER_ZONE_HINT_FADE_OUT_SEC = 3;
+const HOVER_ZONE_HINT_FADE_IN_SEC = 0.1;
+// hoverZoneHintZoneEnter pins the hint to the very first hover of this game session:
+//   null = no hover has shown the hint yet → next paint will claim the hint for itself
+//   number = the zoneEnter value of the in-progress hover currently displaying the hint
+//   -1 = the first hover has ended → hint is fading out or fully retired
+let hoverZoneHintZoneEnter: number | null = null;
+// anchor frozen at first paint so the text stays put even as the target dot drifts
+let hoverZoneHintAnchor: { x: number; y: number } | null = null;
+// beat-time the hint first appeared; null until claimed. Drives the fade-in ramp.
+let hoverZoneHintShownAt: number | null = null;
+// beat-time the originating hover ended; null while still active. Drives the fade-out window.
+let hoverZoneHintRetiredAt: number | null = null;
+// veteran flag is stamped persistently by waveDirector when the player ever hits 6x rhythm;
+// read it inline to avoid pulling the whole waveDirector module (heavy import graph) just for
+// this gate.
+const HOVER_ZONE_HINT_VETERAN_KEY = "pulsar.veteran";
+const playerIsVeteran = (): boolean => {
+  try { return localStorage.getItem(HOVER_ZONE_HINT_VETERAN_KEY) === "1"; }
+  catch { return false; }
+};
+// gate the hint behind the same "all four core controls used" milestone that retires the
+// controls hint panel — we don't want to stack a second instructional overlay on top of the
+// first. gameUpdate emits "tutorial:controls" every time a key transitions to used.
+let allCoreControlsUsed = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("tutorial:controls", (e: Event) => {
+    const d = (e as CustomEvent<{ rotate: boolean; thrust: boolean; back: boolean; fire: boolean }>).detail;
+    if (d && d.rotate && d.thrust && d.back && d.fire) allCoreControlsUsed = true;
+  });
+}
+// called once per frame by the renderer after slot zone-entry stamps have been updated; stamps
+// the retirement beat-time the moment the originating hover ends (kicking off fade-out).
+// Idempotent / safe to call every frame.
+export const expireHoverZoneHintIfHoverEnded = (
+  activeZoneEnters: ReadonlyArray<number | null>, beatTime: number,
+) => {
+  if (typeof hoverZoneHintZoneEnter !== "number" || hoverZoneHintZoneEnter < 0) return;
+  for (const z of activeZoneEnters) { if (z === hoverZoneHintZoneEnter) return; }
+  hoverZoneHintZoneEnter = -1;
+  hoverZoneHintRetiredAt = beatTime;
+};
+
+// called once per frame after the crosshair pass; renders the hint at its frozen anchor (if any)
+// with a long fade-out after retirement. Safe to call when no hint is active.
+export const paintHoverZoneHint = (ctx: CanvasRenderingContext2D, beatTime: number) => {
+  if (hoverZoneHintAnchor === null) return;
+  if (playerIsVeteran()) return;
+  let alpha = 1;
+  if (hoverZoneHintShownAt !== null) {
+    const sinceShown = Math.max(0, beatTime - hoverZoneHintShownAt);
+    alpha *= Math.min(1, sinceShown / HOVER_ZONE_HINT_FADE_IN_SEC);
+  }
+  if (hoverZoneHintRetiredAt !== null) {
+    const since = beatTime - hoverZoneHintRetiredAt;
+    if (since >= HOVER_ZONE_HINT_FADE_OUT_SEC) { hoverZoneHintAnchor = null; return; }
+    const t01 = Math.max(0, 1 - since / HOVER_ZONE_HINT_FADE_OUT_SEC);
+    alpha *= t01 * t01;
+  }
+  const prevFont = ctx.font;
+  const prevFill = ctx.fillStyle;
+  const prevAlign = ctx.textAlign;
+  const prevBaseline = ctx.textBaseline;
+  const prevShadowColor = ctx.shadowColor;
+  const prevShadowBlur = ctx.shadowBlur;
+  ctx.font = HOVER_ZONE_HINT_FONT;
+  ctx.fillStyle = `hsla(${HOVER_ZONE_HINT_FILL_HSL}, ${0.95 * alpha})`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = HOVER_ZONE_HINT_SHADOW;
+  ctx.shadowBlur = 6;
+  // vertical-center the multi-line block on the anchor point so the crosshair sits next to the
+  // midline rather than the top of the first line.
+  const totalH = (HOVER_ZONE_HINT_LINES.length - 1) * HOVER_ZONE_HINT_LINE_HEIGHT;
+  const startY = hoverZoneHintAnchor.y - totalH / 2;
+  for (let i = 0; i < HOVER_ZONE_HINT_LINES.length; i++) {
+    ctx.fillText(HOVER_ZONE_HINT_LINES[i], hoverZoneHintAnchor.x, startY + i * HOVER_ZONE_HINT_LINE_HEIGHT);
+  }
+  ctx.font = prevFont;
+  ctx.fillStyle = prevFill;
+  ctx.textAlign = prevAlign;
+  ctx.textBaseline = prevBaseline;
+  ctx.shadowColor = prevShadowColor;
+  ctx.shadowBlur = prevShadowBlur;
+};
 // faint dashed halo around the first-beat dot — subtle "this is the next-beat lock" cue.
 // Picks up the same beat-pulse boost as the dot itself so it brightens on the beat in sync.
 const TRAJECTORY_FIRST_BEAT_HALO_RADIUS = 6;
@@ -393,26 +497,61 @@ const withinApproachZone = (px: number, py: number, retX: number, retY: number):
   return ddx * ddx + ddy * ddy <= HOVER_ZONE_RADIUS * HOVER_ZONE_RADIUS;
 };
 
-// faint ring that appears at the 75px approach radius and contracts inward to the dot center,
-// restarting every HOVER_ZONE_RING_PERIOD_BEATS on the beat. The first contraction is held at the
-// outer radius until zoneEnter's next beat-grid line so it always launches cleanly on a beat
-// rather than mid-flight when the reticule first enters the zone.
-const paintContractingZoneRing = (
+// giant + crosshair centered on the target dot, with a small white pulse running inward along
+// each arm on every beat — "pointing at the target". Phase is locked directly to the beat grid,
+// so the pulse appears already mid-flight at whatever beat-fraction the crosshair shows up at.
+// Overall opacity ramps 0→1 over HOVER_ZONE_FADE_IN_SEC from zoneEnter so the appearance reads
+// as a soft fade-in rather than a pop. zoneEnter=null means "appeared this frame" → start at 0.
+const paintApproachCrosshair = (
   ctx: CanvasRenderingContext2D, px: number, py: number,
-  beatTime: number, beatGrid: number, zoneEnter: number,
+  beatTime: number, beatGrid: number, zoneEnter: number | null,
 ) => {
   if (beatGrid <= 0) return;
-  const period = beatGrid * HOVER_ZONE_RING_PERIOD_BEATS;
-  const contractStart = (Math.floor(zoneEnter / beatGrid) + 1) * beatGrid;
-  const elapsed = beatTime - contractStart;
-  const phase = elapsed < 0 ? 0 : (elapsed % period) / period;
-  const radius = HOVER_ZONE_RADIUS * (1 - phase);
-  ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${HOVER_ZONE_RING_ALPHA})`;
-  ctx.lineWidth = HOVER_ZONE_RING_LINE_WIDTH;
+  const sinceEnter = zoneEnter === null ? 0 : Math.max(0, beatTime - zoneEnter);
+  const fadeIn = Math.min(1, sinceEnter / HOVER_ZONE_FADE_IN_SEC);
+  if (fadeIn <= 0) return;
+  const prevAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = prevAlpha * fadeIn;
+  const inner = HOVER_ZONE_CROSSHAIR_INNER_GAP;
+  const outer = inner + HOVER_ZONE_CROSSHAIR_ARM;
+  ctx.strokeStyle = `hsla(${RETICULE_DASH_HSL}, ${HOVER_ZONE_CROSSHAIR_ALPHA})`;
+  ctx.lineWidth = HOVER_ZONE_CROSSHAIR_LINE_WIDTH;
   ctx.setLineDash([]);
   ctx.beginPath();
-  ctx.arc(px, py, Math.max(0.5, radius), 0, TAU);
+  ctx.moveTo(px - outer, py); ctx.lineTo(px - inner, py);
+  ctx.moveTo(px + inner, py); ctx.lineTo(px + outer, py);
+  ctx.moveTo(px, py - outer); ctx.lineTo(px, py - inner);
+  ctx.moveTo(px, py + inner); ctx.lineTo(px, py + outer);
   ctx.stroke();
+
+  const period = beatGrid * HOVER_ZONE_RING_PERIOD_BEATS;
+  const phase = ((beatTime % period) + period) % period / period;
+  const armSpan = outer - inner;
+  const headDist = outer - phase * (armSpan + HOVER_ZONE_PULSE_LENGTH);
+  const tailDist = headDist + HOVER_ZONE_PULSE_LENGTH;
+  const segStart = Math.max(inner, headDist);
+  const segEnd = Math.min(outer, tailDist);
+  if (segEnd > segStart) {
+    ctx.strokeStyle = `hsla(${HOVER_ZONE_PULSE_HSL}, 0.85)`;
+    ctx.lineWidth = HOVER_ZONE_PULSE_LINE_WIDTH;
+    ctx.beginPath();
+    ctx.moveTo(px - segEnd, py); ctx.lineTo(px - segStart, py);
+    ctx.moveTo(px + segStart, py); ctx.lineTo(px + segEnd, py);
+    ctx.moveTo(px, py - segEnd); ctx.lineTo(px, py - segStart);
+    ctx.moveTo(px, py + segStart); ctx.lineTo(px, py + segEnd);
+    ctx.stroke();
+  }
+  // hint: only claim the anchor for the very first hover of this session, and freeze it on the
+  // first paint of that hover. Veterans skip the hint pipeline; pre-veterans only see it once
+  // they've cleared the controls hint (rotate + thrust + reverse + fire each used at least once)
+  // so it doesn't stack on the start-of-run controls panel.
+  if (zoneEnter !== null && !playerIsVeteran() && allCoreControlsUsed && hoverZoneHintZoneEnter === null) {
+    hoverZoneHintZoneEnter = zoneEnter;
+    hoverZoneHintAnchor = { x: px + outer + HOVER_ZONE_HINT_OFFSET_X, y: py };
+    hoverZoneHintShownAt = beatTime;
+    hoverZoneHintRetiredAt = null;
+  }
+  ctx.globalAlpha = prevAlpha;
 };
 
 // overlapsReticule = strict hit (powers reticule lock-on visuals); slotProximities[k-1] = soft
@@ -515,11 +654,11 @@ const drawBeatDotsAlongRay = (
           if (withinApproachZone(px, py, retXk, retYk)) within75 = true;
         }
         if (within75) slotWithin75[slotIdx] = true;
-        // contracting approach ring sits under the dot; only once the slot's zone-entry beat is
-        // stamped (set by the renderer on the rising edge) so it launches on a clean beat.
-        const zoneEnter = slotIdx < hoverZoneEnterBySlot.length ? hoverZoneEnterBySlot[slotIdx] : null;
-        if (within75 && zoneEnter !== null) {
-          paintContractingZoneRing(ctx, drawX, drawY, beatTime, beatGrid, zoneEnter);
+        // giant approach crosshairs sit centered on the dot; pulse phase is locked to the beat
+        // grid so it's always mid-flight, with a 50ms opacity ramp from zoneEnter for a soft fade-in.
+        if (within75) {
+          const zoneEnter = slotIdx < hoverZoneEnterBySlot.length ? hoverZoneEnterBySlot[slotIdx] : null;
+          paintApproachCrosshair(ctx, drawX, drawY, beatTime, beatGrid, zoneEnter);
         }
         const tickLength = slotCrosshairLengthTrajectory(slotIdx + 1);
         if (SHOW_FIRST_BEAT_DOT) {
