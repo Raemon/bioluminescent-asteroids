@@ -1,5 +1,64 @@
 [
   {
+    "id": "2026-06-07-4aa2e04",
+    "date": "2026-06-07",
+    "title": "Laser Shot, new music tracks, and visual polish",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "New Laser Shot powerup lets you charge up a powerful beam and release it on the beat for massive damage.",
+          "Four new background music tracks added to the rotation: vaporwave, outer-wilds folk, dawn/crystal, and synthwave styles.",
+          "Bullets now flash when they cross your reticule on-beat, giving clear visual confirmation of on-beat hits.",
+          "A one-time hint appears the first time you complete a Drift Lock, explaining the x2 damage mechanic."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Asteroids spawning at screen edges no longer travel at shallow angles that caused visual glitches.",
+          "Gameplay clock now stays tightly synced to the music, reducing drift between the beat and audio."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "First-wave asteroids now materialize in a ring around the player instead of appearing from fixed positions.",
+          "Reticule beat pulse is significantly stronger, making rhythm timing easier to read at a glance.",
+          "Kick drum and bass sounds updated for more presence and improved audio quality.",
+          "Background music tracks updated with improved audio quality across all styles."
+        ]
+      }
+    ],
+    "commits": [
+      "4aa2e04",
+      "c80bb77",
+      "1985a9d",
+      "b7eec02",
+      "23272e2",
+      "6380212",
+      "ee45c06",
+      "71da644",
+      "b9d977e",
+      "fbb2e7f",
+      "3ba629c",
+      "308aee8",
+      "47265fa",
+      "3bc3ea3",
+      "ec33beb",
+      "1ec9a56",
+      "8baeb47",
+      "230a675",
+      "ecdd8cd",
+      "6f5e3bf",
+      "8d2babe",
+      "4c1718f",
+      "cadccc5",
+      "98e9a84",
+      "7b59153"
+    ]
+  },
+  {
     "id": "2026-06-05-68798ab",
     "date": "2026-06-05",
     "title": "Replay fidelity improvements",
