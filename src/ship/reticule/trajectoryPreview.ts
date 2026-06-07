@@ -105,7 +105,7 @@ const FOCUSED_FIRST_DOT_CROSSHAIR_LENGTH = 6;
 const FOCUSED_FIRST_DOT_CROSSHAIR_DASH: number[] = [2, 2];
 
 // reticule brightens on beat (PEAK) and decays to 1 — visual rhythm gate
-const RETICULE_BEAT_PULSE_PEAK = 2.4;
+const RETICULE_BEAT_PULSE_PEAK = 4.0;
 export const computeBeatPulseBoost = (beatTime: number, beatGrid: number): number => {
   if (beatGrid <= 0) return 1;
   const phase = ((beatTime % beatGrid) + beatGrid) % beatGrid / beatGrid;
