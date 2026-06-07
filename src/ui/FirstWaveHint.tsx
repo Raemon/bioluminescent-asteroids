@@ -157,7 +157,7 @@ export const FirstWaveHint = () => {
       {displayStage === 4 && (
         <>
           <div className="first-wave-hint__line">
-            Fire <span className="first-wave-hint__accent">and hit</span> on the beat<br />to build rhythm
+            Fire <span className="first-wave-hint__accent">(and hit)</span> on the beat<br />to build rhythm
           </div>
           <div className="first-wave-hint__pips" aria-hidden="true">
             {[0, 1, 2].map((i) => (
