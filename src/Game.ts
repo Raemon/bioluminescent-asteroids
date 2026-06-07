@@ -74,6 +74,9 @@ export class Game implements HudElements {
   time = 0;
   // shared bass-beat clock — bass voices, on-beat detection and the visual pulsar all read this one source.
   beatTime = 0;
+  // last beatTime at which we resnapped to the music's authoritative
+  // audio-clock phase. Drives the periodic check in tickBeatResnap.
+  lastBeatResnapAt = 0;
   // player-measured latency offset (seconds), loaded in the constructor. Raw audio
   //   fires on `beatTime`; everything the player reacts to (scoring window + visual
   //   beat cues) reads `perceivedBeatTime` so it lands on the beat they actually hear.

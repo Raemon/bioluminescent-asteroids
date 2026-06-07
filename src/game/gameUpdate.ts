@@ -2,7 +2,7 @@ import type { Game } from "../Game";
 import { dist } from "../vec";
 import { Asteroid } from "../Asteroid";
 import { Alien, ALIEN_FIRE_PATTERN_BEATS, bigAlienBurstAngleOffset } from "../Alien";
-import { BEAT_GRID } from "./rhythmConstants";
+import { BEAT_GRID, DEBUG_BEAT_TIMING } from "./rhythmConstants";
 import {
   isInBeatWindow,
   logBeatEvent,
@@ -238,7 +238,7 @@ const syncHaloAmbient = (game: Game) => {
         // than mid-bar.
         const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
         const measureAlignDelay = nextDownbeat - game.beatTime;
-        void game.sound.startHaloMusic(variation, hasMelodic, measureAlignDelay, hasLayer3);
+        void game.sound.startHaloMusic(variation, hasMelodic, measureAlignDelay, game.beatTime, hasLayer3);
       } else {
         game.sound.setHaloMusicMelodicLayer(hasMelodic);
         game.sound.setHaloMusicLayer3(hasLayer3);
@@ -246,7 +246,7 @@ const syncHaloAmbient = (game: Game) => {
           const next = pickHaloMusicVariationExcluding(game.sound.haloMusic.variation);
           const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
           const measureAlignDelay = nextDownbeat - game.beatTime;
-          void game.sound.crossfadeHaloMusic(next, measureAlignDelay);
+          void game.sound.crossfadeHaloMusic(next, measureAlignDelay, game.beatTime);
         }
       }
     } else if (game.sound.haloMusic) {
@@ -333,6 +333,34 @@ const tickBeatIntensityRamp = (game: Game, dt: number) => {
   if (f >= 1) game.beatIntensityRamp = null;
 };
 
+// tracked across frames so we only push a new playbackRate when it changes
+// meaningfully — avoids hammering AudioParam every frame at the same rate.
+let lastCommandedPlaybackRate = 1;
+
+const BEAT_RESNAP_INTERVAL = BASS_MEASURE_LENGTH;
+const BEAT_RESNAP_THRESHOLD = 0.030;
+
+const tickBeatResnap = (game: Game) => {
+  // skip during slow-mo: gameplay clock and music both run at a non-1 rate,
+  // and we don't second-guess the gameplay clock here.
+  if (game.slowMoTimer > 0) return;
+  if (game.beatTime - game.lastBeatResnapAt < BEAT_RESNAP_INTERVAL) return;
+  game.lastBeatResnapAt = game.beatTime;
+  const expected = game.sound.audioBeatTimeFromMusic();
+  if (expected === null) return;
+  const error = expected - game.beatTime;
+  if (Math.abs(error) < BEAT_RESNAP_THRESHOLD) return;
+  // snap beat clock to music's authoritative phase, and roll forward the
+  // bgBeat eighth-index so the next slot fires from the new phase cleanly.
+  const EIGHTH_GRID = BEAT_GRID / 2;
+  game.beatTime = expected;
+  game.lastBgBeatIndex = Math.floor(expected / EIGHTH_GRID);
+  game.lastBeatResnapAt = expected;
+  if (DEBUG_BEAT_TIMING) {
+    console.log(`[beat-resnap] error=${(error * 1000).toFixed(1)}ms  snapped`);
+  }
+};
+
 // ordered phases (ship → bass → world → collisions) so cause-and-effect reads top-down.
 const updatePlaying = (game: Game, dt: number) => {
   game.recorder?.captureFrame(dt, game.input);
@@ -350,6 +378,16 @@ const updatePlaying = (game: Game, dt: number) => {
   game.replayPlayer?.checkShipAgainstRecording(game.ship);
   tickLaserShot(game);
   const musicDt = tickSlowMoTimer(game, dt);
+  // music slows with gameplay so beat+music stay locked through slow-mo.
+  if (dt > 0) {
+    const slowMoFactor = musicDt / dt;
+    if (Math.abs(slowMoFactor - lastCommandedPlaybackRate) > 0.001) {
+      game.sound.setHaloMusicPlaybackRate(slowMoFactor, 0);
+      lastCommandedPlaybackRate = slowMoFactor;
+    }
+  }
+  game.sound.tickHaloMusicClock();
+  tickBeatResnap(game);
   tickBassBeats(game, musicDt);
   // pulsar runs against perceivedBeatTime so its flash lands with the *heard* bass voices.
   game.pulsar.update(dt, game.perceivedBeatTime, BEAT_GRID);

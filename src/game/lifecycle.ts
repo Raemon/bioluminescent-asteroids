@@ -372,6 +372,7 @@ export const startGame = (game: Game, overrides?: {
 // run-scoped state only; spawnWave handles per-wave timers separately.
 const resetRunTimers = (game: Game) => {
   game.beatTime = 0;
+  game.lastBeatResnapAt = game.beatTime;
   game.lastBgBeatIndex = -1;
   game.nextBeatToEvaluate = 0;
   game.beatCombo = 0;
