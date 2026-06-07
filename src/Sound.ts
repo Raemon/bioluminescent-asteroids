@@ -903,17 +903,17 @@ export class Sound {
         const baseKey = isLight ? pitchRatio - 1000 : pitchRatio;
         const intensity = baseKey - Math.floor(baseKey);
         const actualPitch = Math.floor(baseKey) / 100;
-        const kick = wire(new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 8, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.6, sustain: 0, release: 0.6 }, volume: -2 }), 1, 0.1);
+        const kick = wire(new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 8, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.6, sustain: 0, release: 0.6 }, volume: 3 }), 1, 0.1);
         const isOffbeat = actualPitch !== 1;
         const offbeatMul = isOffbeat ? 0.35 + intensity * 0.45 : 1;
         const lightMul = isLight ? 0.42 : 1;
         const levelMul = (0.35 + 0.65 * intensity) * offbeatMul * lightMul;
         const velocity = (0.25 + intensity * 0.75) * levelMul;
         // Light eighths are pitched a semitone up so they sit between the
-        // main quarter-note pitches: A1 → A#1, B1 → C2.
+        // main quarter-note pitches: A0 → A#0, B0 → C1.
         const note = isLight
-          ? (actualPitch === 1 ? "A#1" : "C2")
-          : (actualPitch === 1 ? "A1" : "B1");
+          ? (actualPitch === 1 ? "A#0" : "C1")
+          : (actualPitch === 1 ? "A0" : "B0");
         kick.triggerAttackRelease(note, "8n", 0, velocity);
         break;
       }
