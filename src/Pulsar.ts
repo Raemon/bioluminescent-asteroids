@@ -791,20 +791,26 @@ export class Pulsar {
       ctx.arc(fcx, fcy, bloomR, 0, TAU);
       ctx.fill();
 
-      // Anamorphic horizontal streak — the classic lens-flare bar, drawn
-      // as a wide, very short-height linear gradient. Always horizontal
-      // (camera-relative) rather than tangent to the limb.
+      // Anamorphic horizontal streak — the classic lens-flare bar. Drawn
+      // as a wide ellipse with a radial gradient so the falloff is soft on
+      // every edge (a rect+linear-gradient leaves hard top/bottom seams
+      // that read as a white stripe rather than a flare ray).
       const streakLen = size * (3.2 + 2.0 * flarePhase);
       const streakH = Math.max(2, pulsarR * 0.9 + size * 0.025);
-      const streak = ctx.createLinearGradient(fcx - streakLen, fcy, fcx + streakLen, fcy);
       const streakAlpha = fAlpha * 0.85;
-      streak.addColorStop(0, `hsla(200, 100%, 80%, 0)`);
-      streak.addColorStop(0.35, `hsla(195, 100%, 90%, ${streakAlpha * 0.45})`);
-      streak.addColorStop(0.5, `hsla(190, 100%, 98%, ${streakAlpha})`);
-      streak.addColorStop(0.65, `hsla(195, 100%, 90%, ${streakAlpha * 0.45})`);
+      ctx.save();
+      ctx.translate(fcx, fcy);
+      ctx.scale(streakLen, streakH);
+      const streak = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      streak.addColorStop(0, `hsla(190, 100%, 98%, ${streakAlpha})`);
+      streak.addColorStop(0.3, `hsla(195, 100%, 90%, ${streakAlpha * 0.55})`);
+      streak.addColorStop(0.7, `hsla(200, 100%, 80%, ${streakAlpha * 0.12})`);
       streak.addColorStop(1, `hsla(200, 100%, 80%, 0)`);
       ctx.fillStyle = streak;
-      ctx.fillRect(fcx - streakLen, fcy - streakH, streakLen * 2, streakH * 2);
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, TAU);
+      ctx.fill();
+      ctx.restore();
 
       // Tiny secondary ghost on the opposite side of the frame centre —
       // sells the "lens" read by hinting at internal reflections.

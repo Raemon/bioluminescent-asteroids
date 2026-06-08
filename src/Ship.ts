@@ -21,7 +21,7 @@ export class Ship {
   pos: Vec;
   vel: Vec = v(0, 0);
   heading = -Math.PI / 2;
-  rotSpeed = 4.6;
+  rotSpeed = 2.5
   rotRamp = 0;
   rotHoldTime = 0;
   thrustPower = 420;
