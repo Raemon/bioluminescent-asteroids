@@ -1108,11 +1108,11 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 #leaderboard-list li {
   display: grid;
-  grid-template-columns: 28px 1fr 60px 64px 28px 36px;
+  grid-template-columns: 28px minmax(0, 1fr) 78px 64px 28px 42px 36px;
   gap: 14px;
-  column-gap: 28px;
+  column-gap: 18px;
   align-items: center;
-  padding: 8px 24px 8px 12px;
+  padding: 8px 20px 8px 12px;
   font-size: 12px;
   letter-spacing: 0.15em;
   text-transform: uppercase;
@@ -1262,6 +1262,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 .lb-date {
   position: relative;
+  grid-column: 7;
 }
 
 #leaderboard-list li:not(.lb-header) .lb-date {
