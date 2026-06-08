@@ -1,5 +1,44 @@
 [
   {
+    "id": "2026-06-08-b121ec1",
+    "date": "2026-06-08",
+    "title": "Boss battle, glass prisons, and leaderboard dates",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "The level-10 boss now has a multi-phase encounter: a dormant reveal period, a tracking eye-core that fires plasma bolts, and a full shatter sequence leaving hemispheres, plates, iris shards, and an ember.",
+          "Glass prison asteroids appear from level 11 — tough angular shells containing a captive wraith that escapes when the prison is destroyed.",
+          "Wraits pursue the ship, slither side to side, and occasionally lunge; they must be finished off after breaking free.",
+          "Boss plasma bolts render as chunky glowing orbs distinct from normal alien stingers.",
+          "Leaderboard now supports sorting scores by date, with relative and exact timestamps shown for each entry."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "The beat-combo threshold for certain rhythm effects has been raised from 16 to 32, increasing the challenge.",
+          "Music layer audio in the Outer Wilds and Cinematic tracks has been updated with improved stems and smoother volume arcs."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Leaderboard layout is more consistent, with better column spacing and date column alignment."
+        ]
+      }
+    ],
+    "commits": [
+      "b121ec1",
+      "e245f93",
+      "1f9eea8",
+      "6d4a714",
+      "1e3ea40",
+      "e08f9d3",
+      "45a1055"
+    ]
+  },
+  {
     "id": "2026-06-08-17e019d",
     "date": "2026-06-08",
     "title": "Dev Log viewer and background beat improvements",
