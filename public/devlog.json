@@ -1,5 +1,28 @@
 [
   {
+    "id": "2026-06-08-17e019d",
+    "date": "2026-06-08",
+    "title": "Dev Log viewer and background beat improvements",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "The Dev Log popup now lists multiple entries, each expandable by clicking.",
+          "Dev Log entries can be collapsed and expanded individually for easier browsing."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Background beat pulse is now stronger and more consistent throughout gameplay."
+        ]
+      }
+    ],
+    "commits": [
+      "17e019d"
+    ]
+  },
+  {
     "id": "2026-06-08-25193ac",
     "date": "2026-06-08",
     "title": "Trajectory preview, intro hints, and invulnerability fixes",
