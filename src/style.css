@@ -1108,7 +1108,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 #leaderboard-list li {
   display: grid;
-  grid-template-columns: 28px 1fr 60px 64px 28px;
+  grid-template-columns: 28px 1fr 60px 64px 28px 36px;
   gap: 14px;
   column-gap: 28px;
   align-items: center;
@@ -1128,7 +1128,8 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 #leaderboard-list .lb-wave,
-#leaderboard-list .lb-combo {
+#leaderboard-list .lb-combo,
+#leaderboard-list .lb-date {
   justify-self: center;
   text-align: center;
 }
@@ -1152,7 +1153,8 @@ html:has(#sound-root), body:has(> #sound-root) {
 #leaderboard-list li.lb-header .lb-name,
 #leaderboard-list li.lb-header .lb-score,
 #leaderboard-list li.lb-header .lb-wave,
-#leaderboard-list li.lb-header .lb-combo {
+#leaderboard-list li.lb-header .lb-combo,
+#leaderboard-list li.lb-header .lb-date {
   color: inherit;
   text-shadow: none;
   font-family: inherit;
@@ -1256,6 +1258,52 @@ html:has(#sound-root), body:has(> #sound-root) {
   color: #d8f3ff;
   letter-spacing: 0.1em;
   opacity: 0.85;
+}
+
+.lb-date {
+  position: relative;
+}
+
+#leaderboard-list li:not(.lb-header) .lb-date {
+  pointer-events: auto;
+}
+
+.lb-date-text {
+  font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-weight: 400;
+  font-size: 9px;
+  color: #6ad7ff;
+  letter-spacing: 0.06em;
+  opacity: 0.45;
+  text-transform: lowercase;
+}
+
+.lb-date-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  padding: 5px 9px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #d8f3ff;
+  background: rgba(8, 18, 36, 0.92);
+  border: 1px solid rgba(106, 215, 255, 0.4);
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 0 12px rgba(76, 182, 255, 0.25);
+  z-index: 10;
+}
+
+#leaderboard-list li:not(.lb-header) .lb-date:hover .lb-date-tip {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .leaderboard-status {

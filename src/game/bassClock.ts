@@ -32,7 +32,7 @@ const tickBgBeats = (game: Game) => {
       // 1.122 = whole-step lift (E1→F#1) — distinct from the downbeat, mood intact.
       const pitchRatio = isOffbeat ? 1.122 : 1;
       game.sound.play("bgBeat", pitchRatio);
-    } else if (game.beatCombo >= 16) {
+    } else if (game.beatCombo >= 32) {
       // Doubletime "and": land on the eighth between quarter beats. The next
       // quarter slot's parity determines pitch — alternating C#/D# so the
       // syncopation oscillates rather than stutters on a single pitch.

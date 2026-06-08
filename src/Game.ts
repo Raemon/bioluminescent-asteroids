@@ -272,7 +272,7 @@ export class Game implements HudElements {
   leaderboardLoadingMore = false;
   // clickable column headers re-sort; rhythm is the default with score as
   //   the tiebreaker so the headline streak stat leads the board.
-  leaderboardSort: "rhythm" | "score" | "wave" | "name" = "rhythm";
+  leaderboardSort: "rhythm" | "score" | "wave" | "name" | "date" = "rhythm";
 
   // post-run trophy lineup; replayed in the end-of-mission parade with original kill sounds.
   killedSnapshots: KilledSnapshot[] = [];

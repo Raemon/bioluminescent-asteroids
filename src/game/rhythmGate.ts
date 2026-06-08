@@ -5,18 +5,18 @@ import { syncComboHud } from "./hud";
 import { popupBeatDebug, popupComboLost } from "./popups";
 
 // Two grid tiers, measured as the period between on-beat slots:
-//   combo 0–15       → quarter-notes (BEAT_GRID): the default groove.
-//   combo ≥ 16, or   → eighth-notes (BEAT_GRID/2): rapid-fire pulls each land on a beat;
+//   combo 0–31       → quarter-notes (BEAT_GRID): the default groove.
+//   combo ≥ 32, or   → eighth-notes (BEAT_GRID/2): rapid-fire pulls each land on a beat;
 //   rapid powerup     at the sparkle tier the in-between bg-beat is audible (see
 //                     bassClock.ts), so the player can hear and play the eighths too.
 export const comboGrid = (game: Game): number => {
-  if (game.ship.rapidActive || game.beatCombo >= 16) return BEAT_GRID / 2;
+  if (game.ship.rapidActive || game.beatCombo >= 32) return BEAT_GRID / 2;
   return BEAT_GRID;
 };
 
-// 16x tightens the on-beat window by 40ms — earning doubletime also raises the bar.
+// doubletime tier tightens the on-beat window by 40ms — earning it also raises the bar.
 export const beatWindow = (game: Game): number => {
-  return game.beatCombo >= 16 ? BEAT_WINDOW - 0.04 : BEAT_WINDOW;
+  return game.beatCombo >= 32 ? BEAT_WINDOW - 0.04 : BEAT_WINDOW;
 };
 
 // pure predicate — classifies fire / hit as on-beat without side effects on combo state.
@@ -80,7 +80,7 @@ export const loseCombo = (game: Game, sourcePos?: Vec) => {
   const haloActive = game.ship.comboHaloTier >= 2;
   // Reaching doubletime is a real achievement — a single off-beat doesn't wipe it,
   // it drops back to the 4x halo tier so the player keeps the yellow halo and music bed.
-  game.beatCombo = prev >= 16 ? 4 : 0;
+  game.beatCombo = prev >= 32 ? 4 : 0;
   if (wasMeaningful) {
     game.sound.play("comboLost");
     game.ship.comboLossFlash = 1;

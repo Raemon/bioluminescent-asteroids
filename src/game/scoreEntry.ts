@@ -176,14 +176,58 @@ const sortByName = (rows: HighscoreRow[]): HighscoreRow[] =>
     return b.score - a.score;
   });
 
+const rowEpoch = (r: HighscoreRow): number => {
+  const t = Date.parse(r.created_at ?? "");
+  return Number.isFinite(t) ? t : 0;
+};
+
+const sortByDate = (rows: HighscoreRow[]): HighscoreRow[] =>
+  [...rows].sort((a, b) => {
+    const dateDiff = rowEpoch(b) - rowEpoch(a);
+    if (dateDiff !== 0) return dateDiff;
+    return b.score - a.score;
+  });
+
 const sortRows = (rows: HighscoreRow[], key: Game["leaderboardSort"]): HighscoreRow[] => {
   switch (key) {
     case "score": return sortByScore(rows);
     case "wave": return sortByWave(rows);
     case "name": return sortByName(rows);
+    case "date": return sortByDate(rows);
     case "rhythm":
     default: return sortByComboThenScore(rows);
   }
+};
+
+// Absolute date for the leaderboard tooltip: "Mar 5, 2026 · 14:32".
+const formatExactDate = (iso: string | undefined): string => {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  const d = new Date(t);
+  const date = d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return `${date} · ${time}`;
+};
+
+// Compact relative-time formatter for the leaderboard date column: 5m, 1d, 1w, 1mo, 2y.
+const formatFromNow = (iso: string | undefined): string => {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  const sec = Math.max(0, (Date.now() - t) / 1000);
+  if (sec < 60) return `${Math.floor(sec)}s`;
+  const min = sec / 60;
+  if (min < 60) return `${Math.floor(min)}m`;
+  const hr = min / 60;
+  if (hr < 24) return `${Math.floor(hr)}h`;
+  const day = hr / 24;
+  if (day < 7) return `${Math.floor(day)}d`;
+  const week = day / 7;
+  if (week < 5) return `${Math.floor(week)}w`;
+  const month = day / 30;
+  if (month < 12) return `${Math.floor(month)}mo`;
+  return `${Math.floor(day / 365)}y`;
 };
 
 // gameover "Your Standing" view: 51-row window (25 above + selected + 25 below).
@@ -225,6 +269,7 @@ const renderLeaderboard = (game: Game) => {
     <span class="lb-score lb-sortable${sortCls("score")}" data-sort="score">Score</span>
     <span class="lb-combo lb-sortable${sortCls("rhythm")}" data-sort="rhythm">Rhythm</span>
     <span class="lb-wave lb-sortable${sortCls("wave")}" data-sort="wave">Wave</span>
+    <span class="lb-date lb-sortable${sortCls("date")}" data-sort="date">When</span>
   </li>`;
   const items: string[] = [];
   for (let i = start; i < end; i++) {
@@ -237,6 +282,11 @@ const renderLeaderboard = (game: Game) => {
     const replayBtn = row.has_replay
       ? `<button class="lb-replay" data-replay-id="${row.id}" title="Watch replay" type="button">▶</button>`
       : "";
+    const fromNow = formatFromNow(row.created_at);
+    const exactDate = escapeHtml(formatExactDate(row.created_at));
+    const dateCell = fromNow
+      ? `<span class="lb-date"><span class="lb-date-text">${fromNow}</span><span class="lb-date-tip">${exactDate}</span></span>`
+      : `<span class="lb-date"></span>`;
     items.push(`<li${cls}>
       <span class="lb-rank">${i + 1}</span>
       <span class="lb-name">${safeName}${replayBtn}</span>
@@ -245,6 +295,7 @@ const renderLeaderboard = (game: Game) => {
         <span class="lb-combo-value">${combo}<span class="lb-combo-x">×</span></span>
       </span>
       <span class="lb-wave">${wave}</span>
+      ${dateCell}
     </li>`);
   }
   game.leaderboardListEl.innerHTML = header + items.join("");

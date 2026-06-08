@@ -89,7 +89,7 @@ export const hitSoundFor = (
 //   hitPos anchors the "RHYTHM LOST" popup at the target the off-beat shot landed on.
 export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) => {
   if (isOnBeatHit && game.beatCombo >= 1) {
-    const crossedSparkleThreshold = game.beatCombo === 15;
+    const crossedSparkleThreshold = game.beatCombo === 31;
     game.beatCombo += 1;
     if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
     if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
@@ -98,7 +98,7 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
     // the player lands one — reaching here means an on-beat fire was followed
     // by an on-beat hit. The component no-ops if it's not currently visible.
     window.dispatchEvent(new CustomEvent("rhythm-loss-hint:dismiss"));
-    // grid just halved (quarters→eighths) at the 16x sparkle threshold; resync the evaluator
+    // grid just halved (quarters→eighths) at the 32x sparkle threshold; resync the evaluator
     // so the freshly-uncovered odd eighths don't all close in a burst on the next frame.
     if (crossedSparkleThreshold && !game.ship.rapidActive) rebaseBeatEval(game);
     syncComboHud(game);
