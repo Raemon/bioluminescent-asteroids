@@ -1,5 +1,29 @@
 [
   {
+    "id": "2026-06-08-25193ac",
+    "date": "2026-06-08",
+    "title": "Trajectory preview, intro hints, and invulnerability fixes",
+    "sections": [
+      {
+        "heading": "Fixed",
+        "items": [
+          "Ship trajectory preview now fades out immediately after you stop thrusting instead of lingering as visual noise.",
+          "Trajectory preview no longer gets stuck visible after intro overlay sequences.",
+          "Players are now correctly vulnerable once the calibration intro hands off to live play."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "One of the intro hint messages has been updated."
+        ]
+      }
+    ],
+    "commits": [
+      "25193ac"
+    ]
+  },
+  {
     "id": "2026-06-08-ae39bf4",
     "date": "2026-06-08",
     "title": "Intro sequence, visual polish, and performance improvements",
