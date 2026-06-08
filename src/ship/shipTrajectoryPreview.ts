@@ -21,10 +21,10 @@ const SHIP_TRAJECTORY_MIN_SPEED = 30;
 // ramp the preview in as the ship accelerates from the min-speed threshold — avoids a hard pop.
 const SHIP_TRAJECTORY_FADE_IN_SPEED = 80;
 // trajectory line is most useful while actively maneuvering — once the player has been
-// coasting for a while their heading is set and the preview becomes visual noise. Hold full
-// alpha for HOLD beats after the last thrust frame, then fade to invisible over FADE beats.
-const SHIP_TRAJECTORY_POST_THRUST_HOLD_BEATS = 1;
-const SHIP_TRAJECTORY_POST_THRUST_FADE_BEATS = 2;
+// coasting for a while their heading is set and the preview becomes visual noise. Fade out
+// immediately after the last thrust frame so coasting doesn't leave a stale line.
+const SHIP_TRAJECTORY_POST_THRUST_HOLD_BEATS = 0;
+const SHIP_TRAJECTORY_POST_THRUST_FADE_BEATS = 2
 
 export const renderShipTrajectoryPreview = (
   ctx: CanvasRenderingContext2D, ship: Ship, beatGrid: number, beatTime: number, w: number, h: number,

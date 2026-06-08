@@ -106,7 +106,10 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   // gold crystals are stationary (or near-stationary) "First Dot" probes — they need a direct
   // proximity pass since the trajectory walk skips speed<1 targets.
   game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime, superBoosted, game.goldCrystals);
-  renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.perceivedBeatTime, game.w, game.h);
+  // ship.lastThrustActiveAt is recorded in game.time/1000 units; pass the same clock so
+  // the post-thrust fade doesn't get stuck after intro overlays (which advance beatTime
+  // without advancing game.time).
+  renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.time / 1000, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
   renderLaserChargeDots(ctx, game.ship, game.beatTime);
   renderPopups(ctx, game.popups);

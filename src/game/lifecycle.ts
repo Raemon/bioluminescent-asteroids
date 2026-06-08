@@ -289,7 +289,9 @@ export const finishCalibrationIntro = (game: Game) => {
   game.introOverlayActive = true;
   game.introOverlayStep = "latency";
   game.introOverlayHints = pickIntroHints(3);
-  game.ship.invuln = Math.max(game.ship.invuln, 2.0);
+  // startCalibrationIntro set invuln to 1e9 for the warm-up; replace (don't Math.max)
+  // so the player is actually vulnerable once the post-calibration intro hands off to play.
+  game.ship.invuln = 2.0;
   markSessionStart();
   // First-ever calibration always counts as a fresh day — kick off the latency
   //   announcement and queue the pilot's log triplet right after. The chain
