@@ -146,8 +146,8 @@ export const ENTITY_CONFIG = {
   },
 
   bgBeatIntensity: {
-    base: 0.08,
-    range: 0.92,
+    base: 0.6,
+    range: 0.4,
     rampWaves: 30,
   },
 
