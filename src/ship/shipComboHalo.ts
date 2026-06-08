@@ -14,7 +14,6 @@ const paintDullHaloOutline = (ctx: CanvasRenderingContext2D, dullAlpha: number) 
   if (dullAlpha <= 0.001) return;
   ctx.strokeStyle = `hsla(210, 30%, 70%, ${dullAlpha})`;
   ctx.lineWidth = 1.2;
-  ctx.shadowBlur = 0;
   ctx.stroke();
 };
 
@@ -28,9 +27,7 @@ const paintActiveHalo = (ctx: CanvasRenderingContext2D, tier1: number, tier2: nu
   ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
   ctx.lineWidth = 1.6;
   ctx.shadowColor = `hsla(${hue}, ${sat}%, ${70 + 30 * tier3}%, 1)`;
-  ctx.shadowBlur = 10 + 6 * beatPulse;
   ctx.stroke();
-  ctx.shadowBlur = 0;
 };
 
 // red wash exactly where the cyan/gold halo just was, so the loss is felt visually as well as audibly.
@@ -40,9 +37,7 @@ const paintComboLossFlash = (ctx: CanvasRenderingContext2D, lossFlash: number) =
   ctx.strokeStyle = `hsla(0, 95%, 62%, ${alpha})`;
   ctx.lineWidth = 1.8;
   ctx.shadowColor = `hsla(0, 100%, 55%, 1)`;
-  ctx.shadowBlur = 12 * lossFlash;
   ctx.stroke();
-  ctx.shadowBlur = 0;
 };
 
 // tracing the actual collision silhouette guarantees the halo == hitbox visually and physically.

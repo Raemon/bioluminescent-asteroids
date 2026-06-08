@@ -113,10 +113,7 @@ const drawAsteroid = (ctx: CanvasRenderingContext2D, a: Asteroid, t: number) => 
   ctx.fill();
   ctx.lineWidth = 1.3;
   ctx.strokeStyle = `hsla(${a.hue + 10}, 100%, 78%, 0.75)`;
-  ctx.shadowColor = `hsla(${a.hue}, 100%, 65%, 1)`;
-  ctx.shadowBlur = 12;
   ctx.stroke();
-  ctx.shadowBlur = 0;
   // nuclei
   for (const n of a.nuclei) {
     const nx = Math.cos(n.angle) * n.dist;
@@ -165,14 +162,11 @@ const drawShip = (ctx: CanvasRenderingContext2D, s: Ship, beatPulse: number) => 
   const brightness = 0.7 + 0.3 * beatPulse;
   ctx.strokeStyle = `hsla(${SHIP_HUE}, 100%, 75%, ${0.95 * brightness})`;
   ctx.lineWidth = 1.5;
-  ctx.shadowColor = `hsla(${SHIP_HUE}, 100%, 70%, 1)`;
-  ctx.shadowBlur = 16;
   ctx.beginPath();
   ctx.moveTo(verts[0].x, verts[0].y);
   for (const u of verts.slice(1)) ctx.lineTo(u.x, u.y);
   ctx.closePath();
   ctx.stroke();
-  ctx.shadowBlur = 0;
   ctx.fillStyle = `hsla(${SHIP_HUE}, 100%, 60%, 0.12)`;
   ctx.fill();
   // thrust flame

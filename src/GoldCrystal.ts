@@ -159,8 +159,6 @@ export class GoldCrystal {
       [2, 4], [2, 5], [3, 4], [3, 5],
     ];
     ctx.lineWidth = 1.5;
-    ctx.shadowColor = `hsla(${this.hue + 18}, 100%, 70%, 1)`;
-    ctx.shadowBlur = 10;
     for (const [a, b] of edges) {
       const va = projected[a];
       const vb = projected[b];
@@ -172,7 +170,6 @@ export class GoldCrystal {
       ctx.lineTo(vb.x, vb.y);
       ctx.stroke();
     }
-    ctx.shadowBlur = 0;
 
     ctx.restore();
   }

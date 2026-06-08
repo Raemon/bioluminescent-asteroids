@@ -22,7 +22,6 @@ const RETICULE_OVERLAP_BRIGHTNESS = 3;
 // in white with a steady yellow shadow-blur halo so the player's eye is pulled to it.
 const TUTORIAL_HIGHLIGHT_HSL = "0, 0%, 100%";
 const TUTORIAL_HIGHLIGHT_GLOW_HSL = "52, 100%, 60%";
-const TUTORIAL_HIGHLIGHT_GLOW_BLUR = 18;
 const TUTORIAL_HIGHLIGHT_GLOW_ALPHA = 0.9;
 
 // pre-check whether any target's silhouette overlaps the on-beat disc before painting anything.
@@ -53,10 +52,8 @@ export const paintAimDiscs = (
   const overlapBoost = overlapsTarget || locked ? RETICULE_OVERLAP_BRIGHTNESS : 1;
   const hitAlpha = Math.min(1, baseAlpha * overlapBoost);
   ctx.globalAlpha = 1;
-  const prevShadowBlur = ctx.shadowBlur;
   const prevShadowColor = ctx.shadowColor;
   if (tutorialHighlight) {
-    ctx.shadowBlur = TUTORIAL_HIGHLIGHT_GLOW_BLUR;
     ctx.shadowColor = `hsla(${TUTORIAL_HIGHLIGHT_GLOW_HSL}, ${TUTORIAL_HIGHLIGHT_GLOW_ALPHA})`;
   }
   const dashHsl = tutorialHighlight ? TUTORIAL_HIGHLIGHT_HSL : RETICULE_DASH_HSL;
@@ -88,6 +85,5 @@ export const paintAimDiscs = (
   ctx.moveTo(reticulePos.x, reticulePos.y + cInner); ctx.lineTo(reticulePos.x, reticulePos.y + cOuter);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.shadowBlur = prevShadowBlur;
   ctx.shadowColor = prevShadowColor;
 };

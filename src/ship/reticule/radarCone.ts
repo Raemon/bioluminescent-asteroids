@@ -67,7 +67,6 @@ export const paintConeBackground = (
   const halfAngle = radarHalfAngle(ship);
   const length = radarLength(ship);
   ctx.save();
-  ctx.shadowBlur = 0;
   ctx.setLineDash([]);
   carveWedgePath(ctx, ship, apex, halfAngle, length);
   paintWedgeBackground(ctx, apex, length);
@@ -91,7 +90,6 @@ export const paintRangeArcs = (
   const halfAngle = radarHalfAngle(ship);
   const length = radarLength(ship);
   ctx.save();
-  ctx.shadowBlur = 0;
   ctx.setLineDash([]);
   ctx.lineWidth = RADAR_LINE_WIDTH;
   const arcStart = ship.heading - halfAngle;

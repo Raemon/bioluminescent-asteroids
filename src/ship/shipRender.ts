@@ -21,13 +21,11 @@ const paintShipHull = (ctx: CanvasRenderingContext2D, verts: Vec[], invuln: numb
   ctx.strokeStyle = `hsla(195, 100%, 75%, ${0.95 * beatBrightness * invuln})`;
   ctx.lineWidth = 1.5;
   ctx.shadowColor = "hsla(195, 100%, 70%, 1)";
-  ctx.shadowBlur = 18;
   ctx.beginPath();
   ctx.moveTo(verts[0].x, verts[0].y);
   for (const vert of verts.slice(1)) ctx.lineTo(vert.x, vert.y);
   ctx.closePath();
   ctx.stroke();
-  ctx.shadowBlur = 0;
   ctx.fillStyle = `hsla(195, 100%, 60%, ${0.12 * invuln})`;
   ctx.fill();
 };
@@ -128,17 +126,14 @@ const paintShieldRing = (ctx: CanvasRenderingContext2D, ship: Ship, beatPulse: n
   const ringOffset = ship.haloOffset + ship.shieldRingOffset;
   const ring = haloVertices(ship, ringOffset);
   ctx.shadowColor = `hsla(${shieldHue}, 100%, 70%, 1)`;
-  ctx.shadowBlur = 28 * shieldBrightness;
   ctx.strokeStyle = `hsla(${shieldHue}, 100%, 60%, ${0.35 * shieldBrightness})`;
   ctx.lineWidth = 4.5;
   traceRoundedTriangle(ctx, ring, 10);
   ctx.stroke();
-  ctx.shadowBlur = 14;
   ctx.strokeStyle = `hsla(${shieldHue}, 100%, 88%, ${0.95 * shieldBrightness})`;
   ctx.lineWidth = 1.6;
   traceRoundedTriangle(ctx, ring, 10);
   ctx.stroke();
-  ctx.shadowBlur = 0;
 };
 
 // cosmetic on-beat scale-up — draws the eye to the rhythm, hitbox unchanged

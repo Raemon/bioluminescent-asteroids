@@ -95,6 +95,12 @@ export class Pulsar {
   lastBeatIndex = -1;
   planets: Planet[];
 
+  // Offscreen cache for the slow-changing pulsar body (nebula, outer flare,
+  // glow, core, pinprick). Re-rendered only when the quantized cache key
+  // changes; the volatile spin-locked overlays (beams, head-on flash, polar
+  // hot spots) are drawn live on top each frame.
+  private bodyCache: { canvas: HTMLCanvasElement; key: string; spriteRadius: number } | null = null;
+
   // Shockwave state machine. The pulsar occasionally (driven by the game,
   // roughly once every 5 waves) vibrates in place, flashes white-hot, then
   // emits an expanding ring that the game uses as a cue to shatter every
@@ -208,6 +214,7 @@ export class Pulsar {
   resize(w: number, h: number) {
     this.w = w;
     this.h = h;
+    this.bodyCache = null;
   }
 
   // Per-beat soft pulse. Cheap and gentle — just nudges the envelope up so
@@ -409,54 +416,21 @@ export class Pulsar {
     const beat = this.pulse;
     const flare = this.flare;
 
-    // Pulsar wind nebula — a soft violet/blue wash centred on the pulsar.
-    // Drawn before the rest of the pulsar so the body sits in its own
-    // remnant, the way the Crab pulsar does. Planets render *after* the
-    // pulsar (see below) and therefore eclipse both the nebula and the
-    // pulsar disc when they cross in front.
+    // Cached slow-changing body: nebula, outer flare ring, glow, core dot,
+    // pinprick. Re-rendered only when the quantized (approach, beat, flare)
+    // key changes; otherwise blitted as a single sprite.
+    const cacheKey = this.bodyCacheKey(approach, beat, flare);
+    if (!this.bodyCache || this.bodyCache.key !== cacheKey) {
+      this.bodyCache = this.renderBodyToCache(approach, beat, flare, minDim, cacheKey);
+    }
+    const cached = this.bodyCache;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    const nebulaRadius = r * 14 + minDim * 0.10;
-    const nebulaAlpha = 0.06 + 0.08 * approach + 0.10 * flare;
-    const nebula = ctx.createRadialGradient(ppx, ppy, 0, ppx, ppy, nebulaRadius);
-    nebula.addColorStop(0, `hsla(265, 80%, 55%, ${nebulaAlpha})`);
-    nebula.addColorStop(0.4, `hsla(220, 90%, 50%, ${nebulaAlpha * 0.5})`);
-    nebula.addColorStop(1, `hsla(220, 90%, 50%, 0)`);
-    ctx.fillStyle = nebula;
-    ctx.beginPath();
-    ctx.arc(ppx, ppy, nebulaRadius, 0, TAU);
-    ctx.fill();
+    ctx.drawImage(cached.canvas, ppx - cached.spriteRadius, ppy - cached.spriteRadius);
     ctx.restore();
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-
-    // Outer flare ring — big and faint, only really visible during a wave
-    // clear when `flare` is high.
-    if (flare > 0.01) {
-      const flareRadius = r * (6 + flare * 8);
-      const flareGrad = ctx.createRadialGradient(ppx, ppy, 0, ppx, ppy, flareRadius);
-      flareGrad.addColorStop(0, `hsla(190, 100%, 80%, ${0.18 * flare})`);
-      flareGrad.addColorStop(0.4, `hsla(220, 100%, 70%, ${0.08 * flare})`);
-      flareGrad.addColorStop(1, `hsla(220, 100%, 70%, 0)`);
-      ctx.fillStyle = flareGrad;
-      ctx.beginPath();
-      ctx.arc(ppx, ppy, flareRadius, 0, TAU);
-      ctx.fill();
-    }
-
-    // Medium glow — driven mostly by the per-beat pulse so the heartbeat is
-    // visible even between waves.
-    const glowRadius = r * (3.2 + beat * 1.5 + flare * 2.0);
-    const glow = ctx.createRadialGradient(ppx, ppy, 0, ppx, ppy, glowRadius);
-    const glowAlpha = 0.22 + 0.35 * beat + 0.25 * flare;
-    glow.addColorStop(0, `hsla(195, 100%, 88%, ${glowAlpha})`);
-    glow.addColorStop(0.5, `hsla(210, 100%, 70%, ${glowAlpha * 0.35})`);
-    glow.addColorStop(1, `hsla(220, 100%, 60%, 0)`);
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(ppx, ppy, glowRadius, 0, TAU);
-    ctx.fill();
 
     // Build the magnetic-axis 3D direction for the current spin phase. The
     // magnetic axis sits at `obliquity` radians off the rotation axis and
@@ -551,13 +525,6 @@ export class Pulsar {
       }
     }
 
-    // Core dot — small, bright, nearly white. This is the actual "star".
-    const coreAlpha = 0.7 + 0.3 * beat + 0.3 * flare;
-    ctx.fillStyle = `hsla(190, 100%, 96%, ${Math.min(1, coreAlpha)})`;
-    ctx.beginPath();
-    ctx.arc(ppx, ppy, Math.max(1.2, r * 0.55), 0, TAU);
-    ctx.fill();
-
     // Polar hot spots. Each one sits on the surface at the magnetic pole;
     // in 3D that's at position (±m) * r. The screen projection is just
     // (±mx*r, ±my*r), and we fade them out as their z-component tips behind
@@ -581,12 +548,6 @@ export class Pulsar {
       ctx.arc(sx, sy, hotSpotR, 0, TAU);
       ctx.fill();
     }
-
-    // Hot center pinprick for that pulsar "lighthouse beam" feel.
-    ctx.fillStyle = `hsla(0, 0%, 100%, ${Math.min(1, 0.5 + beat * 0.5 + flare * 0.5)})`;
-    ctx.beginPath();
-    ctx.arc(ppx, ppy, Math.max(0.6, r * 0.22), 0, TAU);
-    ctx.fill();
 
     ctx.restore();
 
@@ -622,6 +583,78 @@ export class Pulsar {
     }
 
     this.renderShockwave(ctx);
+  }
+
+  // Quantize the slow-changing inputs so the cache reuses across most frames.
+  private bodyCacheKey(approach: number, beat: number, flare: number): string {
+    const aQ = Math.round(approach * 100);
+    const bQ = Math.round(beat * 20);
+    const fQ = Math.round(flare * 50);
+    return `${aQ}|${bQ}|${fQ}`;
+  }
+
+  // Rasterize the slow-changing body parts (nebula, outer flare, glow, core,
+  // pinprick) into a centred offscreen sprite. Drawn additively so a single
+  // drawImage with "lighter" reproduces the original additive blend.
+  private renderBodyToCache(approach: number, beat: number, flare: number, minDim: number, key: string): { canvas: HTMLCanvasElement; key: string; spriteRadius: number } {
+    const base = 4 + approach * 26;
+    const r = base * (1 + 0.18 * beat + 0.55 * flare);
+    const nebulaRadius = r * 14 + minDim * 0.10;
+    const spriteRadius = Math.ceil(nebulaRadius) + 2;
+    const size = spriteRadius * 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d")!;
+    const cx = spriteRadius;
+    const cy = spriteRadius;
+    ctx.globalCompositeOperation = "lighter";
+
+    const nebulaAlpha = 0.06 + 0.08 * approach + 0.10 * flare;
+    const nebula = ctx.createRadialGradient(cx, cy, 0, cx, cy, nebulaRadius);
+    nebula.addColorStop(0, `hsla(265, 80%, 55%, ${nebulaAlpha})`);
+    nebula.addColorStop(0.4, `hsla(220, 90%, 50%, ${nebulaAlpha * 0.5})`);
+    nebula.addColorStop(1, `hsla(220, 90%, 50%, 0)`);
+    ctx.fillStyle = nebula;
+    ctx.beginPath();
+    ctx.arc(cx, cy, nebulaRadius, 0, TAU);
+    ctx.fill();
+
+    if (flare > 0.01) {
+      const flareRadius = r * (6 + flare * 8);
+      const flareGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, flareRadius);
+      flareGrad.addColorStop(0, `hsla(190, 100%, 80%, ${0.18 * flare})`);
+      flareGrad.addColorStop(0.4, `hsla(220, 100%, 70%, ${0.08 * flare})`);
+      flareGrad.addColorStop(1, `hsla(220, 100%, 70%, 0)`);
+      ctx.fillStyle = flareGrad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, flareRadius, 0, TAU);
+      ctx.fill();
+    }
+
+    const glowRadius = r * (3.2 + beat * 1.5 + flare * 2.0);
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowRadius);
+    const glowAlpha = 0.22 + 0.35 * beat + 0.25 * flare;
+    glow.addColorStop(0, `hsla(195, 100%, 88%, ${glowAlpha})`);
+    glow.addColorStop(0.5, `hsla(210, 100%, 70%, ${glowAlpha * 0.35})`);
+    glow.addColorStop(1, `hsla(220, 100%, 60%, 0)`);
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, glowRadius, 0, TAU);
+    ctx.fill();
+
+    const coreAlpha = 0.7 + 0.3 * beat + 0.3 * flare;
+    ctx.fillStyle = `hsla(190, 100%, 96%, ${Math.min(1, coreAlpha)})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(1.2, r * 0.55), 0, TAU);
+    ctx.fill();
+
+    ctx.fillStyle = `hsla(0, 0%, 100%, ${Math.min(1, 0.5 + beat * 0.5 + flare * 0.5)})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(0.6, r * 0.22), 0, TAU);
+    ctx.fill();
+
+    return { canvas, key, spriteRadius };
   }
 
   // Draw a single background planet on top of the pulsar. The disc itself is
@@ -931,8 +964,6 @@ export class Pulsar {
       // Crisp bright leading edge so the ring reads even on busy frames.
       ctx.strokeStyle = `hsla(195, 100%, 98%, ${alpha})`;
       ctx.lineWidth = 2.4;
-      ctx.shadowColor = `hsla(195, 100%, 80%, 1)`;
-      ctx.shadowBlur = 18;
       ctx.beginPath();
       ctx.arc(ox, oy, ringRadius, 0, TAU);
       ctx.stroke();

@@ -173,8 +173,6 @@ export class Canister {
 
     ctx.translate(this.pos.x, this.pos.y);
     ctx.lineWidth = 1.4;
-    ctx.shadowColor = "rgba(255, 255, 255, 1)";
-    ctx.shadowBlur = 12;
     for (const [a, b] of edges) {
       const va = projected[a];
       const vb = projected[b];
@@ -189,7 +187,6 @@ export class Canister {
       ctx.lineTo(vb.x, vb.y);
       ctx.stroke();
     }
-    ctx.shadowBlur = 0;
 
     // Glyph stays upright (no counter-rotation needed since we never rotated
     // the canvas) so the player can always read which powerup is incoming.
@@ -197,8 +194,6 @@ export class Canister {
     ctx.font = `bold ${Math.round(this.radius * 0.95)}px system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.shadowColor = "rgba(255, 255, 255, 1)";
-    ctx.shadowBlur = 8;
     ctx.fillText(POWERUP_GLYPH[this.kind], 0, 1);
 
     ctx.restore();
@@ -247,14 +242,11 @@ export class Canister {
       const y2 = Math.sin(theta + 0.35) * innerR;
       const alpha = (0.35 + 0.55 * flash) * (1 - p * 0.4);
       ctx.strokeStyle = `rgba(220, 240, 255, ${alpha.toFixed(3)})`;
-      ctx.shadowColor = "rgba(255, 255, 255, 0.9)";
-      ctx.shadowBlur = 8;
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       ctx.stroke();
     }
-    ctx.shadowBlur = 0;
 
     // Bright core that pinches to a point near the end.
     const coreRadius = baseR * (0.9 - 0.7 * collapse);

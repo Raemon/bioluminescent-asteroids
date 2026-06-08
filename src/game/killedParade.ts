@@ -256,7 +256,6 @@ const beginScoreFlash = (ctx: CanvasRenderingContext2D, ageBeats: number, align:
   ctx.font = "600 22px 'Space Grotesk', system-ui, sans-serif";
   ctx.fillStyle = "#e6f4ff";
   ctx.shadowColor = "rgba(200, 230, 255, 0.85)";
-  ctx.shadowBlur = 14;
 };
 
 const finishScoreFlash = (ctx: CanvasRenderingContext2D, points: number, ageBeats: number) => {

@@ -1645,10 +1645,28 @@ export class Sound {
     this.scheduleHumBeatPulse(node, t, beatPhase01, beatGrid, Sound.FIRST_DOT_LOCK_HUM_FILTER_TROUGH_HZ, Sound.FIRST_DOT_LOCK_HUM_FILTER_PEAK_HZ);
   }
 
+  // fast release for the lock fifth — when the reticule leaves the target, the G4 must drop
+  // to silence inside FAST_RELEASE_SEC so the player doesn't get a lingering harmony pulling
+  // their ear off the song's beat. Bypasses the gentle two-stage release used by the other hums.
+  private static readonly FIRST_DOT_LOCK_HUM_FAST_RELEASE_SEC = 0.05;
   stopFirstDotLockHum() {
-    if (!this.firstDotLockHum) return;
+    if (!this.firstDotLockHum || !this.ctx) return;
     const node = this.firstDotLockHum;
-    this.releaseHumVoice(node, Sound.FIRST_DOT_LOCK_HUM_PEAK_GAIN, () => this.firstDotLockHum === node, () => { this.firstDotLockHum = null; });
+    if (node.releasing) return;
+    const t = this.ctx.currentTime;
+    const releaseEnd = t + Sound.FIRST_DOT_LOCK_HUM_FAST_RELEASE_SEC;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.linearRampToValueAtTime(0.0001, releaseEnd);
+    node.releasing = true;
+    node.releaseCleanupTimer = setTimeout(() => {
+      if (this.firstDotLockHum !== node) return;
+      const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
+      try { node.oscA.stop(stopAt); } catch {}
+      try { node.oscB.stop(stopAt); } catch {}
+      try { node.vibratoLfo.stop(stopAt); } catch {}
+      this.firstDotLockHum = null;
+    }, Math.ceil(Sound.FIRST_DOT_LOCK_HUM_FAST_RELEASE_SEC * 1000) + 20);
   }
 
   // Ambient drone played for the lifetime of a broken-open bassteroid. There

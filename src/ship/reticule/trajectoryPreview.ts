@@ -43,7 +43,9 @@ const TRAJECTORY_FIRST_BEAT_DOT_PEAK_ALPHA = 0.95;
 const TRAJECTORY_FIRST_BEAT_DOT_LIT_MIN_ALPHA = 0.6;
 // how far outside the on-beat hit radius the proximity glow starts ramping up — this is
 // the "near" band where the first-dot already reads as bright before a direct overlap.
-const TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD = 24;
+// Tight (10px) so the lock animation + drift-shot credit only triggers on near-direct
+// overlap, not on a distant graze that the player wouldn't expect to count.
+const TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD = 10;
 // approach zone: the wider radius (reticule-center → dot-center) at which giant crosshairs
 // appear centered on the dot, plus the soft outer hum starts. Independent of the tight
 // proximity-glow band above so the early "you're on the right track" cue reads well before the
@@ -145,13 +147,11 @@ export const paintHoverZoneHint = (ctx: CanvasRenderingContext2D, beatTime: numb
   const prevAlign = ctx.textAlign;
   const prevBaseline = ctx.textBaseline;
   const prevShadowColor = ctx.shadowColor;
-  const prevShadowBlur = ctx.shadowBlur;
   ctx.font = HOVER_ZONE_HINT_FONT;
   ctx.fillStyle = `hsla(${HOVER_ZONE_HINT_FILL_HSL}, ${0.95 * alpha})`;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.shadowColor = HOVER_ZONE_HINT_SHADOW;
-  ctx.shadowBlur = 6;
   // vertical-center the multi-line block on the anchor point so the crosshair sits next to the
   // midline rather than the top of the first line.
   const totalH = (HOVER_ZONE_HINT_LINES.length - 1) * HOVER_ZONE_HINT_LINE_HEIGHT;
@@ -164,7 +164,6 @@ export const paintHoverZoneHint = (ctx: CanvasRenderingContext2D, beatTime: numb
   ctx.textAlign = prevAlign;
   ctx.textBaseline = prevBaseline;
   ctx.shadowColor = prevShadowColor;
-  ctx.shadowBlur = prevShadowBlur;
 };
 // faint dashed halo around the first-beat dot — subtle "this is the next-beat lock" cue.
 // Picks up the same beat-pulse boost as the dot itself so it brightens on the beat in sync.
@@ -175,8 +174,6 @@ const TRAJECTORY_FIRST_BEAT_HALO_DASH: number[] = [2, 2];
 // tutorial highlight repaints the first-beat dot in solid white so it reads as the focal
 // point of the wave-1 "use your targeting tools" cue.
 const TUTORIAL_FIRST_DOT_HSL = "0, 0%, 100%";
-// entry-flash glow halo so a new contact reads as a soft glow rather than just a brightness bump.
-const TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR = 18;
 const TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA = 0.85;
 const TRAJECTORY_AIM_INTERSECTION_X_RADIUS = 5;
 const TRAJECTORY_AIM_INTERSECTION_X_ALPHA = 0.55;
@@ -336,10 +333,8 @@ const paintOnRhythmReticule = (
   alpha: number, lineWidth: number, glow01: number, unreachable: boolean,
 ) => {
   const hsl = unreachable ? ON_RHYTHM_UNREACHABLE_HSL : RETICULE_DASH_HSL;
-  const prevShadowBlur = ctx.shadowBlur;
   const prevShadowColor = ctx.shadowColor;
   if (glow01 > 0) {
-    ctx.shadowBlur = TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR * glow01;
     ctx.shadowColor = `hsla(${hsl}, ${TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA * glow01})`;
   }
   ctx.strokeStyle = `hsla(${hsl}, ${alpha})`;
@@ -351,7 +346,6 @@ const paintOnRhythmReticule = (
   ctx.stroke();
   paintOnRhythmCrosshair(ctx, px, py);
   ctx.setLineDash([]);
-  ctx.shadowBlur = prevShadowBlur;
   ctx.shadowColor = prevShadowColor;
 };
 
@@ -380,11 +374,9 @@ const paintFirstBeatDot = (
   const rawAlpha = multiplicativeAlpha * (1 - lit01) + litAlpha * lit01;
   const alpha = Math.min(1, tutorialHighlight ? Math.max(rawAlpha, 0.95) : rawAlpha);
   const glow01 = Math.max(0, Math.min(1, (entryFlashBoost - 1) / (TRAJECTORY_ENTRY_FLASH_PEAK_BOOST - 1)));
-  const prevShadowBlur = ctx.shadowBlur;
   const prevShadowColor = ctx.shadowColor;
   const dotHsl = tutorialHighlight ? TUTORIAL_FIRST_DOT_HSL : RETICULE_DASH_HSL;
   if (glow01 > 0) {
-    ctx.shadowBlur = TRAJECTORY_DIRECT_FLASH_GLOW_MAX_BLUR * glow01;
     ctx.shadowColor = `hsla(${RETICULE_DASH_HSL}, ${TRAJECTORY_DIRECT_FLASH_GLOW_ALPHA * glow01})`;
   }
   ctx.fillStyle = `hsla(${dotHsl}, ${alpha})`;
@@ -413,7 +405,6 @@ const paintFirstBeatDot = (
     ctx.moveTo(px, py + fInner); ctx.lineTo(px, py + fOuter);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.shadowBlur = prevShadowBlur;
     ctx.shadowColor = prevShadowColor;
     return;
   }
@@ -437,7 +428,6 @@ const paintFirstBeatDot = (
   ctx.moveTo(px, py + inner); ctx.lineTo(px, py + outer);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.shadowBlur = prevShadowBlur;
   ctx.shadowColor = prevShadowColor;
 };
 
@@ -999,7 +989,6 @@ export const paintTrajectoryPreviews = (
   ctx.ctx.save();
   ctx.ctx.setLineDash([]);
   ctx.ctx.lineWidth = 1.5;
-  ctx.ctx.shadowBlur = 0;
   const rendered = new Set<object>();
   const spotTarget = pickCenterMostTarget(ctx, targets);
   let overlapsReticule = false;

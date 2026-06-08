@@ -18,8 +18,9 @@ import { toroidalDelta } from "./coneGeometry";
 export type ReticuleHoverProbe = { pos: Vec; radius: number };
 // matches the dot-trajectory walk's overlap band (BULLET_HIT_RADIUS_ON_BEAT + probe radius);
 // the smoothstep pad mirrors TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD so probe-locks feel the
-// same as target-locks.
-const PROBE_PROXIMITY_PAD = 24;
+// same as target-locks. Tight (10px) so the lock animation + drift-shot credit only triggers
+// on near-direct overlap, not on a distant graze.
+const PROBE_PROXIMITY_PAD = 10;
 const PROBE_ZONE_RADIUS = 75;
 
 // hitbox alpha for the not-hovering reticule — this IS the final alpha (no hidden downstream
@@ -155,7 +156,6 @@ const paintDriftLockHint = (ctx: CanvasRenderingContext2D, beatTime: number) => 
   const prevAlign = ctx.textAlign;
   const prevBaseline = ctx.textBaseline;
   const prevShadowColor = ctx.shadowColor;
-  const prevShadowBlur = ctx.shadowBlur;
   const prevComposite = ctx.globalCompositeOperation;
   ctx.globalCompositeOperation = "source-over";
   ctx.font = DRIFT_LOCK_HINT_FONT;
@@ -163,7 +163,6 @@ const paintDriftLockHint = (ctx: CanvasRenderingContext2D, beatTime: number) => 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.shadowColor = DRIFT_LOCK_HINT_SHADOW;
-  ctx.shadowBlur = 6;
   for (let i = 0; i < DRIFT_LOCK_HINT_LINES.length; i++) {
     ctx.fillText(DRIFT_LOCK_HINT_LINES[i], driftLockHintAnchor.x, driftLockHintAnchor.y + i * DRIFT_LOCK_HINT_LINE_HEIGHT);
   }
@@ -172,7 +171,6 @@ const paintDriftLockHint = (ctx: CanvasRenderingContext2D, beatTime: number) => 
   ctx.textAlign = prevAlign;
   ctx.textBaseline = prevBaseline;
   ctx.shadowColor = prevShadowColor;
-  ctx.shadowBlur = prevShadowBlur;
   ctx.globalCompositeOperation = prevComposite;
 };
 

@@ -11,7 +11,6 @@ export type Popup = {
   font: string;
   fill: string;
   shadowColor: string;
-  shadowBlur: number;
   decayX: number;
   decayY: number;
   popPeak: number;
@@ -51,7 +50,6 @@ export const popupCombo = (pos: Vec, multiplier: number): Popup => ({
   font: "600 22px 'Space Grotesk', system-ui, sans-serif",
   fill: "#ffd86a",
   shadowColor: "rgba(255, 200, 80, 0.85)",
-  shadowBlur: 14,
   decayX: 0.94, decayY: 0.94,
   popPeak: 0.375, popDuration: 0.15,
   holdUntil: 0, fadeGain: 1.4,
@@ -76,7 +74,6 @@ export const popupDriftBonus = (pos: Vec, withSubtitle = false): Popup => {
     font: labelFont,
     fill,
     shadowColor: shadow,
-    shadowBlur: 14,
     decayX: 0.94, decayY: 0.94,
     popPeak: 0.4, popDuration: 0.15,
     holdUntil: 0, fadeGain: 1.4,
@@ -84,12 +81,10 @@ export const popupDriftBonus = (pos: Vec, withSubtitle = false): Popup => {
       ctx.font = labelFont;
       ctx.fillStyle = fill;
       ctx.shadowColor = shadow;
-      ctx.shadowBlur = 14;
       ctx.fillText("DRIFT SHOT", 0, -8);
       ctx.font = subFont;
       ctx.fillStyle = "#ffd86a";
       ctx.shadowColor = "rgba(255, 200, 80, 0.85)";
-      ctx.shadowBlur = 10;
       ctx.fillText("2× DAMAGE", 0, 12);
     } : undefined,
   };
@@ -105,7 +100,6 @@ export const popupComboLost = (pos: Vec): Popup => ({
   font: "700 16px 'Space Grotesk', system-ui, sans-serif",
   fill: "#ff6a6a",
   shadowColor: "rgba(255, 90, 90, 0.85)",
-  shadowBlur: 14,
   decayX: 0.94, decayY: 0.94,
   popPeak: 0.4, popDuration: 0.15,
   holdUntil: 0, fadeGain: 1.4,
@@ -121,7 +115,6 @@ export const popupScore = (pos: Vec, points: number): Popup => ({
   font: "600 18px 'Space Grotesk', system-ui, sans-serif",
   fill: "#e6f4ff",
   shadowColor: "rgba(200, 230, 255, 0.85)",
-  shadowBlur: 12,
   decayX: 0.94, decayY: 0.94,
   popPeak: 0.3, popDuration: 0.15,
   holdUntil: 0, fadeGain: 1.4,
@@ -138,7 +131,6 @@ export const popupBonusLife = (pos: Vec): Popup => ({
   font: "700 18px 'Space Grotesk', system-ui, sans-serif",
   fill: "#ffffff",
   shadowColor: "rgba(255, 255, 255, 0.9)",
-  shadowBlur: 16,
   decayX: 0.96, decayY: 0.96,
   popPeak: 0.5, popDuration: 0.2,
   holdUntil: 0.5, fadeGain: 1,
@@ -156,7 +148,6 @@ export const popupPickup = (pos: Vec, kind: PowerupKind): Popup => {
     font: "700 18px 'Space Grotesk', system-ui, sans-serif",
     fill: `hsl(${hue}, 90%, 70%)`,
     shadowColor: `hsla(${hue}, 95%, 65%, 0.9)`,
-    shadowBlur: 14,
     decayX: 1, decayY: 0.96,
     popPeak: 0.3, popDuration: 0.15,
     holdUntil: 0.3, fadeGain: 1,
@@ -173,7 +164,6 @@ export const popupBeatDebug = (pos: Vec, prefix: string, onBeat: boolean, offset
   font: "600 14px 'Space Grotesk', system-ui, sans-serif",
   fill: onBeat ? "#7cffb0" : "#ff6a6a",
   shadowColor: onBeat ? "rgba(100, 255, 160, 0.7)" : "rgba(255, 100, 100, 0.7)",
-  shadowBlur: 8,
   decayX: 0.94, decayY: 0.94,
   popPeak: 0, popDuration: 0,
   holdUntil: 0, fadeGain: 1.4,
@@ -216,7 +206,6 @@ export const renderPopups = (ctx: CanvasRenderingContext2D, popups: Popup[]) => 
     ctx.font = p.font;
     ctx.fillStyle = p.fill;
     ctx.shadowColor = p.shadowColor;
-    ctx.shadowBlur = p.shadowBlur;
     ctx.save();
     ctx.translate(p.pos.x, p.pos.y);
     ctx.scale(scale, scale);
@@ -242,7 +231,6 @@ const drawKeyCap = (
   ctx.lineWidth = 1.6;
   ctx.strokeStyle = color;
   ctx.shadowColor = shadow;
-  ctx.shadowBlur = 10;
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.lineTo(x + w - r, y);
@@ -255,7 +243,6 @@ const drawKeyCap = (
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
   ctx.stroke();
-  ctx.shadowBlur = 0;
   ctx.fillStyle = color;
   ctx.font = "700 14px 'Space Grotesk', system-ui, sans-serif";
   ctx.textAlign = "center";
@@ -286,7 +273,6 @@ export const popupLaserShotPickup = (shipPos: Vec): Popup => {
     font: labelFont,
     fill,
     shadowColor: shadow,
-    shadowBlur: 14,
     decayX: 1, decayY: 0.97,
     popPeak: 0.3, popDuration: 0.15,
     holdUntil: 0.65, fadeGain: 1.2,
@@ -294,12 +280,10 @@ export const popupLaserShotPickup = (shipPos: Vec): Popup => {
       ctx.font = labelFont;
       ctx.fillStyle = fill;
       ctx.shadowColor = shadow;
-      ctx.shadowBlur = 14;
       ctx.fillText("LASER SHOT", 0, -12);
       ctx.font = hintFont;
       ctx.fillStyle = "#cfeaff";
       ctx.shadowColor = "rgba(180, 230, 255, 0.7)";
-      ctx.shadowBlur = 8;
       ctx.fillText("HOLD TO CHARGE", 0, 8);
       ctx.fillText("RELEASE TO FIRE", 0, 24);
     },
@@ -323,7 +307,6 @@ export const popupSideEnginesPickup = (pos: Vec): Popup => {
     font: labelFont,
     fill,
     shadowColor: shadow,
-    shadowBlur: 14,
     decayX: 1, decayY: 0.96,
     popPeak: 0.3, popDuration: 0.15,
     holdUntil: 0.3, fadeGain: 1,
@@ -345,7 +328,6 @@ export const popupSideEnginesPickup = (pos: Vec): Popup => {
       ctx.font = labelFont;
       ctx.fillStyle = fill;
       ctx.shadowColor = shadow;
-      ctx.shadowBlur = 14;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       ctx.fillText("SIDE ENGINES ", cursor, 0);
@@ -368,7 +350,6 @@ export const popupSideEnginesPickup = (pos: Vec): Popup => {
       ctx.font = parenFont;
       ctx.fillStyle = fill;
       ctx.shadowColor = shadow;
-      ctx.shadowBlur = 14;
       ctx.fillText(")", cursor, 0);
       ctx.restore();
     },

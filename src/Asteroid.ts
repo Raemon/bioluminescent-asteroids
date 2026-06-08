@@ -773,10 +773,7 @@ export class Asteroid {
 
     ctx.lineWidth = 1.3;
     ctx.strokeStyle = `hsla(${baseHue + 10}, ${sHi}%, 75%, 0.7)`;
-    ctx.shadowColor = `hsla(${baseHue}, ${sHi}%, 65%, 1)`;
-    ctx.shadowBlur = 14;
     ctx.stroke();
-    ctx.shadowBlur = 0;
 
     ctx.save();
     ctx.clip();
@@ -1047,11 +1044,8 @@ export class Asteroid {
     // a rimey ice surface instead of a polished gem facet.
     ctx.strokeStyle = `hsla(${H + 18}, 45%, 92%, 0.75)`;
     ctx.lineWidth = isSmall ? 1.2 : 2.6;
-    ctx.shadowColor = `hsla(${H + 12}, 50%, 88%, 1)`;
-    ctx.shadowBlur = 11;
     rimPath();
     ctx.stroke();
-    ctx.shadowBlur = 0;
     // Inner hairline — sits just inside the bright band; the cool, low-sat
     // tint keeps it reading as ice rather than chrome.
     ctx.strokeStyle = `hsla(${H + 25}, 35%, 96%, 0.55)`;
@@ -1176,14 +1170,11 @@ export class Asteroid {
       fill.addColorStop(0.5, `hsla(${baseHue + 8}, 65%, 32%, 0.85)`);
       fill.addColorStop(1, `hsla(${baseHue - 5}, 75%, 14%, 0.85)`);
       ctx.fillStyle = fill;
-      ctx.shadowBlur = 0;
       ctx.fill();
-      ctx.shadowBlur = 10;
       ctx.lineWidth = 1.6;
       ctx.strokeStyle = `hsla(${baseHue + 12}, 100%, 78%, 0.95)`;
       ctx.stroke();
     }
-    ctx.shadowBlur = 0;
 
     // Inner panel-line accents: a thin bright stripe inside each module so
     // the surface reads as plated metal rather than a flat fill.
@@ -1806,20 +1797,14 @@ export class Asteroid {
       ctx.globalCompositeOperation = "lighter";
       const outerScale = 1.7 + 0.6 * a;
       ctx.fillStyle = `hsla(${baseHue + 25}, 100%, 70%, ${0.22 * a})`;
-      ctx.shadowColor = `hsla(${baseHue + 15}, 100%, 75%, 1)`;
-      ctx.shadowBlur = 28 + 16 * a;
       this.tracePath(ctx, outerScale);
       ctx.fill();
-      ctx.shadowBlur = 0;
 
       const innerScale = 1.25 + 0.18 * a;
       ctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 90%, ${0.95 * a})`;
       ctx.lineWidth = 2.4 + 2.6 * a;
-      ctx.shadowColor = `hsla(${baseHue + 20}, 100%, 85%, 1)`;
-      ctx.shadowBlur = 18 + 12 * a;
       this.tracePath(ctx, innerScale);
       ctx.stroke();
-      ctx.shadowBlur = 0;
       ctx.restore();
     }
 
@@ -1927,8 +1912,6 @@ export class Asteroid {
     ctx.arc(0, 0, r, 0, TAU);
     ctx.clip();
     ctx.globalCompositeOperation = "lighter";
-    ctx.shadowColor = `hsla(${baseHue + 20}, 100%, 55%, 1)`;
-    ctx.shadowBlur = 14;
     const faultCount = this.size === "large" ? 5 : this.size === "medium" ? 3 : 2;
     for (let i = 0; i < faultCount; i++) {
       const a = rand(0, TAU);
@@ -1949,7 +1932,6 @@ export class Asteroid {
       }
       ctx.stroke();
     }
-    ctx.shadowBlur = 0;
     ctx.restore();
 
     // Terminator — dark crescent on the lower-right where the body falls
@@ -1975,12 +1957,9 @@ export class Asteroid {
     ctx.globalCompositeOperation = "lighter";
     ctx.strokeStyle = `hsla(${baseHue + 15}, 100%, 75%, 0.85)`;
     ctx.lineWidth = 2.2;
-    ctx.shadowColor = `hsla(${baseHue}, 100%, 60%, 1)`;
-    ctx.shadowBlur = 18;
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, TAU);
     ctx.stroke();
-    ctx.shadowBlur = 0;
 
     return canvas;
   }

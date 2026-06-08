@@ -627,13 +627,10 @@ export class Alien {
     //    fill (drawn earlier in source-over) covers the rear stroke so only
     //    the forward arc reads as the highlight.
     sctx.globalCompositeOperation = "lighter";
-    sctx.shadowColor = `hsla(${baseHue + 30}, 100%, 80%, 1)`;
-    sctx.shadowBlur = 9;
     sctx.strokeStyle = `hsla(${baseHue + 24}, 100%, 78%, 0.85)`;
     sctx.lineWidth = 1.4;
     this.traceBody(sctx);
     sctx.stroke();
-    sctx.shadowBlur = 0;
 
     // 7. Spine ridge — a faint dark line down the centerline gives the
     //    wing-disc a dorsal seam. Source-over so it darkens rather than
