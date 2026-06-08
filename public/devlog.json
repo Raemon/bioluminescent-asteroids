@@ -1,5 +1,45 @@
 [
   {
+    "id": "2026-06-08-ae39bf4",
+    "date": "2026-06-08",
+    "title": "Intro sequence, visual polish, and performance improvements",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "A beat-locked intro overlay now plays at the start of each run, fading in gameplay tips before revealing the world.",
+          "First-time players see a 'Latency calibrated' confirmation screen followed by three gameplay hints and a closing 'Become one with the Pulsar' line.",
+          "Returning players after 4+ hours see the full three-hint pilot's log; same-day re-entries get a lighter single-hint opener.",
+          "Hints rotate each session so the same three lines are not repeated back-to-back.",
+          "Pulsar now displays richer nebula, flare, glow, core, and pinprick visual effects."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Pulsar eclipse flare no longer incorrectly blooms when totality is zero.",
+          "Target lock hum now fades out quickly when the reticule leaves a target instead of lingering."
+        ]
+      },
+      {
+        "heading": "Tuning",
+        "items": [
+          "Target lock animation and sound use a smooth sine swell instead of a sharp pop, keeping your ear on the song beat.",
+          "Lock fill animation and cue are now snapped to the song's beat grid for tighter audio-visual sync.",
+          "Lock proximity zone is tightened so drift-shot credit only triggers on near-direct overlap.",
+          "Canvas shadow blur removed globally, improving rendering performance across all game objects."
+        ]
+      }
+    ],
+    "commits": [
+      "ae39bf4",
+      "e708522",
+      "047bdde",
+      "017e82d",
+      "4267fd0"
+    ]
+  },
+  {
     "id": "2026-06-07-4aa2e04",
     "date": "2026-06-07",
     "title": "Laser Shot, new music tracks, and visual polish",
