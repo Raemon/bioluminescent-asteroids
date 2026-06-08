@@ -19,6 +19,8 @@ const BUCKET_LABELS: Record<KillBucket, string> = {
   alien_small: "alien-S",
   comet: "comet",
   boss: "boss",
+  glassPrison: "prison",
+  wraith: "wraith",
 };
 
 export type HighscoreRow = {

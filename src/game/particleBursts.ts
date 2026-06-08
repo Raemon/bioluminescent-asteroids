@@ -196,6 +196,62 @@ export const emitShipDebris = (particles: ParticleSystem, pos: Vec) => {
   });
 };
 
+// Glass-prison shatter: a quick outward ring of pale-blue glass chips +
+// a slower expanding cloud of dark purple wisps (the captive's breath
+// escaping). Two layers so the impact reads as both "the shell broke"
+// and "something just got out".
+export const emitGlassPrisonShatter = (particles: ParticleSystem, shards: Shard[], a: Asteroid) => {
+  // Physical Shard objects — the prison's shell is real glass that should
+  // break into chunks rather than only fading particles.
+  for (const s of shatterAsteroid(a)) shards.push(s);
+  // (1) Bright glass shards — pale indigo, fast, short-lived.
+  emitBurst(particles, {
+    pos: a.pos, count: 70,
+    speedRange: [180, 480],
+    lifeRange: [0.5, 1.1], maxLife: 1.1,
+    sizeRange: [1.2, 2.6],
+    hue: a.hue, hueSpread: [-12, 18],
+    drag: 1.6,
+    angleMode: "random", angleJitter: 0,
+  });
+  // (2) Dark exhale — slow, deep purple wisps. Different drag so they
+  // bloom outward and linger after the bright shards have faded.
+  emitBurst(particles, {
+    pos: a.pos, count: 36,
+    speedRange: [40, 140],
+    lifeRange: [1.4, 2.4], maxLife: 2.4,
+    sizeRange: [2.4, 3.6],
+    hue: 290, hueSpread: [-12, 18],
+    drag: 0.7,
+    angleMode: "random", angleJitter: 0,
+  });
+};
+
+// Wraith death: no bright sparks — a dispersing cloud of dark purple wisps
+// that drift outward then dissolve. Reads as "it came apart" rather than
+// "it exploded".
+export const emitWraithDeath = (particles: ParticleSystem, a: Asteroid) => {
+  emitBurst(particles, {
+    pos: a.pos, count: 50,
+    speedRange: [60, 200],
+    lifeRange: [1.0, 2.2], maxLife: 2.2,
+    sizeRange: [2.0, 3.4],
+    hue: a.hue, hueSpread: [-16, 24],
+    drag: 1.0,
+    angleMode: "random", angleJitter: 0,
+  });
+  // A faint reddish flicker at the centre — the eyes going out.
+  emitBurst(particles, {
+    pos: a.pos, count: 14,
+    speedRange: [40, 120],
+    lifeRange: [0.4, 0.9], maxLife: 0.9,
+    sizeRange: [1.4, 2.4],
+    hue: 0, hueSpread: [-10, 18],
+    drag: 1.8,
+    angleMode: "random", angleJitter: 0,
+  });
+};
+
 // outward-radiating sparks sell the shockwave as physical mass, not a pure light effect.
 export const emitShockwaveSparks = (particles: ParticleSystem, pos: Vec) => {
   emitBurst(particles, {

@@ -4,7 +4,7 @@
 import type * as Tone from "tone";
 import { cfgN, cfgU } from "./soundConfig";
 import { getChannelVolume, type AudioChannel } from "./game/audioPrefs";
-import { getHaloLayerGain, type HaloLayer } from "./game/haloMusicPrefs";
+import { musicGain, loadMusicConfig, type MusicLayer } from "./musicConfig";
 
 type ToneModule = typeof import("tone");
 let toneModulePromise: Promise<ToneModule> | null = null;
@@ -2684,22 +2684,20 @@ export class Sound {
     }
   }
 
-  // Effective peak gains, override-aware. The /music page persists per-layer
-  // overrides via haloMusicPrefs; when one is present we use it verbatim,
+  // Effective peak gains, config-aware. The /music page persists per-layer
+  // overrides to public/sounds/music-config.json, which Sound bootstrap loads
+  // via loadMusicConfig(); when an entry is present we use it verbatim,
   // otherwise we fall through to the audit-calibrated values above. Ambient
-  // and melodic share the base value (haloMusicGain) absent overrides — the
-  // override layer is what lets the player split them.
+  // and melodic share the base fallback (haloMusicGain) absent overrides —
+  // the config layer is what lets the player split them.
   private haloAmbientGain(variation: HaloMusicVariation): number {
-    const o = getHaloLayerGain(variation, "ambient");
-    return o !== null ? o : this.haloMusicGain(variation);
+    return musicGain(variation, "ambient", this.haloMusicGain(variation));
   }
   private haloMelodicGain(variation: HaloMusicVariation): number {
-    const o = getHaloLayerGain(variation, "melodic");
-    return o !== null ? o : this.haloMusicGain(variation);
+    return musicGain(variation, "melodic", this.haloMusicGain(variation));
   }
   private haloLayer3Gain(variation: HaloMusicVariation): number {
-    const o = getHaloLayerGain(variation, "layer3");
-    return o !== null ? o : this.haloMusicLayer3Gain(variation);
+    return musicGain(variation, "layer3", this.haloMusicLayer3Gain(variation));
   }
 
   // Live-update an active halo-music layer's peak gain to a new value. Called
@@ -2708,7 +2706,7 @@ export class Sound {
   // the next combo cycle. No-ops if the variation doesn't match or the layer
   // is currently ducked (in which case the next time it's brought back the
   // override-aware accessors above will pick up the saved value).
-  applyHaloLayerGain(variation: HaloMusicVariation, layer: HaloLayer, value: number): void {
+  applyHaloLayerGain(variation: HaloMusicVariation, layer: MusicLayer, value: number): void {
     if (!this.ctx || !this.haloMusic) return;
     if (this.haloMusic.variation !== variation) return;
     const t = this.ctx.currentTime;
@@ -5497,6 +5495,208 @@ export class Sound {
       lfo.start(t);
       osc.stop(t + 1.15);
       lfo.stop(t + 1.15);
+    }
+  }
+
+  // Haunting wraith scream — the sound the captive makes the moment the
+  // glass prison shatters. Built from five layered voices:
+  //   (1) An initial "crack" noise burst lasting ~80ms — the shell breaking.
+  //   (2) A detuned-sawtooth pair sliding from ~620Hz down to ~95Hz over
+  //       1.6s with a 6Hz vibrato — the cry itself, inhuman because the two
+  //       saws beat against each other instead of locking phase.
+  //   (3) A bandpass-swept noise voice tracking the fundamental — adds the
+  //       breath/throat texture so the cry doesn't read as a pure synth tone.
+  //   (4) A slow sub thrum at ~38Hz that swells in late — the dread/presence
+  //       sub-bass that arrives *after* the scream peaks.
+  //   (5) A reverb-style ringing tail built from a comb-filtered noise burst
+  //       so the cry "lingers in the room" instead of cutting out.
+  // Total duration ~2.4s. Distinct from playDeath (which is the player's
+  // death) and crystalShatter (which is melodic).
+  private playWraithScream() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const totalDur = 2.4;
+
+    // (1) Shell-cracking noise burst — short and bright, on top of the cry.
+    const crackDur = 0.12;
+    const crackBuf = this.makeNoiseBuffer(crackDur);
+    if (crackBuf) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = crackBuf;
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 1800;
+      hp.Q.value = 0.7;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.42, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + crackDur);
+      src.connect(hp);
+      hp.connect(g);
+      g.connect(this.master);
+      src.start(t);
+      src.stop(t + crackDur + 0.02);
+    }
+
+    // (2) Detuned saw cry. Two saws ~14 cents apart so the beating creates
+    // the "two voices, neither of them human" wail. Lowpass closing over
+    // the slide so the cry sinks deeper into the throat as it descends.
+    const cryDur = 1.6;
+    const cryStartHz = 620;
+    const cryEndHz = 95;
+    const cryFilter = this.ctx.createBiquadFilter();
+    cryFilter.type = "lowpass";
+    cryFilter.Q.value = 6.5;
+    cryFilter.frequency.setValueAtTime(2400, t);
+    cryFilter.frequency.exponentialRampToValueAtTime(220, t + cryDur);
+    const cryGain = this.ctx.createGain();
+    cryGain.gain.setValueAtTime(0.0001, t);
+    cryGain.gain.exponentialRampToValueAtTime(0.24, t + 0.08);
+    cryGain.gain.setValueAtTime(0.24, t + 0.6);
+    cryGain.gain.exponentialRampToValueAtTime(0.0001, t + cryDur);
+    cryFilter.connect(cryGain);
+    cryGain.connect(this.master);
+    // Vibrato — slow 5.5Hz, narrow band. Reads as a held cry with a tremble.
+    const vibrato = this.ctx.createOscillator();
+    vibrato.type = "sine";
+    vibrato.frequency.value = 5.5;
+    const vibratoGain = this.ctx.createGain();
+    vibratoGain.gain.value = 22;
+    vibrato.connect(vibratoGain);
+    vibrato.start(t);
+    vibrato.stop(t + cryDur + 0.05);
+    for (const detune of [-14, 14]) {
+      const saw = this.ctx.createOscillator();
+      saw.type = "sawtooth";
+      saw.detune.value = detune;
+      saw.frequency.setValueAtTime(cryStartHz, t);
+      saw.frequency.exponentialRampToValueAtTime(cryEndHz, t + cryDur * 0.92);
+      vibratoGain.connect(saw.frequency);
+      saw.connect(cryFilter);
+      saw.start(t);
+      saw.stop(t + cryDur + 0.05);
+    }
+    // (2b) Sub-octave sine doubling — gives the cry weight without losing
+    // the airy saw character on top. Same slide.
+    const subCry = this.ctx.createOscillator();
+    const subCryGain = this.ctx.createGain();
+    subCry.type = "sine";
+    subCry.frequency.setValueAtTime(cryStartHz * 0.5, t);
+    subCry.frequency.exponentialRampToValueAtTime(cryEndHz * 0.5, t + cryDur * 0.92);
+    subCryGain.gain.setValueAtTime(0.0001, t);
+    subCryGain.gain.exponentialRampToValueAtTime(0.12, t + 0.1);
+    subCryGain.gain.exponentialRampToValueAtTime(0.0001, t + cryDur);
+    subCry.connect(subCryGain);
+    subCryGain.connect(this.master);
+    subCry.start(t);
+    subCry.stop(t + cryDur + 0.05);
+
+    // (3) Breathy noise voice — bandpass-swept along the cry's pitch slide.
+    // Reads as "throat noise" on top of the synth tone so the cry has a body.
+    const breathBuf = this.makeNoiseBuffer(cryDur);
+    if (breathBuf) {
+      const breath = this.ctx.createBufferSource();
+      breath.buffer = breathBuf;
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.Q.value = 8;
+      bp.frequency.setValueAtTime(cryStartHz * 1.4, t);
+      bp.frequency.exponentialRampToValueAtTime(cryEndHz * 1.4, t + cryDur);
+      const bg = this.ctx.createGain();
+      bg.gain.setValueAtTime(0.0001, t);
+      bg.gain.exponentialRampToValueAtTime(0.18, t + 0.05);
+      bg.gain.exponentialRampToValueAtTime(0.0001, t + cryDur);
+      breath.connect(bp);
+      bp.connect(bg);
+      bg.connect(this.master);
+      breath.start(t);
+      breath.stop(t + cryDur + 0.02);
+    }
+
+    // (4) Dread sub — fades in late, lingers past the cry. The "something
+    // is here now" sub-bass tail that makes the room feel changed.
+    const subStartT = t + 0.4;
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(38, subStartT);
+    sub.frequency.exponentialRampToValueAtTime(28, t + totalDur);
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.32, subStartT + 0.5);
+    subGain.gain.setValueAtTime(0.32, t + 1.8);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + totalDur);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + totalDur + 0.05);
+
+    // (5) Reverb-tail noise. Bandpass-flickered noise tail that echoes
+    // after the cry — gives the scream a "rings off the walls" feel without
+    // an actual ConvolverNode (which would cost an IR load).
+    const tailDur = 1.4;
+    const tailStart = t + 0.5;
+    const tailBuf = this.makeNoiseBuffer(tailDur);
+    if (tailBuf) {
+      const tail = this.ctx.createBufferSource();
+      tail.buffer = tailBuf;
+      const tailFilter = this.ctx.createBiquadFilter();
+      tailFilter.type = "bandpass";
+      tailFilter.Q.value = 12;
+      tailFilter.frequency.setValueAtTime(420, tailStart);
+      tailFilter.frequency.exponentialRampToValueAtTime(140, tailStart + tailDur);
+      const tailGain = this.ctx.createGain();
+      tailGain.gain.setValueAtTime(0.0001, tailStart);
+      tailGain.gain.exponentialRampToValueAtTime(0.10, tailStart + 0.05);
+      tailGain.gain.exponentialRampToValueAtTime(0.0001, tailStart + tailDur);
+      tail.connect(tailFilter);
+      tailFilter.connect(tailGain);
+      tailGain.connect(this.master);
+      tail.start(tailStart);
+      tail.stop(tailStart + tailDur + 0.02);
+    }
+  }
+
+  // Soft wet thud when a bullet lands on a wraith — clearly different from a
+  // normal hit (no metallic clang, no rock thud). A short detuned-sine pulse
+  // through a closing bandpass, with a tiny noise puff for texture. Sits low
+  // in volume so the cry/scream remains the prominent wraith audio.
+  private playWraithHit() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    // Detuned sine pair — both around 180Hz, ~10c apart. The beating creates
+    // a fluttering wet-flesh quality without sounding pitched.
+    for (const detune of [-10, 10]) {
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = "sine";
+      o.frequency.value = 180;
+      o.detune.value = detune;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.10, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      o.connect(g);
+      g.connect(this.master);
+      o.start(t);
+      o.stop(t + 0.25);
+    }
+    // Noise puff through a low bandpass — the breathy texture.
+    const puffBuf = this.makeNoiseBuffer(0.18);
+    if (puffBuf) {
+      const p = this.ctx.createBufferSource();
+      p.buffer = puffBuf;
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 380;
+      bp.Q.value = 4;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.06, t + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      p.connect(bp);
+      bp.connect(g);
+      g.connect(this.master);
+      p.start(t);
+      p.stop(t + 0.2);
     }
   }
 

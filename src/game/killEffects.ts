@@ -19,6 +19,8 @@ import {
   emitCrackParticles,
   emitAlienExplosion,
   emitCometExplosion,
+  emitGlassPrisonShatter,
+  emitWraithDeath,
 } from "./particleBursts";
 import { snapshotAsteroidKill, snapshotAlienKill, snapshotCometKill } from "./killSnapshot";
 import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet, markVeteranPilot } from "./waveDirector";
@@ -56,13 +58,15 @@ const asteroidBucket = (a: Asteroid): KillBucket => {
   if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble") return a.kind;
   if (a.kind === "goldCrystal") return "goldCrystal";
   if (a.kind === "solidCrystal" || a.kind === "solidCrystalSmall") return "solidCrystal";
+  if (a.kind === "glassPrison") return "glassPrison";
+  if (a.kind === "wraith") return "wraith";
   return `asteroid_${a.size}`;
 };
 
 // bassteroids run their own bassHit/bassEcho path; this maps the non-bass kinds to sounds.
 export const hitSoundFor = (
   a: Asteroid,
-): "explosionLarge" | "explosionMedium" | "explosionSmall" | "chime" | "bell" | "warble" | "crystalShatterLarge" | "crystalShatterSmall" => {
+): "explosionLarge" | "explosionMedium" | "explosionSmall" | "chime" | "bell" | "warble" | "crystalShatterLarge" | "crystalShatterSmall" | "wraithHit" | "wraithScream" => {
   if (a.kind === "chime") return "chime";
   if (a.kind === "bell") return "bell";
   if (a.kind === "warble") return "warble";
@@ -71,6 +75,13 @@ export const hitSoundFor = (
   // each get their own size-scaled shatter.
   if (a.kind === "solidCrystal") return "crystalShatterLarge";
   if (a.kind === "solidCrystalSmall") return "crystalShatterSmall";
+  // The prison's shell IS cut glass — same shatter as a solid crystal. The
+  // scream is layered ON TOP by finishAsteroidKillCore (it isn't returned
+  // here because callers also use this for the on-crack chip sound).
+  if (a.kind === "glassPrison") return "crystalShatterLarge";
+  // Wraith hit / death — the killing hit plays wraithScream as a second
+  // overlay in finishAsteroidKillCore; this is the per-shot thud.
+  if (a.kind === "wraith") return "wraithHit";
   return a.size === "large" ? "explosionLarge" : a.size === "medium" ? "explosionMedium" : "explosionSmall";
 };
 
@@ -178,7 +189,22 @@ const finishAsteroidKillCore = (
   comboAtKill: number,
   impactPos?: Vec,
 ): Asteroid[] => {
-  emitExplosion(game.particles, game.shards, a, isOnBeatHit);
+  // Glass prison + wraith get bespoke kill bursts instead of the generic
+  // shard-and-particle explosion. The prison still emits shards (its shell
+  // is physical glass that should shatter into Shard objects), but the
+  // particle layer is dark/wisp-y rather than sparky; the wraith emits no
+  // shards and only a dispersing wisp cloud.
+  if (a.kind === "glassPrison") {
+    emitGlassPrisonShatter(game.particles, game.shards, a);
+    // Haunting cry — layered ON TOP of the shatter sound the caller will
+    // play (crystalShatterLarge). Position-aware so the cry pans from where
+    // the prison broke open.
+    game.sound.play("wraithScream", 1, a.pos);
+  } else if (a.kind === "wraith") {
+    emitWraithDeath(game.particles, a);
+  } else {
+    emitExplosion(game.particles, game.shards, a, isOnBeatHit);
+  }
   if (a.isBass()) game.sound.stopBassteroidDrone(a);
   const asteroidHit = hitSoundFor(a);
   // parade replays the bassteroid's *beat* voice (kick/pluck/boom/snap) rather than the

@@ -52,6 +52,8 @@ export type ObjectId =
   | "asteroid-warble"
   | "asteroid-gold"
   | "asteroid-solidCrystal"
+  | "asteroid-glassPrison"
+  | "wraith"
   | "alien-big"
   | "alien-medium"
   | "alien-small"
@@ -384,6 +386,11 @@ export const ANIMATIONS: Record<ObjectId, () => Animator> = {
   "asteroid-warble": () => drawAsteroid("warble", "chip"),
   "asteroid-gold": () => drawAsteroid("goldCrystal", "chip"),
   "asteroid-solidCrystal": () => drawAsteroid("solidCrystal", "chip"),
+  // No bespoke animator yet for the new kinds — reuse the solid-crystal
+  // chip preview for the prison and the generic pulse for the wraith.
+  // Visual fidelity here only matters for the sound-debug page.
+  "asteroid-glassPrison": () => drawAsteroid("solidCrystal", "chip"),
+  wraith: drawGenericPulse,
   "alien-big": () => drawAlien("big"),
   "alien-medium": () => drawAlien("medium"),
   "alien-small": () => drawAlien("small"),

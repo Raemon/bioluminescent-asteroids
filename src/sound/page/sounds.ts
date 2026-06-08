@@ -215,6 +215,23 @@ export const OBJECTS: GameObject[] = [
       { verb: "killed (small frag shatter)", sound: "crystalShatterSmall", trigger: beat(2) },
     ],
   },
+  {
+    id: "asteroid-glassPrison",
+    label: "glass prison",
+    about: "indigo shell sealing a wraith inside — shatters open on the killing hit",
+    actions: [
+      { verb: "shell shatters", sound: "crystalShatterLarge", trigger: beat(8) },
+      { verb: "captive's cry on release", sound: "wraithScream", trigger: beat(8) },
+    ],
+  },
+  {
+    id: "wraith",
+    label: "wraith",
+    about: "freed from a shattered prison — writhes after the ship until destroyed",
+    actions: [
+      { verb: "takes a hit", sound: "wraithHit", trigger: beat(2) },
+    ],
+  },
 
   {
     id: "alien-big",
@@ -352,6 +369,7 @@ const MENTIONED_SOUNDS = [
   "bassKick", "bassPluck", "bassBoom", "bassSnap", "bassHit", "bassEcho",
   "chime", "bell", "warble", "tink",
   "crystalShatterLarge", "crystalShatterSmall",
+  "wraithScream", "wraithHit",
   // aliens
   "alienFireBig", "alienFireMedium", "alienFireSmall", "alienHit", "alienExplode",
   // comets
