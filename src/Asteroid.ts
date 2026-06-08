@@ -3,6 +3,7 @@ import { Trail } from "./Trail";
 import { SoundwaveRadiator } from "./SoundwaveRadiator";
 import { rng } from "./game/rng";
 import { ENTITY_CONFIG } from "./game/entityConfig";
+import { drawGlow } from "./glow";
 
 const HUE_PALETTE = [185, 200, 220, 250, 280, 310, 330];
 
@@ -68,7 +69,16 @@ export type AsteroidSize = "large" | "medium" | "small";
 // `bossEye` core. Hemispheres further split into `bossPlate` shards (the
 // modular ring panels they wore); the eye further splits into
 // `bossIrisShard` slivers + a single inert `bossEmber` pupil.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "goldCrystal" | "solidCrystal" | "solidCrystalSmall";
+//
+// "glassPrison" is the post-boss horror: an angular indigo glass shell with
+// 16 HP that drifts in starting display-level 11. A tortured silhouette is
+// frozen inside, eyes glowing faintly. The killing hit shatters the shell —
+// the captive wraith escapes screaming.
+//
+// "wraith" is what crawls out. It has no baked sprite (drawn live every
+// frame from drifting noise layers and writhing tendrils), pursues the ship
+// in a slow slither, and occasionally lunges. Eats a few bullets to finish.
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "goldCrystal" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith";
 
 export const BASS_KINDS: ReadonlyArray<"bassA" | "bassB" | "bassC" | "bassD"> = ["bassA", "bassB", "bassC", "bassD"];
 
@@ -104,6 +114,8 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   warble: 130,
   solidCrystal: 232,
   solidCrystalSmall: 232,
+  glassPrison: 258,
+  wraith: 286,
 };
 
 // Solid crystal large asteroids render slightly bigger than a stock large so
@@ -155,6 +167,16 @@ export const BASS_HP: Record<AsteroidSize, number> = {
 // cleanup still demands a few well-timed shots.
 export const SOLID_CRYSTAL_HP_LARGE = ENTITY_CONFIG.solidCrystal.largeHp;
 export const SOLID_CRYSTAL_HP_SMALL = ENTITY_CONFIG.solidCrystal.smallHp;
+
+// Glass prison — the shell that locks a wraith in stasis. Tougher than a
+// solid crystal so even a rhythm-saturated player has to commit to breaking
+// one open. On death the prison spawns a single wraith at its position.
+export const GLASS_PRISON_HP = ENTITY_CONFIG.glassPrison.hp;
+export const GLASS_PRISON_RADIUS = ENTITY_CONFIG.glassPrison.radius;
+// Wraith — the freed captive. HP is low (it's a wisp, not armoured), but
+// it pursues and writhes so it's hard to line up cleanly.
+export const WRAITH_HP = ENTITY_CONFIG.wraith.hp;
+export const WRAITH_RADIUS = ENTITY_CONFIG.wraith.radius;
 
 // Vertex list (local-space, normalised to radius=1) for one armoured panel
 // of a bassteroid. Each kind is a fixed cluster of these panels — drawn with
@@ -584,6 +606,28 @@ export class Asteroid {
   // For bossEmber: tiny inert pupil — no firing, just drifts. No state
   // beyond hue/radius is needed, this flag is implicit in kind.
 
+  // Wraith-only state. The writhe phase drives the live-painted body's
+  // breathing distortion and tendril extrusion. The lunge clock counts up
+  // continuously; when it crosses lungeNextAt the wraith accelerates briefly
+  // toward the ship (eyes flare red), then settles back into drift. Pre-roll
+  // per-tendril phase offsets at construction so each wraith has its own
+  // gait rather than them all squirming in lockstep.
+  writhePhase = 0;
+  // 0 → just-emerged, 1 → fully manifested. Eases up over emergeDuration
+  // so a wraith doesn't appear and instantly start damaging the player.
+  wraithEmerge = 0;
+  lungeClock = 0;
+  lungeNextAt = 0;
+  // > 0 while mid-lunge; counts down. Drives the red-eye flare and the
+  // additional pursuit acceleration burst during the lunge window.
+  lungeActiveT = 0;
+  // Per-tendril phase offsets (length determines tendril count). Decided at
+  // spawn so each wraith reads as an individual; the actual extrusion is
+  // computed live from this + writhePhase.
+  wraithTendrils: number[] = [];
+  // Emission cooldown for the dark-smoke trail the wraith bleeds behind it.
+  wraithSmokeT = 0;
+
   constructor(pos: Vec, vel: Vec, size: AsteroidSize, hue?: number, kind: AsteroidKind = "normal", inheritBass?: BassShip) {
     this.pos = pos;
     this.vel = vel;
@@ -616,6 +660,25 @@ export class Asteroid {
       // Slightly oversized vs a stock large — reads as a more menacing target
       // without towering over the field. Smalls keep stock size.
       this.radius = SOLID_CRYSTAL_LARGE_RADIUS;
+    }
+    if (kind === "glassPrison") {
+      // Slightly taller/thinner-feeling than a normal large; the elongated
+      // facet polygon (kiki harmonics + low sample count) does the work.
+      this.radius = GLASS_PRISON_RADIUS;
+      this.rotSpeed = rand(-0.18, 0.18);
+    }
+    if (kind === "wraith") {
+      this.radius = WRAITH_RADIUS;
+      // Slow tumble — the writhe body deformation does the real visual work.
+      this.rotSpeed = rand(-0.4, 0.4);
+      this.writhePhase = rand(0, TAU);
+      this.lungeNextAt = rand(2.4, 4.2);
+      // Five tendrils, evenly distributed around the body with per-piece
+      // phase jitter so they wave asynchronously.
+      const tendrilCount = 5;
+      for (let i = 0; i < tendrilCount; i++) {
+        this.wraithTendrils.push((i / tendrilCount) * TAU + rand(-0.4, 0.4));
+      }
     }
     if (isBoss) {
       // Boss is huge — override the size table so its physical footprint
@@ -677,7 +740,11 @@ export class Asteroid {
                 ? SOLID_CRYSTAL_HP_LARGE
                 : kind === "solidCrystalSmall"
                   ? SOLID_CRYSTAL_HP_SMALL
-                  : ASTEROID_HP[size];
+                  : kind === "glassPrison"
+                    ? GLASS_PRISON_HP
+                    : kind === "wraith"
+                      ? WRAITH_HP
+                      : ASTEROID_HP[size];
     this.hp = this.maxHp;
     // For most asteroids each HP gets its own pre-rolled crack so the
     // damage state escalates predictably. The boss has a much higher HP
@@ -699,6 +766,9 @@ export class Asteroid {
     // resampled Fourier curve. Kiki, not bouba.
     if (kind === "solidCrystal") this.outlineSamples = 7;
     else if (kind === "solidCrystalSmall") this.outlineSamples = 6;
+    // Prison silhouette is a tall narrow polygon — 8 vertices read as a
+    // hand-cut sarcophagus rather than a generic rock.
+    else if (kind === "glassPrison") this.outlineSamples = 8;
     this.outline = this.computeOutline();
     this.nuclei = [];
     const nucleusCount = size === "large" ? 5 : size === "medium" ? 3 : 2;
@@ -788,6 +858,13 @@ export class Asteroid {
       // Wobbly elongated lobes: strong 3-fold + odd higher mode.
       freqs = [3, 5, 8];
       ampScale = 1.4;
+    } else if (kind === "glassPrison") {
+      // Strong 1-harmonic = tall asymmetric sarcophagus (one end wider than
+      // the other). 3 and 5 jut individual facet vertices outward. The clamp
+      // in computeOutline (set for glassPrison alongside crystals) prevents
+      // a degenerate collapse if phases happen to align.
+      freqs = [1, 3, 5];
+      ampScale = 1.6;
     } else if (kind === "solidCrystal" || kind === "solidCrystalSmall") {
       // Pure crystal: a low harmonic count + low outlineSamples (set in the
       // constructor) make the silhouette a hard-edged polygon. Avoid any
@@ -821,7 +898,9 @@ export class Asteroid {
     // on bossFragmentAngle, eye core renders the tracking iris each frame,
     // shards are tumbling sub-pieces). Returning null skips the pre-bake;
     // render() branches on kind below to dispatch to the live painters.
-    if (this.isBossFamily()) return null;
+    // Wraiths also paint live — their entire identity is "writhing motion",
+    // so a pre-baked silhouette would defeat the point.
+    if (this.isBossFamily() || this.kind === "wraith") return null;
     if (this.isBass()) return this.buildBassteroidSprite();
     const haloRadius = this.radius * 2.3;
     const padding = 14;
@@ -913,8 +992,188 @@ export class Asteroid {
 
     if (this.kind === "goldCrystal") this.paintEmbeddedGoldCrystal(ctx);
     if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall") this.paintSolidCrystalBody(ctx);
+    if (this.kind === "glassPrison") this.paintGlassPrisonBody(ctx);
 
     return canvas;
+  }
+
+  // The glass prison is faceted indigo crystal containing a captive wraith.
+  // Pre-baked: the outer shell (etched runes, faceted shading, rim) + the
+  // dark interior with the frozen silhouette of the thing inside. Per-frame
+  // we overlay an eye-glow pulse in render() so the captive reads as "still
+  // alive". Drawing order: shell paint → clip → interior void → silhouette
+  // → runes overstroke.
+  private paintGlassPrisonBody(ctx: CanvasRenderingContext2D) {
+    const H = this.hue;
+    const R = this.radius;
+    const verts: Vec[] = [];
+    for (let i = 0; i < this.outlineSamples; i++) {
+      const angle = (i / this.outlineSamples) * TAU;
+      const r = this.outline[i];
+      verts.push(v(Math.cos(angle) * r, Math.sin(angle) * r));
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i < verts.length; i++) {
+      if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
+      else ctx.lineTo(verts[i].x, verts[i].y);
+    }
+    ctx.closePath();
+    ctx.clip();
+
+    // Interior void — much darker than a solid crystal. The captive lives
+    // in here; the player should feel they're peering into a black sarcophagus.
+    ctx.globalCompositeOperation = "source-over";
+    const voidGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
+    voidGrad.addColorStop(0, `hsla(${H - 8}, 60%, 6%, 1)`);
+    voidGrad.addColorStop(0.6, `hsla(${H}, 55%, 10%, 0.95)`);
+    voidGrad.addColorStop(1, `hsla(${H + 8}, 45%, 16%, 0.85)`);
+    ctx.fillStyle = voidGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, TAU);
+    ctx.fill();
+
+    // Frosted facet wash — same fan-triangulation trick the solid crystal
+    // uses, but additive and far lower-alpha so the void shows through. The
+    // faintly-lit facets sell the "this is cut glass" read without making
+    // the shell read as solid.
+    const lightX = -R * 0.5;
+    const lightY = -R * 0.55;
+    const maxLightDist = R * 1.9;
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < verts.length; i++) {
+      const a = verts[i];
+      const b = verts[(i + 1) % verts.length];
+      const cx = (a.x + b.x) / 3;
+      const cy = (a.y + b.y) / 3;
+      const d = Math.hypot(cx - lightX, cy - lightY);
+      const lit = Math.pow(Math.max(0, 1 - d / maxLightDist), 1.4);
+      const lightness = 22 + lit * 36;
+      const alpha = 0.18 + lit * 0.22;
+      ctx.fillStyle = `hsla(${H + 8}, 75%, ${lightness}%, ${alpha})`;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // The captive silhouette — a hunched figure rendered in near-black with a
+    // single bright violet rim. Hand-tuned vertex list (in local space, scaled
+    // by R) so each prison reads as the SAME thing inside, not a procedural
+    // blob. The figure faces the viewer, arms hugging itself.
+    ctx.globalCompositeOperation = "source-over";
+    ctx.save();
+    ctx.fillStyle = `hsla(${H - 12}, 80%, 4%, 0.95)`;
+    ctx.beginPath();
+    const head = R * 0.16;
+    ctx.arc(0, -R * 0.28, head, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.20, -R * 0.05);
+    ctx.lineTo( R * 0.20, -R * 0.05);
+    ctx.lineTo( R * 0.28,  R * 0.30);
+    ctx.lineTo( R * 0.10,  R * 0.55);
+    ctx.lineTo(-R * 0.10,  R * 0.55);
+    ctx.lineTo(-R * 0.28,  R * 0.30);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.18, -R * 0.02);
+    ctx.lineTo(-R * 0.32,  R * 0.18);
+    ctx.lineTo(-R * 0.14,  R * 0.32);
+    ctx.lineTo(-R * 0.08,  R * 0.10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo( R * 0.18, -R * 0.02);
+    ctx.lineTo( R * 0.32,  R * 0.18);
+    ctx.lineTo( R * 0.14,  R * 0.32);
+    ctx.lineTo( R * 0.08,  R * 0.10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Frost veil — a milky band just inside the silhouette so the figure
+    // reads as "encased in ice" rather than "painted on a window".
+    const frostGrad = ctx.createRadialGradient(0, 0, R * 0.15, 0, 0, R * 1.0);
+    frostGrad.addColorStop(0, `hsla(${H + 4}, 30%, 90%, 0)`);
+    frostGrad.addColorStop(0.65, `hsla(${H + 2}, 40%, 78%, 0.08)`);
+    frostGrad.addColorStop(1, `hsla(${H}, 50%, 88%, 0.32)`);
+    ctx.fillStyle = frostGrad;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, TAU);
+    ctx.fill();
+
+    // Etched containment runes — thin bright glyph segments scattered along
+    // the inside of the rim. Suggests "this thing was bound here on purpose".
+    // Pre-rolled positions look identical every paint (we want every prison
+    // to feel like a deliberate ritual artefact, not procedurally noisy).
+    ctx.strokeStyle = `hsla(${H + 22}, 80%, 82%, 0.55)`;
+    ctx.lineWidth = 0.8;
+    const runeCount = 12;
+    for (let i = 0; i < runeCount; i++) {
+      const a = (i / runeCount) * TAU + 0.12;
+      const rr = R * 0.84;
+      const cx = Math.cos(a) * rr;
+      const cy = Math.sin(a) * rr;
+      const tang = a + Math.PI / 2;
+      const len = R * 0.07;
+      ctx.beginPath();
+      ctx.moveTo(cx - Math.cos(tang) * len, cy - Math.sin(tang) * len);
+      ctx.lineTo(cx + Math.cos(tang) * len, cy + Math.sin(tang) * len);
+      ctx.stroke();
+      // tiny perpendicular tick = stylised glyph rather than a hash mark.
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(a) * len * 0.6, cy + Math.sin(a) * len * 0.6);
+      ctx.stroke();
+    }
+
+    // Hairline facet seams from centre to each vertex.
+    ctx.strokeStyle = `hsla(${H + 14}, 90%, 80%, 0.16)`;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    for (const vtx of verts) {
+      ctx.moveTo(0, 0);
+      ctx.lineTo(vtx.x * 0.95, vtx.y * 0.95);
+    }
+    ctx.stroke();
+
+    // Thick shell rim — two stacked strokes: an outer dark layer for depth,
+    // a bright inner band for the "cut glass edge" tell. Heavier and cooler
+    // than the solid crystal so the prison reads as a tougher object.
+    const rimPath = () => {
+      ctx.beginPath();
+      for (let i = 0; i < verts.length; i++) {
+        if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
+        else ctx.lineTo(verts[i].x, verts[i].y);
+      }
+      ctx.closePath();
+    };
+    ctx.globalCompositeOperation = "source-over";
+    ctx.lineJoin = "miter";
+    ctx.miterLimit = 4;
+    ctx.strokeStyle = `hsla(${H - 16}, 75%, 14%, 0.95)`;
+    ctx.lineWidth = 5.0;
+    rimPath();
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${H + 18}, 70%, 88%, 0.85)`;
+    ctx.lineWidth = 2.4;
+    rimPath();
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${H + 30}, 60%, 96%, 0.55)`;
+    ctx.lineWidth = 0.8;
+    ctx.save();
+    ctx.scale(0.94, 0.94);
+    rimPath();
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.restore();
   }
 
   // Paint a faintly visible, blurred gold crystal inside the asteroid body —
@@ -1317,7 +1576,7 @@ export class Asteroid {
   }
 
   computeOutline(): number[] {
-    const isCrystal = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall";
+    const isCrystal = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison";
     const samples: number[] = [];
     for (let i = 0; i < this.outlineSamples; i++) {
       const angle = (i / this.outlineSamples) * TAU;
@@ -1341,7 +1600,7 @@ export class Asteroid {
     }
     // Mirror the clamp in computeOutline so the collision surface matches
     // the visible silhouette for the high-amp crystal harmonics.
-    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall") {
+    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison") {
       r = Math.max(0.45, Math.min(1.55, r));
     }
     return r * this.radius;
@@ -1463,6 +1722,74 @@ export class Asteroid {
     }
   }
 
+  // Drives a wraith's pursuit, lunge cycle, and writhe phase. Called once
+  // per tick from the game loop with dt + ship position. Updates velocity
+  // in place (capped pursuit + lunge burst when the lunge clock fires).
+  // The rotation field is overwritten with the gaze angle so the renderer
+  // can place eyes along it.
+  tickWraith(dt: number, shipX: number, shipY: number) {
+    if (this.kind !== "wraith") return;
+    const cfg = ENTITY_CONFIG.wraith;
+    // Emerge fade-in over emergeDuration. While < 1, damage gating + visuals
+    // both scale down — the wraith should not feel suddenly there.
+    if (this.wraithEmerge < 1) {
+      this.wraithEmerge = Math.min(1, this.wraithEmerge + dt / cfg.emergeDuration);
+    }
+    // Writhe advances steadily; tendril/body deformation reads from it.
+    this.writhePhase += dt * 2.2;
+
+    // Gaze direction: always face the ship (for the eyes + lunge vector).
+    const dx = shipX - this.pos.x;
+    const dy = shipY - this.pos.y;
+    const dist = Math.max(1, Math.hypot(dx, dy));
+    const toShipX = dx / dist;
+    const toShipY = dy / dist;
+    this.rotation = Math.atan2(dy, dx);
+
+    // Lunge cycle. Wait until lungeClock crosses lungeNextAt, then engage
+    // a short burst toward the ship, then reset with a new randomised gap.
+    this.lungeClock += dt;
+    if (this.lungeActiveT > 0) {
+      this.lungeActiveT = Math.max(0, this.lungeActiveT - dt);
+    } else if (this.lungeClock >= this.lungeNextAt) {
+      this.lungeActiveT = cfg.lungeDuration;
+      this.lungeClock = 0;
+      this.lungeNextAt = rand(cfg.lungePeriod[0], cfg.lungePeriod[1]);
+    }
+
+    // Pursuit acceleration (always-on, capped). Don't start chasing until
+    // the wraith has finished emerging — gives the player room to read it.
+    if (this.wraithEmerge >= 1) {
+      const accel = cfg.pursuitAccel * dt;
+      this.vel.x += toShipX * accel;
+      this.vel.y += toShipY * accel;
+    }
+    // Lunge burst: heavy acceleration along the gaze ray while active.
+    if (this.lungeActiveT > 0 && this.wraithEmerge >= 1) {
+      const burst = cfg.lungeAccel * dt;
+      this.vel.x += toShipX * burst;
+      this.vel.y += toShipY * burst;
+    }
+    // Writhe drag: perpendicular sinusoidal nudge that flips sign, making
+    // the path slither instead of arrow straight in. Small magnitude so it
+    // reads as a body motion rather than wild swerves.
+    const perpX = -toShipY;
+    const perpY = toShipX;
+    const writheStr = Math.sin(this.writhePhase * 0.9) * 30 * dt;
+    this.vel.x += perpX * writheStr;
+    this.vel.y += perpY * writheStr;
+
+    // Cap pursuit speed unless mid-lunge (a lunge briefly exceeds the cap
+    // by design — that's what makes it feel dangerous).
+    const maxSpeed = this.lungeActiveT > 0 ? cfg.maxPursuitSpeed * 2.8 : cfg.maxPursuitSpeed;
+    const speed = Math.hypot(this.vel.x, this.vel.y);
+    if (speed > maxSpeed) {
+      const k = maxSpeed / speed;
+      this.vel.x *= k;
+      this.vel.y *= k;
+    }
+  }
+
   // Drive the boss/eye fire cycle. Two-phase: a "rest" countdown of
   // (eyeFirePeriod - eyeTelegraphTime) ending in the start of a telegraph
   // (sightline locks onto the player's current position), then a telegraph
@@ -1525,12 +1852,17 @@ export class Asteroid {
     // Solid crystal pays out for the bullet budget it absorbs (16 HP / 4 HP).
     if (this.kind === "solidCrystal") return ENTITY_CONFIG.solidCrystal.largeScore;
     if (this.kind === "solidCrystalSmall") return ENTITY_CONFIG.solidCrystal.smallScore;
+    if (this.kind === "glassPrison") return ENTITY_CONFIG.glassPrison.score;
+    if (this.kind === "wraith") return ENTITY_CONFIG.wraith.score;
     return SIZE_SCORE[this.size];
   }
 
   isBass(): boolean {
     return this.kind === "bassA" || this.kind === "bassB" || this.kind === "bassC" || this.kind === "bassD";
   }
+
+  isWraith(): boolean { return this.kind === "wraith"; }
+  isGlassPrison(): boolean { return this.kind === "glassPrison"; }
 
   isBoss(): boolean {
     return this.kind === "boss";
@@ -1718,6 +2050,39 @@ export class Asteroid {
       }
       return fragmentList;
     }
+    // Glass prison: shatters into a single wraith born at the prison's
+    // centre + a few inert crystal fragments fanning out from the impact.
+    // The wraith starts stationary (its tickWraith emerge phase handles the
+    // fade-in); the shards fly outward fast so the visual reads as "the
+    // prison just broke open and something stepped out".
+    if (this.kind === "glassPrison") {
+      const baseAngle = impactDir
+        ? Math.atan2(impactDir.y, impactDir.x)
+        : Math.atan2(this.vel.y, this.vel.x);
+      const fragmentList: Asteroid[] = [];
+      const wraith = new Asteroid({ x: this.pos.x, y: this.pos.y }, v(0, 0), "medium", undefined, "wraith");
+      fragmentList.push(wraith);
+      // Three small crystal shards as the prison's broken pieces. Reuse the
+      // solidCrystalSmall kind so they look like cut glass and ring on hit;
+      // they hand the player a small extra payout for cracking the prison.
+      const parentSpeed = Math.hypot(this.vel.x, this.vel.y);
+      const ejectDist = this.radius * 0.5;
+      for (let i = 0; i < 3; i++) {
+        const childAngle = baseAngle + (i - 1) * 0.9 + rand(-0.18, 0.18);
+        const childPos = {
+          x: this.pos.x + Math.cos(childAngle) * ejectDist,
+          y: this.pos.y + Math.sin(childAngle) * ejectDist,
+        };
+        const speedMag = parentSpeed * rand(1.0, 1.4) + rand(160, 220);
+        const shard = new Asteroid(childPos, fromAngle(childAngle, speedMag), "small", this.hue, "solidCrystalSmall");
+        shard.rotSpeed = rand(1.2, 2.4) * (rng() < 0.5 ? -1 : 1);
+        fragmentList.push(shard);
+      }
+      return fragmentList;
+    }
+    // Wraith: terminal — no split. The escaping puff is handled by
+    // particle/sound effects in killEffects.
+    if (this.kind === "wraith") return [];
     // Solid crystal: large shatters into 2 fast-moving small crystal
     // fragments fanning around the bullet's heading. Smalls don't split
     // further — they're the terminal tier.
@@ -1950,6 +2315,7 @@ export class Asteroid {
     if (this.kind === "bossPlate") { this.renderBossPlate(ctx, t); return; }
     if (this.kind === "bossIrisShard") { this.renderBossIrisShard(ctx, t); return; }
     if (this.kind === "bossEmber") { this.renderBossEmber(ctx, t); return; }
+    if (this.kind === "wraith") { this.renderWraith(ctx, t); return; }
     if (this.isBass()) {
       this.renderBass(ctx);
       return;
@@ -1966,6 +2332,29 @@ export class Asteroid {
 
     if (this.sprite) {
       ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
+    }
+
+    // Glass prison: live eye-glow pulse over the baked silhouette. Two faint
+    // red pinpricks where the captive's eyes sit, breathing in and out so the
+    // figure inside reads as "alive, watching". Drawn additive so it brightens
+    // through the void without flattening the frosted facets.
+    if (this.kind === "glassPrison") {
+      const eyePulse = 0.55 + 0.45 * Math.sin(time * 1.6 + this.membranePhase);
+      const eyeY = -this.radius * 0.30;
+      const eyeX = this.radius * 0.055;
+      const glowR = this.radius * 0.22 * (0.7 + 0.3 * eyePulse);
+      ctx.globalCompositeOperation = "lighter";
+      drawGlow(ctx, -eyeX, eyeY, glowR, 0, 0.55 * eyePulse);
+      drawGlow(ctx,  eyeX, eyeY, glowR, 0, 0.55 * eyePulse);
+      ctx.globalAlpha = 1;
+      // Tight bright pupil dots over the glow so the gaze has a centre.
+      ctx.fillStyle = `hsla(8, 100%, 80%, ${0.85 * eyePulse})`;
+      ctx.beginPath();
+      ctx.arc(-eyeX, eyeY, 1.2, 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc( eyeX, eyeY, 1.2, 0, TAU);
+      ctx.fill();
     }
 
     const isPlain = this.kind === "normal" || this.kind === "goldCrystal";
@@ -1990,6 +2379,147 @@ export class Asteroid {
     }
 
     this.renderCracks(ctx);
+
+    ctx.restore();
+  }
+
+  // Wraith renderer — fully live-painted. The whole point of this entity is
+  // motion that "shouldn't be possible", so a baked sprite would defeat it.
+  // Layered approach: outer aura → 3 drifting noisy silhouettes at different
+  // writhe phases (the "ghost in multiple film exposures" read) → wispy
+  // tendrils extruding outward → eyes tracking the ship. Hue shifts from
+  // deep violet (idle) toward red while lunging.
+  private renderWraith(ctx: CanvasRenderingContext2D, t: number) {
+    const time = t * 0.001;
+    const phase = this.writhePhase;
+    const emerge = this.wraithEmerge;
+    // Lunge mix: smooth 0→1 by how active the lunge is. Drives hue shift
+    // toward red and brightens the eyes.
+    const lungeCfg = ENTITY_CONFIG.wraith;
+    const lungeMix = lungeCfg.lungeDuration > 0
+      ? Math.min(1, Math.max(0, this.lungeActiveT / lungeCfg.lungeDuration))
+      : 0;
+    const hue = this.hue + (0 - this.hue) * lungeMix * 0.35;
+    const R = this.radius;
+
+    ctx.save();
+    ctx.translate(this.pos.x, this.pos.y);
+    ctx.globalCompositeOperation = "lighter";
+
+    // (1) Outer aura — dim purple haze, larger than the body. Sells the
+    // "this thing has a presence around it" read without using shadowBlur.
+    const auraAlpha = 0.28 * emerge * (0.7 + 0.3 * Math.sin(phase * 0.7));
+    drawGlow(ctx, 0, 0, R * 2.6, hue, auraAlpha);
+    ctx.globalAlpha = 1;
+
+    // (2) Three drifting noisy body layers. Each layer is a closed wobble
+    // polygon, offset in phase + tinted at a different lightness, so the
+    // body reads as "ghost in multiple exposures". The polygons are drawn
+    // around a base radius modulated by sin-harmonics of `phase`.
+    const layers: Array<{ phaseOff: number; rMul: number; alpha: number; lightness: number }> = [
+      { phaseOff: 0.0, rMul: 1.00, alpha: 0.45, lightness: 22 },
+      { phaseOff: 1.3, rMul: 0.85, alpha: 0.35, lightness: 32 },
+      { phaseOff: 2.6, rMul: 0.72, alpha: 0.30, lightness: 44 },
+    ];
+    const wobbleSamples = 24;
+    for (const layer of layers) {
+      ctx.fillStyle = `hsla(${hue}, 75%, ${layer.lightness}%, ${layer.alpha * emerge})`;
+      ctx.beginPath();
+      for (let i = 0; i < wobbleSamples; i++) {
+        const a = (i / wobbleSamples) * TAU;
+        // 3-fold + 5-fold deformation with phase offset per layer gives each
+        // layer its own "breathing" rhythm.
+        const dist = R * layer.rMul * (
+          1
+          + 0.18 * Math.sin(a * 3 + phase + layer.phaseOff)
+          + 0.10 * Math.sin(a * 5 - phase * 1.3 + layer.phaseOff)
+          + 0.05 * Math.cos(a * 7 + phase * 0.6)
+        );
+        const x = Math.cos(a) * dist;
+        const y = Math.sin(a) * dist;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // (3) Tendrils — wispy extrusions per stored phase offset. Length
+    // oscillates so they look like reaching limbs. Drawn as tapered lines
+    // (thicker near the body, thin at the tip) using a small gradient stroke
+    // approximation: draw segments with decreasing alpha + width.
+    const tendrilSegments = 6;
+    for (const baseAngle of this.wraithTendrils) {
+      const a = baseAngle + Math.sin(phase * 0.4 + baseAngle) * 0.25;
+      // Length ramps with lungeMix — tendrils extend during a lunge.
+      const lengthMul = 0.95 + 0.55 * Math.sin(phase * 0.8 + baseAngle * 1.3) + lungeMix * 0.6;
+      const length = R * lengthMul;
+      for (let s = 0; s < tendrilSegments; s++) {
+        const f0 = s / tendrilSegments;
+        const f1 = (s + 1) / tendrilSegments;
+        // Curl: each segment offset slightly perpendicular to the tendril
+        // axis, growing with distance from the body. Curl direction flips
+        // with phase so the tendril wriggles instead of holding a static curve.
+        const curl0 = Math.sin(phase + baseAngle + f0 * 3.0) * R * 0.18 * f0;
+        const curl1 = Math.sin(phase + baseAngle + f1 * 3.0) * R * 0.18 * f1;
+        const r0 = R * 0.85 + f0 * length;
+        const r1 = R * 0.85 + f1 * length;
+        const px = Math.cos(a) * r0 - Math.sin(a) * curl0;
+        const py = Math.sin(a) * r0 + Math.cos(a) * curl0;
+        const qx = Math.cos(a) * r1 - Math.sin(a) * curl1;
+        const qy = Math.sin(a) * r1 + Math.cos(a) * curl1;
+        const segAlpha = (1 - f0) * 0.55 * emerge;
+        ctx.strokeStyle = `hsla(${hue + 8}, 80%, ${50 - f0 * 30}%, ${segAlpha})`;
+        ctx.lineWidth = (1 - f0) * 3.2 + 0.3;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(qx, qy);
+        ctx.stroke();
+      }
+    }
+
+    // (4) Inner dark heart — a small near-black pit at centre. Without this
+    // the wraith reads as a soft cloud; the dark core makes it feel hollow.
+    const heartR = R * 0.35;
+    const heartGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, heartR);
+    heartGrad.addColorStop(0, `hsla(${hue - 10}, 90%, 4%, 0.85)`);
+    heartGrad.addColorStop(1, `hsla(${hue}, 80%, 8%, 0)`);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = heartGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, heartR, 0, TAU);
+    ctx.fill();
+
+    // (5) Eyes — two pinpricks tracking the ship. The local-space angle was
+    // resolved in update() and stored on `rotation`; we just place the eyes
+    // along that direction. Brighter, redder, larger while lunging.
+    const gazeX = Math.cos(this.rotation) * R * 0.18;
+    const gazeY = Math.sin(this.rotation) * R * 0.18;
+    const perpX = -Math.sin(this.rotation) * R * 0.10;
+    const perpY =  Math.cos(this.rotation) * R * 0.10;
+    const eyeHue = 286 - lungeMix * 280;  // violet → red
+    const eyeBright = 0.6 + 0.4 * Math.sin(time * 5 + phase) + lungeMix * 0.8;
+    const eyeR = R * 0.18 * (0.6 + 0.4 * eyeBright);
+    ctx.globalCompositeOperation = "lighter";
+    drawGlow(ctx, gazeX + perpX, gazeY + perpY, eyeR, eyeHue, 0.7 * eyeBright * emerge);
+    drawGlow(ctx, gazeX - perpX, gazeY - perpY, eyeR, eyeHue, 0.7 * eyeBright * emerge);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = `hsla(${eyeHue}, 100%, 90%, ${0.95 * emerge})`;
+    ctx.beginPath();
+    ctx.arc(gazeX + perpX, gazeY + perpY, 1.4, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(gazeX - perpX, gazeY - perpY, 1.4, 0, TAU);
+    ctx.fill();
+
+    // (6) Hit flash — same approach as the standard render, but in the
+    // wraith's body-tint so the flash feels of-a-piece with the entity.
+    if (this.flashAmount > 0) {
+      ctx.globalCompositeOperation = "lighter";
+      drawGlow(ctx, 0, 0, R * 1.6, hue + 20, this.flashAmount * 0.45);
+      ctx.globalAlpha = 1;
+    }
 
     ctx.restore();
   }

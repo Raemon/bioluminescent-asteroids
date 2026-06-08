@@ -8,6 +8,8 @@ import { Pulsar } from "./Pulsar";
 import { Input, IInput } from "./Input";
 import { Sound } from "./Sound";
 import type { AudioChannel } from "./game/audioPrefs";
+import type { HaloLayer } from "./game/haloMusicPrefs";
+import type { HaloMusicVariation } from "./Sound";
 import { Canister } from "./Canister";
 import { GoldCrystal } from "./GoldCrystal";
 import { Comet } from "./Comet";
@@ -388,6 +390,15 @@ export class Game implements HudElements {
     window.addEventListener("audio-pref:changed", (e) => {
       const { channel, value } = (e as CustomEvent).detail as { channel: AudioChannel; value: number };
       this.sound.setChannelVolume(channel, value);
+    });
+    // /music page tweaks a per-variation/per-layer halo-music gain.
+    //   haloMusicPrefs.setHaloLayerGain persists the value; Sound applies it
+    //   live to the active stem so the change is audible without restarting.
+    window.addEventListener("halo-music-pref:changed", (e) => {
+      const { variation, layer, value } = (e as CustomEvent).detail as {
+        variation: HaloMusicVariation; layer: HaloLayer; value: number;
+      };
+      this.sound.applyHaloLayerGain(variation, layer, value);
     });
     // <IntroSequence> fires unfreeze the moment its bg starts revealing the
     //   world (4 beats before the text finishes fading out) so the player can

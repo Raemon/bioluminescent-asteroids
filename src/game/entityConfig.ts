@@ -132,6 +132,41 @@ export const ENTITY_CONFIG = {
     },
   },
 
+  // Glass prison — appears from display-level 11 onward (internal wave 12+,
+  // immediately after the boss fight). Sixteen-HP indigo crystal shell with
+  // a wraith locked inside; the killing hit shatters the shell and frees
+  // the wraith.
+  glassPrison: {
+    firstWave: 12,
+    perSpawnChance: 0.18,
+    radius: 46,
+    hp: 16,
+    score: 600,
+    // Heavy — drifts in slower than its size band suggests so the player has
+    // time to read "do I want to crack this thing open?" before committing.
+    spawnSpeedMul: 0.55,
+  },
+
+  // Wraith — what spawns out of a shattered prison. No standalone spawn; it
+  // exists only as a glassPrison drop. Low HP relative to its menace, but
+  // pursues the ship and writhes so cleanly lining up the kill is the trick.
+  wraith: {
+    radius: 26,
+    hp: 5,
+    score: 900,
+    // How long (seconds) the wraith fades in / cannot damage the player after
+    // emerging. Gives the player a beat to react to the new threat.
+    emergeDuration: 0.9,
+    // Pursuit acceleration (px/s/s) while drifting toward the ship.
+    pursuitAccel: 36,
+    // Pursuit speed cap (px/s) outside of lunges.
+    maxPursuitSpeed: 95,
+    // Lunge: an additional burst toward the ship. Period sampled per-wraith.
+    lungePeriod: [3.0, 5.5] as [number, number],
+    lungeDuration: 0.65,
+    lungeAccel: 380,
+  },
+
   boss: {
     waves: [11] as readonly number[],
     foreshadowWaves: [10] as readonly number[],

@@ -597,6 +597,7 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   pruneOffscreenAliens(game);
   tickAlienFire(game);
   tickBossEyeFire(game);
+  tickWraiths(game, musicDt);
   for (const b of game.bullets) b.update(musicDt, game.w, game.h);
   tickBulletReticuleCrossings(game);
   compactInPlace(game.bullets, (b) => b.life > 0);
@@ -677,6 +678,13 @@ const tickBossEyeFire = (game: Game) => {
     if (!(a.isBoss() || a.kind === "bossEye")) continue;
     a.trackPlayer(game.ship.pos.x, game.ship.pos.y);
     if (a.consumeEyeFireTick()) fireBossEyeBolt(game, a);
+  }
+};
+
+const tickWraiths = (game: Game, dt: number) => {
+  for (const a of game.asteroids) {
+    if (a.kind !== "wraith") continue;
+    a.tickWraith(dt, game.ship.pos.x, game.ship.pos.y);
   }
 };
 

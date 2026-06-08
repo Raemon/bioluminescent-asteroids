@@ -10,6 +10,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PianoKeyboard } from "./PianoKeyboard";
 import { HALO_MUSIC_POOL } from "../../game/haloMusicConfig";
+import { getChannelVolume, setChannelVolume } from "../../game/audioPrefs";
+import { getHaloLayerGain, setHaloLayerGain } from "../../game/haloMusicPrefs";
 import type { HaloMusicVariation } from "../../Sound";
 
 // Beat grid (seconds per quarter beat) and bass measure length must match the
@@ -68,8 +70,8 @@ const VARIATION_META: Record<Variation, VariationInfo> = {
     gains: { ambient: 0.25, melodic: 0.28, layer3: 0.32 },
   },
   "outerwilds-el": {
-    label: "outerwilds-el — drone pad + fingerpicked guitar + harmonica",
-    blurb: "ElevenLabs Outer-Wilds folk: distant drone pad (ambient) + fingerpicked acoustic guitar in G mixolydian (melodic, plucks quantized to the 8th-note grid) + slow held-note harmonica (layer 3). G-rooted melodic over the bass field's C — V-over-I suspension that never resolves.",
+    label: "outerwilds-el — drone pad + fingerpicked guitar + plucked countermelody",
+    blurb: "ElevenLabs Outer-Wilds folk: distant drone pad (ambient) + fingerpicked acoustic guitar in G mixolydian (melodic, plucks quantized to the 8th-note grid) + sparse plucked acoustic-guitar countermelody (layer 3, D-centered upper register, HPF'd at 500 Hz so its body clears the fingerpicking). G-rooted melodic over the bass field's C — V-over-I suspension that never resolves.",
     gains: { ambient: 0.22, melodic: 0.25, layer3: 0.30 },
   },
 };
@@ -109,14 +111,26 @@ export const MusicMixer = () => {
     return init as Record<StemKey, "idle">;
   });
   const [playing, setPlaying] = useState<Record<StemKey, boolean>>({} as Record<StemKey, boolean>);
+  // Seed from any saved per-layer overrides so the page opens reflecting
+  // whatever the player last persisted; without an override we fall back to
+  // the in-game default exposed via VARIATION_META so the slider matches the
+  // audit-calibrated value the in-game code would pick.
   const [gains, setGains] = useState<Record<StemKey, number>>(() => {
     const init: Record<string, number> = {};
-    for (const v of VARIATIONS) for (const l of LAYERS) init[stemKey(v.id, l)] = v.gains[l];
+    for (const v of VARIATIONS) for (const l of LAYERS) {
+      const saved = getHaloLayerGain(v.id, l);
+      init[stemKey(v.id, l)] = saved !== null ? saved : v.gains[l];
+    }
     return init as Record<StemKey, number>;
   });
-  const [masterGain, setMasterGain] = useState(1.0);
-  const [pulseEnabled, setPulseEnabled] = useState(true);
-  const [pulseGain, setPulseGain] = useState(1.0);
+  // Master/pulse sliders mirror the saved audio prefs ("music" and "basePulse"
+  // channels) so adjusting them here updates the same localStorage values the
+  // in-game settings dialog uses. Initialized from whatever the player last
+  // saved; writes go through setChannelVolume which persists + broadcasts.
+  const [masterGain, setMasterGain] = useState(() => getChannelVolume("music"));
+  const savedPulse = getChannelVolume("basePulse");
+  const [pulseEnabled, setPulseEnabled] = useState(savedPulse > 0);
+  const [pulseGain, setPulseGain] = useState(savedPulse > 0 ? savedPulse : 1.0);
 
   const ctxRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
@@ -304,6 +318,7 @@ export const MusicMixer = () => {
   }, [gains]);
 
   useEffect(() => {
+    setChannelVolume("music", masterGain);
     if (!masterRef.current || !ctxRef.current) return;
     const t = ctxRef.current.currentTime;
     masterRef.current.gain.cancelScheduledValues(t);
@@ -311,6 +326,7 @@ export const MusicMixer = () => {
   }, [masterGain]);
 
   useEffect(() => {
+    setChannelVolume("basePulse", pulseEnabled ? pulseGain : 0);
     if (!pulseGainNodeRef.current || !ctxRef.current) return;
     const t = ctxRef.current.currentTime;
     const target = pulseEnabled ? Math.max(0.0001, pulseGain) : 0.0001;
@@ -534,14 +550,19 @@ export const MusicMixer = () => {
                           max={1}
                           step={0.005}
                           value={gains[key]}
-                          onChange={(e) =>
-                            setGains((g) => ({ ...g, [key]: parseFloat(e.target.value) }))
-                          }
+                          onChange={(e) => {
+                            const next = parseFloat(e.target.value);
+                            setGains((g) => ({ ...g, [key]: next }));
+                            setHaloLayerGain(variation.id, layer, next);
+                          }}
                           className="min-w-0 accent-[#6ad7ff]"
                         />
                         <button
                           type="button"
-                          onClick={() => setGains((g) => ({ ...g, [key]: variation.gains[layer] }))}
+                          onClick={() => {
+                            setGains((g) => ({ ...g, [key]: variation.gains[layer] }));
+                            setHaloLayerGain(variation.id, layer, variation.gains[layer]);
+                          }}
                           title={`Reset to in-game default (${variation.gains[layer].toFixed(3)})`}
                           className="w-12 shrink-0 text-right text-[11px] tabular-nums text-[#d6ecff] hover:text-[#6ad7ff]"
                         >

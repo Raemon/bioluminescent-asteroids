@@ -31,6 +31,10 @@ const spawnSpeedRange = (a: Asteroid): [number, number] => {
     const m = CFG.solidCrystal.largeSpawnSpeedMul;
     return [lo * m, hi * m];
   }
+  if (a.kind === "glassPrison") {
+    const m = CFG.glassPrison.spawnSpeedMul;
+    return [lo * m, hi * m];
+  }
   return [lo, hi];
 };
 
@@ -178,6 +182,10 @@ const spawnAsteroidAway = (
   if (a.kind === "solidCrystal") {
     a.vel.x *= CFG.solidCrystal.largeSpawnSpeedMul;
     a.vel.y *= CFG.solidCrystal.largeSpawnSpeedMul;
+  }
+  if (a.kind === "glassPrison") {
+    a.vel.x *= CFG.glassPrison.spawnSpeedMul;
+    a.vel.y *= CFG.glassPrison.spawnSpeedMul;
   }
   alignIncomingToRhythm(game, a, claimed);
   applyRhythmSpeed(game, a.vel);
@@ -486,6 +494,10 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
   // are checked first — when one fires, the slot can't also become a gem rock.
   const slotKinds: AsteroidKind[] = [];
   for (let i = 0; i < normalCount; i++) {
+    // Glass prison gated on its firstWave (post-boss). Rolled first so a
+    // prison slot can't also pick up a gem or be downgraded to a solid crystal.
+    const isPrison = game.wave >= CFG.glassPrison.firstWave && rng() < CFG.glassPrison.perSpawnChance;
+    if (isPrison) { slotKinds.push("glassPrison"); continue; }
     const isSolid = game.wave > CFG.solidCrystal.firstWave && rng() < CFG.solidCrystal.perSpawnChance;
     if (isSolid) { slotKinds.push("solidCrystal"); continue; }
     const isGem = game.wave > CFG.goldCrystal.firstWave && rng() < CFG.goldCrystal.perSpawnChance;
@@ -496,6 +508,11 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
   }
   if (game.wave === CFG.solidCrystal.firstWave && normalCount > 0 && !slotKinds.includes("solidCrystal")) {
     slotKinds[Math.floor(rng() * normalCount)] = "solidCrystal";
+  }
+  // Introductory glassPrison wave is guaranteed one prison so the player meets
+  // the new mechanic right away rather than rolling for it.
+  if (game.wave === CFG.glassPrison.firstWave && normalCount > 0 && !slotKinds.includes("glassPrison")) {
+    slotKinds[Math.floor(rng() * normalCount)] = "glassPrison";
   }
 
   const firstLevelPlacements = isFirstLevel

@@ -4,6 +4,7 @@
 import type * as Tone from "tone";
 import { cfgN, cfgU } from "./soundConfig";
 import { getChannelVolume, type AudioChannel } from "./game/audioPrefs";
+import { getHaloLayerGain, type HaloLayer } from "./game/haloMusicPrefs";
 
 type ToneModule = typeof import("tone");
 let toneModulePromise: Promise<ToneModule> | null = null;
@@ -120,7 +121,7 @@ export type HaloMusicVariation =
   | "synthwave-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + layer 3
   | "flagship-sb"    // 32-second C-pedal flagship — pulsing arp (ambient) + solo cello (melodic, VPO3) + female choir (layer 3, VPO3); all onsets on-beat
   | "vaporwave-el"   // ElevenLabs 32-second C-pedal dawn/vaporwave — glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio
-  | "outerwilds-el"  // ElevenLabs 32-second Outer-Wilds folk — distant drone pad + fingerpicked G-rooted acoustic guitar + C-rooted pump-organ held notes (V-over-I suspension on the guitar over the bass field's C)
+  | "outerwilds-el"  // ElevenLabs 32-second Outer-Wilds folk — distant drone pad + fingerpicked G-rooted acoustic guitar + sparse plucked D-centered acoustic-guitar countermelody (layer 3)
   | "none";          // Legacy synthesized pad (the original startHaloAmbient)
 
 type HaloMusicNode = {
@@ -214,7 +215,9 @@ export type SoundName =
   | "cometDestroyedSad"
   | "canisterAppear"
   | "canisterDestroyed"
-  | "comboLost";
+  | "comboLost"
+  | "wraithScream"
+  | "wraithHit";
 
 // Combo-milestone vocal pools. Each milestone (x6, x12) has its own folder
 // under /sounds/vocals/in-use/. When the player hits the milestone, one file
@@ -2609,7 +2612,9 @@ export class Sound {
     return `/sounds/halo-music/${variation}-${layer}.mp3`;
   }
 
-  // Per-variation playback gain, calibrated against the in-game-mix audit
+  // Per-variation peak gain consulted by both haloAmbientGain and
+  // haloMelodicGain unless a per-layer override is saved in localStorage
+  // (see haloMusicPrefs). Calibrated against the in-game-mix audit
   // (`scripts/music-gen/ingame_mix.py`) so the bass kit stays dominant by
   // ≥7 dB in every band. EL stems are spectrally darker so they need a
   // touch less gain to match perceived loudness with the self-built stems.
@@ -2669,12 +2674,53 @@ export class Sound {
       // register. Audit at gain 0.32 (in the full 3-layer mix above) leaves
       // lo-mid +5.8 dB and mid +5.9 dB margin against the bass field.
       case "vaporwave-el": return 0.32;
-      // outerwilds-el layer3 is sparse held-note pump organ (3 long notes per
-      // 32s loop), C-rooted in the upper register (C5/E5/G5/B5 = Cmaj7
-      // voicing). HPF'd at 500 Hz so the organ's lo-mid overtones clear
-      // the bass kit. Full 3-layer stack at gain 0.30 leaves lo-mid +3.1 dB.
+      // outerwilds-el layer3 is a haunting plucked-acoustic-guitar countermelody,
+      // D-centered in the upper register (D5/E5/A5 dominant) — sits above the
+      // layer-2 fingerpicking instead of doubling it. HPF'd at 500 Hz so the
+      // guitar's lo-mid body clears the bass kit. Full 3-layer stack at gain
+      // 0.30 leaves lo-mid +4.9 dB.
       case "outerwilds-el": return 0.30;
       default:      return 0.40;
+    }
+  }
+
+  // Effective peak gains, override-aware. The /music page persists per-layer
+  // overrides via haloMusicPrefs; when one is present we use it verbatim,
+  // otherwise we fall through to the audit-calibrated values above. Ambient
+  // and melodic share the base value (haloMusicGain) absent overrides — the
+  // override layer is what lets the player split them.
+  private haloAmbientGain(variation: HaloMusicVariation): number {
+    const o = getHaloLayerGain(variation, "ambient");
+    return o !== null ? o : this.haloMusicGain(variation);
+  }
+  private haloMelodicGain(variation: HaloMusicVariation): number {
+    const o = getHaloLayerGain(variation, "melodic");
+    return o !== null ? o : this.haloMusicGain(variation);
+  }
+  private haloLayer3Gain(variation: HaloMusicVariation): number {
+    const o = getHaloLayerGain(variation, "layer3");
+    return o !== null ? o : this.haloMusicLayer3Gain(variation);
+  }
+
+  // Live-update an active halo-music layer's peak gain to a new value. Called
+  // from Game.ts in response to `halo-music-pref:changed` so adjusting a
+  // slider on /music affects the currently-playing stem without waiting for
+  // the next combo cycle. No-ops if the variation doesn't match or the layer
+  // is currently ducked (in which case the next time it's brought back the
+  // override-aware accessors above will pick up the saved value).
+  applyHaloLayerGain(variation: HaloMusicVariation, layer: HaloLayer, value: number): void {
+    if (!this.ctx || !this.haloMusic) return;
+    if (this.haloMusic.variation !== variation) return;
+    const t = this.ctx.currentTime;
+    if (layer === "ambient") {
+      this.haloMusic.ambientGain.gain.cancelScheduledValues(t);
+      this.haloMusic.ambientGain.gain.setTargetAtTime(Math.max(0.0001, value), t, 0.05);
+    } else if (layer === "melodic" && this.haloMusic.melodicActive) {
+      this.haloMusic.melodicGain.gain.cancelScheduledValues(t);
+      this.haloMusic.melodicGain.gain.setTargetAtTime(Math.max(0.0001, value), t, 0.05);
+    } else if (layer === "layer3" && this.haloMusic.layer3Gain && this.haloMusic.layer3Active) {
+      this.haloMusic.layer3Gain.gain.cancelScheduledValues(t);
+      this.haloMusic.layer3Gain.gain.setTargetAtTime(Math.max(0.0001, value), t, 0.05);
     }
   }
 
@@ -2763,22 +2809,24 @@ export class Sound {
     ambientSrc.loop = true;
     melodicSrc.loop = true;
 
-    // Per-variation playback peak gain. See haloMusicGain — round-2 stems
-    // (-12 dBFS peak) need lower gain than round-1 (-6 dBFS peak) to sit
-    // under the bass field. Layer 3 has its own gain since it lives outside
-    // the bass-melodic register and tolerates an independent mix.
-    const peakGain = this.haloMusicGain(variation);
+    // Per-variation peak gain, override-aware. Ambient and melodic each pull
+    // their own value so the /music page sliders can split them; without
+    // overrides they collapse to haloMusicGain (the audit-calibrated base).
+    // Layer 3 has its own gain since it lives outside the bass-melodic
+    // register and tolerates an independent mix.
+    const ambientPeak = this.haloAmbientGain(variation);
+    const melodicPeak = this.haloMelodicGain(variation);
 
     // Fade-in starts at the *aligned* start time, not now, so the music
     // doesn't bleed in during the wait-for-downbeat window.
     const ambientGain = this.ctx.createGain();
     ambientGain.gain.setValueAtTime(0.0001, startAt);
-    ambientGain.gain.exponentialRampToValueAtTime(peakGain, startAt + 1.5);
+    ambientGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, ambientPeak), startAt + 1.5);
 
     const melodicGain = this.ctx.createGain();
     melodicGain.gain.setValueAtTime(0.0001, startAt);
     if (melodicActive) {
-      melodicGain.gain.exponentialRampToValueAtTime(peakGain, startAt + 0.5);
+      melodicGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, melodicPeak), startAt + 0.5);
     }
 
     const mainGain = this.ctx.createGain();
@@ -2794,14 +2842,14 @@ export class Sound {
     let layer3Src: AudioBufferSourceNode | null = null;
     let layer3Gain: GainNode | null = null;
     if (layer3Buf) {
-      const layer3Peak = this.haloMusicLayer3Gain(variation);
+      const layer3Peak = this.haloLayer3Gain(variation);
       layer3Src = this.ctx.createBufferSource();
       layer3Src.buffer = layer3Buf;
       layer3Src.loop = true;
       layer3Gain = this.ctx.createGain();
       layer3Gain.gain.setValueAtTime(0.0001, startAt);
       if (layer3Active) {
-        layer3Gain.gain.exponentialRampToValueAtTime(layer3Peak, startAt + 0.5);
+        layer3Gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, layer3Peak), startAt + 0.5);
       }
       layer3Src.connect(layer3Gain);
       layer3Gain.connect(mainGain);
@@ -2877,15 +2925,16 @@ export class Sound {
     ambientSrc.loop = true;
     melodicSrc.loop = true;
 
-    const peakGain = this.haloMusicGain(variation);
+    const ambientPeak = this.haloAmbientGain(variation);
+    const melodicPeak = this.haloMelodicGain(variation);
 
     const ambientGain = this.ctx.createGain();
     ambientGain.gain.setValueAtTime(0.0001, startAt);
-    ambientGain.gain.exponentialRampToValueAtTime(peakGain, startAt + CROSSFADE_SEC);
+    ambientGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, ambientPeak), startAt + CROSSFADE_SEC);
 
     const melodicGain = this.ctx.createGain();
     melodicGain.gain.setValueAtTime(0.0001, startAt);
-    melodicGain.gain.exponentialRampToValueAtTime(peakGain, startAt + CROSSFADE_SEC);
+    melodicGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, melodicPeak), startAt + CROSSFADE_SEC);
 
     const mainGain = this.ctx.createGain();
     mainGain.gain.value = 1.0;
@@ -2899,13 +2948,13 @@ export class Sound {
     let layer3Src: AudioBufferSourceNode | null = null;
     let layer3Gain: GainNode | null = null;
     if (layer3Buf) {
-      const layer3Peak = this.haloMusicLayer3Gain(variation);
+      const layer3Peak = this.haloLayer3Gain(variation);
       layer3Src = this.ctx.createBufferSource();
       layer3Src.buffer = layer3Buf;
       layer3Src.loop = true;
       layer3Gain = this.ctx.createGain();
       layer3Gain.gain.setValueAtTime(0.0001, startAt);
-      layer3Gain.gain.exponentialRampToValueAtTime(layer3Peak, startAt + CROSSFADE_SEC);
+      layer3Gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, layer3Peak), startAt + CROSSFADE_SEC);
       layer3Src.connect(layer3Gain);
       layer3Gain.connect(mainGain);
     }
@@ -2943,8 +2992,8 @@ export class Sound {
     if (!this.ctx || !this.haloMusic) return;
     if (this.haloMusic.melodicActive === active) return;
     const t = this.ctx.currentTime;
-    const peakGain = this.haloMusicGain(this.haloMusic.variation);
-    const target = active ? peakGain : 0.0001;
+    const peakGain = this.haloMelodicGain(this.haloMusic.variation);
+    const target = active ? Math.max(0.0001, peakGain) : 0.0001;
     const ramp = active ? 0.5 : 0.9;
     this.haloMusic.melodicGain.gain.cancelScheduledValues(t);
     this.haloMusic.melodicGain.gain.setValueAtTime(this.haloMusic.melodicGain.gain.value, t);
@@ -2961,8 +3010,8 @@ export class Sound {
     if (!this.haloMusic.layer3Gain) return;
     if (this.haloMusic.layer3Active === active) return;
     const t = this.ctx.currentTime;
-    const peakGain = this.haloMusicLayer3Gain(this.haloMusic.variation);
-    const target = active ? peakGain : 0.0001;
+    const peakGain = this.haloLayer3Gain(this.haloMusic.variation);
+    const target = active ? Math.max(0.0001, peakGain) : 0.0001;
     const ramp = active ? 0.7 : 1.1;
     this.haloMusic.layer3Gain.gain.cancelScheduledValues(t);
     this.haloMusic.layer3Gain.gain.setValueAtTime(this.haloMusic.layer3Gain.gain.value, t);
@@ -3212,6 +3261,8 @@ export class Sound {
       case "canisterAppear": this.playCanisterAppear(); break;
       case "canisterDestroyed": this.playCanisterDestroyed(); break;
       case "comboLost": this.playComboLost(); break;
+      case "wraithScream": this.playWraithScream(); break;
+      case "wraithHit": this.playWraithHit(); break;
     }
 
     this.master = realMaster;
