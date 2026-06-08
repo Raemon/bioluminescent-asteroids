@@ -2613,8 +2613,9 @@ export class Sound {
   }
 
   // Per-variation peak gain consulted by both haloAmbientGain and
-  // haloMelodicGain unless a per-layer override is saved in localStorage
-  // (see haloMusicPrefs). Calibrated against the in-game-mix audit
+  // haloMelodicGain unless a per-layer override is saved in
+  // public/sounds/music-config.json (loaded by musicConfig.ts and edited via
+  // the /music page). Calibrated against the in-game-mix audit
   // (`scripts/music-gen/ingame_mix.py`) so the bass kit stays dominant by
   // ≥7 dB in every band. EL stems are spectrally darker so they need a
   // touch less gain to match perceived loudness with the self-built stems.
@@ -2751,6 +2752,9 @@ export class Sound {
   preloadHaloMusic(variation: HaloMusicVariation): void {
     if (variation === "none") return;
     this.ensureContext();
+    // Idempotent — pulls /sounds/music-config.json once so haloAmbientGain
+    // and friends see the tuned values when the music actually starts.
+    void loadMusicConfig();
     void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient"));
     void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic"));
     void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3"));

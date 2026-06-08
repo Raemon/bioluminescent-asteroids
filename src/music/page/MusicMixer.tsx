@@ -11,7 +11,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { PianoKeyboard } from "./PianoKeyboard";
 import { HALO_MUSIC_POOL } from "../../game/haloMusicConfig";
 import { getChannelVolume, setChannelVolume } from "../../game/audioPrefs";
-import { getHaloLayerGain, setHaloLayerGain } from "../../game/haloMusicPrefs";
+import {
+  loadMusicConfig,
+  getMusicConfig,
+  saveMusicConfig,
+  type MusicConfig,
+} from "../../musicConfig";
 import type { HaloMusicVariation } from "../../Sound";
 
 // Beat grid (seconds per quarter beat) and bass measure length must match the
@@ -111,15 +116,15 @@ export const MusicMixer = () => {
     return init as Record<StemKey, "idle">;
   });
   const [playing, setPlaying] = useState<Record<StemKey, boolean>>({} as Record<StemKey, boolean>);
-  // Seed from any saved per-layer overrides so the page opens reflecting
-  // whatever the player last persisted; without an override we fall back to
-  // the in-game default exposed via VARIATION_META so the slider matches the
-  // audit-calibrated value the in-game code would pick.
+  // Start from VARIATION_META defaults; a useEffect below pulls
+  // music-config.json once and overlays whatever's persisted so the page
+  // opens with the current on-disk values. Until the fetch resolves, the
+  // sliders show the audit-calibrated baseline — close enough to the saved
+  // values that the moment of update isn't jarring.
   const [gains, setGains] = useState<Record<StemKey, number>>(() => {
     const init: Record<string, number> = {};
     for (const v of VARIATIONS) for (const l of LAYERS) {
-      const saved = getHaloLayerGain(v.id, l);
-      init[stemKey(v.id, l)] = saved !== null ? saved : v.gains[l];
+      init[stemKey(v.id, l)] = v.gains[l];
     }
     return init as Record<StemKey, number>;
   });
@@ -348,6 +353,52 @@ export const MusicMixer = () => {
     return () => stopPulseScheduler();
   }, []);
 
+  // Pull the on-disk gains once and overlay them on the meta defaults. Sound.ts
+  // reads the same file, so this keeps the page in sync with what plays
+  // in-game.
+  useEffect(() => {
+    let cancelled = false;
+    void loadMusicConfig().then((cfg) => {
+      if (cancelled) return;
+      setGains((g) => {
+        const next = { ...g };
+        for (const v of VARIATIONS) {
+          const entry = cfg.variations[v.id];
+          if (!entry) continue;
+          for (const l of LAYERS) {
+            const saved = entry[l];
+            if (typeof saved === "number" && Number.isFinite(saved)) {
+              next[stemKey(v.id, l)] = saved;
+            }
+          }
+        }
+        return next;
+      });
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Mutate one (variation, layer) gain on the in-memory config, POST the
+  // whole blob to disk, and broadcast `halo-music-pref:changed` so a running
+  // game can ramp the active stem's gain live without waiting for the next
+  // halo-music start.
+  const persistLayerGain = (v: Variation, l: Layer, value: number) => {
+    const cur = getMusicConfig();
+    const nextVars: MusicConfig["variations"] = { ...cur.variations };
+    const entry = { ...(nextVars[v] ?? {}) };
+    entry[l] = value;
+    nextVars[v] = entry;
+    const next: MusicConfig = { ...cur, variations: nextVars };
+    void saveMusicConfig(next);
+    try {
+      window.dispatchEvent(new CustomEvent("halo-music-pref:changed", {
+        detail: { variation: v, layer: l, value },
+      }));
+    } catch {
+      // no-op
+    }
+  };
+
   const togglePlay = async (v: Variation, l: Layer) => {
     const key = stemKey(v, l);
     setReady(true);
@@ -553,7 +604,7 @@ export const MusicMixer = () => {
                           onChange={(e) => {
                             const next = parseFloat(e.target.value);
                             setGains((g) => ({ ...g, [key]: next }));
-                            setHaloLayerGain(variation.id, layer, next);
+                            persistLayerGain(variation.id, layer, next);
                           }}
                           className="min-w-0 accent-[#6ad7ff]"
                         />
@@ -561,7 +612,7 @@ export const MusicMixer = () => {
                           type="button"
                           onClick={() => {
                             setGains((g) => ({ ...g, [key]: variation.gains[layer] }));
-                            setHaloLayerGain(variation.id, layer, variation.gains[layer]);
+                            persistLayerGain(variation.id, layer, variation.gains[layer]);
                           }}
                           title={`Reset to in-game default (${variation.gains[layer].toFixed(3)})`}
                           className="w-12 shrink-0 text-right text-[11px] tabular-nums text-[#d6ecff] hover:text-[#6ad7ff]"

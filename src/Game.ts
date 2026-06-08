@@ -8,7 +8,7 @@ import { Pulsar } from "./Pulsar";
 import { Input, IInput } from "./Input";
 import { Sound } from "./Sound";
 import type { AudioChannel } from "./game/audioPrefs";
-import type { HaloLayer } from "./game/haloMusicPrefs";
+import type { MusicLayer } from "./musicConfig";
 import type { HaloMusicVariation } from "./Sound";
 import { Canister } from "./Canister";
 import { GoldCrystal } from "./GoldCrystal";
@@ -391,12 +391,14 @@ export class Game implements HudElements {
       const { channel, value } = (e as CustomEvent).detail as { channel: AudioChannel; value: number };
       this.sound.setChannelVolume(channel, value);
     });
-    // /music page tweaks a per-variation/per-layer halo-music gain.
-    //   haloMusicPrefs.setHaloLayerGain persists the value; Sound applies it
-    //   live to the active stem so the change is audible without restarting.
+    // /music page tweaks a per-variation/per-layer halo-music gain. The page
+    //   saves through saveMusicConfig (POSTs to /__music-config__ and the dev
+    //   plugin in vite.config.ts writes public/sounds/music-config.json);
+    //   it also dispatches `halo-music-pref:changed` so the active stem can
+    //   ramp to the new value without waiting for the next combo cycle.
     window.addEventListener("halo-music-pref:changed", (e) => {
       const { variation, layer, value } = (e as CustomEvent).detail as {
-        variation: HaloMusicVariation; layer: HaloLayer; value: number;
+        variation: HaloMusicVariation; layer: MusicLayer; value: number;
       };
       this.sound.applyHaloLayerGain(variation, layer, value);
     });
