@@ -160,7 +160,7 @@ export class Pulsar {
         angularSpeed: 0.005,
         baseRadiusFrac: 0.38,
         baseSize: 12,
-        growthRate: 5.5,
+        growthRate: 7.4,
         hue: 245,
         baseSat: 50,
         satGrowth: 30,

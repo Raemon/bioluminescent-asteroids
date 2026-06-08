@@ -63,7 +63,12 @@ export type AsteroidSize = "large" | "medium" | "small";
 // "solidCrystalSmall" also spawns standalone as a rare "treat" — a tough
 // 4 HP shard that pays out solidCrystal.smallScore on the killing hit. Same
 // sprite + shatter sound as a parent-spawned fragment, no further split.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "goldCrystal" | "solidCrystal" | "solidCrystalSmall";
+// Boss fragment kinds (level 10 culmination). The "boss" kind is the
+// whole-body planetoid; it splits into two `bossHemisphere` halves + one
+// `bossEye` core. Hemispheres further split into `bossPlate` shards (the
+// modular ring panels they wore); the eye further splits into
+// `bossIrisShard` slivers + a single inert `bossEmber` pupil.
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "goldCrystal" | "solidCrystal" | "solidCrystalSmall";
 
 export const BASS_KINDS: ReadonlyArray<"bassA" | "bassB" | "bassC" | "bassD"> = ["bassA", "bassB", "bassC", "bassD"];
 
@@ -539,6 +544,46 @@ export class Asteroid {
   // and the death payout.
   embeddedGemSpots: { x: number; y: number; r: number; tilt: number }[] = [];
 
+  // Level-10 boss reveal phase. "dormant" plays the 8s grow-and-rotate
+  // foreshadow animation and is invulnerable. "live" is the normal damageable
+  // engagement. Only meaningful when isBossFamily().
+  bossPhase: "dormant" | "live" = "live";
+  // Seconds elapsed since spawn while dormant; drives the swell + the rotate
+  // -around reveal of the architecture. Reaches revealDuration → phase
+  // transitions to "live" and the eye opens.
+  bossRevealT = 0;
+  // Eye-core target radius (set at construction for "boss" too so the
+  // closed-eye lid seam is positioned consistently). For "bossEye" this is
+  // the full body radius — the eye IS the asteroid.
+  bossEyeRadius = 0;
+  // Iris angle the eye is currently aiming. Lerps toward the player position
+  // over a short window so quick player jukes are tracked but not perfectly.
+  bossIrisAngle = 0;
+  // Seconds until the next plasma bolt fires. Counts down on bossEye and on
+  // the whole-body boss (which fires through its central iris before any
+  // damage). On the first fire after the dormant phase clears, the eye
+  // telegraphs for bossEyeTelegraphT before the actual bolt.
+  bossEyeCooldown = 0;
+  // Telegraph timer: > 0 means the eye is mid-windup, showing the red
+  // sightline. When it reaches 0 the bolt actually spawns. -1 = not
+  // currently telegraphing.
+  bossEyeTelegraphT = -1;
+  // Tracked aim point at the start of the telegraph — so a player who jukes
+  // *during* the windup actually dodges the bolt. Set in worldspace.
+  bossEyeAimX = 0;
+  bossEyeAimY = 0;
+  // Per-fragment local-space orientation marker. For bossHemisphere this is
+  // the angle of the cut diameter (so the straight edge faces a known
+  // direction); for bossPlate it's the original modular hue band the plate
+  // came from. Stored on the asteroid so the renderer doesn't need to derive
+  // it from velocity (which drifts post-spawn).
+  bossFragmentAngle = 0;
+  // Color band index for bossPlate fragments — 0..3 picks one of the four
+  // bassteroid hues that decorate the equatorial ring.
+  bossPlateBand = 0;
+  // For bossEmber: tiny inert pupil — no firing, just drifts. No state
+  // beyond hue/radius is needed, this flag is implicit in kind.
+
   constructor(pos: Vec, vel: Vec, size: AsteroidSize, hue?: number, kind: AsteroidKind = "normal", inheritBass?: BassShip) {
     this.pos = pos;
     this.vel = vel;
@@ -549,6 +594,12 @@ export class Asteroid {
     this.kind = kind;
     const isBass = kind === "bassA" || kind === "bassB" || kind === "bassC" || kind === "bassD";
     const isBoss = kind === "boss";
+    const isBossHemisphere = kind === "bossHemisphere";
+    const isBossEye = kind === "bossEye";
+    const isBossPlate = kind === "bossPlate";
+    const isBossIrisShard = kind === "bossIrisShard";
+    const isBossEmber = kind === "bossEmber";
+    const isBossFragment = isBossHemisphere || isBossEye || isBossPlate || isBossIrisShard || isBossEmber;
     if (isBass) {
       this.measureOffset = BASS_KIND_BASE_OFFSET[kind];
       // Split children inherit a chunk of the parent's modules so they look
@@ -574,16 +625,59 @@ export class Asteroid {
       // than ordinary asteroids — these are chunks of broken planet, not
       // pebbles.
       this.rotSpeed = rand(-0.12, 0.12) * (size === "large" ? 0.5 : 1);
+      // Whole-body boss starts dormant: the 8s grow-and-rotate reveal plays
+      // before the eye opens and damage becomes possible. Children of the
+      // shatter spawn directly into "live" phase (overridden below).
+      this.bossPhase = "dormant";
+      this.bossRevealT = 0;
+      // The closed eyelid seam is centred at this latitude; the iris radius
+      // is fixed for visual layout consistency.
+      this.bossEyeRadius = ENTITY_CONFIG.boss.eyeRadius * (this.radius / BOSS_RADIUS.large);
+    }
+    if (isBossHemisphere) {
+      // Hemispheres render as half-discs but use a circular hitbox sized to
+      // the full half-disc bounds. Radius matches the boss medium tier.
+      this.radius = BOSS_RADIUS.medium;
+      this.rotSpeed = rand(-0.18, 0.18);
+    }
+    if (isBossEye) {
+      // Eye core is smaller than the hemispheres but the most dangerous
+      // piece — it keeps firing. Use the dedicated eyeRadius.
+      this.radius = ENTITY_CONFIG.boss.eyeRadius;
+      this.rotSpeed = rand(-0.12, 0.12);
+      // Spawned mid-fight, no telegraph yet — first shot lands after one
+      // full eyeFirePeriod so the player has a beat to react to the new
+      // entity before the next plasma bolt.
+      this.bossEyeCooldown = ENTITY_CONFIG.boss.eyeFirePeriod;
+      this.bossEyeTelegraphT = -1;
+    }
+    if (isBossPlate) {
+      this.radius = BOSS_RADIUS.small;
+      this.rotSpeed = rand(-1.4, 1.4);
+    }
+    if (isBossIrisShard) {
+      this.radius = BOSS_RADIUS.small * 0.85;
+      this.rotSpeed = rand(-2.0, 2.0);
+    }
+    if (isBossEmber) {
+      this.radius = BOSS_RADIUS.small * 0.55;
+      this.rotSpeed = rand(-1.0, 1.0);
     }
     this.maxHp = isBoss
       ? BOSS_HP[size]
-      : isBass
-        ? BASS_HP[size]
-        : kind === "solidCrystal"
-          ? SOLID_CRYSTAL_HP_LARGE
-          : kind === "solidCrystalSmall"
-            ? SOLID_CRYSTAL_HP_SMALL
-            : ASTEROID_HP[size];
+      : isBossHemisphere
+        ? BOSS_HP.medium
+        : isBossEye
+          ? ENTITY_CONFIG.boss.eyeHp
+          : isBossPlate || isBossIrisShard || isBossEmber
+            ? BOSS_HP.small
+            : isBass
+              ? BASS_HP[size]
+              : kind === "solidCrystal"
+                ? SOLID_CRYSTAL_HP_LARGE
+                : kind === "solidCrystalSmall"
+                  ? SOLID_CRYSTAL_HP_SMALL
+                  : ASTEROID_HP[size];
     this.hp = this.maxHp;
     // For most asteroids each HP gets its own pre-rolled crack so the
     // damage state escalates predictably. The boss has a much higher HP
@@ -591,10 +685,13 @@ export class Asteroid {
     // wasteful and looks like noise, so cap the boss at a handful of
     // distinct fractures and let `renderBossCracks` interpolate brightness
     // with the damage fraction instead.
-    const crackCount = isBoss ? (size === "large" ? 12 : size === "medium" ? 8 : 5) : this.maxHp;
+    const crackCount = isBoss
+      ? 12
+      : isBossHemisphere ? 8 : isBossEye ? 6 : (isBossPlate || isBossIrisShard || isBossEmber) ? 4
+      : this.maxHp;
     this.cracks = rollCracks(crackCount);
     const kindHue = KIND_HUE[kind];
-    this.hue = hue ?? (isBoss ? BOSS_HUE : kindHue !== undefined ? kindHue : nextWaveHue());
+    this.hue = hue ?? ((isBoss || isBossFragment) ? BOSS_HUE : kindHue !== undefined ? kindHue : nextWaveHue());
     this.harmonics = this.buildHarmonicsForKind(kind);
     // Solid crystal reads as cut glass — drop the outline sample count to a
     // small number (7 for large, 6 for small fragments) so the silhouette
@@ -718,8 +815,13 @@ export class Asteroid {
     return out;
   }
 
-  buildSprite(): HTMLCanvasElement {
-    if (this.isBoss()) return this.buildBossSprite();
+  buildSprite(): HTMLCanvasElement | null {
+    // Boss-family pieces all paint live (the whole-body boss needs to swell
+    // during the dormant reveal, hemispheres draw a half-disc that depends
+    // on bossFragmentAngle, eye core renders the tracking iris each frame,
+    // shards are tumbling sub-pieces). Returning null skips the pre-bake;
+    // render() branches on kind below to dispatch to the live painters.
+    if (this.isBossFamily()) return null;
     if (this.isBass()) return this.buildBassteroidSprite();
     const haloRadius = this.radius * 2.3;
     const padding = 14;
@@ -1246,6 +1348,11 @@ export class Asteroid {
   }
 
   collidesWith(point: Vec, pointRadius: number): boolean {
+    // Dormant boss is intangible during the 8s grow-and-reveal — neither
+    // bullets nor the ship can interact with the looming silhouette. The
+    // transition to "live" enables both at once on the same frame as the
+    // eye opens.
+    if (this.isBoss() && this.bossPhase === "dormant") return false;
     const dx = point.x - this.pos.x;
     const dy = point.y - this.pos.y;
     const distance = Math.hypot(dx, dy);
@@ -1255,7 +1362,10 @@ export class Asteroid {
     // miss the gaps between modules instead of registering on empty space.
     if (this.isBass()) return distance < this.radius * 0.88 + pointRadius;
     // Boss planetoid is a round body — circle hitbox at near-full radius.
+    // Boss-family fragments use the same circular hitbox at slightly looser
+    // radius so all the awkward shard shapes register cleanly.
     if (this.isBoss()) return distance < this.radius * 0.95 + pointRadius;
+    if (this.isBossFragment()) return distance < this.radius * 0.92 + pointRadius;
     const localAngle = Math.atan2(dy, dx) - this.rotation;
     const surface = this.radiusAtAngle(localAngle);
     return distance < surface + pointRadius;
@@ -1305,8 +1415,96 @@ export class Asteroid {
     // Beat flare decays a touch slower than the hit flash so the visible
     // pulse rides the audio kick all the way through the beat window.
     if (this.beatFlash > 0) this.beatFlash = Math.max(0, this.beatFlash - dt * 2.6);
+    // Whole-body boss reveal: ticks the dormant timer toward revealDuration,
+    // then transitions to live. While dormant the asteroid cannot take
+    // damage (gateApplyDamage), the eye cannot fire, and rendering swells
+    // the silhouette + rotates the architecture into view.
+    if (this.isBoss() && this.bossPhase === "dormant") {
+      this.bossRevealT += dt;
+      if (this.bossRevealT >= ENTITY_CONFIG.boss.revealDuration) {
+        this.bossPhase = "live";
+        // First plasma bolt fires telegraph-then-shoot after the reveal:
+        // start the cooldown ticking down from a short window so the eye's
+        // opening glint flows directly into the first sightline.
+        this.bossEyeCooldown = ENTITY_CONFIG.boss.eyeTelegraphTime;
+        this.bossEyeTelegraphT = ENTITY_CONFIG.boss.eyeTelegraphTime;
+      }
+    }
+    // Plasma fire cooldown — only the whole-body boss (post-reveal) and the
+    // detached eye-core run this clock. Telegraph timer is wound by the
+    // game loop when the cooldown crosses zero; here we just decrement.
+    if ((this.isBoss() && this.bossPhase === "live") || this.kind === "bossEye") {
+      if (this.bossEyeCooldown > 0) this.bossEyeCooldown = Math.max(0, this.bossEyeCooldown - dt);
+      if (this.bossEyeTelegraphT > 0) this.bossEyeTelegraphT = Math.max(0, this.bossEyeTelegraphT - dt);
+    }
     // Nucleus orbital drift is baked into the sprite so we no longer rotate
     // it here — the per-frame pulse highlight handles the only visible motion.
+  }
+
+  // Update the iris to track the player. Caller (gameUpdate) passes the
+  // current ship position so the boss/eye can do its slit-pupil aim. Done
+  // outside `update()` because the asteroid module doesn't know about Ship.
+  trackPlayer(shipX: number, shipY: number) {
+    if (!this.isBoss() && this.kind !== "bossEye") return;
+    const target = Math.atan2(shipY - this.pos.y, shipX - this.pos.x);
+    // Smoothly slew the iris toward the player along the shorter angular
+    // path. Constant lerp factor keeps it from snapping during dodges so the
+    // sightline (when a telegraph is up) reads as a deliberate aim.
+    let diff = target - this.bossIrisAngle;
+    while (diff > Math.PI) diff -= TAU;
+    while (diff < -Math.PI) diff += TAU;
+    this.bossIrisAngle += diff * 0.18;
+    // While *not* mid-telegraph, also refresh the worldspace aim point so
+    // when the next telegraph starts it begins from where the eye currently
+    // points (not stale data).
+    if (this.bossEyeTelegraphT <= 0) {
+      this.bossEyeAimX = shipX;
+      this.bossEyeAimY = shipY;
+    }
+  }
+
+  // Drive the boss/eye fire cycle. Two-phase: a "rest" countdown of
+  // (eyeFirePeriod - eyeTelegraphTime) ending in the start of a telegraph
+  // (sightline locks onto the player's current position), then a telegraph
+  // countdown of eyeTelegraphTime ending in the actual bolt. Returns true on
+  // exactly the frame the bolt fires; caller spawns the bullet. Has to be
+  // called once per tick AFTER trackPlayer + the dt decrement in update().
+  consumeEyeFireTick(): boolean {
+    if (!((this.isBoss() && this.bossPhase === "live") || this.kind === "bossEye")) return false;
+    if (this.bossEyeCooldown > 0) return false;
+    // Cooldown just hit zero. If we were resting (telegraph == -1), enter
+    // the telegraph window and don't fire yet. If we were telegraphing
+    // (telegraph > 0 before this tick → now decremented to 0), fire.
+    if (this.bossEyeTelegraphT > 0) {
+      // Telegraph still running — wait for it to finish (its own decrement
+      // in update() handles the countdown).
+      return false;
+    }
+    if (this.bossEyeTelegraphT === 0) {
+      // Telegraph done → fire. Reset to a full rest period before the next
+      // telegraph starts. Mark telegraph as -1 so the "no telegraph" branch
+      // fires on the next zero-crossing. (telegraphT is float-clamped to a
+      // hard 0 in update() so this exact compare is safe.)
+      this.bossEyeCooldown = Math.max(0.1, ENTITY_CONFIG.boss.eyeFirePeriod - ENTITY_CONFIG.boss.eyeTelegraphTime);
+      this.bossEyeTelegraphT = -1;
+      return true;
+    }
+    // Rest just ended → start the telegraph. Lock aim now so a juke during
+    // the telegraph actually dodges the bolt.
+    this.bossEyeCooldown = ENTITY_CONFIG.boss.eyeTelegraphTime;
+    this.bossEyeTelegraphT = ENTITY_CONFIG.boss.eyeTelegraphTime;
+    this.bossEyeAimX = this.pos.x + Math.cos(this.bossIrisAngle) * 1000;
+    this.bossEyeAimY = this.pos.y + Math.sin(this.bossIrisAngle) * 1000;
+    return false;
+  }
+
+  // Direction from the iris toward its locked aim point. Used both by the
+  // telegraph renderer and by the bullet-spawn so the rendered sightline
+  // matches the shot.
+  eyeAimAngle(): number {
+    const dx = this.bossEyeAimX - this.pos.x;
+    const dy = this.bossEyeAimY - this.pos.y;
+    return Math.atan2(dy, dx);
   }
 
   scoreValue(): number {
@@ -1315,6 +1513,14 @@ export class Asteroid {
       // kill, mediums and smalls are still chunky. Combo multiplier applies
       // on top at the call site.
       return ENTITY_CONFIG.boss.score[this.size];
+    }
+    // Boss fragments inherit the boss score band by tier — hemispheres use
+    // the medium boss score, plates/shards/embers use small. The eye-core
+    // gets its own bump for being the most dangerous fragment.
+    if (this.kind === "bossHemisphere") return ENTITY_CONFIG.boss.score.medium;
+    if (this.kind === "bossEye") return ENTITY_CONFIG.boss.eyeScore;
+    if (this.kind === "bossPlate" || this.kind === "bossIrisShard" || this.kind === "bossEmber") {
+      return ENTITY_CONFIG.boss.score.small;
     }
     // Solid crystal pays out for the bullet budget it absorbs (16 HP / 4 HP).
     if (this.kind === "solidCrystal") return ENTITY_CONFIG.solidCrystal.largeScore;
@@ -1328,6 +1534,19 @@ export class Asteroid {
 
   isBoss(): boolean {
     return this.kind === "boss";
+  }
+
+  // The level-10 boss fragments after the planetoid breaks: hemispheres,
+  // eye core, plates, iris shards, ember. They share the boss hue / scoring
+  // / shatter-aesthetic but render and split differently than the whole-body
+  // planetoid.
+  isBossFragment(): boolean {
+    return this.kind === "bossHemisphere" || this.kind === "bossEye"
+      || this.kind === "bossPlate" || this.kind === "bossIrisShard" || this.kind === "bossEmber";
+  }
+
+  isBossFamily(): boolean {
+    return this.isBoss() || this.isBossFragment();
   }
 
   // `impactDir` is the bullet's velocity direction at the moment of the kill.
@@ -1351,36 +1570,111 @@ export class Asteroid {
   // context.
   split(opts?: { impactDir?: Vec; impactPos?: Vec; combo?: number; onBeat?: boolean }): Asteroid[] {
     const impactDir = opts?.impactDir;
-    // Boss: large → 3 medium, medium → 3 small, small → terminal. Children
-    // fan outward from the parent's velocity in evenly-spaced cones so the
-    // post-split field reads as a clean shatter rather than a dust cloud.
+    // Boss whole-body: cracks open into two hemisphere halves + the iris
+    // eye-core (3 mediums total, but with distinct identities). Cleavage
+    // axis is perpendicular to the killing-shot direction so the bullet
+    // visibly "splits the planet in two", and the hemispheres fly out along
+    // that perpendicular while the eye drifts forward along the bullet's
+    // line of travel.
     if (this.isBoss()) {
-      if (this.size === "small") return [];
-      const nextSize: AsteroidSize = this.size === "large" ? "medium" : "small";
-      // Boss is huge and ponderous, so the bullet's direction dominates the
-      // shatter axis when available; otherwise fall back to parent velocity.
       const baseAngle = impactDir
         ? Math.atan2(impactDir.y, impactDir.x)
         : Math.atan2(this.vel.y, this.vel.x);
-      // Eject from a position offset out toward each child's direction so
-      // mediums/smalls don't all start stacked on top of each other (which
-      // would let one shot near the centre clip several at once before they
-      // separated). Offset distance is half the parent radius.
-      const ejectDist = this.radius * 0.5;
+      // perpendicular to the bullet: cleavage plane direction
+      const cutAxis = baseAngle + Math.PI / 2;
+      const parentSpeed = Math.hypot(this.vel.x, this.vel.y);
+      const ejectDist = this.radius * 0.45;
       const fragmentList: Asteroid[] = [];
-      for (let i = 0; i < 3; i++) {
-        // Spread of ±1.2 rad with a small per-child jitter so the three
-        // children aren't perfectly symmetrical.
-        const childAngle = baseAngle + (i - 1) * 1.2 + rand(-0.15, 0.15);
+      // Two hemispheres — one to each side of the cut axis.
+      for (let i = 0; i < 2; i++) {
+        const sign = i === 0 ? -1 : 1;
+        const childAngle = cutAxis + sign * 0.15;
         const childPos = {
           x: this.pos.x + Math.cos(childAngle) * ejectDist,
           y: this.pos.y + Math.sin(childAngle) * ejectDist,
         };
-        const speedMag = Math.hypot(this.vel.x, this.vel.y) * rand(0.9, 1.4) + 60;
-        const child = new Asteroid(childPos, fromAngle(childAngle, speedMag), nextSize, this.hue, this.kind);
-        fragmentList.push(child);
+        const speedMag = parentSpeed * rand(0.9, 1.3) + 50;
+        const hemi = new Asteroid(childPos, fromAngle(childAngle, speedMag), "medium", this.hue, "bossHemisphere");
+        // Remember which side of the cut this hemisphere came from so the
+        // renderer can paint the flat diameter facing back along the cut
+        // axis — that's the freshly-revealed cross-section of the broken
+        // planet, with the inner ring laid bare.
+        hemi.bossFragmentAngle = cutAxis + (sign === -1 ? Math.PI : 0);
+        fragmentList.push(hemi);
+      }
+      // Eye core — flies forward along the bullet's line, slightly slower
+      // than the hemispheres so the player can tell the moving threat from
+      // the rubble. Inherits the iris angle so its first telegraphed shot
+      // points roughly where it was already aiming.
+      const eyePos = {
+        x: this.pos.x + Math.cos(baseAngle) * ejectDist * 0.4,
+        y: this.pos.y + Math.sin(baseAngle) * ejectDist * 0.4,
+      };
+      const eyeSpeed = parentSpeed * rand(0.7, 1.0) + 30;
+      const eye = new Asteroid(eyePos, fromAngle(baseAngle, eyeSpeed), "medium", this.hue, "bossEye");
+      eye.bossIrisAngle = this.bossIrisAngle;
+      eye.bossEyeAimX = this.bossEyeAimX;
+      eye.bossEyeAimY = this.bossEyeAimY;
+      fragmentList.push(eye);
+      return fragmentList;
+    }
+    // Boss hemisphere: shatters into three modular plate fragments — each
+    // a sliver of the equatorial Bassteroid-style ring this hemisphere wore.
+    // Each plate carries one of the four bass-hue bands so the rubble paints
+    // a recognisable echo of the parent's architecture.
+    if (this.kind === "bossHemisphere") {
+      const baseAngle = impactDir
+        ? Math.atan2(impactDir.y, impactDir.x)
+        : Math.atan2(this.vel.y, this.vel.x);
+      const fragmentList: Asteroid[] = [];
+      for (let i = 0; i < 3; i++) {
+        const childAngle = baseAngle + (i - 1) * 0.9 + rand(-0.18, 0.18);
+        const speedMag = Math.hypot(this.vel.x, this.vel.y) * rand(1.0, 1.5) + 80;
+        const childPos = {
+          x: this.pos.x + Math.cos(childAngle) * this.radius * 0.4,
+          y: this.pos.y + Math.sin(childAngle) * this.radius * 0.4,
+        };
+        const plate = new Asteroid(childPos, fromAngle(childAngle, speedMag), "small", this.hue, "bossPlate");
+        // Distribute the four bass-band hues across the three plates: the
+        // hemisphere wore two color rings (each plate gets a distinct one,
+        // the third samples a third). Modular indices into BASS_KIND_BASE.
+        plate.bossPlateBand = (i + Math.floor(rng() * 2)) % 4;
+        fragmentList.push(plate);
       }
       return fragmentList;
+    }
+    // Boss eye-core: shatters into two iris-crescent shards + one inert
+    // ember (the burnt-out pupil). The shards fan opposite the bullet,
+    // the ember drifts slowly forward — a final remnant cooling off.
+    if (this.kind === "bossEye") {
+      const baseAngle = impactDir
+        ? Math.atan2(impactDir.y, impactDir.x)
+        : Math.atan2(this.vel.y, this.vel.x);
+      const fragmentList: Asteroid[] = [];
+      for (let i = 0; i < 2; i++) {
+        const sign = i === 0 ? -1 : 1;
+        const childAngle = baseAngle + sign * 1.4 + rand(-0.15, 0.15);
+        const speedMag = Math.hypot(this.vel.x, this.vel.y) * rand(1.1, 1.5) + 90;
+        const childPos = {
+          x: this.pos.x + Math.cos(childAngle) * this.radius * 0.5,
+          y: this.pos.y + Math.sin(childAngle) * this.radius * 0.5,
+        };
+        const shard = new Asteroid(childPos, fromAngle(childAngle, speedMag), "small", this.hue, "bossIrisShard");
+        // Track which side of the iris this shard came from so the renderer
+        // can draw the brass rim arc on the correct edge.
+        shard.bossFragmentAngle = sign === -1 ? -1 : 1;
+        fragmentList.push(shard);
+      }
+      // The ember drifts slowly forward along the impact line — a tiny
+      // black sphere with a smouldering core. No firing, no telegraph.
+      const emberSpeed = Math.hypot(this.vel.x, this.vel.y) * rand(0.4, 0.7) + 20;
+      const ember = new Asteroid({ ...this.pos }, fromAngle(baseAngle, emberSpeed), "small", this.hue, "bossEmber");
+      fragmentList.push(ember);
+      return fragmentList;
+    }
+    // Boss small-tier shards are terminal — they break into nothing further.
+    if (this.kind === "bossPlate" || this.kind === "bossIrisShard" || this.kind === "bossEmber") {
+      return [];
     }
     // Bassteroid: each split subdivides the parent's beat slot. Gen-0 (large)
     // → 2 gen-1 (medium) half a measure apart, gen-1 → 2 gen-2 (small) a
@@ -1644,9 +1938,18 @@ export class Asteroid {
 
   render(ctx: CanvasRenderingContext2D, t: number) {
     if (this.isBoss()) {
-      this.renderBoss(ctx, t);
+      // Dormant boss draws the swelling planetoid silhouette + the slow
+      // architecture reveal; live boss draws the fully-built body with the
+      // tracking eye and any in-progress fire telegraph.
+      if (this.bossPhase === "dormant") this.renderBossDormant(ctx, t);
+      else this.renderBossLive(ctx, t);
       return;
     }
+    if (this.kind === "bossHemisphere") { this.renderBossHemisphere(ctx, t); return; }
+    if (this.kind === "bossEye") { this.renderBossEye(ctx, t); return; }
+    if (this.kind === "bossPlate") { this.renderBossPlate(ctx, t); return; }
+    if (this.kind === "bossIrisShard") { this.renderBossIrisShard(ctx, t); return; }
+    if (this.kind === "bossEmber") { this.renderBossEmber(ctx, t); return; }
     if (this.isBass()) {
       this.renderBass(ctx);
       return;
@@ -1830,160 +2133,176 @@ export class Asteroid {
     ctx.restore();
   }
 
-  // Pre-rendered cratered planetoid sprite for the boss. Heavy dark body
-  // with a strong red rim glow (matches the foreshadowing planet's menace
-  // hue), pitted with craters, fractured by deep canyon lines, and lit from
-  // the side by an off-screen sun so it reads as a 3D sphere rather than a
-  // flat disc. Cracks and the live damage state are drawn per-frame in
-  // renderBoss.
-  buildBossSprite(): HTMLCanvasElement {
-    const r = this.radius;
-    const haloRadius = r * 1.55;
-    const padding = 24;
-    const size = Math.ceil(2 * (haloRadius + padding));
-    const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext("2d")!;
-    this.spriteHalfSize = size / 2;
-    const baseHue = this.hue;
-
-    ctx.translate(size / 2, size / 2);
-
-    // Wide outer corona — red/orange wash so the boss carries its menace
-    // colour signature out into the surrounding space.
-    ctx.globalCompositeOperation = "lighter";
-    const corona = ctx.createRadialGradient(0, 0, r * 0.7, 0, 0, haloRadius);
-    corona.addColorStop(0, `hsla(${baseHue}, 100%, 50%, 0.18)`);
-    corona.addColorStop(0.55, `hsla(${baseHue - 8}, 100%, 45%, 0.08)`);
-    corona.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
-    ctx.fillStyle = corona;
-    ctx.beginPath();
-    ctx.arc(0, 0, haloRadius, 0, TAU);
-    ctx.fill();
-
-    // Body — dark molten rock with a directional gradient (the "sun" is up
-    // and to the left). source-over so the body genuinely occludes the
-    // corona behind it instead of glowing through it.
-    ctx.globalCompositeOperation = "source-over";
-    const body = ctx.createRadialGradient(-r * 0.4, -r * 0.4, r * 0.1, 0, 0, r);
-    body.addColorStop(0, `hsl(${baseHue + 8}, 70%, 32%)`);
-    body.addColorStop(0.45, `hsl(${baseHue + 4}, 75%, 18%)`);
-    body.addColorStop(0.85, `hsl(${baseHue - 6}, 80%, 8%)`);
-    body.addColorStop(1, `hsl(${baseHue - 10}, 80%, 4%)`);
-    ctx.fillStyle = body;
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, TAU);
-    ctx.fill();
-
-    // Craters — randomly placed dark pits with bright south-east rims (the
-    // sun is up-left, so the lit side of each crater is opposite). Smaller
-    // bosses get fewer craters proportionally so the silhouette stays
-    // readable.
-    const craterCount = this.size === "large" ? 14 : this.size === "medium" ? 8 : 5;
-    for (let i = 0; i < craterCount; i++) {
-      const a = rand(0, TAU);
-      const d = rand(0, r * 0.78);
-      const cx = Math.cos(a) * d;
-      const cy = Math.sin(a) * d;
-      const cr = rand(r * 0.06, r * 0.16);
-      // Pit
-      const pit = ctx.createRadialGradient(cx - cr * 0.2, cy - cr * 0.2, 0, cx, cy, cr);
-      pit.addColorStop(0, `hsl(${baseHue - 6}, 75%, 4%)`);
-      pit.addColorStop(0.7, `hsl(${baseHue}, 70%, 9%)`);
-      pit.addColorStop(1, `hsl(${baseHue + 8}, 65%, 20%)`);
-      ctx.fillStyle = pit;
-      ctx.beginPath();
-      ctx.arc(cx, cy, cr, 0, TAU);
-      ctx.fill();
-      // Sun-lit rim crescent on the lower-right of each crater. A thin
-      // bright arc sells the depth without burying the body in noise.
-      ctx.strokeStyle = `hsla(${baseHue + 25}, 90%, 65%, 0.8)`;
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.arc(cx, cy, cr * 0.95, -0.4, 1.7);
-      ctx.stroke();
-    }
-
-    // Glowing magma fault lines — bright canyons running across the body
-    // suggesting the planetoid is unstable. Clipped to the disc.
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, TAU);
-    ctx.clip();
-    ctx.globalCompositeOperation = "lighter";
-    const faultCount = this.size === "large" ? 5 : this.size === "medium" ? 3 : 2;
-    for (let i = 0; i < faultCount; i++) {
-      const a = rand(0, TAU);
-      const offset = rand(-r * 0.5, r * 0.5);
-      ctx.strokeStyle = `hsla(${baseHue + 18 + i * 4}, 100%, 60%, 0.85)`;
-      ctx.lineWidth = rand(1.2, 2.4);
-      ctx.beginPath();
-      let px = Math.cos(a) * -r * 1.2 + Math.cos(a + Math.PI / 2) * offset;
-      let py = Math.sin(a) * -r * 1.2 + Math.sin(a + Math.PI / 2) * offset;
-      ctx.moveTo(px, py);
-      const segs = 6;
-      for (let s = 1; s <= segs; s++) {
-        const t = -1 + (s / segs) * 2;
-        const jitter = (rng() - 0.5) * r * 0.08;
-        px = Math.cos(a) * r * 1.2 * t + Math.cos(a + Math.PI / 2) * (offset + jitter);
-        py = Math.sin(a) * r * 1.2 * t + Math.sin(a + Math.PI / 2) * (offset + jitter);
-        ctx.lineTo(px, py);
-      }
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    // Terminator — dark crescent on the lower-right where the body falls
-    // into shadow. Sells the spherical lighting model harder than the body
-    // gradient alone.
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, TAU);
-    ctx.clip();
-    ctx.globalCompositeOperation = "source-over";
-    const term = ctx.createRadialGradient(r * 0.5, r * 0.5, r * 0.2, r * 0.5, r * 0.5, r * 1.3);
-    term.addColorStop(0, `hsla(0, 0%, 0%, 0)`);
-    term.addColorStop(0.6, `hsla(0, 0%, 0%, 0.45)`);
-    term.addColorStop(1, `hsla(0, 0%, 0%, 0.85)`);
-    ctx.fillStyle = term;
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, TAU);
-    ctx.fill();
-    ctx.restore();
-
-    // Outline rim — thin bright ring so the boss reads cleanly against the
-    // starfield even when the corona is washed out.
-    ctx.globalCompositeOperation = "lighter";
-    ctx.strokeStyle = `hsla(${baseHue + 15}, 100%, 75%, 0.85)`;
-    ctx.lineWidth = 2.2;
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, TAU);
-    ctx.stroke();
-
-    return canvas;
+  // Boss eased reveal curve. 0 → 1 over the 8s dormant window, with a
+  // mid-window pause for the rotation reveal so the swell and the
+  // architecture-rotate read as two distinct beats. Phase breakdown:
+  //   0.00 - 0.68 : swell from ~level-9 silhouette to ~85% boss radius
+  //   0.68 - 0.88 : rotate-around (silhouette stays the same size, but the
+  //                 architecture continues sweeping from edge to front)
+  //   0.88 - 1.00 : final swell to full radius, eye opens
+  // The eased "reveal" return value is the architecture-visibility factor,
+  // 0 = pure dark silhouette, 1 = fully painted. We return swell + reveal
+  // + spin separately so the renderer can compose them.
+  bossDormantPhase(): { swellT: number; revealT: number; spinT: number } {
+    const t = Math.min(1, this.bossRevealT / Math.max(0.001, ENTITY_CONFIG.boss.revealDuration));
+    let swellT: number;
+    if (t < 0.68) swellT = (t / 0.68) * 0.85;
+    else if (t < 0.88) swellT = 0.85;
+    else swellT = 0.85 + ((t - 0.88) / 0.12) * 0.15;
+    // Architecture reveal stays at 0 (pure dark silhouette) until the
+    // rotate-around begins, then ramps in. Final 12% is the eye opening +
+    // last details settling.
+    const revealT = t < 0.25 ? 0 : t < 0.88 ? (t - 0.25) / 0.63 : 1;
+    // Spin position: smoothly rotates 1.5 full turns across the window so
+    // the architecture sweeps into view from the limb. Eases out near the
+    // end so the final stop lands flat.
+    const spinEase = t < 0.88 ? t / 0.88 : 1;
+    const spinT = spinEase * 1.5;
+    return { swellT, revealT, spinT };
   }
 
-  // Per-frame boss draw. Sprite carries the body and craters; we paint live
-  // damage cracks, hit flash, and a slow rotation on top. Damage cracks
-  // escalate from hairlines to wide molten gashes as HP drops, so the
-  // player gets clear feedback that they're chipping at this monster.
-  renderBoss(ctx: CanvasRenderingContext2D, t: number) {
+  // Render the dormant whole-body boss: a swelling planet silhouette that
+  // gradually reveals modular architecture as it rotates. Mimics the
+  // background-planet renderer (dark disc + faint rim) at the start so the
+  // hand-off from background planet → boss is seamless.
+  renderBossDormant(ctx: CanvasRenderingContext2D, t: number) {
     const baseHue = this.hue;
-    const damageT = 1 - this.hp / Math.max(1, this.maxHp);
+    const phase = this.bossDormantPhase();
+    const r = this.radius * (0.42 + 0.58 * phase.swellT);
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
-    ctx.rotate(this.rotation);
 
-    // Slow corona pulse driven by clock so the boss feels alive even when
-    // nothing is happening. Drawn before the sprite so it sits behind.
-    const breath = 0.5 + 0.5 * Math.sin(t * 0.0018);
+    // Soft outer corona — very dim during silhouette, ramps up as the
+    // architecture is revealed. Mirrors the eclipse rim-light look the
+    // background planet was wearing right before this.
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
+    const coronaA = 0.04 + 0.18 * phase.revealT + 0.05 * Math.sin(t * 0.002);
+    const coronaR = r * (1.25 + 0.18 * phase.revealT);
+    const corona = ctx.createRadialGradient(0, 0, r * 0.7, 0, 0, coronaR);
+    corona.addColorStop(0, `hsla(${baseHue}, 100%, 50%, ${coronaA * 0.5})`);
+    corona.addColorStop(0.55, `hsla(${baseHue - 8}, 100%, 45%, ${coronaA * 0.25})`);
+    corona.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
+    ctx.fillStyle = corona;
+    ctx.beginPath();
+    ctx.arc(0, 0, coronaR, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // Dark silhouette body — same hsl ramp as the background planet so the
+    // transition from one to the other is invisible. As the reveal builds,
+    // a subtle directional gradient appears (the sun side of the boss).
+    ctx.save();
+    const dark = 4 + phase.revealT * 8;
+    ctx.fillStyle = `hsl(${baseHue + 4}, 70%, ${dark}%)`;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // Architecture: drawn clipped to the disc, rotated by spinT so the
+    // modular ring sweeps into view from the edge. Alpha climbs with
+    // revealT so the body stays a clean silhouette early.
+    if (phase.revealT > 0.001) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TAU);
+      ctx.clip();
+      ctx.rotate(phase.spinT * TAU);
+
+      // Equatorial Bassteroid-style ring of plated panels — four hue bands
+      // (red/amber/blue/violet) span the visible arc. Modeled as a wide
+      // horizontal band across the body, clipped by the disc so the curved
+      // limb cuts the bottom and top of the band.
+      const bandHeight = r * 0.42;
+      const bassHues = [0, 28, 215, 290];
+      const panelCount = 14;
+      for (let i = 0; i < panelCount; i++) {
+        const u = i / panelCount;
+        const x0 = -r * 1.2 + u * r * 2.4;
+        const x1 = -r * 1.2 + (u + 1 / panelCount) * r * 2.4;
+        const hueBand = bassHues[Math.floor(u * 4) % 4];
+        const panel = ctx.createLinearGradient(0, -bandHeight, 0, bandHeight);
+        const a = 0.55 * phase.revealT;
+        panel.addColorStop(0, `hsla(${hueBand}, 60%, 18%, ${a * 0.7})`);
+        panel.addColorStop(0.45, `hsla(${hueBand}, 75%, 30%, ${a})`);
+        panel.addColorStop(0.55, `hsla(${hueBand}, 75%, 22%, ${a})`);
+        panel.addColorStop(1, `hsla(${hueBand}, 60%, 10%, ${a * 0.7})`);
+        ctx.fillStyle = panel;
+        ctx.fillRect(x0, -bandHeight, x1 - x0, bandHeight * 2);
+        // Plate seam
+        ctx.strokeStyle = `hsla(${hueBand + 20}, 100%, 80%, ${0.55 * phase.revealT})`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x1, -bandHeight);
+        ctx.lineTo(x1, bandHeight);
+        ctx.stroke();
+      }
+
+      // Polar caps (north + south) — darker hex-paneled lids stitched on
+      // top of the ring. Just a darker fill with one bright rim arc on the
+      // ring-facing edge.
+      for (const sign of [-1, 1]) {
+        ctx.fillStyle = `hsla(${baseHue}, 70%, 10%, ${0.7 * phase.revealT})`;
+        ctx.beginPath();
+        ctx.ellipse(0, sign * r * 0.55, r * 1.1, r * 0.5, 0, 0, TAU);
+        ctx.fill();
+        ctx.strokeStyle = `hsla(${baseHue + 10}, 100%, 55%, ${0.5 * phase.revealT})`;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.ellipse(0, sign * r * 0.55, r * 1.1, r * 0.5, 0, 0, TAU);
+        ctx.stroke();
+      }
+
+      // Closed-eye seam: a thin horizontal canyon across the equator where
+      // the lid will open. Dim until the very end of the reveal, then a hot
+      // crimson line as the lid begins to crack.
+      const lidOpen = Math.max(0, (this.bossRevealT - ENTITY_CONFIG.boss.revealDuration * 0.85) / Math.max(0.001, ENTITY_CONFIG.boss.revealDuration * 0.15));
+      const seamGlow = 0.3 * phase.revealT + 0.7 * lidOpen;
+      ctx.strokeStyle = `hsla(${baseHue}, 100%, ${30 + 40 * lidOpen}%, ${seamGlow})`;
+      ctx.lineWidth = 1.5 + 2.5 * lidOpen;
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.75, 0);
+      ctx.lineTo(r * 0.75, 0);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // Outline rim — soft during silhouette, sharpening as the body
+    // resolves. This is what sells "thing in space against starfield".
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = `hsla(${baseHue + 12}, 100%, 65%, ${0.25 + 0.55 * phase.revealT})`;
+    ctx.lineWidth = 1.4 + 1.4 * phase.revealT;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  // Render the live whole-body boss: layered orrery with a tracking eye.
+  // The architecture stays static (cached painting overlaid live) and the
+  // iris + telegraph + damage cracks are the only animated overlays.
+  renderBossLive(ctx: CanvasRenderingContext2D, t: number) {
+    const baseHue = this.hue;
+    const damageT = 1 - this.hp / Math.max(1, this.maxHp);
+    const r = this.radius;
+
+    ctx.save();
+    ctx.translate(this.pos.x, this.pos.y);
+
+    // Slow corona breath. Stronger at high damage so the planet visibly
+    // stresses as it takes hits.
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const breath = 0.5 + 0.5 * Math.sin(t * 0.0018);
     const breathAlpha = 0.18 + 0.12 * breath + 0.35 * damageT;
-    const breathR = this.radius * (1.35 + 0.05 * breath + 0.15 * damageT);
-    const grad = ctx.createRadialGradient(0, 0, this.radius * 0.7, 0, 0, breathR);
+    const breathR = r * (1.35 + 0.05 * breath + 0.15 * damageT);
+    const grad = ctx.createRadialGradient(0, 0, r * 0.7, 0, 0, breathR);
     grad.addColorStop(0, `hsla(${baseHue}, 100%, 50%, ${breathAlpha * 0.4})`);
     grad.addColorStop(0.6, `hsla(${baseHue + 8}, 100%, 55%, ${breathAlpha})`);
     grad.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
@@ -1993,24 +2312,646 @@ export class Asteroid {
     ctx.fill();
     ctx.restore();
 
-    if (this.sprite) {
-      ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
-    }
+    // Body — dark planetoid base with a directional gradient (sun up-left).
+    ctx.save();
+    const body = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.1, 0, 0, r);
+    body.addColorStop(0, `hsl(${baseHue + 8}, 70%, 22%)`);
+    body.addColorStop(0.45, `hsl(${baseHue + 4}, 75%, 14%)`);
+    body.addColorStop(0.9, `hsl(${baseHue - 6}, 80%, 6%)`);
+    body.addColorStop(1, `hsl(${baseHue - 10}, 80%, 3%)`);
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+    ctx.restore();
 
-    // Live damage cracks — same system as regular asteroids but with a
-    // brighter, redder over-stroke so they read on the boss body. Number
-    // shown scales with damage taken (one per HP lost, capped at crack
-    // count).
+    // Architecture (clipped to body). Equatorial ring of four-band plated
+    // modules + dim hex pole caps. Drawn each frame; cheap because it's
+    // just rects/arcs.
+    this.paintBossArchitecture(ctx, r, t);
+
+    // Live damage cracks
     this.renderBossCracks(ctx, damageT);
+
+    // Eye — sits at the body center, iris rotates to track player. Drawn
+    // last (above architecture + cracks) so it always reads as the primary
+    // focal point.
+    this.paintBossEyeAt(ctx, 0, 0, this.bossEyeRadius, baseHue, this.bossIrisAngle, this.bossEyeTelegraphT, t);
+
+    // Outline rim
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = `hsla(${baseHue + 15}, 100%, 75%, 0.85)`;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
 
     if (this.flashAmount > 0) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.fillStyle = `hsla(${baseHue + 30}, 100%, 90%, ${this.flashAmount * 0.35})`;
       ctx.beginPath();
-      ctx.arc(0, 0, this.radius * 1.05, 0, TAU);
+      ctx.arc(0, 0, r * 1.05, 0, TAU);
       ctx.fill();
       ctx.restore();
+    }
+
+    ctx.restore();
+
+    // Eye telegraph sightline is world-space (extends past the boss body)
+    // so it's drawn outside the boss-local transform.
+    if (this.bossEyeTelegraphT > 0) this.paintBossSightline(ctx);
+  }
+
+  // Equatorial ring + pole caps + plate seams. Shared by the live boss; the
+  // dormant boss paints a simpler version inline so the swell-and-rotate
+  // animation can clip differently.
+  paintBossArchitecture(ctx: CanvasRenderingContext2D, r: number, t: number) {
+    const baseHue = this.hue;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.clip();
+
+    // Equatorial Bassteroid-style ring — four hue bands wrapping the body
+    const bandHeight = r * 0.42;
+    const bassHues = [0, 28, 215, 290];
+    const panelCount = 14;
+    for (let i = 0; i < panelCount; i++) {
+      const u = i / panelCount;
+      const x0 = -r * 1.2 + u * r * 2.4;
+      const x1 = -r * 1.2 + (u + 1 / panelCount) * r * 2.4;
+      const hueBand = bassHues[Math.floor(u * 4) % 4];
+      const panel = ctx.createLinearGradient(0, -bandHeight, 0, bandHeight);
+      panel.addColorStop(0, `hsla(${hueBand}, 60%, 18%, 0.55)`);
+      panel.addColorStop(0.45, `hsla(${hueBand}, 75%, 30%, 0.85)`);
+      panel.addColorStop(0.55, `hsla(${hueBand}, 75%, 22%, 0.85)`);
+      panel.addColorStop(1, `hsla(${hueBand}, 60%, 10%, 0.55)`);
+      ctx.fillStyle = panel;
+      ctx.fillRect(x0, -bandHeight, x1 - x0, bandHeight * 2);
+
+      ctx.strokeStyle = `hsla(${hueBand + 20}, 100%, 80%, 0.55)`;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(x1, -bandHeight);
+      ctx.lineTo(x1, bandHeight);
+      ctx.stroke();
+    }
+
+    // Pole caps — dim hex panels stitched on top/bottom
+    for (const sign of [-1, 1]) {
+      ctx.fillStyle = `hsla(${baseHue}, 70%, 10%, 0.78)`;
+      ctx.beginPath();
+      ctx.ellipse(0, sign * r * 0.55, r * 1.1, r * 0.5, 0, 0, TAU);
+      ctx.fill();
+      // Inner rim
+      ctx.strokeStyle = `hsla(${baseHue + 10}, 100%, 60%, 0.55)`;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.ellipse(0, sign * r * 0.55, r * 1.1, r * 0.5, 0, 0, TAU);
+      ctx.stroke();
+      // Hex panel seams running across the cap
+      ctx.strokeStyle = `hsla(${baseHue + 10}, 70%, 28%, 0.6)`;
+      ctx.lineWidth = 0.9;
+      for (let k = -2; k <= 2; k++) {
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.9, sign * (r * 0.55 + k * r * 0.1));
+        ctx.lineTo(r * 0.9, sign * (r * 0.55 + k * r * 0.1));
+        ctx.stroke();
+      }
+    }
+
+    // Faint cross-hair plate seam through the equator centre — the lid is
+    // open now, but the seam where it cracked remains as a thin scar above
+    // and below the iris.
+    ctx.strokeStyle = `hsla(${baseHue}, 90%, 28%, 0.5)`;
+    ctx.lineWidth = 1.0;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.85, 0);
+    ctx.lineTo(-r * 0.32, 0);
+    ctx.moveTo(r * 0.32, 0);
+    ctx.lineTo(r * 0.85, 0);
+    ctx.stroke();
+
+    ctx.restore();
+    // (no `t` use here yet — kept signature consistent for future motion)
+    void t;
+  }
+
+  // Iris + pupil + brass aperture rim. Shared by the whole-body boss
+  // (drawn at the planet center) and the detached eye-core (drawn at its
+  // own center). `irisAngle` is the world-space angle the slit pupil
+  // points; `telegraphT` > 0 paints a hot inner glow as the bolt charges.
+  paintBossEyeAt(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    eyeR: number,
+    hue: number,
+    irisAngle: number,
+    telegraphT: number,
+    t: number,
+  ) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Brass aperture rim — a wide ring framing the iris. Brass = warm
+    // ochre, distinct from the body's red so the eye reads as a fitted
+    // device rather than a wound.
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const rimR = eyeR * 1.12;
+    const rim = ctx.createRadialGradient(0, 0, eyeR * 0.85, 0, 0, rimR);
+    rim.addColorStop(0, `hsla(38, 80%, 55%, 0)`);
+    rim.addColorStop(0.45, `hsla(38, 95%, 60%, 0.55)`);
+    rim.addColorStop(1, `hsla(28, 90%, 45%, 0)`);
+    ctx.fillStyle = rim;
+    ctx.beginPath();
+    ctx.arc(0, 0, rimR, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // Iris — dark crimson disc. Subtle radial gradient gives it depth.
+    const irisFill = ctx.createRadialGradient(0, 0, 0, 0, 0, eyeR);
+    irisFill.addColorStop(0, `hsl(${hue + 8}, 90%, 22%)`);
+    irisFill.addColorStop(0.55, `hsl(${hue - 4}, 85%, 11%)`);
+    irisFill.addColorStop(1, `hsl(${hue - 10}, 90%, 4%)`);
+    ctx.fillStyle = irisFill;
+    ctx.beginPath();
+    ctx.arc(0, 0, eyeR, 0, TAU);
+    ctx.fill();
+
+    // Brass rim outline — thin precise ring
+    ctx.strokeStyle = `hsla(38, 90%, 65%, 0.85)`;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(0, 0, eyeR, 0, TAU);
+    ctx.stroke();
+
+    // Inner sclera ring — concentric darker line
+    ctx.strokeStyle = `hsla(${hue}, 80%, 18%, 0.85)`;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.arc(0, 0, eyeR * 0.78, 0, TAU);
+    ctx.stroke();
+
+    // Pupil — vertical slit aligned to irisAngle. Drawn as a tall, narrow
+    // black ellipse; rotation by irisAngle aims it at the player. A slow
+    // dilate breath modulates the slit width.
+    ctx.save();
+    ctx.rotate(irisAngle);
+    const dilate = 1 + 0.1 * Math.sin(t * 0.003);
+    const slitW = eyeR * 0.16 * dilate;
+    const slitH = eyeR * 0.7;
+    // Pupil body
+    ctx.fillStyle = `hsla(0, 0%, 0%, 0.95)`;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, slitW, slitH, 0, 0, TAU);
+    ctx.fill();
+    // Telegraph charge — hot core inside the pupil ramps up as the
+    // bolt charges. White-hot at peak so the player sees the glint and
+    // dodges.
+    if (telegraphT > 0) {
+      const charge = 1 - telegraphT / Math.max(0.001, ENTITY_CONFIG.boss.eyeTelegraphTime);
+      ctx.globalCompositeOperation = "lighter";
+      const coreR = slitW * (0.6 + 1.3 * charge);
+      const core = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR);
+      core.addColorStop(0, `hsla(48, 100%, 96%, ${0.9 * charge})`);
+      core.addColorStop(0.55, `hsla(${hue + 30}, 100%, 70%, ${0.6 * charge})`);
+      core.addColorStop(1, `hsla(${hue}, 100%, 50%, 0)`);
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(0, 0, coreR, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Highlight glint — small bright spot on the upper-left of the iris,
+    // sells "wet" reflective optic rather than dull cratered rock.
+    ctx.fillStyle = `hsla(48, 100%, 92%, 0.7)`;
+    ctx.beginPath();
+    ctx.arc(-eyeR * 0.35, -eyeR * 0.35, eyeR * 0.08, 0, TAU);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // World-space telegraph sightline from the eye's iris toward the locked
+  // aim point. Drawn between the boss-local restore and the next entity so
+  // it sits above the body but below the HUD.
+  paintBossSightline(ctx: CanvasRenderingContext2D) {
+    const a = this.eyeAimAngle();
+    // Charge fraction (0 → 1 across the telegraph window)
+    const charge = 1 - this.bossEyeTelegraphT / Math.max(0.001, ENTITY_CONFIG.boss.eyeTelegraphTime);
+    const startR = (this.kind === "bossEye" ? this.radius : this.bossEyeRadius) * 1.05;
+    const len = 2200;
+    const sx = this.pos.x + Math.cos(a) * startR;
+    const sy = this.pos.y + Math.sin(a) * startR;
+    const ex = this.pos.x + Math.cos(a) * (startR + len);
+    const ey = this.pos.y + Math.sin(a) * (startR + len);
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const grad = ctx.createLinearGradient(sx, sy, ex, ey);
+    const alpha = 0.18 + 0.5 * charge;
+    grad.addColorStop(0, `hsla(${this.hue + 10}, 100%, 65%, ${alpha})`);
+    grad.addColorStop(0.5, `hsla(${this.hue + 4}, 100%, 55%, ${alpha * 0.55})`);
+    grad.addColorStop(1, `hsla(${this.hue}, 100%, 50%, 0)`);
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 0.9 + 2.0 * charge;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Hemisphere fragment: a half-disc with the freshly-revealed inner
+  // cross-section facing the cut axis. The straight edge (the diameter)
+  // shows a glowing interior — molten core glimpse — while the curved limb
+  // wears its share of the equatorial Bassteroid ring.
+  renderBossHemisphere(ctx: CanvasRenderingContext2D, t: number) {
+    const baseHue = this.hue;
+    const damageT = 1 - this.hp / Math.max(1, this.maxHp);
+    const r = this.radius;
+
+    ctx.save();
+    ctx.translate(this.pos.x, this.pos.y);
+    ctx.rotate(this.rotation);
+
+    // The hemisphere is the half-disc on the side opposite the cut axis.
+    // In its own local frame we draw the half on +x side (so the cut
+    // diameter is the y-axis), then the outer rotation places it correctly.
+    // Apply the fragment angle so the cut faces the recorded direction.
+    ctx.rotate(this.bossFragmentAngle);
+
+    // Wide outer corona — same hue family as the whole boss
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const breath = 0.5 + 0.5 * Math.sin(t * 0.002);
+    const coronaA = 0.14 + 0.08 * breath + 0.3 * damageT;
+    const coronaR = r * (1.35 + 0.18 * damageT);
+    const corona = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, coronaR);
+    corona.addColorStop(0, `hsla(${baseHue}, 100%, 50%, ${coronaA * 0.5})`);
+    corona.addColorStop(0.6, `hsla(${baseHue + 8}, 100%, 50%, ${coronaA})`);
+    corona.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
+    ctx.fillStyle = corona;
+    ctx.beginPath();
+    ctx.arc(0, 0, coronaR, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // The half-disc body itself (curved side on +x). Clip a circular path
+    // to the +x half-plane so the renderer can paint architecture inside.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, r, -Math.PI / 2, Math.PI / 2);
+    ctx.lineTo(0, -r);
+    ctx.closePath();
+    ctx.clip();
+
+    // Body fill — dark planetoid base
+    const body = ctx.createRadialGradient(r * 0.4, -r * 0.3, r * 0.1, 0, 0, r);
+    body.addColorStop(0, `hsl(${baseHue + 8}, 70%, 22%)`);
+    body.addColorStop(0.5, `hsl(${baseHue}, 75%, 12%)`);
+    body.addColorStop(1, `hsl(${baseHue - 8}, 80%, 4%)`);
+    ctx.fillStyle = body;
+    ctx.fillRect(0, -r, r, r * 2);
+
+    // Equatorial ring slice — this hemisphere wore half the boss's ring.
+    // Draw it as a horizontal band on the +x side; the diameter edge cuts
+    // the band so its left edge is the broken cross-section.
+    const bandHeight = r * 0.36;
+    const bassHues = [0, 28, 215, 290];
+    for (let i = 0; i < 7; i++) {
+      const u = i / 7;
+      const x0 = u * r * 1.05;
+      const x1 = (u + 1 / 7) * r * 1.05;
+      const hueBand = bassHues[Math.floor(u * 4) % 4];
+      const panel = ctx.createLinearGradient(0, -bandHeight, 0, bandHeight);
+      panel.addColorStop(0, `hsla(${hueBand}, 60%, 18%, 0.5)`);
+      panel.addColorStop(0.5, `hsla(${hueBand}, 75%, 28%, 0.8)`);
+      panel.addColorStop(1, `hsla(${hueBand}, 60%, 10%, 0.5)`);
+      ctx.fillStyle = panel;
+      ctx.fillRect(x0, -bandHeight, x1 - x0, bandHeight * 2);
+      ctx.strokeStyle = `hsla(${hueBand + 20}, 100%, 80%, 0.5)`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(x1, -bandHeight);
+      ctx.lineTo(x1, bandHeight);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    // The cut cross-section — the flat diameter face of the broken planet.
+    // Glowing molten interior so the freshly-revealed inside reads as
+    // "this thing was alive inside". Draw on top, only along the diameter.
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const cutGlow = ctx.createLinearGradient(-r * 0.05, 0, r * 0.3, 0);
+    cutGlow.addColorStop(0, `hsla(${baseHue + 25}, 100%, 75%, 0.95)`);
+    cutGlow.addColorStop(0.4, `hsla(${baseHue + 12}, 100%, 55%, 0.75)`);
+    cutGlow.addColorStop(1, `hsla(${baseHue}, 100%, 40%, 0)`);
+    ctx.fillStyle = cutGlow;
+    ctx.fillRect(-r * 0.04, -r, r * 0.3, r * 2);
+    // Bright thin seam right at x=0
+    ctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 90%, 0.9)`;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.lineTo(0, r);
+    ctx.stroke();
+    ctx.restore();
+
+    // Outline rim — curved limb only (the half-circle arc on +x)
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = `hsla(${baseHue + 15}, 100%, 75%, 0.85)`;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Damage cracks (clipped to the half-disc)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, r, -Math.PI / 2, Math.PI / 2);
+    ctx.lineTo(0, -r);
+    ctx.closePath();
+    ctx.clip();
+    this.renderBossCracks(ctx, damageT);
+    ctx.restore();
+
+    if (this.flashAmount > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = `hsla(${baseHue + 30}, 100%, 90%, ${this.flashAmount * 0.4})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.05, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(0, -r);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  // Eye-core fragment: a free-floating iris that keeps firing on its 4s
+  // cadence. Renders very similarly to the whole-body eye but as its own
+  // standalone entity (smaller, more agile target).
+  renderBossEye(ctx: CanvasRenderingContext2D, t: number) {
+    const baseHue = this.hue;
+    const damageT = 1 - this.hp / Math.max(1, this.maxHp);
+    const r = this.radius;
+
+    ctx.save();
+    ctx.translate(this.pos.x, this.pos.y);
+
+    // Corona — slightly more agitated than the whole-body boss; this thing
+    // is detached and angry. Pulses harder with damage.
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const breath = 0.5 + 0.5 * Math.sin(t * 0.003);
+    const coronaA = 0.22 + 0.16 * breath + 0.4 * damageT;
+    const coronaR = r * (1.6 + 0.25 * damageT);
+    const corona = ctx.createRadialGradient(0, 0, r * 0.4, 0, 0, coronaR);
+    corona.addColorStop(0, `hsla(${baseHue}, 100%, 50%, ${coronaA * 0.6})`);
+    corona.addColorStop(0.55, `hsla(${baseHue + 12}, 100%, 55%, ${coronaA})`);
+    corona.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
+    ctx.fillStyle = corona;
+    ctx.beginPath();
+    ctx.arc(0, 0, coronaR, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // Iris/pupil — full eye-core uses the same painter, with the eye
+    // occupying its entire body.
+    this.paintBossEyeAt(ctx, 0, 0, r, baseHue, this.bossIrisAngle, this.bossEyeTelegraphT, t);
+
+    // Damage cracks
+    this.renderBossCracks(ctx, damageT);
+
+    if (this.flashAmount > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = `hsla(${baseHue + 30}, 100%, 92%, ${this.flashAmount * 0.4})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.1, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.restore();
+
+    if (this.bossEyeTelegraphT > 0) this.paintBossSightline(ctx);
+  }
+
+  // Plate fragment: a single Bassteroid-style modular shard, painted in
+  // one of the four ring hues. Tumbles freely. Reads as a literal piece of
+  // the equatorial band that just flew off.
+  renderBossPlate(ctx: CanvasRenderingContext2D, t: number) {
+    const damageT = 1 - this.hp / Math.max(1, this.maxHp);
+    const r = this.radius;
+    const bassHues = [0, 28, 215, 290];
+    const hue = bassHues[this.bossPlateBand];
+
+    ctx.save();
+    ctx.translate(this.pos.x, this.pos.y);
+    ctx.rotate(this.rotation);
+
+    // Small hue-tinted halo
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const halo = ctx.createRadialGradient(0, 0, r * 0.3, 0, 0, r * 1.8);
+    halo.addColorStop(0, `hsla(${hue}, 100%, 60%, 0.4)`);
+    halo.addColorStop(1, `hsla(${hue}, 100%, 60%, 0)`);
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.8, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // Plate silhouette — a chunky trapezoidal panel with bevelled corners.
+    // Hand-built shape so it doesn't read as a generic rock.
+    ctx.fillStyle = `hsl(${hue}, 60%, 14%)`;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.9, -r * 0.45);
+    ctx.lineTo(r * 0.65, -r * 0.7);
+    ctx.lineTo(r * 0.95, -r * 0.1);
+    ctx.lineTo(r * 0.75, r * 0.55);
+    ctx.lineTo(-r * 0.55, r * 0.75);
+    ctx.lineTo(-r * 0.95, r * 0.1);
+    ctx.closePath();
+    ctx.fill();
+
+    // Panel inner gradient — bright top edge, dark bottom (suggests light
+    // reflecting off the plated surface)
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.9, -r * 0.45);
+    ctx.lineTo(r * 0.65, -r * 0.7);
+    ctx.lineTo(r * 0.95, -r * 0.1);
+    ctx.lineTo(r * 0.75, r * 0.55);
+    ctx.lineTo(-r * 0.55, r * 0.75);
+    ctx.lineTo(-r * 0.95, r * 0.1);
+    ctx.closePath();
+    ctx.clip();
+    const sheen = ctx.createLinearGradient(0, -r, 0, r);
+    sheen.addColorStop(0, `hsla(${hue + 10}, 90%, 50%, 0.55)`);
+    sheen.addColorStop(0.5, `hsla(${hue}, 75%, 25%, 0.4)`);
+    sheen.addColorStop(1, `hsla(${hue - 10}, 80%, 8%, 0.5)`);
+    ctx.fillStyle = sheen;
+    ctx.fillRect(-r, -r, r * 2, r * 2);
+    // Inner stripe — Bassteroid plate accent
+    ctx.strokeStyle = `hsla(${hue + 30}, 100%, 80%, 0.55)`;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.6, 0);
+    ctx.lineTo(r * 0.5, 0);
+    ctx.stroke();
+    ctx.restore();
+
+    // Panel outline — bright rim
+    ctx.strokeStyle = `hsla(${hue + 20}, 100%, 75%, 0.9)`;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.9, -r * 0.45);
+    ctx.lineTo(r * 0.65, -r * 0.7);
+    ctx.lineTo(r * 0.95, -r * 0.1);
+    ctx.lineTo(r * 0.75, r * 0.55);
+    ctx.lineTo(-r * 0.55, r * 0.75);
+    ctx.lineTo(-r * 0.95, r * 0.1);
+    ctx.closePath();
+    ctx.stroke();
+
+    // One running light — pinprick glow at a corner
+    ctx.fillStyle = `hsla(${hue + 40}, 100%, 95%, 1)`;
+    ctx.beginPath();
+    ctx.arc(r * 0.6, -r * 0.4, r * 0.08, 0, TAU);
+    ctx.fill();
+
+    this.renderBossCracks(ctx, damageT);
+
+    if (this.flashAmount > 0) {
+      ctx.fillStyle = `hsla(${hue + 30}, 100%, 92%, ${this.flashAmount * 0.4})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TAU);
+      ctx.fill();
+    }
+
+    ctx.restore();
+    void t;
+  }
+
+  // Iris-shard fragment: a crescent sliver of the brass aperture rim with
+  // a sliver of pupil. Reads as a slice of the dead eye.
+  renderBossIrisShard(ctx: CanvasRenderingContext2D, t: number) {
+    const baseHue = this.hue;
+    const damageT = 1 - this.hp / Math.max(1, this.maxHp);
+    const r = this.radius;
+    const side = this.bossFragmentAngle >= 0 ? 1 : -1;
+
+    ctx.save();
+    ctx.translate(this.pos.x, this.pos.y);
+    ctx.rotate(this.rotation);
+
+    // Faint halo
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const halo = ctx.createRadialGradient(0, 0, r * 0.3, 0, 0, r * 1.6);
+    halo.addColorStop(0, `hsla(${baseHue}, 100%, 55%, 0.4)`);
+    halo.addColorStop(1, `hsla(${baseHue}, 100%, 55%, 0)`);
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.6, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // Crescent shape — outer arc + inner arc on the same side.
+    ctx.fillStyle = `hsl(${baseHue}, 80%, 10%)`;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, side * -Math.PI / 2, side * Math.PI / 2, side < 0);
+    ctx.arc(0, 0, r * 0.55, side * Math.PI / 2, side * -Math.PI / 2, side > 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // Brass rim on the outer arc
+    ctx.strokeStyle = `hsla(38, 90%, 60%, 0.9)`;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, side * -Math.PI / 2, side * Math.PI / 2, side < 0);
+    ctx.stroke();
+    // Dim inner edge
+    ctx.strokeStyle = `hsla(${baseHue}, 80%, 30%, 0.7)`;
+    ctx.lineWidth = 1.0;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.55, side * -Math.PI / 2, side * Math.PI / 2, side < 0);
+    ctx.stroke();
+
+    this.renderBossCracks(ctx, damageT);
+
+    if (this.flashAmount > 0) {
+      ctx.fillStyle = `hsla(${baseHue + 30}, 100%, 92%, ${this.flashAmount * 0.4})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TAU);
+      ctx.fill();
+    }
+
+    ctx.restore();
+    void t;
+  }
+
+  // Inert pupil ember — a tiny black sphere with a final smouldering core.
+  // Doesn't fire, doesn't telegraph. Pure remnant.
+  renderBossEmber(ctx: CanvasRenderingContext2D, t: number) {
+    const baseHue = this.hue;
+    const damageT = 1 - this.hp / Math.max(1, this.maxHp);
+    const r = this.radius;
+
+    ctx.save();
+    ctx.translate(this.pos.x, this.pos.y);
+    ctx.rotate(this.rotation);
+
+    // Tiny corona — the last warmth
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const flicker = 0.5 + 0.5 * Math.sin(t * 0.004);
+    const coreA = 0.4 + 0.25 * flicker;
+    const coreR = r * 1.8;
+    const core = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR);
+    core.addColorStop(0, `hsla(48, 100%, 90%, ${coreA})`);
+    core.addColorStop(0.35, `hsla(${baseHue + 30}, 100%, 60%, ${coreA * 0.7})`);
+    core.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(0, 0, coreR, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // Black ember body
+    ctx.fillStyle = `hsl(${baseHue}, 80%, 5%)`;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+
+    // Hot pinprick at center
+    ctx.fillStyle = `hsla(48, 100%, 95%, ${0.6 + 0.3 * flicker})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.22, 0, TAU);
+    ctx.fill();
+
+    this.renderBossCracks(ctx, damageT);
+
+    if (this.flashAmount > 0) {
+      ctx.fillStyle = `hsla(48, 100%, 90%, ${this.flashAmount * 0.5})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TAU);
+      ctx.fill();
     }
 
     ctx.restore();

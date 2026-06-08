@@ -33,13 +33,27 @@ export class AlienBullet {
   size: AlienSize;
   trail: Vec[] = [];
 
-  constructor(pos: Vec, vel: Vec, size: AlienSize, hue: number) {
+  // Boss plasma bolts use the same bullet pool but render as a chunky orb
+  // rather than a stinger and have their own size/life envelope. The flag is
+  // checked in render(); a true value bypasses the AlienSize sizing.
+  isBoss = false;
+
+  constructor(pos: Vec, vel: Vec, size: AlienSize, hue: number, isBoss: boolean = false) {
     this.pos = { ...pos };
     this.vel = vel;
     this.size = size;
     this.hue = hue;
-    this.radius = SIZE_BULLET_RADIUS[size];
-    this.maxLife = BEAT_GRID * SIZE_BULLET_LIFE_BEATS[size];
+    if (isBoss) {
+      this.isBoss = true;
+      // Big slow plasma sphere. Long flight time so an off-screen wrap
+      // doesn't make it disappear mid-arc; chunky radius so the player can
+      // read the threat at a glance.
+      this.radius = 14;
+      this.maxLife = BEAT_GRID * 8;
+    } else {
+      this.radius = SIZE_BULLET_RADIUS[size];
+      this.maxLife = BEAT_GRID * SIZE_BULLET_LIFE_BEATS[size];
+    }
     this.life = this.maxLife;
   }
 
@@ -56,6 +70,24 @@ export class AlienBullet {
     ctx.globalCompositeOperation = "lighter";
     const trailHue = this.hue;
     const headHue = this.hue;
+    if (this.isBoss) {
+      // Heavy plasma sphere — chunky bright core with a wide crimson
+      // corona and a fat tapered tail. Reads at a glance as "incoming,
+      // dodge it" without imitating the alien stinger silhouette.
+      for (let i = 0; i < this.trail.length; i++) {
+        const segmentT = i / this.trail.length;
+        const p = this.trail[i];
+        drawGlow(ctx, p.x, p.y, this.radius * (1.6 + 1.0 * segmentT), trailHue, 0.55 * segmentT);
+      }
+      drawGlow(ctx, this.pos.x, this.pos.y, this.radius * 3.8, headHue, 0.85);
+      drawGlow(ctx, this.pos.x, this.pos.y, this.radius * 1.5, headHue + 30, 0.9, true);
+      ctx.fillStyle = `hsla(48, 100%, 96%, 0.95)`;
+      ctx.beginPath();
+      ctx.arc(this.pos.x, this.pos.y, this.radius * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
     // Tighter trail — narrower glow so the bullet reads as a precise stinger
     // rather than a smeared comet.
     for (let i = 0; i < this.trail.length; i++) {

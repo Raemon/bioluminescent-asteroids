@@ -1,9 +1,11 @@
 import type { Game } from "../Game";
 import { Asteroid } from "../Asteroid";
 import { Alien } from "../Alien";
+import { AlienBullet } from "../AlienBullet";
 import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
 import { Vec } from "../vec";
+import { ENTITY_CONFIG } from "./entityConfig";
 import { spawnGoldCrystalAt, spawnRhythmAlignedGems } from "../GoldCrystal";
 import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
@@ -23,13 +25,33 @@ import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet, markVeteranPil
 import { BASS_KIND_SOUND } from "./bassClock";
 import type { KillBucket } from "./killBuckets";
 
+// Last-gasp plasma bolt fired by an eye-core in the same frame it dies —
+// a "died with its boots on" beat. Aims at the ship's current position
+// (no telegraph; the eye is already broken) and skips the cooldown gate.
+const fireBossEyeFinalShot = (game: Game, a: Asteroid) => {
+  const angle = Math.atan2(game.ship.pos.y - a.pos.y, game.ship.pos.x - a.pos.x);
+  const speed = ENTITY_CONFIG.boss.eyeBulletSpeed;
+  const muzzleDist = a.radius * 1.1;
+  const muzzleX = a.pos.x + Math.cos(angle) * muzzleDist;
+  const muzzleY = a.pos.y + Math.sin(angle) * muzzleDist;
+  const bullet = new AlienBullet(
+    { x: muzzleX, y: muzzleY },
+    { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+    "big",
+    a.hue,
+    true,
+  );
+  game.alienBullets.push(bullet);
+  game.sound.play("alienFireBig", 1.0, a.pos);
+};
+
 // feeds the leaderboard's per-run breakdown; bucket names stay human-readable for display.
 const bumpKill = (game: Game, bucket: KillBucket) => {
   game.killTally[bucket] = (game.killTally[bucket] ?? 0) + 1;
 };
 
 const asteroidBucket = (a: Asteroid): KillBucket => {
-  if (a.kind === "boss") return "boss";
+  if (a.kind === "boss" || a.isBossFragment()) return "boss";
   if (a.isBass()) return "bassteroid";
   if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble") return a.kind;
   if (a.kind === "goldCrystal") return "goldCrystal";
@@ -197,6 +219,13 @@ const finishAsteroidKillCore = (
       BEAT_GRID,
     );
     for (const g of gems) game.goldCrystals.push(g);
+  }
+  // Defiant final shot: a boss eye-core that just took its killing hit
+  // fires one last plasma bolt before the shards spawn. Skip if no ship to
+  // aim at (post-death) — splatting an inert iris on a dead ship would just
+  // be visual noise.
+  if (a.kind === "bossEye" && game.ship.alive) {
+    fireBossEyeFinalShot(game, a);
   }
   const children = a.split({
     impactDir: killerVel,

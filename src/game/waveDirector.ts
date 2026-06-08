@@ -64,7 +64,7 @@ const alignIncomingToRhythm = (game: Game, a: Asteroid, claimed?: BeatClaimSet) 
 // the debris is aligned to a stale "ghost ship" position and a moving
 // player never sees combo-able children.
 export const alignSplitChildToRhythm = (game: Game, child: Asteroid, claimed?: BeatClaimSet) => {
-  if (child.isBoss()) return;
+  if (child.isBossFamily()) return;
   const speed = Math.hypot(child.vel.x, child.vel.y);
   if (speed < 1) return;
   alignVelocityToRhythm(child.pos, child.vel, {

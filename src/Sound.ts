@@ -157,11 +157,6 @@ type HaloMusicNode = {
   startedAtBeatTime: number;
   // Last commanded playbackRate (1.0 normally, < 1 during slow-mo).
   currentPlaybackRate: number;
-  // Audio time at which the accumulator was last advanced.
-  lastSampleAudioTime: number;
-  // Integrated beat-time progress since startedAtAudioTime; sums
-  // dt * currentPlaybackRate per tick so rate ramps are baked in.
-  audioBeatTimeAccumulator: number;
 };
 
 // Optional pan + distance-falloff splice. When a sound (one-shot or drone)
@@ -1106,31 +1101,16 @@ export class Sound {
   }
 
   // Authoritative beat-time derived from the music's actual playback position
-  // on the audio hardware clock; gameplay uses it to resnap beatTime and
-  // prevent drift between the integrated sim clock and the looping halo
-  // stems. Returns null when no halo music is active or no audio context.
-  // The returned value already accounts for past playback-rate ramps because
-  // tickHaloMusicClock integrates dt * currentPlaybackRate each frame.
+  // on the audio hardware clock. Returns null when no halo music is active,
+  // when the buffer hasn't actually started (measure-align delay), or when
+  // playbackRate isn't 1 (slow-mo ramps have their own audible easing — we
+  // don't try to second-guess them here).
   audioBeatTimeFromMusic(): number | null {
     if (!this.haloMusic || !this.ctx) return null;
-    return this.haloMusic.startedAtBeatTime + this.haloMusic.audioBeatTimeAccumulator;
-  }
-
-  // Called every game frame to advance the music's beat-time accumulator.
-  // Integrates dt * currentPlaybackRate so slow-mo rate ramps are baked in
-  // and audioBeatTimeFromMusic stays correct after rate changes.
-  tickHaloMusicClock(): void {
-    if (!this.haloMusic || !this.ctx) return;
-    const now = this.ctx.currentTime;
-    // startAt may be in the future for the measure-align delay.
-    if (now < this.haloMusic.startedAtAudioTime) return;
-    if (this.haloMusic.lastSampleAudioTime === 0) {
-      this.haloMusic.lastSampleAudioTime = this.haloMusic.startedAtAudioTime;
-    }
-    const dt = now - this.haloMusic.lastSampleAudioTime;
-    if (dt <= 0) return;
-    this.haloMusic.audioBeatTimeAccumulator += dt * this.haloMusic.currentPlaybackRate;
-    this.haloMusic.lastSampleAudioTime = now;
+    if (this.haloMusic.currentPlaybackRate !== 1) return null;
+    const elapsed = this.ctx.currentTime - this.haloMusic.startedAtAudioTime;
+    if (elapsed < 0) return null;
+    return this.haloMusic.startedAtBeatTime + elapsed;
   }
 
   // Slow-mo: gameplay clock advances at SLOW_MO_FACTOR, so we match the
@@ -2844,8 +2824,6 @@ export class Sound {
       startedAtAudioTime: startAt,
       startedAtBeatTime,
       currentPlaybackRate: 1.0,
-      lastSampleAudioTime: 0,
-      audioBeatTimeAccumulator: 0,
     };
   }
 
@@ -2955,8 +2933,6 @@ export class Sound {
       startedAtAudioTime: startAt,
       startedAtBeatTime,
       currentPlaybackRate: 1.0,
-      lastSampleAudioTime: 0,
-      audioBeatTimeAccumulator: 0,
     };
   }
 

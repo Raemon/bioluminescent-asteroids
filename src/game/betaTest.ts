@@ -234,6 +234,7 @@ const startBetaWave = (game: Game) => {
   game.nextBonusLifeScore = 50000;
   game.beatTime = 0;
   game.lastBeatResnapAt = game.beatTime;
+  game.beatPhaseCorrection = 0;
   game.lastBgBeatIndex = -1;
   game.nextBeatToEvaluate = 0;
   game.beatCombo = 0;

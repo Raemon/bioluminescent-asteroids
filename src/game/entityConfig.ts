@@ -135,12 +135,27 @@ export const ENTITY_CONFIG = {
   boss: {
     waves: [11] as readonly number[],
     foreshadowWaves: [10] as readonly number[],
-    // ~3× a normal large; splits into 3 medium children, each splitting into
-    // 3 smalls (smalls don't split). HP per tier is generous so a rhythm-locked
-    // player still needs a sustained engagement.
-    radius: { large: 160, medium: 70, small: 36 } as Record<AsteroidSize, number>,
+    // The whole-body large solidifies out of the grown background planet;
+    // the killing hit cracks it into two hemispheres + an eye-core. Mediums
+    // are the hemispheres (~70% of full-body radius); smalls are the plate
+    // fragments that come off them.
+    radius: { large: 132, medium: 62, small: 30 } as Record<AsteroidSize, number>,
     hp: { large: 60, medium: 18, small: 6 } as Record<AsteroidSize, number>,
     score: { large: 2500, medium: 800, small: 300 } as Record<AsteroidSize, number>,
+    // The eye-core is a third gen-1 fragment alongside the two hemispheres:
+    // smaller, slightly less HP, keeps shooting until destroyed. On death it
+    // breaks into 2 iris shards + 1 inert pupil ember (all small-size).
+    eyeRadius: 48,
+    eyeHp: 10,
+    eyeScore: 1200,
+    // Plasma bolt cadence (seconds) and damage. Slow and heavy — the player
+    // has time to read the pre-fire telegraph and dodge.
+    eyeFirePeriod: 4.0,
+    eyeTelegraphTime: 0.6,
+    eyeBulletDamage: 3,
+    eyeBulletSpeed: 200,
+    // 8-second grow-and-reveal before the boss becomes live and damageable.
+    revealDuration: 8.0,
     // menace-rim red — matches the foreshadowing planet's tint.
     hue: 12,
   },

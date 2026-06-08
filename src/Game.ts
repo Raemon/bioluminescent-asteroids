@@ -77,6 +77,10 @@ export class Game implements HudElements {
   // last beatTime at which we resnapped to the music's authoritative
   // audio-clock phase. Drives the periodic check in tickBeatResnap.
   lastBeatResnapAt = 0;
+  // signed seconds of beat-phase error left to bleed off into musicDt over
+  // subsequent frames, so corrections happen as a smooth tempo nudge rather
+  // than a hard jump that skips or replays bgBeat slots.
+  beatPhaseCorrection = 0;
   // player-measured latency offset (seconds), loaded in the constructor. Raw audio
   //   fires on `beatTime`; everything the player reacts to (scoring window + visual
   //   beat cues) reads `perceivedBeatTime` so it lands on the beat they actually hear.

@@ -2,6 +2,8 @@ import type { Game } from "../Game";
 import { dist } from "../vec";
 import { Asteroid } from "../Asteroid";
 import { Alien, ALIEN_FIRE_PATTERN_BEATS, bigAlienBurstAngleOffset } from "../Alien";
+import { AlienBullet } from "../AlienBullet";
+import { ENTITY_CONFIG } from "./entityConfig";
 import { BEAT_GRID, DEBUG_BEAT_TIMING } from "./rhythmConstants";
 import {
   isInBeatWindow,
@@ -245,6 +247,7 @@ const syncHaloAmbient = (game: Game) => {
         // than mid-bar.
         const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
         const measureAlignDelay = nextDownbeat - game.beatTime;
+        game.beatPhaseCorrection = 0;
         void game.sound.startHaloMusic(variation, hasMelodic, measureAlignDelay, game.beatTime, hasLayer3);
       } else {
         game.sound.setHaloMusicMelodicLayer(hasMelodic);
@@ -253,6 +256,7 @@ const syncHaloAmbient = (game: Game) => {
           const next = pickHaloMusicVariationExcluding(game.sound.haloMusic.variation);
           const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
           const measureAlignDelay = nextDownbeat - game.beatTime;
+          game.beatPhaseCorrection = 0;
           void game.sound.crossfadeHaloMusic(next, measureAlignDelay, game.beatTime);
         }
       }
@@ -346,10 +350,18 @@ let lastCommandedPlaybackRate = 1;
 
 const BEAT_RESNAP_INTERVAL = BASS_MEASURE_LENGTH;
 const BEAT_RESNAP_THRESHOLD = 0.030;
+// above this we assume a real stall (tab suspend, GC pause, debugger) rather
+// than gradual drift — bleeding it off as a tempo nudge would take many
+// seconds of audibly-wrong cadence, so we accept a one-shot skip instead.
+const BEAT_RESNAP_HARD_SNAP = 0.5;
+// fraction of dt that any single frame's correction is allowed to consume,
+// so corrections sound like a subtle breath rather than a tempo shift.
+const PHASE_CORRECTION_RATE = 0.25;
 
+// Watchdog: once a measure, compare beatTime to the music's actual playback
+// position. Small errors get bled off over many frames via beatPhaseCorrection;
+// huge errors (post-stall) hard-snap and re-sync the bgBeat index.
 const tickBeatResnap = (game: Game) => {
-  // skip during slow-mo: gameplay clock and music both run at a non-1 rate,
-  // and we don't second-guess the gameplay clock here.
   if (game.slowMoTimer > 0) return;
   if (game.beatTime - game.lastBeatResnapAt < BEAT_RESNAP_INTERVAL) return;
   game.lastBeatResnapAt = game.beatTime;
@@ -357,15 +369,32 @@ const tickBeatResnap = (game: Game) => {
   if (expected === null) return;
   const error = expected - game.beatTime;
   if (Math.abs(error) < BEAT_RESNAP_THRESHOLD) return;
-  // snap beat clock to music's authoritative phase, and roll forward the
-  // bgBeat eighth-index so the next slot fires from the new phase cleanly.
-  const EIGHTH_GRID = BEAT_GRID / 2;
-  game.beatTime = expected;
-  game.lastBgBeatIndex = Math.floor(expected / EIGHTH_GRID);
-  game.lastBeatResnapAt = expected;
-  if (DEBUG_BEAT_TIMING) {
-    console.log(`[beat-resnap] error=${(error * 1000).toFixed(1)}ms  snapped`);
+  if (Math.abs(error) >= BEAT_RESNAP_HARD_SNAP) {
+    const EIGHTH_GRID = BEAT_GRID / 2;
+    game.beatTime = expected;
+    game.lastBgBeatIndex = Math.floor(expected / EIGHTH_GRID);
+    game.lastBeatResnapAt = expected;
+    game.beatPhaseCorrection = 0;
+    if (DEBUG_BEAT_TIMING) {
+      console.log(`[beat-resnap] error=${(error * 1000).toFixed(1)}ms  hard-snapped`);
+    }
+    return;
   }
+  game.beatPhaseCorrection = error;
+  if (DEBUG_BEAT_TIMING) {
+    console.log(`[beat-resnap] error=${(error * 1000).toFixed(1)}ms  bleeding`);
+  }
+};
+
+// Bleeds beatPhaseCorrection into musicDt so tickBassBeats advances beatTime
+// by a fraction of the pending error each frame — corrections never skip or
+// duplicate an eighth-note slot, just gently warp tempo until phase aligns.
+const applyBeatPhaseCorrection = (game: Game, musicDt: number): number => {
+  if (game.beatPhaseCorrection === 0) return musicDt;
+  const cap = musicDt * PHASE_CORRECTION_RATE;
+  const delta = Math.max(-cap, Math.min(cap, game.beatPhaseCorrection));
+  game.beatPhaseCorrection -= delta;
+  return musicDt + delta;
 };
 
 // ordered phases (ship → bass → world → collisions) so cause-and-effect reads top-down.
@@ -384,17 +413,17 @@ const updatePlaying = (game: Game, dt: number) => {
   game.recorder?.captureShip(game.ship, game.input);
   game.replayPlayer?.checkShipAgainstRecording(game.ship);
   tickLaserShot(game);
-  const musicDt = tickSlowMoTimer(game, dt);
+  const rawMusicDt = tickSlowMoTimer(game, dt);
   // music slows with gameplay so beat+music stay locked through slow-mo.
   if (dt > 0) {
-    const slowMoFactor = musicDt / dt;
+    const slowMoFactor = rawMusicDt / dt;
     if (Math.abs(slowMoFactor - lastCommandedPlaybackRate) > 0.001) {
       game.sound.setHaloMusicPlaybackRate(slowMoFactor, 0);
       lastCommandedPlaybackRate = slowMoFactor;
     }
   }
-  game.sound.tickHaloMusicClock();
   tickBeatResnap(game);
+  const musicDt = applyBeatPhaseCorrection(game, rawMusicDt);
   tickBassBeats(game, musicDt);
   // pulsar runs against perceivedBeatTime so its flash lands with the *heard* bass voices.
   game.pulsar.update(dt, game.perceivedBeatTime, BEAT_GRID);
@@ -567,6 +596,7 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   for (const al of game.aliens) al.update(musicDt, game.w, game.h);
   pruneOffscreenAliens(game);
   tickAlienFire(game);
+  tickBossEyeFire(game);
   for (const b of game.bullets) b.update(musicDt, game.w, game.h);
   tickBulletReticuleCrossings(game);
   compactInPlace(game.bullets, (b) => b.life > 0);
@@ -636,6 +666,36 @@ const tickAlienFire = (game: Game) => {
   for (const a of game.aliens) {
     while (game.beatTime >= a.nextFireAt) fireOneAlienShot(game, a);
   }
+};
+
+// boss eye-core fires a heavy plasma bolt on its own 4s cycle, telegraphed
+// for ~0.6s so the player has a window to dodge. Tracks the player every
+// frame so the iris reads as "alive". Driven by wall-clock dt rather than
+// the rhythm grid — the boss is the culmination beat that doesn't conform.
+const tickBossEyeFire = (game: Game) => {
+  for (const a of game.asteroids) {
+    if (!(a.isBoss() || a.kind === "bossEye")) continue;
+    a.trackPlayer(game.ship.pos.x, game.ship.pos.y);
+    if (a.consumeEyeFireTick()) fireBossEyeBolt(game, a);
+  }
+};
+
+const fireBossEyeBolt = (game: Game, a: Asteroid) => {
+  const angle = a.eyeAimAngle();
+  const speed = ENTITY_CONFIG.boss.eyeBulletSpeed;
+  // Muzzle: just outside the iris/eye, along the aim direction.
+  const muzzleDist = (a.isBoss() ? a.bossEyeRadius : a.radius) * 1.1;
+  const muzzleX = a.pos.x + Math.cos(angle) * muzzleDist;
+  const muzzleY = a.pos.y + Math.sin(angle) * muzzleDist;
+  const bullet = new AlienBullet(
+    { x: muzzleX, y: muzzleY },
+    { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+    "big",
+    a.hue,
+    true,
+  );
+  game.alienBullets.push(bullet);
+  game.sound.play("alienFireBig", 1.0, a.pos);
 };
 
 const fireOneAlienShot = (game: Game, a: Alien) => {

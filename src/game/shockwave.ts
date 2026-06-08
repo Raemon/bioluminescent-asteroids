@@ -64,7 +64,7 @@ const shatterAllAsteroids = (game: Game) => {
   const surviving: Asteroid[] = [];
   const claimed = newBeatClaimSet();
   for (const a of game.asteroids) {
-    if (a.isBoss()) bossWeathersShockwave(game, a, surviving);
+    if (a.isBossFamily()) bossWeathersShockwave(game, a, surviving);
     else if (a.isBass()) shatterBassRock(game, a, surviving, claimed);
     else shatterPlainRock(game, a, surviving, claimed);
   }
