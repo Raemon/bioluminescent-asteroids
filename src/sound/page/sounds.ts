@@ -230,6 +230,7 @@ export const OBJECTS: GameObject[] = [
     about: "freed from a shattered prison — writhes after the ship until destroyed",
     actions: [
       { verb: "takes a hit", sound: "wraithHit", trigger: beat(2) },
+      { verb: "lunges (every 2 measures)", sound: "wraithLunge", trigger: beat(8) },
     ],
   },
 
@@ -369,7 +370,7 @@ const MENTIONED_SOUNDS = [
   "bassKick", "bassPluck", "bassBoom", "bassSnap", "bassHit", "bassEcho",
   "chime", "bell", "warble", "tink",
   "crystalShatterLarge", "crystalShatterSmall",
-  "wraithScream", "wraithHit",
+  "wraithScream", "wraithHit", "wraithLunge",
   // aliens
   "alienFireBig", "alienFireMedium", "alienFireSmall", "alienHit", "alienExplode",
   // comets
@@ -390,7 +391,7 @@ type MentionedSound = (typeof MENTIONED_SOUNDS)[number];
 
 // Add a sound here only if it's intentionally omitted from the page (e.g.
 // system-only sound that shouldn't appear as a checkbox).
-type IntentionallyOmitted = never;
+type IntentionallyOmitted = "bossPulse" | "bossEyeOpenStinger";
 
 // Compile-time check: every SoundName must be in MENTIONED_SOUNDS or
 // IntentionallyOmitted. If you add a new SoundName and forget to wire it

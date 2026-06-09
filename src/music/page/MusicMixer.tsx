@@ -79,6 +79,26 @@ const VARIATION_META: Record<Variation, VariationInfo> = {
     blurb: "ElevenLabs Outer-Wilds folk: distant drone pad (ambient) + fingerpicked acoustic guitar in G mixolydian (melodic, plucks quantized to the 8th-note grid) + sparse plucked acoustic-guitar countermelody (layer 3, D-centered upper register, HPF'd at 500 Hz so its body clears the fingerpicking). G-rooted melodic over the bass field's C — V-over-I suspension that never resolves.",
     gains: { ambient: 0.22, melodic: 0.25, layer3: 0.30 },
   },
+  "crucible-sb": {
+    label: "crucible-sb — boss climactic theme: brooding pedal + marcato brass + heroic horn",
+    blurb: "Force-picked during the level-10 boss fight (kept out of HALO_MUSIC_POOL so it doesn't roll randomly). Ambient = C-minor pedal + C1 heartbeat sub-pulse every 2 beats; melodic = stabbing marcato brass riff climbing the minor pentatonic; layer 3 = sustained French horn call-and-response + sparse C2/G2 timpani downbeat strikes. The track stays minor while the player is below 24x — the 24x climax crossfade is suppressed on the boss wave so this theme plays for the entire engagement.",
+    gains: { ambient: 0.30, melodic: 0.32, layer3: 0.32 },
+  },
+  "cathedral-hymn-el": {
+    label: "cathedral-hymn-el — bowed-string cathedral pad + distant felt piano + low monastic chant",
+    blurb: "ElevenLabs haunting variation, post-boss (waves 12–20). Ambient = slow legato bowed-string pad in a cathedral, long reverb tail; melodic = sparse distant felt-piano single tones, one note per measure; layer 3 = quiet low monastic male chant on 'ooo/aaa' vowels, sotto-voce. Designed to feel sacred and slightly otherworldly without tipping into horror.",
+    gains: { ambient: 0.27, melodic: 0.27, layer3: 0.30 },
+  },
+  "lost-transmission-el": {
+    label: "lost-transmission-el — AM-radio analog pad + musical-saw lead + whispered breaths",
+    blurb: "ElevenLabs haunting variation, post-boss (waves 12–20). Ambient = warm analog pad through tape-hiss + AM-radio bandlimiting + gentle wow/flutter; melodic = frail musical-saw lead, slow vibrato, transmissions almost lost in static; layer 3 = subliminal breathy whispered exhalations + faint short-wave crackle (non-instrumental texture). Frail, cold, lonely.",
+    gains: { ambient: 0.22, melodic: 0.22, layer3: 0.28 },
+  },
+  "underwater-requiem-el": {
+    label: "underwater-requiem-el — submerged orchestral pad + glass harmonica + ghostly celesta",
+    blurb: "ElevenLabs haunting variation, post-boss (waves 12–20). Ambient = submerged orchestral string pad, heavy lowpass + watery shimmer reverb; melodic = faint sustained glass-harmonica tones; layer 3 = sparse upper-register celesta countermelody (HPF'd 500 Hz to clear the bass kit). Mournful and beautiful.",
+    gains: { ambient: 0.25, melodic: 0.25, layer3: 0.32 },
+  },
 };
 
 const PLACEHOLDER_META: VariationInfo = {
@@ -87,10 +107,21 @@ const PLACEHOLDER_META: VariationInfo = {
   gains: { ambient: 0.25, melodic: 0.25, layer3: 0.30 },
 };
 
-const VARIATIONS: readonly (VariationInfo & { id: Variation })[] = HALO_MUSIC_POOL.map((id) => ({
-  id: id as Variation,
-  ...(VARIATION_META[id as Variation] ?? PLACEHOLDER_META),
-}));
+// Boss-fight variation lives outside HALO_MUSIC_POOL so it never rolls
+// randomly, but the mixer page should still expose it for tuning and
+// audition. Append after the pool so the listing order matches "random
+// rotation first, then specials".
+const NON_POOL_VARIATIONS: readonly Variation[] = ["crucible-sb", "cathedral-hymn-el", "lost-transmission-el", "underwater-requiem-el"];
+const VARIATIONS: readonly (VariationInfo & { id: Variation })[] = [
+  ...HALO_MUSIC_POOL.map((id) => ({
+    id: id as Variation,
+    ...(VARIATION_META[id as Variation] ?? PLACEHOLDER_META),
+  })),
+  ...NON_POOL_VARIATIONS.map((id) => ({
+    id,
+    ...(VARIATION_META[id] ?? PLACEHOLDER_META),
+  })),
+];
 
 const LAYERS: readonly Layer[] = ["ambient", "melodic", "layer3"];
 

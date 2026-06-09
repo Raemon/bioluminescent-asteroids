@@ -37,6 +37,17 @@ export class AlienBullet {
   // rather than a stinger and have their own size/life envelope. The flag is
   // checked in render(); a true value bypasses the AlienSize sizing.
   isBoss = false;
+  // The big-iris laser shot — drawn as a beam-streak (long bright trail,
+  // lensflare muzzle, white-hot core) rather than a soft plasma orb.
+  isBossLaser = false;
+  // Post-break hemisphere plasma ball — drawn as a heavy charged sphere
+  // with a long crimson tail and a soft inner star. Distinct silhouette
+  // from the laser so the player can read "slow ball, dodgeable arc" vs
+  // "fast laser, react now".
+  isBossHemiPlasma = false;
+  // Optional cross-fade window at end of life. When set, alpha ramps from 1
+  // at (life == fadeStartLife) down to 0 at (life == 0).
+  fadeStartLife = 0;
 
   constructor(pos: Vec, vel: Vec, size: AlienSize, hue: number, isBoss: boolean = false) {
     this.pos = { ...pos };
@@ -60,7 +71,8 @@ export class AlienBullet {
   update(dt: number, w: number, h: number) {
     this.life -= dt;
     this.trail.push({ ...this.pos });
-    if (this.trail.length > 10) this.trail.shift();
+    const trailCap = this.isBossLaser ? 28 : 10;
+    if (this.trail.length > trailCap) this.trail.shift();
     addScaledMut(this.pos, this.vel, dt);
     wrapMut(this.pos, w, h);
   }
@@ -71,19 +83,79 @@ export class AlienBullet {
     const trailHue = this.hue;
     const headHue = this.hue;
     if (this.isBoss) {
-      // Heavy plasma sphere — chunky bright core with a wide crimson
-      // corona and a fat tapered tail. Reads at a glance as "incoming,
-      // dodge it" without imitating the alien stinger silhouette.
+      // End-of-life fade window: hemisphere plasma fades out over its last
+      // beat instead of just popping when life hits 0.
+      let alpha = 1;
+      if (this.fadeStartLife > 0 && this.life < this.fadeStartLife) {
+        alpha = Math.max(0, this.life / this.fadeStartLife);
+      }
+      if (this.isBossLaser) {
+        // Beam-streak laser. Long bright tail along the entire trail
+        // history, white-hot core at the head, prismatic blue/violet
+        // perpendicular flare. Reads as a continuous beam fired from the
+        // muzzle even though the underlying entity is a fast bullet.
+        // Tail beam.
+        for (let i = 0; i < this.trail.length; i++) {
+          const segmentT = i / this.trail.length;
+          const p = this.trail[i];
+          drawGlow(ctx, p.x, p.y, this.radius * (2.2 + 3.5 * segmentT), trailHue, 0.7 * segmentT * alpha);
+          drawGlow(ctx, p.x, p.y, this.radius * (0.8 + 1.4 * segmentT), trailHue + 30, 0.9 * segmentT * alpha, true);
+        }
+        // Hot inner ribbon — narrow white core stretched along the trail.
+        if (this.trail.length > 1) {
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.lineCap = "round";
+          ctx.strokeStyle = `hsla(48, 100%, 96%, 0.95)`;
+          ctx.lineWidth = this.radius * 0.55;
+          ctx.beginPath();
+          ctx.moveTo(this.trail[0].x, this.trail[0].y);
+          for (let i = 1; i < this.trail.length; i++) ctx.lineTo(this.trail[i].x, this.trail[i].y);
+          ctx.lineTo(this.pos.x, this.pos.y);
+          ctx.stroke();
+          ctx.restore();
+        }
+        // Head: brilliant white-hot core + wide crimson corona + a
+        // perpendicular lensflare slash that sells the beam tip.
+        drawGlow(ctx, this.pos.x, this.pos.y, this.radius * 5.5, headHue, 0.9 * alpha);
+        drawGlow(ctx, this.pos.x, this.pos.y, this.radius * 2.5, headHue + 25, 0.95 * alpha, true);
+        ctx.fillStyle = `hsla(48, 100%, 98%, ${0.98 * alpha})`;
+        ctx.beginPath();
+        ctx.arc(this.pos.x, this.pos.y, this.radius * 0.85, 0, Math.PI * 2);
+        ctx.fill();
+        // Perpendicular lensflare line — short hot streak crossing the
+        // beam tip to suggest a focusing aperture.
+        const angle = Math.atan2(this.vel.y, this.vel.x);
+        const perpX = -Math.sin(angle);
+        const perpY = Math.cos(angle);
+        const flareR = this.radius * 4.5;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = `hsla(48, 100%, 96%, 0.85)`;
+        ctx.lineWidth = this.radius * 0.4;
+        ctx.beginPath();
+        ctx.moveTo(this.pos.x - perpX * flareR, this.pos.y - perpY * flareR);
+        ctx.lineTo(this.pos.x + perpX * flareR, this.pos.y + perpY * flareR);
+        ctx.stroke();
+        ctx.restore();
+        ctx.restore();
+        return;
+      }
+      // Heavy plasma sphere (boss whole-body iris and post-break
+      // hemispheres). Chunky bright core with a wide crimson corona, fat
+      // tapered tail, and a slow orbiting inner glint that makes the ball
+      // feel "alive" rather than flat.
       for (let i = 0; i < this.trail.length; i++) {
         const segmentT = i / this.trail.length;
         const p = this.trail[i];
-        drawGlow(ctx, p.x, p.y, this.radius * (1.6 + 1.0 * segmentT), trailHue, 0.55 * segmentT);
+        drawGlow(ctx, p.x, p.y, this.radius * (1.6 + 1.0 * segmentT), trailHue, 0.55 * segmentT * alpha);
       }
-      drawGlow(ctx, this.pos.x, this.pos.y, this.radius * 3.8, headHue, 0.85);
-      drawGlow(ctx, this.pos.x, this.pos.y, this.radius * 1.5, headHue + 30, 0.9, true);
-      ctx.fillStyle = `hsla(48, 100%, 96%, 0.95)`;
+      drawGlow(ctx, this.pos.x, this.pos.y, this.radius * (this.isBossHemiPlasma ? 4.6 : 3.8), headHue, 0.85 * alpha);
+      drawGlow(ctx, this.pos.x, this.pos.y, this.radius * (this.isBossHemiPlasma ? 1.9 : 1.5), headHue + 30, 0.9 * alpha, true);
+      ctx.fillStyle = `hsla(48, 100%, 96%, ${0.95 * alpha})`;
       ctx.beginPath();
-      ctx.arc(this.pos.x, this.pos.y, this.radius * 0.5, 0, Math.PI * 2);
+      ctx.arc(this.pos.x, this.pos.y, this.radius * (this.isBossHemiPlasma ? 0.6 : 0.5), 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
       return;

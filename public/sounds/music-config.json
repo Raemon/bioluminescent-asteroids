@@ -7,6 +7,10 @@
     "synthwave-el": { "ambient": 0.22, "melodic": 0.22, "layer3": 0.30 },
     "flagship-sb": { "ambient": 0.25, "melodic": 0.25, "layer3": 0.32 },
     "vaporwave-el": { "ambient": 0.25, "melodic": 0.28, "layer3": 0.32 },
-    "outerwilds-el": { "ambient": 0.22, "melodic": 0.25, "layer3": 0.30 }
+    "outerwilds-el": { "ambient": 0.22, "melodic": 0.25, "layer3": 0.30 },
+    "crucible-sb": { "ambient": 0.30, "melodic": 0.32, "layer3": 0.32 },
+    "cathedral-hymn-el": { "ambient": 0.27, "melodic": 0.27, "layer3": 0.30 },
+    "lost-transmission-el": { "ambient": 0.22, "melodic": 0.22, "layer3": 0.28 },
+    "underwater-requiem-el": { "ambient": 0.25, "melodic": 0.25, "layer3": 0.32 }
   }
 }

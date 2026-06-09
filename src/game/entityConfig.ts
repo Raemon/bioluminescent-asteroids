@@ -35,8 +35,21 @@ export const ENTITY_CONFIG = {
   // Bassteroids share asteroid radius/score but are 4× tougher so the rhythm
   // system has real teeth — a rhythm-bullet (4 damage) needs four hits to
   // crack a large bassteroid, matching the "armoured" silhouette.
+  // maxLevel is the last *internal* wave on which bassteroids may appear
+  // (display-level = wave - 1); they vanish after that so the post-boss arc
+  // can introduce a new ambient texture.
   bassteroid: {
     hpMultiplier: 2,
+    maxLevel: 10,
+  },
+
+  // Decorator asteroid kinds (chime/bell/warble) share asteroid stats — they
+  // exist purely to add a melodic colour on top of the bass rhythm. Each entry
+  // is the internal wave on which that kind first unlocks via
+  // activeSpecialsForWave; chime/warble keep their original staggered intro
+  // while bell holds back until the post-boss arc (display-level 11+).
+  bell: {
+    firstWave: 12,
   },
 
   canister: {
@@ -161,8 +174,10 @@ export const ENTITY_CONFIG = {
     pursuitAccel: 36,
     // Pursuit speed cap (px/s) outside of lunges.
     maxPursuitSpeed: 95,
-    // Lunge: an additional burst toward the ship. Period sampled per-wraith.
-    lungePeriod: [3.0, 5.5] as [number, number],
+    // Lunge: an additional burst toward the ship. Fires on a beat-aligned
+    // cadence (every lungePeriodMeasures bass measures). Per-wraith phase
+    // offset is set at spawn so several wraiths stagger across the grid.
+    lungePeriodMeasures: 2,
     lungeDuration: 0.65,
     lungeAccel: 380,
   },
@@ -183,11 +198,9 @@ export const ENTITY_CONFIG = {
     eyeRadius: 48,
     eyeHp: 10,
     eyeScore: 1200,
-    // Plasma bolt cadence (seconds) and damage. Slow and heavy — the player
-    // has time to read the pre-fire telegraph and dodge.
-    eyeFirePeriod: 4.0,
-    eyeTelegraphTime: 0.6,
-    eyeBulletDamage: 3,
+    // Bolt projectile speed. Cadence + telegraph are no longer dt-driven —
+    // both the iris laser and the post-break hemisphere plasma are snapped
+    // to the boss's 8-beat rhythm (see Asteroid.tickBossRhythm).
     eyeBulletSpeed: 200,
     // 8-second grow-and-reveal before the boss becomes live and damageable.
     revealDuration: 8.0,

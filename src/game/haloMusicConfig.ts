@@ -1,10 +1,20 @@
 // Halo music selection. Stems live in /sounds/halo-music/{variation}-{ambient,melodic,layer3}.mp3.
 //
 // Each time the player crosses combo ≥ 4 from below, syncHaloAmbient picks
-// a random variation from HALO_MUSIC_POOL. The chosen variation persists
-// for the lifetime of that halo (so 6x melodic and 12x layer3 use the
-// same variation's stems); a new pick happens on the next 4x trigger after
-// combo breaks.
+// a random variation from the wave-appropriate pool. The chosen variation
+// persists for the lifetime of that halo (so 6x melodic and 12x layer3 use
+// the same variation's stems); a new pick happens on the next 4x trigger
+// after combo breaks.
+//
+// Pool selection follows the wave:
+//   - internal waves 1–10 (display levels 0–9): HALO_MUSIC_POOL — the
+//     standard six-variation rotation.
+//   - internal wave 11 (display level 10, boss): BOSS_MUSIC_VARIATION
+//     (crucible-sb) is force-picked.
+//   - internal waves 12–20 (display levels 11–19): HAUNTING_MUSIC_POOL —
+//     three ElevenLabs variations designed to feel creepier/more haunting
+//     while still beautiful. The 24x climax swap stays inside this pool so
+//     the arc's tone is preserved.
 //
 // To disable music entirely and fall back to the legacy synthesized pad,
 // set HALO_MUSIC_POOL to []. To force a specific variation for an A/B test,
@@ -50,20 +60,56 @@ export const PLAY_COMBO_MUSIC = true;
 
 export const HALO_MUSIC_POOL: readonly HaloMusicVariation[] = ["cinematic-el", "musicbox-sb", "synthwave-el", "flagship-sb", "vaporwave-el", "outerwilds-el"];
 
-// Pick a random variation from the pool, or "none" if the pool is empty
-// (which routes syncHaloAmbient to the legacy synthesized pad path).
-export function pickHaloMusicVariation(): HaloMusicVariation {
-  if (HALO_MUSIC_POOL.length === 0) return "none";
-  return HALO_MUSIC_POOL[Math.floor(rng() * HALO_MUSIC_POOL.length)];
+// Post-boss "haunting" pool. Picked from on internal waves 12–20 (display
+// levels 11–19) instead of HALO_MUSIC_POOL. Three ElevenLabs variations
+// designed to feel creepier/more haunting than the standard rotation while
+// still beautiful: cathedral hymn with a low monastic chant, an AM-radio
+// ghost transmission with whispered breaths, and a submerged requiem with
+// ghostly celesta. Each is 32 s C-pedal-tolerant just like the standard
+// pool, so the same combo-tier layering still works.
+export const HAUNTING_MUSIC_POOL: readonly HaloMusicVariation[] = ["cathedral-hymn-el", "lost-transmission-el", "underwater-requiem-el"];
+
+// Internal-wave range during which HAUNTING_MUSIC_POOL replaces HALO_MUSIC_POOL.
+// Display level = wave - 1, so internal 12..20 = display 11..19. Internal
+// wave 11 is the boss (display "10") and uses BOSS_MUSIC_VARIATION instead.
+const HAUNTING_WAVE_MIN = 12;
+const HAUNTING_WAVE_MAX = 20;
+
+export function isHauntingWave(wave: number): boolean {
+  return wave >= HAUNTING_WAVE_MIN && wave <= HAUNTING_WAVE_MAX;
 }
 
-// Pick a random variation from the pool excluding the currently-playing one.
-// Used by the 24x climax swap so the new track always sounds different. Falls
-// back to the regular pick when the pool has 0 or 1 entries.
-export function pickHaloMusicVariationExcluding(current: HaloMusicVariation): HaloMusicVariation {
-  if (HALO_MUSIC_POOL.length === 0) return "none";
-  if (HALO_MUSIC_POOL.length === 1) return HALO_MUSIC_POOL[0];
-  const others = HALO_MUSIC_POOL.filter((v) => v !== current);
-  if (others.length === 0) return HALO_MUSIC_POOL[0];
+// Dedicated boss-fight variation. Force-picked by syncHaloAmbient whenever
+// the current wave is a boss wave (see ENTITY_CONFIG.boss.waves), so the
+// climactic C-minor brass theme replaces the random halo pick during the
+// fight. Kept out of HALO_MUSIC_POOL so it doesn't appear at random on
+// non-boss waves.
+export const BOSS_MUSIC_VARIATION: HaloMusicVariation = "crucible-sb";
+
+// Effective per-wave pool used by the pickers below. Internal waves 12–20
+// see only the haunting trio; every other wave sees the regular pool.
+function poolForWave(wave: number): readonly HaloMusicVariation[] {
+  return isHauntingWave(wave) ? HAUNTING_MUSIC_POOL : HALO_MUSIC_POOL;
+}
+
+// Pick a random variation from the wave-appropriate pool, or "none" if the
+// pool is empty (which routes syncHaloAmbient to the legacy synthesized pad
+// path).
+export function pickHaloMusicVariation(wave: number): HaloMusicVariation {
+  const pool = poolForWave(wave);
+  if (pool.length === 0) return "none";
+  return pool[Math.floor(rng() * pool.length)];
+}
+
+// Pick a random variation from the wave-appropriate pool excluding the
+// currently-playing one. Used by the 24x climax swap so the new track always
+// sounds different. During haunting waves the swap stays inside the haunting
+// trio so the arc's tone doesn't break mid-combo.
+export function pickHaloMusicVariationExcluding(current: HaloMusicVariation, wave: number): HaloMusicVariation {
+  const pool = poolForWave(wave);
+  if (pool.length === 0) return "none";
+  if (pool.length === 1) return pool[0];
+  const others = pool.filter((v) => v !== current);
+  if (others.length === 0) return pool[0];
   return others[Math.floor(rng() * others.length)];
 }

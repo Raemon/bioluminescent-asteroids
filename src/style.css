@@ -2765,7 +2765,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 .intro-sequence__line--close {
   font-weight: 500;
-  letter-spacing: 0.32em;
+  letter-spacing: 0.12em;
   font-size: clamp(17px, 1.95vw, 30px);
   color: #eafaff;
   text-shadow: 0 0 22px rgba(76, 182, 255, 0.6), 0 0 56px rgba(76, 182, 255, 0.35);

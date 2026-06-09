@@ -199,7 +199,7 @@ const transitionToGameOver = (game: Game) => {
   emitGameState(game);
 };
 
-import { HALO_MUSIC_POOL, PLAY_COMBO_MUSIC, pickHaloMusicVariation, pickHaloMusicVariationExcluding } from "./haloMusicConfig";
+import { BOSS_MUSIC_VARIATION, HALO_MUSIC_POOL, PLAY_COMBO_MUSIC, pickHaloMusicVariation, pickHaloMusicVariationExcluding } from "./haloMusicConfig";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
 
 // yellow-halo (combo ≥ 4) opens the ambient pad; combo ≥ 6 adds the
@@ -237,9 +237,13 @@ const syncHaloAmbient = (game: Game) => {
 
   if (HALO_MUSIC_POOL.length > 0) {
     // Pre-rendered music path. Three layers: ambient (4x) + melodic (6x) + layer3 (12x).
+    // On boss waves, force the dedicated climactic variation. The crucible
+    // theme replaces the random halo pick AND blocks the 24x climax swap so
+    // the boss-fight track plays for the entire engagement.
+    const bossWave = isBossWave(game.wave);
     if (hasYellowHalo) {
       if (!game.sound.haloMusic) {
-        const variation = pickHaloMusicVariation();
+        const variation = bossWave ? BOSS_MUSIC_VARIATION : pickHaloMusicVariation(game.wave);
         // Schedule the music's downbeat on the next bass-measure boundary
         // so the loop's chord changes align with the bass field's measure
         // clock. Worst-case wait is BASS_MEASURE_LENGTH (2 s); typical is
@@ -252,8 +256,8 @@ const syncHaloAmbient = (game: Game) => {
       } else {
         game.sound.setHaloMusicMelodicLayer(hasMelodic);
         game.sound.setHaloMusicLayer3(hasLayer3);
-        if (hasClimax && !game.sound.haloMusic.climaxActive) {
-          const next = pickHaloMusicVariationExcluding(game.sound.haloMusic.variation);
+        if (hasClimax && !game.sound.haloMusic.climaxActive && !bossWave) {
+          const next = pickHaloMusicVariationExcluding(game.sound.haloMusic.variation, game.wave);
           const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
           const measureAlignDelay = nextDownbeat - game.beatTime;
           game.beatPhaseCorrection = 0;
@@ -596,7 +600,7 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   for (const al of game.aliens) al.update(musicDt, game.w, game.h);
   pruneOffscreenAliens(game);
   tickAlienFire(game);
-  tickBossEyeFire(game);
+  tickBossRhythm(game);
   tickWraiths(game, musicDt);
   for (const b of game.bullets) b.update(musicDt, game.w, game.h);
   tickBulletReticuleCrossings(game);
@@ -669,29 +673,53 @@ const tickAlienFire = (game: Game) => {
   }
 };
 
-// boss eye-core fires a heavy plasma bolt on its own 4s cycle, telegraphed
-// for ~0.6s so the player has a window to dodge. Tracks the player every
-// frame so the iris reads as "alive". Driven by wall-clock dt rather than
-// the rhythm grid — the boss is the culmination beat that doesn't conform.
-const tickBossEyeFire = (game: Game) => {
+// Boss 8-beat rhythm. Every 4s cycle drives top/bottom hemisphere flashes,
+// iris flash, pupil double-pulse, and the charged laser shot — all snapped
+// to game.beatTime so the boss "plays along" with the music. Post-break the
+// hemispheres each fire a slow plasma ball on their flash slot.
+const tickBossRhythm = (game: Game) => {
   for (const a of game.asteroids) {
-    if (!(a.isBoss() || a.kind === "bossEye")) continue;
+    if (!a.isBoss() && a.kind !== "bossEye" && a.kind !== "bossHemisphere") continue;
+    // Boss-eye-open edge: the dormant→live transition just fired this tick.
+    // Play the dissonant stinger and wipe the player's combo — the boss
+    // arriving is a "wrong-note" moment, the music's tonal centre is broken.
+    // Skip loseCombo() because its "wrrr" SFX would step on the stinger and
+    // because the boss reset is a HARD wipe (a normal off-beat at 32x drops
+    // to 4x; here the player drops to 0 regardless).
+    if (a.bossJustOpenedEye) {
+      a.bossJustOpenedEye = false;
+      game.sound.play("bossEyeOpenStinger", 1.0, a.pos);
+      if (game.beatCombo > 0) {
+        game.beatCombo = 0;
+        game.ship.comboLossFlash = 1;
+        syncComboHud(game);
+      }
+    }
     a.trackPlayer(game.ship.pos.x, game.ship.pos.y);
-    if (a.consumeEyeFireTick()) fireBossEyeBolt(game, a);
+    const ev = a.tickBossRhythm(game.beatTime);
+    if (ev.topFlash || ev.bottomFlash || ev.irisFlash) game.sound.play("bossPulse", 0.9, a.pos);
+    if (ev.pupilFlash) game.sound.play("bossPulse", 1.0, a.pos);
+    if (ev.firePlasma) fireBossHemispherePlasma(game, a);
+    if (ev.fireLaser) fireBossEyeBolt(game, a);
   }
 };
 
 const tickWraiths = (game: Game, dt: number) => {
   for (const a of game.asteroids) {
     if (a.kind !== "wraith") continue;
-    a.tickWraith(dt, game.ship.pos.x, game.ship.pos.y);
+    const didLunge = a.tickWraith(dt, game.ship.pos.x, game.ship.pos.y, game.beatTime);
+    if (didLunge) game.sound.play("wraithLunge", 1, a.pos);
   }
 };
 
 const fireBossEyeBolt = (game: Game, a: Asteroid) => {
-  const angle = a.eyeAimAngle();
-  const speed = ENTITY_CONFIG.boss.eyeBulletSpeed;
-  // Muzzle: just outside the iris/eye, along the aim direction.
+  // Aim straight at the ship's CURRENT position the frame the bolt fires —
+  // the beat-7 pupil flash is the visible telegraph; from there the player
+  // gets one half-beat to dodge before the beat-8 bolt commits.
+  const angle = Math.atan2(game.ship.pos.y - a.pos.y, game.ship.pos.x - a.pos.x);
+  a.bossEyeAimX = a.pos.x + Math.cos(angle) * 1000;
+  a.bossEyeAimY = a.pos.y + Math.sin(angle) * 1000;
+  const speed = ENTITY_CONFIG.boss.eyeBulletSpeed * 1.6;
   const muzzleDist = (a.isBoss() ? a.bossEyeRadius : a.radius) * 1.1;
   const muzzleX = a.pos.x + Math.cos(angle) * muzzleDist;
   const muzzleY = a.pos.y + Math.sin(angle) * muzzleDist;
@@ -702,8 +730,34 @@ const fireBossEyeBolt = (game: Game, a: Asteroid) => {
     a.hue,
     true,
   );
+  bullet.isBossLaser = true;
   game.alienBullets.push(bullet);
   game.sound.play("alienFireBig", 1.0, a.pos);
+  game.sound.play("bossPulse", 1.0, a.pos);
+};
+
+// Post-break, top/bottom hemispheres each launch one heavy plasma ball
+// per cycle on their own flash beat. The ball lives exactly 4 beats and
+// fades over the 5th — a sustained dodge window per shot.
+const fireBossHemispherePlasma = (game: Game, a: Asteroid) => {
+  const angle = Math.atan2(game.ship.pos.y - a.pos.y, game.ship.pos.x - a.pos.x);
+  const speed = ENTITY_CONFIG.boss.eyeBulletSpeed * 0.85;
+  const muzzleDist = a.radius * 0.95;
+  const muzzleX = a.pos.x + Math.cos(angle) * muzzleDist;
+  const muzzleY = a.pos.y + Math.sin(angle) * muzzleDist;
+  const bullet = new AlienBullet(
+    { x: muzzleX, y: muzzleY },
+    { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+    "big",
+    a.hue,
+    true,
+  );
+  bullet.isBossHemiPlasma = true;
+  bullet.maxLife = BEAT_GRID * 5;
+  bullet.fadeStartLife = BEAT_GRID * 1;
+  bullet.life = bullet.maxLife;
+  game.alienBullets.push(bullet);
+  game.sound.play("alienFireBig", 0.8, a.pos);
 };
 
 const fireOneAlienShot = (game: Game, a: Alien) => {

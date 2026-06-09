@@ -139,15 +139,23 @@ export const alignBassBeat = (game: Game, asteroid: Asteroid) => {
 };
 
 // paired-wave intro (one bass, then both, then decorators) trains the player gradually.
+// Bass kinds drop out entirely once the wave passes CFG.bassteroid.maxLevel —
+// the post-boss arc retires the rhythm-armour pieces so a new texture
+// (glass prisons, the bell-toll cathedral fragment) can take centre stage.
+// The bell decorator is held back to CFG.bell.firstWave for the same reason,
+// so it lands as a post-boss reveal rather than a mid-rhythm colour.
 export const activeSpecialsForWave = (game: Game, wave: number): AsteroidKind[] => {
   if (wave < 3) return [];
-  if (wave === 3) return [game.bassOrder[0]];
-  if (wave === 4) return [game.bassOrder[1]];
-  const specials: AsteroidKind[] = [game.bassOrder[0], game.bassOrder[1]];
-  const lateUnlockOrder: AsteroidKind[] = ["chime", "bell", "warble", game.bassOrder[2], game.bassOrder[3]];
-  // pair waves hold each new sound steady so the player has time to learn it before the next.
+  const bassAllowed = wave <= CFG.bassteroid.maxLevel;
+  if (wave === 3) return bassAllowed ? [game.bassOrder[0]] : [];
+  if (wave === 4) return bassAllowed ? [game.bassOrder[1]] : [];
+  const specials: AsteroidKind[] = bassAllowed ? [game.bassOrder[0], game.bassOrder[1]] : [];
+  const lateUnlockOrder: AsteroidKind[] = bassAllowed
+    ? ["chime", "warble", game.bassOrder[2], game.bassOrder[3]]
+    : ["chime", "warble"];
   const lateCount = Math.max(0, Math.min(lateUnlockOrder.length, Math.floor((wave - 5) / 2)));
   for (let i = 0; i < lateCount; i++) specials.push(lateUnlockOrder[i]);
+  if (wave >= CFG.bell.firstWave) specials.push("bell");
   return specials;
 };
 

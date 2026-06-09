@@ -12,7 +12,7 @@ import { renderKilledRow } from "./killedParade";
 import { snapshotShipKill } from "./killSnapshot";
 import { emitShipDebris } from "./particleBursts";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showLeaderboard, showScoreEntry } from "./scoreEntry";
-import { HALO_MUSIC_POOL } from "./haloMusicConfig";
+import { BOSS_MUSIC_VARIATION, HALO_MUSIC_POOL, HAUNTING_MUSIC_POOL } from "./haloMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
 import { hideGameOverIntro, showGameOverIntro } from "./gameOverIntro";
 import { hasCalibrated, CALIBRATION_BEAT_INTENSITY } from "./beatCalibration";
@@ -249,6 +249,10 @@ export const startCalibrationIntro = (game: Game) => {
   game.sound.preloadPilotLog(6);
   game.sound.preloadPilotLog(12);
   for (const variation of HALO_MUSIC_POOL) game.sound.preloadHaloMusic(variation);
+  for (const variation of HAUNTING_MUSIC_POOL) game.sound.preloadHaloMusic(variation);
+  // Boss music isn't in the random pool but plays on the level-10 boss wave;
+  // preload it now so the wave 11 transition doesn't pay fetch latency.
+  game.sound.preloadHaloMusic(BOSS_MUSIC_VARIATION);
   game.betaMode = false;
   game.state = "playing";
   game.calibrationIntro = true;
@@ -397,6 +401,10 @@ export const startGame = (game: Game, overrides?: {
   for (const variation of HALO_MUSIC_POOL) {
     game.sound.preloadHaloMusic(variation);
   }
+  for (const variation of HAUNTING_MUSIC_POOL) {
+    game.sound.preloadHaloMusic(variation);
+  }
+  game.sound.preloadHaloMusic(BOSS_MUSIC_VARIATION);
   // Seed the PRNG before anything random fires (bassOrder shuffle, wave events,
   //   asteroid hues). Re-arming the lazy hue cursor lets the first nextWaveHue
   //   call after this draw from the seeded RNG, not whichever cursor a previous
