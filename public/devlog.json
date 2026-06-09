@@ -1,5 +1,35 @@
 [
   {
+    "id": "2026-06-09-eb9c290",
+    "date": "2026-06-09",
+    "title": "New boss music, visual effects, and cathedral asteroids",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "A dedicated boss-fight music track (brooding brass and heartbeat sub-bass) now plays during the boss encounter.",
+          "Three new post-boss atmospheric music tracks cycle through levels 11–19: a cathedral hymn, a lost-transmission ghost, and a submerged requiem.",
+          "Boss laser shots now render as a bright beam-streak with a white-hot core and perpendicular lens flare.",
+          "Post-break boss plasma balls display as larger charged spheres with a crimson corona and fade out gracefully.",
+          "Bell asteroids now display as detailed cathedral wall fragments with gothic lancet windows, stained glass, rose medallions, and weathered masonry."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Wraith lunges are now beat-aligned and staggered between enemies so they don't all charge at the same time.",
+          "The Pulsar features improved Bailey's Beads and diamond-ring visual effects during close passes."
+        ]
+      }
+    ],
+    "commits": [
+      "eb9c290",
+      "52ab8f1",
+      "825fed2",
+      "72ffc19"
+    ]
+  },
+  {
     "id": "2026-06-08-b121ec1",
     "date": "2026-06-08",
     "title": "Boss battle, glass prisons, and leaderboard dates",
