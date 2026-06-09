@@ -1,5 +1,29 @@
 [
   {
+    "id": "2026-06-09-38dd07e",
+    "date": "2026-06-09",
+    "title": "Touch controls added for mobile play",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "On-screen rotation and thrust buttons now appear on touch devices during gameplay.",
+          "Beat Calibration screen now supports tapping the on-screen ring on touch devices instead of pressing Space.",
+          "Leaderboard layout is optimised for small screens."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Beat Calibration tap timing is more accurate on touch devices — input registers on finger-down rather than finger-up."
+        ]
+      }
+    ],
+    "commits": [
+      "38dd07e"
+    ]
+  },
+  {
     "id": "2026-06-09-eb9c290",
     "date": "2026-06-09",
     "title": "New boss music, visual effects, and cathedral asteroids",
