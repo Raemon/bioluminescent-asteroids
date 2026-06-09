@@ -221,51 +221,63 @@ def crucible_ambient_stereo() -> np.ndarray:
 # --- Layer 2: melodic — rising marcato brass riff -------------------------
 
 def build_crucible_melodic_events():
-    """Brass section (GM 61). Stabbing minor-pentatonic hook that climbs.
+    """Brass section (GM 61). Per-phrase identity is the climactic structure.
 
-    Per phrase (16 beats):
-      A  : G3 . Eb4 G4 . Bb4 G4 .   (rising C-minor-pent stab cluster, then drop)
-      A' : G3 . Eb4 G4 . Bb4 C5 .   (same shape, lifts the peak by one note)
-      B  : G3 . E4  G4 . B4  D5 .   (Cmaj7 colour — major 3rd + 7th)
-      A' : G3 . Eb4 G4 . Bb4 G4 .   (return to Cm, peak settles)
+    A / A' phrases keep the stabbing 6-note minor-pentatonic hook (the boss
+    pressing forward). Phrase B *opens up* — the dense stab pattern thins out
+    after beat 2 and the brass holds a B4 then D5 across the remaining beats
+    so the Cmaj7 colour can actually ring instead of getting buried in stabs.
+    Phrase A' (resolve) is much softer AND drops the second-hook repeat
+    entirely so the last 8 beats of the loop are mostly silent — the seam
+    lands on decay rather than on a hard cutoff.
 
-    Each phrase plays the 8-beat hook TWICE so the melodic identity locks
-    in within one phrase rather than relying on the player hearing all 32s.
-    Marcato — short staccato durations (0.4-0.6 beats) with velocity accents
-    on the climbing notes.
+    Per phrase (16 beats), shapes:
+      A   : 6 stabs in beats 0-7 (the hook), repeated beats 8-15
+      A'  : same shape, peak climbs one step higher
+      B   : 3 stabs in beats 0-2, then held B4 (3 beats) + held D5 (2 beats);
+            repeated in beats 8-15 with the same opening-up shape
+      A'  : 6 stabs in beats 0-7 at low velocity (the resolve), NO repeat —
+            beats 8-15 are silent. Tail of the loop is genuinely a settle.
     """
     phrase_riffs = {
         "A": [
             (0.0,  0.5, "G3",  90),
             (1.0,  0.6, "Eb4", 96),
             (1.75, 0.5, "G4",  92),
-            (3.0,  0.6, "Bb4", 100),  # peak
+            (3.0,  0.6, "Bb4", 100),
             (4.0,  0.6, "G4",  88),
-            (5.5,  1.5, "Eb4", 84),   # tail — slightly longer
+            (5.5,  1.5, "Eb4", 84),
         ],
         "A1": [
             (0.0,  0.5, "G3",  92),
             (1.0,  0.6, "Eb4", 96),
             (1.75, 0.5, "G4",  92),
             (3.0,  0.6, "Bb4", 102),
-            (4.0,  0.6, "C5",  104),  # peak — climbs one step higher
+            (4.0,  0.6, "C5",  104),
             (5.5,  1.5, "G4",  86),
         ],
         "B": [
-            (0.0,  0.5, "G3",  94),
-            (1.0,  0.6, "E4",  98),   # major 3rd
-            (1.75, 0.5, "G4",  94),
-            (3.0,  0.6, "B4",  104),  # major 7th
-            (4.0,  0.6, "D5",  108),  # 9
-            (5.5,  1.5, "C5",  88),   # land on the root
+            # Opens like A — three driven stabs into beat 2.
+            (0.0,  0.5, "G3",  96),
+            (1.0,  0.6, "E4",  102),   # major 3rd
+            (1.75, 0.5, "G4",  98),
+            # Then THE LIFT: held B4 (3 beats) + held D5 (2 beats). The
+            # held maj7 colour rings out instead of being buried under
+            # stabbing surround tones, fixing the analysis finding that B
+            # phrase was 97.6% chord-similar to A1.
+            (3.0,  3.0, "B4",  108),   # major 7 — held, climax
+            (6.0,  2.0, "D5",  100),   # 9 — held, lifts and resolves
         ],
         "A2": [
-            (0.0,  0.5, "G3",  90),
-            (1.0,  0.6, "Eb4", 94),
-            (1.75, 0.5, "G4",  90),
-            (3.0,  0.6, "Bb4", 98),
-            (4.0,  0.6, "G4",  86),
-            (5.5,  1.5, "Eb4", 82),
+            # The resolve. Same 6-note hook shape, but ALL velocities drop
+            # ~30 from A (mp instead of mf-f) so the listener feels the
+            # phrase audibly winding down.
+            (0.0,  0.5, "G3",  60),
+            (1.0,  0.6, "Eb4", 64),
+            (1.75, 0.5, "G4",  60),
+            (3.0,  0.6, "Bb4", 66),
+            (4.0,  0.6, "G4",  58),
+            (5.5,  2.0, "Eb4", 54),    # final tail — held 2 beats, soft
         ],
     }
     phrase_order = ["A", "A1", "B", "A2"]
@@ -273,11 +285,12 @@ def build_crucible_melodic_events():
     for i, key in enumerate(phrase_order):
         phrase_beat_offset = i * 16
         riff = phrase_riffs[key]
-        # Play the 8-beat hook twice per phrase (at beats 0 and 8).
-        for repeat_offset in (0.0, 8.0):
+        # Phrases A / A1 / B play the 8-beat hook twice. Phrase A2 plays it
+        # ONCE — the second 8 beats of A2 are silent so the loop's last 4
+        # seconds decay into stillness before the next A-phrase downbeat.
+        repeat_offsets = (0.0,) if key == "A2" else (0.0, 8.0)
+        for repeat_offset in repeat_offsets:
             for b, d, pitch, vel in riff:
-                # On the 2nd repeat, soften velocities slightly so the
-                # phrase doesn't feel mechanically identical.
                 adjusted_vel = vel - (4 if repeat_offset == 8.0 else 0)
                 events.append((phrase_beat_offset + repeat_offset + b, d, 0,
                               midi_note(pitch), adjusted_vel))

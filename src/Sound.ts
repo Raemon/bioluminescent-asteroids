@@ -2801,6 +2801,36 @@ export class Sound {
     void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3"));
   }
 
+  // Warm a list of variations one-at-a-time during idle gaps, so each
+  // decodeAudioData completion lands far enough from the next that the
+  // audio scheduler isn't starved by a burst of back-to-back decodes.
+  // Use this for music that isn't needed for several minutes (haunting
+  // pool, boss variation) — the eager pool stays on preloadHaloMusic.
+  preloadHaloMusicSequential(variations: readonly HaloMusicVariation[]): void {
+    if (variations.length === 0) return;
+    this.ensureContext();
+    void loadMusicConfig();
+    const queue: { variation: HaloMusicVariation; layer: "ambient" | "melodic" | "layer3" }[] = [];
+    for (const variation of variations) {
+      if (variation === "none") continue;
+      queue.push({ variation, layer: "ambient" });
+      queue.push({ variation, layer: "melodic" });
+      queue.push({ variation, layer: "layer3" });
+    }
+    const idle = (cb: () => void) => {
+      const w = window as unknown as { requestIdleCallback?: (cb: () => void) => number };
+      if (typeof w.requestIdleCallback === "function") w.requestIdleCallback(cb);
+      else setTimeout(cb, 250);
+    };
+    const drain = () => {
+      const next = queue.shift();
+      if (!next) return;
+      this.loadHaloMusicBuffer(this.haloMusicUrl(next.variation, next.layer))
+        .finally(() => idle(drain));
+    };
+    idle(drain);
+  }
+
   // Start (or hot-restart) the pre-rendered halo music for a variation. If a
   // node is already playing for the same variation, we just toggle the
   // melodic layer; otherwise we tear down the old one and load the new.

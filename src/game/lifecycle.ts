@@ -248,11 +248,12 @@ export const startCalibrationIntro = (game: Game) => {
   game.sound.resume();
   game.sound.preloadPilotLog(6);
   game.sound.preloadPilotLog(12);
+  // Wave 1 only ever needs HALO_MUSIC_POOL — warm just those here so the
+  // first 4x trigger doesn't pay fetch latency. The haunting pool + boss
+  // variation are deferred to unfreezeIntroWorld (see preloadDeferredMusic)
+  // because back-to-back decodes during the intro starve the audio
+  // scheduler and skip beats.
   for (const variation of HALO_MUSIC_POOL) game.sound.preloadHaloMusic(variation);
-  for (const variation of HAUNTING_MUSIC_POOL) game.sound.preloadHaloMusic(variation);
-  // Boss music isn't in the random pool but plays on the level-10 boss wave;
-  // preload it now so the wave 11 transition doesn't pay fetch latency.
-  game.sound.preloadHaloMusic(BOSS_MUSIC_VARIATION);
   game.betaMode = false;
   game.state = "playing";
   game.calibrationIntro = true;
@@ -331,6 +332,11 @@ export const unfreezeIntroWorld = (game: Game) => {
   game.introOverlayActive = false;
   game.beatIntensityRamp = null;
   game.sound.bgBeatIntensity = CALIBRATION_BEAT_INTENSITY;
+  // Intro is fading out — kick off the deferred music preload now. The
+  // haunting pool isn't needed until wave 12 and the boss variation not
+  // until wave 11, so we have minutes of slack to warm them one stem at
+  // a time without contending with active beat scheduling.
+  game.sound.preloadHaloMusicSequential([...HAUNTING_MUSIC_POOL, BOSS_MUSIC_VARIATION]);
   // Post-calibration chain only: spawn wave 1 + tutorial if we haven't yet.
   //   startGameWithIntro already spawned the wave; in that case `hasSpawnedFirstLevel`
   //   is true and beginFirstWaveByTutorialFlag is skipped.
@@ -396,15 +402,12 @@ export const startGame = (game: Game, overrides?: {
   game.sound.preloadPilotLog(12);
   // Warm every halo music stem in the pool so whichever variation gets
   // randomly picked at the first 4x doesn't pay fetch+decode latency.
-  // Pool size × 2 stems × ~600 KB ≈ 2.5 MB for the current 2-variation pool —
-  // small enough to load eagerly at game start.
+  // Haunting pool + boss variation are deferred until the intro fades out
+  // (see preloadDeferredMusic in unfreezeIntroWorld) — back-to-back decodes
+  // during the intro starve the audio scheduler and skip beats.
   for (const variation of HALO_MUSIC_POOL) {
     game.sound.preloadHaloMusic(variation);
   }
-  for (const variation of HAUNTING_MUSIC_POOL) {
-    game.sound.preloadHaloMusic(variation);
-  }
-  game.sound.preloadHaloMusic(BOSS_MUSIC_VARIATION);
   // Seed the PRNG before anything random fires (bassOrder shuffle, wave events,
   //   asteroid hues). Re-arming the lazy hue cursor lets the first nextWaveHue
   //   call after this draw from the seeded RNG, not whichever cursor a previous
