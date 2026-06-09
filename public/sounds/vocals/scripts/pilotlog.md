@@ -20,9 +20,23 @@ I'll be home soon.
 ## 12x
 ### 1
 
-Couldn't sleep, huh.
+Still up, kiddo?
 
-Listen. 
+Me too I guess.
+
+
+
+
+
+
+
+
+## 24x
+### 1
+
+Still can't sleep?
+
+Listen.
 
 ...
 

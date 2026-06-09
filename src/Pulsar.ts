@@ -738,24 +738,67 @@ export class Pulsar {
     // Diamond ring — the pulsar peeks past the limb at second/third
     // contact. A single brilliant point of light sitting on the silhouette
     // edge at the contact angle. Peaks sharply when the pulsar disc is
-    // about half-occluded, so the moment reads as a pulse rather than a
-    // sustained gleam.
+    // about half-occluded; intentionally dim because the corona of a small
+    // star is many orders dimmer than its photosphere, so this should read
+    // as a quick glint rather than a sustained burst.
     const diamond = 4 * ingress * (1 - ingress);
     if (diamond > 0.02 && totality < 0.5) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      const diamondAlpha = Math.min(1, 0.9 * diamond * (1 - totality * 1.5));
+      const diamondAlpha = Math.min(1, 0.4 * diamond * (1 - totality * 1.5));
       const dcx = px + nx * size;
       const dcy = py + ny * size;
-      const dR = pulsarR * (1.6 + 1.2 * diamond) + size * 0.05;
+      const dR = pulsarR * (1.2 + 0.8 * diamond) + size * 0.04;
       const dGrad = ctx.createRadialGradient(dcx, dcy, 0, dcx, dcy, dR);
       dGrad.addColorStop(0, `hsla(50, 100%, 98%, ${diamondAlpha})`);
-      dGrad.addColorStop(0.35, `hsla(40, 100%, 80%, ${diamondAlpha * 0.7})`);
+      dGrad.addColorStop(0.35, `hsla(40, 100%, 80%, ${diamondAlpha * 0.6})`);
       dGrad.addColorStop(1, `hsla(25, 100%, 55%, 0)`);
       ctx.fillStyle = dGrad;
       ctx.beginPath();
       ctx.arc(dcx, dcy, dR, 0, TAU);
       ctx.fill();
+      ctx.restore();
+    }
+
+    // Bailey's Beads — during contact (ingress and egress), photospheric
+    // light leaks through "valleys" along the silhouette's limb, scattered
+    // around the contact angle rather than concentrated at it. Gives the
+    // moment asymmetric punctuation without a single bright burst.
+    // Positions/sizes are seeded off the planet's stable hue+baseAngle so
+    // a given planet's beads are consistent run to run.
+    if (diamond > 0.05 && totality < 0.7) {
+      const seed = Math.abs(Math.sin(planet.hue * 12.9898 + planet.baseAngle * 78.233));
+      const beadCount = 5;
+      const contactAngle = Math.atan2(ny, nx);
+      // Spread the beads across an arc on the pulsar-facing limb. Wider
+      // than the diamond ring's footprint so it reads as a different
+      // optical event, not the same blob twice.
+      const arcSpread = 1.1;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = 0; i < beadCount; i++) {
+        const slot = (i + 0.5) / beadCount;
+        const jitter = ((seed * (i + 1) * 43.1) % 1) - 0.5;
+        const angle = contactAngle + (slot - 0.5) * arcSpread + jitter * 0.18;
+        const bx = px + Math.cos(angle) * size;
+        const by = py + Math.sin(angle) * size;
+        // Each bead has its own twinkle envelope and brightness so they
+        // don't all peak simultaneously — sells "discrete points of light"
+        // rather than a dashed line.
+        const phase = (seed * (i * 7 + 3)) % 1;
+        const twinkle = 0.4 + 0.6 * ((seed * (i + 2) * 17.5) % 1);
+        const beadAlpha = Math.min(1, diamond * twinkle * (1 - totality * 1.2) * (0.55 + 0.45 * Math.sin((phase + i) * 9.7)));
+        if (beadAlpha < 0.02) continue;
+        const beadR = pulsarR * (0.35 + 0.4 * twinkle) + size * 0.012;
+        const bg = ctx.createRadialGradient(bx, by, 0, bx, by, beadR);
+        bg.addColorStop(0, `hsla(52, 100%, 96%, ${beadAlpha})`);
+        bg.addColorStop(0.5, `hsla(38, 100%, 75%, ${beadAlpha * 0.5})`);
+        bg.addColorStop(1, `hsla(20, 100%, 50%, 0)`);
+        ctx.fillStyle = bg;
+        ctx.beginPath();
+        ctx.arc(bx, by, beadR, 0, TAU);
+        ctx.fill();
+      }
       ctx.restore();
     }
 
@@ -766,7 +809,7 @@ export class Pulsar {
     // hot bloom centred on the source. Peaks during ingress/egress and
     // decays smoothly across early totality so the disappearance reads as
     // a flare blooming and then snuffing out.
-    const flarePhase = Math.max(diamond, totality > 0 && totality < 0.35 ? (1 - totality / 0.35) * 0.7 : 0);
+    const flarePhase = Math.max(diamond, totality > 0 && totality < 0.25 ? (1 - totality / 0.25) * 0.5 : 0);
     if (flarePhase > 0.04) {
       // Anchor sits at the contact point during ingress and slides back
       // toward the planet centre as the pulsar buries — that's where the
@@ -774,17 +817,18 @@ export class Pulsar {
       const anchor = size * (1 - 0.55 * totality);
       const fcx = px + nx * anchor;
       const fcy = py + ny * anchor;
-      const fAlpha = Math.min(1, 0.85 * flarePhase * (1 - totality * 0.6));
+      const fAlpha = Math.min(1, 0.42 * flarePhase * (1 - totality * 0.6));
 
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
 
-      // Hot bloom — radial, warm-white core falling to gold.
-      const bloomR = size * (0.55 + 0.45 * flarePhase) + pulsarR * 2.0;
+      // Hot bloom — radial, warm-white core falling to gold. Kept compact
+      // so it reads as glint off the limb, not a flooded directional flare.
+      const bloomR = size * (0.32 + 0.28 * flarePhase) + pulsarR * 1.2;
       const bloom = ctx.createRadialGradient(fcx, fcy, 0, fcx, fcy, bloomR);
       bloom.addColorStop(0, `hsla(55, 100%, 98%, ${fAlpha})`);
-      bloom.addColorStop(0.25, `hsla(45, 100%, 85%, ${fAlpha * 0.6})`);
-      bloom.addColorStop(0.65, `hsla(30, 100%, 60%, ${fAlpha * 0.18})`);
+      bloom.addColorStop(0.25, `hsla(45, 100%, 85%, ${fAlpha * 0.55})`);
+      bloom.addColorStop(0.65, `hsla(30, 100%, 60%, ${fAlpha * 0.15})`);
       bloom.addColorStop(1, `hsla(20, 100%, 50%, 0)`);
       ctx.fillStyle = bloom;
       ctx.beginPath();
@@ -794,10 +838,12 @@ export class Pulsar {
       // Anamorphic horizontal streak — the classic lens-flare bar. Drawn
       // as a wide ellipse with a radial gradient so the falloff is soft on
       // every edge (a rect+linear-gradient leaves hard top/bottom seams
-      // that read as a white stripe rather than a flare ray).
-      const streakLen = size * (3.2 + 2.0 * flarePhase);
-      const streakH = Math.max(2, pulsarR * 0.9 + size * 0.025);
-      const streakAlpha = fAlpha * 0.85;
+      // that read as a white stripe rather than a flare ray). Shortened
+      // significantly from the original so it punctuates rather than
+      // dominates the frame.
+      const streakLen = size * (1.6 + 1.1 * flarePhase);
+      const streakH = Math.max(1.5, pulsarR * 0.6 + size * 0.018);
+      const streakAlpha = fAlpha * 0.7;
       ctx.save();
       ctx.translate(fcx, fcy);
       ctx.scale(streakLen, streakH);
