@@ -1385,6 +1385,23 @@ html:has(#sound-root), body:has(> #sound-root) {
   cursor: pointer;
 }
 
+@media (max-width: 640px) {
+  #leaderboard-list li {
+    grid-template-columns: 20px minmax(0, 1fr) auto auto 32px auto;
+    column-gap: 10px;
+    gap: 10px;
+    padding: 8px 10px;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+  }
+  #leaderboard-list li.lb-header { letter-spacing: 0.16em; }
+  .lb-date { grid-column: 6; }
+  .lb-combo { min-width: 0; padding: 2px 6px; }
+  .lb-combo-value { font-size: 16px; }
+  .lb-combo-x { font-size: 11px; }
+  .lb-date-text { font-size: 8px; }
+}
+
 #beat-calibrator {
   position: fixed;
   inset: 0;
@@ -1434,6 +1451,38 @@ html:has(#sound-root), body:has(> #sound-root) {
   cursor: pointer;
   /* soft nebula behind the ring system for depth */
   background: radial-gradient(circle at 50% 50%, rgba(76, 182, 255, 0.14) 0%, rgba(76, 182, 255, 0.04) 38%, transparent 68%);
+  /* reset <button> defaults so the ring renders the same as the original div */
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+}
+
+.cal-ring-wrap:focus { outline: none; }
+
+/* On touch the ring doubles as the input — grow it for a 56px+ tap target,
+   disable iOS tap highlight, and dim slightly when pressed. */
+.cal-ring-wrap--touch {
+  width: 280px;
+  height: 280px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.cal-ring-wrap--touch:active .cal-guide {
+  border-color: rgba(180, 235, 255, 0.85);
+  box-shadow: inset 0 0 36px rgba(76, 182, 255, 0.32), 0 0 22px rgba(76, 182, 255, 0.4);
+}
+
+.cal-tap-label {
+  position: absolute;
+  bottom: 32px;
+  font-size: 10px;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: rgba(180, 235, 255, 0.55);
+  pointer-events: none;
 }
 
 /* steady reference ring the ping expands past */
@@ -2774,4 +2823,122 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 .intro-sequence__accent {
   color: #ffffff;
+}
+
+/* ------------------------------------------------------------------------
+   Touch controls. Mounted on touch-first devices via JS. Two clusters:
+   rotation (◀▶) and thrust (▲▼). Portrait anchors them to the bottom
+   corners; landscape moves them onto the side rails (vertically centred,
+   pulled slightly low for thumb reach).
+   ------------------------------------------------------------------------ */
+
+#touch-controls {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 12;
+  /* iOS safe-area so the bottom row sits above the home indicator */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.tc-cluster {
+  position: absolute;
+  display: flex;
+  gap: 18px;
+  pointer-events: none;
+}
+
+/* Portrait: two thumb clusters anchored at the bottom corners. */
+.tc-cluster--rotate {
+  left: 22px;
+  bottom: 28px;
+  flex-direction: row;
+}
+
+.tc-cluster--thrust {
+  right: 22px;
+  bottom: 28px;
+  /* Natural "up = forward" gesture: DOM order is [thrust, reverse], plain
+     `column` puts thrust on top, reverse below. */
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.tc-btn {
+  pointer-events: auto;
+  width: 66px;
+  height: 66px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #c8efff;
+  background: radial-gradient(circle at 50% 35%, rgba(106, 215, 255, 0.22), rgba(8, 16, 36, 0.55) 70%);
+  border: 1px solid rgba(106, 215, 255, 0.45);
+  border-radius: 50%;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+  user-select: none;
+  box-shadow:
+    0 0 14px rgba(76, 182, 255, 0.25),
+    inset 0 0 12px rgba(76, 182, 255, 0.18);
+  transition: background 0.08s ease, border-color 0.08s ease, transform 0.08s ease;
+}
+
+.tc-btn svg {
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px rgba(140, 224, 255, 0.7));
+}
+
+.tc-btn:active {
+  background: radial-gradient(circle at 50% 35%, rgba(180, 235, 255, 0.45), rgba(20, 40, 80, 0.7) 70%);
+  border-color: rgba(200, 235, 255, 0.95);
+  box-shadow:
+    0 0 22px rgba(140, 224, 255, 0.6),
+    inset 0 0 18px rgba(140, 224, 255, 0.35);
+  transform: scale(0.94);
+}
+
+.tc-btn:focus { outline: none; }
+
+/* Landscape: side rails. Vertically anchored just below centre so the
+   thumb sits at a relaxed angle; clusters stack vertically so both rails
+   stay narrow and don't push into the playfield. */
+@media (orientation: landscape) {
+  .tc-cluster--rotate {
+    left: 22px;
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-25%);
+    flex-direction: column;
+  }
+  .tc-cluster--thrust {
+    right: 22px;
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-25%);
+    flex-direction: column;
+    align-items: flex-end;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 380px) {
+  .tc-btn { width: 58px; height: 58px; }
+  .tc-btn svg { width: 24px; height: 24px; }
+  .tc-cluster { gap: 14px; }
+  .tc-cluster--rotate { left: 14px; bottom: 22px; }
+  .tc-cluster--thrust { right: 14px; bottom: 22px; }
+}
+
+@media (orientation: landscape) and (max-height: 420px) {
+  .tc-btn { width: 56px; height: 56px; }
+  .tc-btn svg { width: 22px; height: 22px; }
+  .tc-cluster { gap: 12px; }
 }

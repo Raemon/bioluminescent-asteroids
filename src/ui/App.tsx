@@ -8,6 +8,7 @@ import { IntroSequence } from "./IntroSequence";
 import { SettingsDialog } from "./SettingsDialog";
 import { PauseButton } from "./PauseButton";
 import { DevLogPopup } from "./DevLogPopup";
+import { TouchControls } from "./TouchControls";
 
 export const App = () => (
   <>
@@ -21,5 +22,6 @@ export const App = () => (
     <SettingsDialog />
     <PauseButton />
     <DevLogPopup />
+    <TouchControls />
   </>
 );

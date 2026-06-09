@@ -41,4 +41,18 @@ export class Input implements IInput {
   endFrame() {
     this.justPressed.clear();
   }
+
+  // Push a synthetic key state from non-keyboard sources (on-screen touch
+  //   buttons). Mirrors what keydown/keyup do to keys + justPressed so the
+  //   rest of the input layer doesn't need to know the press came from a
+  //   finger instead of a key.
+  setVirtual(k: string, down: boolean) {
+    const key = k.toLowerCase();
+    if (down) {
+      if (!this.keys.has(key)) this.justPressed.add(key);
+      this.keys.add(key);
+    } else {
+      this.keys.delete(key);
+    }
+  }
 }

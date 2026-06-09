@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Sound } from "../Sound";
+import { isTouchDevice } from "./touch";
 
 // Rhythm practice + latency calibrator. The player taps space on every beat;
 //   once they're consistent (a streak of beats landing at a steady offset, one
@@ -37,6 +38,7 @@ type Phase = "idle" | "running" | "fading";
 export const BeatCalibrator = () => {
   const [phase, setPhase] = useState<Phase>("idle");
   const [streak, setStreak] = useState(0);
+  const touch = isTouchDevice();
 
   const soundRef = useRef<Sound | null>(null);
   const introRef = useRef(false);
@@ -227,17 +229,36 @@ export const BeatCalibrator = () => {
         ? "lock in… keep the streak going"
         : "you've got the rhythm";
 
+  // pointerdown over click: registers on finger-down instead of tap-up,
+  //   which would skew the offset by ~50-100ms on touch.
+  const onTapDown = (e: React.PointerEvent) => {
+    if (phase !== "running") return;
+    e.preventDefault();
+    registerTap();
+  };
+
   return (
     <div id="beat-calibrator" className={phase === "fading" ? "fading" : ""}>
       <div className="cal-inner">
         <h2 className="cal-title">Find the Beat</h2>
-        <div className="cal-ring-wrap" onClick={phase === "running" ? registerTap : undefined}>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Tap on every beat"
+          className={`cal-ring-wrap${touch ? " cal-ring-wrap--touch" : ""}`}
+          onPointerDown={onTapDown}
+        >
           <div className="cal-guide" />
           <div className="cal-ping" ref={pingRef} />
           <div className="cal-core" ref={coreRef} />
-        </div>
+          {touch && <div className="cal-tap-label">tap</div>}
+        </button>
         <p className="cal-instruction">
-          tap <span className="key">space</span> on every beat
+          {touch ? (
+            <>tap the circle on every beat</>
+          ) : (
+            <>tap <span className="key">space</span> on every beat</>
+          )}
         </p>
         <p className="cal-sub">{sub}</p>
         <div className="cal-progress">
@@ -246,7 +267,7 @@ export const BeatCalibrator = () => {
           ))}
         </div>
         <button type="button" className="cal-skip" onClick={cancel}>
-          Esc
+          {touch ? "Cancel" : "Esc"}
         </button>
       </div>
     </div>
