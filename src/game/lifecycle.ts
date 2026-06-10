@@ -479,6 +479,10 @@ const resetRunTimers = (game: Game) => {
   game.hasShownDriftShotLabel = false;
   game.firedOffBeatSinceLastBeat = false;
   game.pendingDriftBonuses = [];
+  game.pendingRhythmBonuses = [];
+  game.lastRhythmHitBeatCenter = -1;
+  game.rhythmHitsThisBeat = 0;
+  game.lastRhythmHitPos = null;
   game.slowMoTimer = 0;
   game.hasLostComboEver = false;
   game.pilotLog1Unlocked = false;

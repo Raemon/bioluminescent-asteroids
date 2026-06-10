@@ -10,7 +10,7 @@
 //   - internal waves 1–10 (display levels 0–9): HALO_MUSIC_POOL — the
 //     standard six-variation rotation.
 //   - internal wave 11 (display level 10, boss): BOSS_MUSIC_VARIATION
-//     (crucible-sb) is force-picked.
+//     (vigil-sb) is force-picked.
 //   - internal waves 12–20 (display levels 11–19): HAUNTING_MUSIC_POOL —
 //     three ElevenLabs variations designed to feel creepier/more haunting
 //     while still beautiful. The 24x climax swap stays inside this pool so
@@ -85,14 +85,18 @@ export function isHauntingWave(wave: number): boolean {
 
 // Dedicated boss-fight variation. Force-picked by syncHaloAmbient whenever
 // the current wave is a boss wave (see ENTITY_CONFIG.boss.waves), so the
-// climactic C-minor brass theme replaces the random halo pick during the
-// fight. Kept out of HALO_MUSIC_POOL so it doesn't appear at random on
-// non-boss waves.
+// climactic C-minor theme replaces the random halo pick during the fight.
+// Kept out of HALO_MUSIC_POOL so it doesn't appear at random on non-boss waves.
 //
-// "knell-sb" is the alternate boss candidate (tolling bell + ghost choir +
-// string ostinato) — auditionable on the /music page; swap it in here to
-// hear it on the boss wave.
-export const BOSS_MUSIC_VARIATION: HaloMusicVariation = "crucible-sb";
+// "vigil-sb" is built as the *climax of the levels 1–9 halo music* — the same
+// felt-piano + sine-pad + glassy-chime palette, turned climactic-and-scary
+// (minor-leaning drift, a Db♭9/tritone "scare" phrase, an accelerating
+// heartbeat) rather than swapping to a new instrument family.
+//
+// "knell-sb" is the funeral death-knell track (tolling bell + ghost choir +
+// string ostinato), earmarked for the level-20 boss — auditionable on the
+// /music page; swap it in here to hear it on the boss wave.
+export const BOSS_MUSIC_VARIATION: HaloMusicVariation = "vigil-sb";
 
 // Effective per-wave pool used by the pickers below. Internal waves 12–20
 // see only the haunting trio; every other wave sees the regular pool.

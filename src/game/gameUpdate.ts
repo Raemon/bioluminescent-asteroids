@@ -34,6 +34,7 @@ import { renderKilledRow, stopParade } from "./killedParade";
 import { snapshotShipKill } from "./killSnapshot";
 import { updatePopups, popupDriftBonus } from "./popups";
 import { updateBassLightnings } from "./bassLightning";
+import { tickPendingRhythmBonuses } from "./rhythmBonus";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderboardKeyRepeat } from "./scoreEntry";
@@ -441,6 +442,7 @@ const updatePlaying = (game: Game, dt: number) => {
   game.popups = updatePopups(game.popups, dt);
   game.bassLightnings = updateBassLightnings(game.bassLightnings, dt);
   tickPendingDriftBonuses(game);
+  tickPendingRhythmBonuses(game);
   runCollisionPasses(game);
   evaluateClosedBeats(game);
   syncPowerupHud(game);

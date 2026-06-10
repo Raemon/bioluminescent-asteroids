@@ -64,6 +64,15 @@ export class Game implements HudElements {
   // on-beat hits while the first-dot hover ring is fully locked queue a +1-beat
   //   bonus increment here. Each tick fires (or cancels) the entries whose moment has come.
   pendingDriftBonuses: Array<{ fireAt: number; pos: { x: number; y: number } }> = [];
+  // rhythm-hit pairing for the Rapid Rhythm / Twin Shot bonuses (game/rhythmBonus.ts):
+  //   beat center of the latest combo-incrementing hit (-1 = none since last break),
+  //   how many such hits landed on that beat, and where the last one struck.
+  lastRhythmHitBeatCenter = -1;
+  rhythmHitsThisBeat = 0;
+  lastRhythmHitPos: { x: number; y: number } | null = null;
+  // queued +1-rhythm rewards from those bonuses; staggered fireAt times make each
+  //   bonus xN pop separately. Fired by tickPendingRhythmBonuses.
+  pendingRhythmBonuses: Array<{ fireAt: number; pos: { x: number; y: number } }> = [];
   score = 0;
   wave = 1;
   lives = 3;

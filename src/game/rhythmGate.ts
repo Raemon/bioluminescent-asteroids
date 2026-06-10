@@ -81,6 +81,11 @@ export const loseCombo = (game: Game, sourcePos?: Vec) => {
   // Reaching doubletime is a real achievement — a single off-beat doesn't wipe it,
   // it drops back to the 4x halo tier so the player keeps the yellow halo and music bed.
   game.beatCombo = prev >= 32 ? 4 : 0;
+  // a post-loss hit must not pair with a pre-loss one for Rapid Rhythm / Twin Shot.
+  //   Set inline (no rhythmBonus.ts import) to avoid a cycle through comboGrid.
+  game.lastRhythmHitBeatCenter = -1;
+  game.rhythmHitsThisBeat = 0;
+  game.lastRhythmHitPos = null;
   if (wasMeaningful) {
     game.sound.play("comboLost");
     game.ship.comboLossFlash = 1;

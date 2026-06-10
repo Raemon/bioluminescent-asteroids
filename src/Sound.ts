@@ -123,8 +123,8 @@ export type HaloMusicVariation =
   | "spectral-toll-sb"      // Haunting post-boss (waves 12–20). Deep C/G drone (ambient, EL) / mournful solo cello (melodic, EL) / sparse inharmonic glass bells with ping-pong echo (layer 3, procedural).
   | "vaporwave-el"   // ElevenLabs 32-second C-pedal dawn/vaporwave — glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio
   | "outerwilds-el"  // ElevenLabs 32-second Outer-Wilds folk — distant drone pad + fingerpicked G-rooted acoustic guitar + sparse plucked D-centered acoustic-guitar countermelody (layer 3)
-  | "crucible-sb"    // 32-second boss-fight climactic track — C-minor brooding pedal + heartbeat sub (ambient) / rising marcato brass riff (melodic) / heroic French horn + timpani (layer 3). Force-picked when isBossWave(wave).
-  | "knell-sb"       // Alternate boss-fight track (A/B vs crucible-sb) — C-minor pad + lub-dub heartbeat (ambient) / driving staccato string ostinato + tremolo swells (melodic) / ghost choir on a Dies-irae-shaded motif + tolling tubular bell (layer 3).
+  | "vigil-sb"       // Level-10 boss track, built as the CLIMAX of the levels 1–9 halo music (same felt-piano + sine-pad + glassy-chime palette, turned climactic-and-scary via tension inside the warmth). C-minor pad + accelerating C2 heartbeat (ambient) / insistent rising felt-piano minor-pentatonic arpeggio that densifies per phrase (melodic) / glassy celesta countermelody on tense scale tones + felt-piano low-octave toll (layer 3). The B phrase swaps the halo pool's hopeful Cmaj7 lift for a Db(♭9)+F# tritone shadow — the scare. Force-picked when isBossWave(wave).
+  | "knell-sb"       // Funeral death-knell boss track, earmarked for the level-20 boss — C-minor pad + lub-dub heartbeat (ambient) / driving staccato string ostinato + tremolo swells (melodic) / ghost choir on a Dies-irae-shaded motif + tolling tubular bell (layer 3). Auditionable on /music.
   | "cathedral-hymn-el"     // Haunting post-boss (waves 12–20). Stone-cathedral bowed string pad / distant felt-piano line / low monastic male chant (layer 3).
   | "lost-transmission-el"  // Haunting post-boss (waves 12–20). AM-radio analog pad / frail musical-saw lead / whispered breaths with faint radio crackle (layer 3).
   | "underwater-requiem-el" // Haunting post-boss (waves 12–20). Submerged orchestral pad / glass-harmonica lead / ghostly upper-register celesta countermelody (layer 3).
@@ -2591,12 +2591,13 @@ export class Sound {
       // (0.25) stem gains used in the audit. Full 3-layer stack leaves
       // lo-mid +4.5 dB, bass +20 dB headroom against the bass field.
       case "outerwilds-el": return 0.235;
-      // crucible-sb is the boss-fight climactic track. Ambient = brooding C-minor
-      // pedal + C1 heartbeat sub-pulse every 2 beats; melodic = stabbing marcato
-      // brass riff (GM 61) climbing the minor pentatonic. Full 3-layer stack at
-      // 0.30/0.32/0.32 against the bass field: sub +10.2, bass +19.5, lo_mid
-      // +11.1 dB margin. Same fallback-base value (0.30) used by ambient+melodic.
-      case "crucible-sb": return 0.30;
+      // vigil-sb is the level-10 boss track — the climax of the halo music.
+      // Ambient = warm minor C-pedal pad + accelerating C2 heartbeat (doubles to
+      // eighths in the final phrase); melodic = insistent rising felt-piano
+      // minor-pentatonic arpeggio. Final processed mp3s at 0.30/0.30/0.32 against
+      // the bass field: ambient sub +15.4, bass +15.5, lo_mid +16.9 dB; melodic
+      // lo_mid +10.8 dB margin. Same fallback-base (0.30) shared by ambient+melodic.
+      case "vigil-sb": return 0.30;
       // knell-sb is the alternate boss-fight track (A/B vs crucible-sb).
       // Ambient = C-minor pad + C1 lub-dub heartbeat; melodic = driving
       // staccato string-ensemble ostinato (GM 48) + tremolo swells (GM 44).
@@ -2654,12 +2655,12 @@ export class Sound {
       // guitar's lo-mid body clears the bass kit. Full 3-layer stack at gain
       // 0.30 leaves lo-mid +4.9 dB.
       case "outerwilds-el": return 0.30;
-      // crucible-sb layer 3 = solo French horn (GM 60) sustained call-and-response
-      // + sparse timpani (GM 47) downbeat hits. Horn voicing sits 500-1500 Hz so
-      // it cuts through the brass riff; timpani strikes are tuned C2/G2 to
-      // reinforce the bass anchor without introducing a new pitch. Audit at
-      // gain 0.32 leaves bass +22.6 dB, lo_mid +11.9 dB margin (well above pass).
-      case "crucible-sb": return 0.32;
+      // vigil-sb layer 3 = glassy celesta (GM 9) countermelody on tense scale
+      // tones (Eb/Bb/Db — anxious-beautiful sparkle) + a felt-piano (GM 0)
+      // low-octave C2/C3 toll on phrase downbeats for weight, kept in the piano
+      // family rather than a bell so the boss still sounds like the halo world.
+      // Final mp3 at gain 0.32 leaves bass +33.8 dB, lo_mid +15.5 dB margin.
+      case "vigil-sb": return 0.32;
       // knell-sb layer 3 = ghost choir (GM 52) on a Dies-irae-shaded descending
       // motif + tubular bell (GM 14) tolling each phrase downbeat. 62% of its
       // energy lives in 500-2k, well clear of the bass family. Audit at gain

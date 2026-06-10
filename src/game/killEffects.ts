@@ -13,6 +13,7 @@ import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintS
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
 import { popupCombo, popupScore } from "./popups";
 import { resonanceBonus } from "./resonanceBonus";
+import { trackRhythmComboHit } from "./rhythmBonus";
 import { triggerBassLightning } from "./bassLightning";
 import { checkBonusLife } from "./bonusLife";
 import { BEAT_GRID } from "./rhythmConstants";
@@ -96,6 +97,7 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
     if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
     if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
     if (game.beatCombo >= 6) markVeteranPilot();
+    trackRhythmComboHit(game, hitPos);
     // Dismiss the post-rhythm-loss "fire and hit on the beat" hint as soon as
     // the player lands one — reaching here means an on-beat fire was followed
     // by an on-beat hit. The component no-ops if it's not currently visible.

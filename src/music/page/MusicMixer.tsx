@@ -74,14 +74,14 @@ const VARIATION_META: Record<Variation, VariationInfo> = {
     blurb: "ElevenLabs Outer-Wilds folk: distant drone pad (ambient) + fingerpicked acoustic guitar in G mixolydian (melodic, plucks quantized to the 8th-note grid) + sparse plucked acoustic-guitar countermelody (layer 3, D-centered upper register, HPF'd at 500 Hz so its body clears the fingerpicking). G-rooted melodic over the bass field's C — V-over-I suspension that never resolves.",
     gains: { ambient: 0.22, melodic: 0.25, layer3: 0.30 },
   },
-  "crucible-sb": {
-    label: "crucible-sb — boss climactic theme: brooding pedal + marcato brass + heroic horn",
-    blurb: "Force-picked during the level-10 boss fight (kept out of HALO_MUSIC_POOL so it doesn't roll randomly). Ambient = C-minor pedal + C1 heartbeat sub-pulse every 2 beats; melodic = stabbing marcato brass riff climbing the minor pentatonic; layer 3 = sustained French horn call-and-response + sparse C2/G2 timpani downbeat strikes. The track stays minor while the player is below 24x — the 24x climax crossfade is suppressed on the boss wave so this theme plays for the entire engagement.",
-    gains: { ambient: 0.30, melodic: 0.32, layer3: 0.32 },
+  "vigil-sb": {
+    label: "vigil-sb — level-10 boss: the climax of the levels 1–9 music",
+    blurb: "Force-picked during the level-10 boss fight (kept out of HALO_MUSIC_POOL so it doesn't roll randomly). Built as the CLIMAX of the levels 1–9 halo music — same felt-piano + sine-pad + glassy-chime palette, turned climactic-and-scary through tension inside the warmth rather than a genre change. Ambient = warm minor C-pedal pad + an accelerating C2 heartbeat (quarter-notes, doubling to eighths in the final phrase); melodic = insistent rising felt-piano minor-pentatonic arpeggio (C-Eb-G-Bb-C) that densifies each phrase; layer 3 = glassy celesta countermelody on tense scale tones (anxious-beautiful sparkle) + a felt-piano low-octave toll on phrase downbeats for weight. The B phrase swaps the halo pool's hopeful Cmaj7 lift for a Db(♭9)+F# tritone shadow that swells and recedes — the scare. The 24x climax crossfade is suppressed on the boss wave so this plays the whole engagement.",
+    gains: { ambient: 0.30, melodic: 0.30, layer3: 0.32 },
   },
   "knell-sb": {
-    label: "knell-sb — alternate boss theme: lub-dub heartbeat + string ostinato + ghost choir & tolling bell",
-    blurb: "Alternate boss-fight candidate (A/B against crucible-sb — not wired to the boss wave yet). Ambient = C-minor pad + C1 lub-dub double-pulse heartbeat + faint G5 shimmer swelling mid-loop; melodic = relentless staccato string-ensemble eighth-note ostinato around C3/Eb3/G3 with tremolo-string swells into each phrase; layer 3 = ghost choir singing a Dies-irae-shaded descending motif (C5-Bb4-Ab4-G4) + tubular bell tolling each phrase downbeat. Same A-A'-B-A2 shape as crucible: the B phrase stops the ostinato and lifts to Cmaj7 before the minor resolve.",
+    label: "knell-sb — funeral death-knell (earmarked for the level-20 boss)",
+    blurb: "Funeral death-knell boss track, earmarked for the level-20 boss (not wired to a boss wave yet — auditionable here). Ambient = C-minor pad + C1 lub-dub double-pulse heartbeat + faint G5 shimmer swelling mid-loop; melodic = relentless staccato string-ensemble eighth-note ostinato around C3/Eb3/G3 with tremolo-string swells into each phrase; layer 3 = ghost choir singing a Dies-irae-shaded descending motif (C5-Bb4-Ab4-G4) + tubular bell tolling each phrase downbeat. A-A'-B-A2 shape: the B phrase stops the ostinato and lifts to Cmaj7 before the minor resolve.",
     gains: { ambient: 0.30, melodic: 0.32, layer3: 0.32 },
   },
   "cathedral-hymn-el": {
@@ -116,7 +116,7 @@ const PLACEHOLDER_META: VariationInfo = {
 // randomly, but the mixer page should still expose it for tuning and
 // audition. Append after the pool so the listing order matches "random
 // rotation first, then specials".
-const NON_POOL_VARIATIONS: readonly Variation[] = ["crucible-sb", "knell-sb", "cathedral-hymn-el", "lost-transmission-el", "underwater-requiem-el", "spectral-toll-sb"];
+const NON_POOL_VARIATIONS: readonly Variation[] = ["vigil-sb", "knell-sb", "cathedral-hymn-el", "lost-transmission-el", "underwater-requiem-el", "spectral-toll-sb"];
 const VARIATIONS: readonly (VariationInfo & { id: Variation })[] = [
   ...HALO_MUSIC_POOL.map((id) => ({
     id: id as Variation,

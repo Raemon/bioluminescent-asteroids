@@ -96,6 +96,30 @@ export const popupDriftBonus = (pos: Vec, withSubtitle = false): Popup => {
   };
 };
 
+// shared shape for the streak-bonus labels — sized/animated like DRIFT SHOT
+//   but each gets its own color so the three bonuses read distinctly.
+const popupBonusLabel = (pos: Vec, text: string, fill: string, shadowColor: string): Popup => ({
+  pos: { x: pos.x, y: pos.y - 18 },
+  vel: { x: rand(-10, 10), y: -65 },
+  life: COMBO_POPUP_LIFE,
+  maxLife: COMBO_POPUP_LIFE,
+  text,
+  font: "700 18px 'Space Grotesk', system-ui, sans-serif",
+  fill,
+  shadowColor,
+  decayX: 0.94, decayY: 0.94,
+  popPeak: 0.4, popDuration: 0.15,
+  holdUntil: 0, fadeGain: 1.4,
+});
+
+// combo hits on two back-to-back beats — label rides the second hit.
+export const popupRapidRhythm = (pos: Vec): Popup =>
+  popupBonusLabel(pos, "RAPID RHYTHM", "#ff9ee0", "rgba(255, 130, 210, 0.85)");
+
+// prong pair landing two combo hits on one beat — label sits between the two.
+export const popupTwinShot = (pos: Vec): Popup =>
+  popupBonusLabel(pos, "TWIN SHOT", "#c9a6ff", "rgba(180, 140, 255, 0.85)");
+
 // surfaces the streak break at the spot that caused it (ship fire / target hit).
 export const popupComboLost = (pos: Vec): Popup => ({
   pos: { x: pos.x, y: pos.y - 6 },
