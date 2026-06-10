@@ -33,7 +33,11 @@ export const Hud = () => (
         </div>
         <div id="combo" className="hidden">
           <span id="combo-value">0</span>
-          <span id="combo-label">combo</span>
+          <span id="combo-label">rhythm</span>
+        </div>
+        <div id="echo" className="hidden">
+          <span id="echo-value">0</span>
+          <span id="echo-label">echo</span>
         </div>
       </div>
     </div>

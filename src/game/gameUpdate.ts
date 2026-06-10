@@ -29,7 +29,7 @@ import {
   expireGoldCrystal,
 } from "./collisions";
 import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState, finalizeRecorder } from "./lifecycle";
-import { syncHud, syncPowerupHud, syncComboHud } from "./hud";
+import { syncHud, syncPowerupHud, syncComboHud, syncEchoHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
 import { snapshotShipKill } from "./killSnapshot";
 import { updatePopups, popupDriftBonus } from "./popups";
@@ -280,7 +280,7 @@ const syncHaloAmbient = (game: Game) => {
 };
 
 // seconds the reticule must rest on a first-beat dot to clear the hover gate.
-const TUTORIAL_HOVER_SEC = 1.25;
+const TUTORIAL_HOVER_SEC = 1.0;
 
 // Guided-tutorial spawn machine. Holds exactly one small practice rock (respawns
 //   when killed) and watches the two gates: hover a first-beat dot for 1s, then
@@ -442,6 +442,7 @@ const updatePlaying = (game: Game, dt: number) => {
   runCollisionPasses(game);
   evaluateClosedBeats(game);
   syncPowerupHud(game);
+  syncEchoHud(game);
   if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning && !game.tutorialActive) advanceWave(game);
 };
 

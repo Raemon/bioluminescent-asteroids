@@ -12,6 +12,7 @@ import { syncComboHud, syncHud, flashScoreGain } from "./hud";
 import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
 import { popupCombo, popupScore } from "./popups";
+import { echoBonus } from "./echoBonus";
 import { checkBonusLife } from "./bonusLife";
 import { BEAT_GRID } from "./rhythmConstants";
 import {
@@ -143,7 +144,9 @@ const awardScoreForKill = (
 ): number => {
   let scoreEarned = baseScore;
   if (isOnBeatHit) {
-    const multiplier = game.beatCombo;
+    // Rhythm (×beatCombo) and Echo (+pieces-1 per shattered bass voice) combine
+    //   additively into one effective multiplier — see echoBonus / syncComboHud.
+    const multiplier = game.beatCombo + echoBonus(game);
     scoreEarned = Math.round(scoreEarned * multiplier);
     game.sound.play("comboSparkle", 1, hitPos);
     game.sound.playComboChime(multiplier, hitPos);

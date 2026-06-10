@@ -21,10 +21,10 @@ export class Ship {
   pos: Vec;
   vel: Vec = v(0, 0);
   heading = -Math.PI / 2;
-  rotTapRate = 0.4; // slow turn rate while inside the tap window
+  rotTapRate = 0.1; // slow turn rate while inside the tap window
   rotTapHoldTime = 0.1; // hold time before ramping past tap rate
-  rotRampTime = 0.1; // blend time from tap rate to full rate
-  rotMaxSpeed = 3; // steady turn rate once fully ramped
+  rotRampTime = 0.5 // blend time from tap rate to full rate
+  rotMaxSpeed = 5; // steady turn rate once fully ramped
   rotInertia = false; // spin coasts on release instead of stopping
   rotVel = 0; // current angular velocity
   rotHoldTime = 0; // how long the turn key has been held

@@ -1,6 +1,7 @@
 import type { Game } from "../Game";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { displayWave } from "./waveDirector";
+import { echoBonus } from "./echoBonus";
 
 // cache the DOM handles once so per-frame syncs don't repeat document.getElementById calls.
 export type HudElements = {
@@ -8,6 +9,8 @@ export type HudElements = {
   scoreFlashEl: HTMLElement;
   comboEl: HTMLElement;
   comboValueEl: HTMLElement;
+  echoEl: HTMLElement;
+  echoValueEl: HTMLElement;
   waveEl: HTMLElement;
   livesEl: HTMLElement;
   overlayEl: HTMLElement;
@@ -44,6 +47,8 @@ export const bindHudElements = (): HudElements => {
     scoreFlashEl: document.getElementById("score-flash")!,
     comboEl: document.getElementById("combo")!,
     comboValueEl: document.getElementById("combo-value")!,
+    echoEl: document.getElementById("echo")!,
+    echoValueEl: document.getElementById("echo-value")!,
     waveEl: document.getElementById("wave")!,
     livesEl: document.getElementById("lives")!,
     overlayEl: document.getElementById("overlay")!,
@@ -118,6 +123,7 @@ export const syncHud = (game: Game) => {
   for (let i = 0; i < game.lives; i++) lifeSpans.push("<span></span>");
   game.livesEl.innerHTML = lifeSpans.join("");
   syncComboHud(game);
+  syncEchoHud(game);
   syncPowerupHud(game);
 };
 
@@ -144,5 +150,18 @@ export const syncComboHud = (game: Game) => {
     game.comboValueEl.textContent = String(game.beatCombo);
   } else {
     game.comboEl.classList.add("hidden");
+  }
+};
+
+// Echo (+N) tracks live shattered-bassteroid pieces; unlike combo it shifts every
+//   frame as fragments spawn and die, so it rides the per-frame powerup sync. +0
+//   (no bass broken) stays hidden — nothing to add yet.
+export const syncEchoHud = (game: Game) => {
+  const bonus = echoBonus(game);
+  if (bonus >= 1) {
+    game.echoEl.classList.remove("hidden");
+    game.echoValueEl.textContent = String(bonus);
+  } else {
+    game.echoEl.classList.add("hidden");
   }
 };
