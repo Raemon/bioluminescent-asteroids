@@ -11,8 +11,9 @@ import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
 import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
-import { popupCombo, popupScore, popupResonance } from "./popups";
-import { resonanceBonus, resonanceValueOf } from "./resonanceBonus";
+import { popupCombo, popupScore } from "./popups";
+import { resonanceBonus } from "./resonanceBonus";
+import { triggerBassLightning } from "./bassLightning";
 import { checkBonusLife } from "./bonusLife";
 import { BEAT_GRID } from "./rhythmConstants";
 import {
@@ -268,15 +269,7 @@ const finishAsteroidKillCore = (
   //   before the second drifts past the engagement ring on the same tick.
   const claimed = newBeatClaimSet();
   for (const c of children) alignSplitChildToRhythm(game, c, claimed);
-  if (a.isBass()) {
-    restartChildBassDrones(game, children);
-    // Each fresh fragment sprouts a "+N" tag (its own resonance worth) that
-    //   rides along with it so the player can read what the break is now worth.
-    for (const c of children) {
-      const value = resonanceValueOf(c);
-      if (value > 0) game.popups.push(popupResonance(c, value));
-    }
-  }
+  if (a.isBass()) restartChildBassDrones(game, children);
   return children;
 };
 
@@ -289,6 +282,7 @@ export const onAsteroidKilledByBullet = (
 ): Asteroid[] => {
   const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit, b.driftEligibleAtHit());
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
+  if (isOnBeatHit) triggerBassLightning(game, a.pos, a);
   if (a.isBass()) game.sound.play("bassEcho", 1, a.pos);
   // On-beat plain asteroid kills get the taiko boom in place of the noise
   // explosion — replacing rather than layering so the acoustic drum isn't
@@ -336,6 +330,7 @@ export const onAsteroidCrackedByRam = (game: Game, a: Asteroid) => {
 export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boolean) => {
   const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit, b.driftEligibleAtHit());
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
+  if (isOnBeatHit) triggerBassLightning(game, al.pos);
   game.shake = Math.min(game.shake + 0.5, 1.4);
   game.sound.play("alienExplode", 1, al.pos);
   game.sound.stopAlienDrone(al);
@@ -368,6 +363,7 @@ export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: bool
   if (isOnBeatHit) {
     game.sound.play("comboSparkle", 1, b.pos);
     if (game.beatCombo >= 2) game.popups.push(popupCombo(b.pos, game.beatCombo));
+    triggerBassLightning(game, c.pos);
   }
   game.shake = Math.min(game.shake + 0.6, 1.6);
   const deathSound = isOnBeatHit ? "cometDestroyed" : "cometDestroyedSad";

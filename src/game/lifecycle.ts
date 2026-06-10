@@ -496,6 +496,7 @@ const resetRunCollections = (game: Game) => {
   game.asteroids = [];
   game.bullets = [];
   game.popups = [];
+  game.bassLightnings = [];
   game.shards = [];
   game.canisters = [];
   game.goldCrystals = [];

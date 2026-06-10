@@ -10,8 +10,8 @@ export const RESONANCE_VALUE: Record<AsteroidSize, number> = {
   small: 25,
 };
 
-// One bassteroid piece's standalone contribution — used both for the live-field
-//   total and for the "+N" tag that follows each fresh fragment after a break.
+// One bassteroid piece's standalone contribution — used for the live-field
+//   total and the bass-echo "+N" tag a lightning arc pins beside the piece.
 export const resonanceValueOf = (a: Asteroid): number =>
   a.isBass() ? RESONANCE_VALUE[a.size] : 0;
 

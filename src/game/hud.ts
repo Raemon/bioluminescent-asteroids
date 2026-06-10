@@ -1,7 +1,6 @@
 import type { Game } from "../Game";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { displayWave } from "./waveDirector";
-import { resonanceBonus } from "./resonanceBonus";
 
 // cache the DOM handles once so per-frame syncs don't repeat document.getElementById calls.
 export type HudElements = {
@@ -9,8 +8,6 @@ export type HudElements = {
   scoreFlashEl: HTMLElement;
   comboEl: HTMLElement;
   comboValueEl: HTMLElement;
-  resonanceEl: HTMLElement;
-  resonanceValueEl: HTMLElement;
   waveEl: HTMLElement;
   livesEl: HTMLElement;
   overlayEl: HTMLElement;
@@ -47,8 +44,6 @@ export const bindHudElements = (): HudElements => {
     scoreFlashEl: document.getElementById("score-flash")!,
     comboEl: document.getElementById("combo")!,
     comboValueEl: document.getElementById("combo-value")!,
-    resonanceEl: document.getElementById("resonance")!,
-    resonanceValueEl: document.getElementById("resonance-value")!,
     waveEl: document.getElementById("wave")!,
     livesEl: document.getElementById("lives")!,
     overlayEl: document.getElementById("overlay")!,
@@ -123,7 +118,6 @@ export const syncHud = (game: Game) => {
   for (let i = 0; i < game.lives; i++) lifeSpans.push("<span></span>");
   game.livesEl.innerHTML = lifeSpans.join("");
   syncComboHud(game);
-  syncResonanceHud(game);
   syncPowerupHud(game);
 };
 
@@ -150,18 +144,5 @@ export const syncComboHud = (game: Game) => {
     game.comboValueEl.textContent = String(game.beatCombo);
   } else {
     game.comboEl.classList.add("hidden");
-  }
-};
-
-// Resonance (+N) tracks live shattered-bassteroid pieces; unlike combo it shifts
-//   every frame as fragments spawn and die, so it rides the per-frame powerup sync.
-//   +0 (no bass broken) stays hidden — nothing to add yet.
-export const syncResonanceHud = (game: Game) => {
-  const bonus = resonanceBonus(game);
-  if (bonus >= 1) {
-    game.resonanceEl.classList.remove("hidden");
-    game.resonanceValueEl.textContent = String(bonus);
-  } else {
-    game.resonanceEl.classList.add("hidden");
   }
 };

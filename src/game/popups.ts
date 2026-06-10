@@ -126,27 +126,28 @@ export const popupScore = (pos: Vec, points: number): Popup => ({
   holdUntil: 0, fadeGain: 1.4,
 });
 
-// "+N" resonance tag that rides along with a freshly-split bassteroid fragment,
-//   announcing what that piece is now worth toward the field's resonance bonus.
-//   Holds at full alpha for 1.5s pinned to the fragment, then fades over 0.5s.
-//   Cyan to match the Resonance HUD readout and read distinctly from the gold
-//   rhythm popups. No vel — the follow target supplies all the motion.
-const RESONANCE_POPUP_LIFE = 2.0;
-const RESONANCE_POPUP_FADE = 0.5;
-export const popupResonance = (target: { pos: Vec }, value: number): Popup => ({
+// "+N" tag pinned just above a bassteroid whose beat-slot the player struck
+//   on — paired with the bass-echo lightning arc, it announces that piece's
+//   resonance payout at the moment it actually pays. Tinted with the bass
+//   kind's own hue so the tag, the arc, and the rock all read as one voice.
+//   No vel — the follow target supplies all the motion.
+const BASS_ECHO_POPUP_LIFE = 1.0;
+export const popupBassEcho = (
+  target: { pos: Vec; radius: number; hue: number }, value: number,
+): Popup => ({
   pos: { x: target.pos.x, y: target.pos.y },
   vel: { x: 0, y: 0 },
-  life: RESONANCE_POPUP_LIFE,
-  maxLife: RESONANCE_POPUP_LIFE,
+  life: BASS_ECHO_POPUP_LIFE,
+  maxLife: BASS_ECHO_POPUP_LIFE,
   text: `+${value}`,
-  font: "700 16px 'Space Grotesk', system-ui, sans-serif",
-  fill: "#6ad8ff",
-  shadowColor: "rgba(80, 200, 255, 0.85)",
+  font: "700 15px 'Space Grotesk', system-ui, sans-serif",
+  fill: `hsl(${target.hue}, 95%, 78%)`,
+  shadowColor: `hsla(${target.hue}, 95%, 65%, 0.85)`,
   decayX: 1, decayY: 1,
   popPeak: 0.35, popDuration: 0.15,
-  holdUntil: RESONANCE_POPUP_FADE / RESONANCE_POPUP_LIFE, fadeGain: 1,
+  holdUntil: 0.4, fadeGain: 1,
   follow: target,
-  followOffset: { x: 0, y: -18 },
+  followOffset: { x: 0, y: -(target.radius + 16) },
 });
 // bright milestone against the cyan/gold of the combat HUD.
 export const popupBonusLife = (pos: Vec): Popup => ({

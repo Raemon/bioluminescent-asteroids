@@ -17,6 +17,7 @@ import { Alien, AlienSize } from "./Alien";
 import { AlienBullet } from "./AlienBullet";
 import { v } from "./vec";
 import { Popup } from "./game/popups";
+import type { BassLightning } from "./game/bassLightning";
 import { LaserBeam } from "./game/laserShot";
 import { KilledSnapshot } from "./game/killSnapshot";
 import type { HighscoreRow } from "./game/highscores";
@@ -57,6 +58,9 @@ export class Game implements HudElements {
   //   charge. Short-lived visuals (damage resolves on spawn); see game/laserShot.ts.
   lasers: LaserBeam[] = [];
   popups: Popup[] = [];
+  // bass-echo arcs from a firing bassteroid to an on-rhythm kill — see
+  //   game/bassLightning.ts for the trigger conditions and rendering.
+  bassLightnings: BassLightning[] = [];
   // on-beat hits while the first-dot hover ring is fully locked queue a +1-beat
   //   bonus increment here. Each tick fires (or cancels) the entries whose moment has come.
   pendingDriftBonuses: Array<{ fireAt: number; pos: { x: number; y: number } }> = [];
@@ -222,8 +226,6 @@ export class Game implements HudElements {
   scoreFlashEl: HTMLElement;
   comboEl: HTMLElement;
   comboValueEl: HTMLElement;
-  resonanceEl: HTMLElement;
-  resonanceValueEl: HTMLElement;
   waveEl: HTMLElement;
   livesEl: HTMLElement;
   overlayEl: HTMLElement;
@@ -309,8 +311,6 @@ export class Game implements HudElements {
     this.scoreFlashEl = hud.scoreFlashEl;
     this.comboEl = hud.comboEl;
     this.comboValueEl = hud.comboValueEl;
-    this.resonanceEl = hud.resonanceEl;
-    this.resonanceValueEl = hud.resonanceValueEl;
     this.waveEl = hud.waveEl;
     this.livesEl = hud.livesEl;
     this.overlayEl = hud.overlayEl;

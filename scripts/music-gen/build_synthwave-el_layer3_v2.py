@@ -1,4 +1,4 @@
-"""Rebuild synthwave-el's layer 3: plucked-saw echo cascade (outrun delay arp).
+"""Rebuild synthwave-el's layer 3: soft-pluck echo cascade (outrun delay arp).
 
 The previous layer 3 (FluidSynth synth-bass arp, C2/G2 quarter notes) sat in
 the same sub-500 Hz register as the ambient and melodic stems — the whole
@@ -6,7 +6,8 @@ variation has ~87% of its energy below 500 Hz and the 12x reward was
 spectrally invisible. This version goes the opposite way: a sparse plucked
 detuned-saw motif in C5-C6 whose dotted-eighth ping-pong delay fills the
 empty upper register with cascading syncopation — the classic synthwave
-sequencer-echo move.
+sequencer-echo move, voiced here as a round sine-dominant pluck so it glows
+under the mix rather than buzzing on top of it.
 
 Structure follows the variation's A-A'-B-A' phrase plan. Each measure
 strikes only 2-3 notes; the 375 ms delay (dotted eighth at 120 BPM) supplies
@@ -47,7 +48,7 @@ NOTE_RING_S = 1.1
 ATTACK_S = 0.004
 DECAY_TAU_S = 0.16
 DETUNE_CENTS = 6.0
-MAX_PARTIAL_HZ = 15000.0
+SOFT_PARTIAL_HZ = 6000.0
 
 A4 = 440.0
 _NOTE_SEMIS = {"C": -9, "D": -7, "E": -5, "F": -4, "G": -2, "A": 0, "B": 2}
@@ -68,20 +69,24 @@ def pitch_hz(name: str) -> float:
 
 
 def render_pluck(f0: float) -> np.ndarray:
-    """Stereo pluck: two band-limited saws detuned +-6 cents, panned apart."""
+    """Stereo pluck: two soft sine-dominant voices detuned +-6 cents, panned
+    apart. A pure fundamental with a whisper of triangle-shaped odd partials —
+    round and glassy rather than the buzzy saw it replaces."""
     n = int(NOTE_RING_S * SR)
     t = np.arange(n) / SR
 
-    def saw(f: float) -> np.ndarray:
-        y = np.zeros(n)
-        k = 1
-        while k * f < MAX_PARTIAL_HZ:
-            y += np.sin(2 * np.pi * k * f * t) / k
-            k += 1
-        return y
+    def soft_voice(f: float) -> np.ndarray:
+        # fundamental sine + faint triangle-weighted odd partials (1/k^2),
+        # rolled off well below the saw's 15 kHz so the tone stays mellow
+        y = np.sin(2 * np.pi * f * t)
+        for k in (3, 5, 7):
+            if k * f >= SOFT_PARTIAL_HZ:
+                break
+            y += (1.0 / (k * k)) * np.sin(2 * np.pi * k * f * t)
+        return y / 1.13            # 1 + 1/9 + 1/25 + 1/49
 
-    lo = saw(f0 * 2.0 ** (-DETUNE_CENTS / 1200.0))
-    hi = saw(f0 * 2.0 ** (+DETUNE_CENTS / 1200.0))
+    lo = soft_voice(f0 * 2.0 ** (-DETUNE_CENTS / 1200.0))
+    hi = soft_voice(f0 * 2.0 ** (+DETUNE_CENTS / 1200.0))
 
     env = np.exp(-t / DECAY_TAU_S)
     a = max(1, int(ATTACK_S * SR))

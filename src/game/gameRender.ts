@@ -3,6 +3,7 @@ import { BEAT_GRID } from "./rhythmConstants";
 import { currentBeatPulse, comboGrid } from "./rhythmGate";
 import { renderTrails } from "./trailsRender";
 import { renderPopups } from "./popups";
+import { renderBassLightnings } from "./bassLightning";
 import { computeConeFrame } from "../ship/reticule/coneGeometry";
 import { pickCenterMostTargetForFocus, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
 import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
@@ -74,6 +75,7 @@ const paintEntityLayers = (
   for (const b of game.bullets) b.render(ctx);
   renderLasers(ctx, game.lasers);
   if (focusedTarget) paintFocusGlow(ctx, focusedTarget);
+  renderBassLightnings(ctx, game.bassLightnings, game.time * 0.001);
   game.particles.render(ctx);
 };
 

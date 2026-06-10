@@ -246,6 +246,7 @@ const startBetaWave = (game: Game) => {
 
   game.bullets = [];
   game.popups = [];
+  game.bassLightnings = [];
   game.shards = [];
   game.canisters = [];
   game.killedSnapshots = [];

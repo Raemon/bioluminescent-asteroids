@@ -29,10 +29,11 @@ import {
   expireGoldCrystal,
 } from "./collisions";
 import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState, finalizeRecorder } from "./lifecycle";
-import { syncHud, syncPowerupHud, syncComboHud, syncResonanceHud } from "./hud";
+import { syncHud, syncPowerupHud, syncComboHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
 import { snapshotShipKill } from "./killSnapshot";
 import { updatePopups, popupDriftBonus } from "./popups";
+import { updateBassLightnings } from "./bassLightning";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderboardKeyRepeat } from "./scoreEntry";
@@ -438,11 +439,11 @@ const updatePlaying = (game: Game, dt: number) => {
   tickWorldEntities(game, dt, musicDt);
   game.particles.update(musicDt);
   game.popups = updatePopups(game.popups, dt);
+  game.bassLightnings = updateBassLightnings(game.bassLightnings, dt);
   tickPendingDriftBonuses(game);
   runCollisionPasses(game);
   evaluateClosedBeats(game);
   syncPowerupHud(game);
-  syncResonanceHud(game);
   if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning && !game.tutorialActive) advanceWave(game);
 };
 
