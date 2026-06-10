@@ -9,8 +9,8 @@ public/sounds/halo-music/.
 
 Reverb settings per stem:
   musicbox-sb (felt glockenspiel)   long warm hall — bells want room to ring
-  synthwave-el (synth-bass arp)      short plate — synth-bass wants tight low end
-                              so it doesn't smear the kick register
+  synthwave-el (pluck echo cascade)  medium plate — echoes want glow, but the
+                              dotted-eighth articulation must stay distinct
   flagship-sb (counter-melody glock) short tight reverb so chime notes stay
                               articulated and interlock cleanly with the
                               arp's 16ths
@@ -107,8 +107,9 @@ def main():
     plan = [
         # musicbox-sb glock: long warm hall lets the bell tones ring into each other
         ("musicbox-sb-layer3", "musicbox-sb-layer3", (55, 65, 80, 30)),
-        # synthwave-el synth-bass: tight short plate — keep low end articulate
-        ("synthwave-el-layer3", "synthwave-el-layer3", (15, 50, 40, 10)),
+        # synthwave-el pluck cascade: medium plate — room for the echoes to
+        # glow without smearing the dotted-eighth articulation
+        ("synthwave-el-layer3", "synthwave-el-layer3", (28, 55, 50, 12)),
         # flagship-sb counter-glock: short tight verb — must interlock with arp
         ("flagship-sb-layer3", "flagship-sb-layer3", (25, 60, 50, 15)),
     ]

@@ -10,23 +10,26 @@ import { isDown } from "../game/controlBindings";
 
 const ENGINE_SOUNDS_ENABLED = false;
 
-// initial 1/4 speed nudge, then hold for TURN_RAMP_DELAY before ramping to full over ~0.15s.
-const TURN_RAMP_DELAY = 0;
-const TURN_INITIAL_SCALE = 0.01;
+// Two-regime turning: inside the tap window the ship turns at a slow,
+// constant nudge rate, then the rate blends quickly up to the full turn
+// rate and holds steady there. With rotInertia the spin coasts on key
+// release and must be countered; without it the spin stops instantly.
 const updateTurning = (ship: Ship, input: IInput, dt: number) => {
-  const turnLeft = isDown(input, "rotateLeft");
-  const turnRight = isDown(input, "rotateRight");
-  if (turnLeft || turnRight) {
-    ship.rotHoldTime += dt;
-    if (ship.rotHoldTime > TURN_RAMP_DELAY) ship.rotRamp = Math.min(1, ship.rotRamp + dt / 0.15);
-  } else {
-    ship.rotRamp = 0;
-    ship.rotHoldTime = 0;
-  }
-  const turnScale = TURN_INITIAL_SCALE + (1 - TURN_INITIAL_SCALE) * ship.rotRamp;
+  const dir = (isDown(input, "rotateRight") ? 1 : 0) - (isDown(input, "rotateLeft") ? 1 : 0);
   const precision = isDown(input, "precisionTurn") ? 0.2 : 1;
-  if (turnLeft) ship.heading -= ship.rotSpeed * turnScale * precision * dt;
-  if (turnRight) ship.heading += ship.rotSpeed * turnScale * precision * dt;
+  if (dir !== 0) {
+    if (dir !== ship.rotHeldDir) ship.rotHoldTime = 0;
+    ship.rotHoldTime += dt;
+    const past = ship.rotHoldTime - ship.rotTapHoldTime;
+    const blend = Math.min(1, Math.max(0, past / ship.rotRampTime));
+    const rate = ship.rotTapRate + (ship.rotMaxSpeed - ship.rotTapRate) * blend;
+    ship.rotVel = dir * rate * precision;
+  } else {
+    ship.rotHoldTime = 0;
+    if (!ship.rotInertia) ship.rotVel = 0;
+  }
+  ship.rotHeldDir = dir;
+  ship.heading += ship.rotVel * dt;
 };
 
 // tap-to-nudge feel; thrust ramps in over ~0.15s so a tap barely budges and a hold accelerates fully.

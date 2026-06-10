@@ -2,15 +2,55 @@
   "_comment": "Auto-edited by /music. Hand-edits welcome. Per-variation gains for halo-music layers (ambient/melodic/layer3). Read by Sound.haloMusicGain and Sound.haloMusicLayer3Gain via musicConfig.ts.",
   "_version": 1,
   "variations": {
-    "cinematic-el": { "ambient": 0.25, "melodic": 0.25, "layer3": 0.45 },
-    "musicbox-sb": { "ambient": 0.30, "melodic": 0.30, "layer3": 0.40 },
-    "synthwave-el": { "ambient": 0.22, "melodic": 0.22, "layer3": 0.30 },
-    "flagship-sb": { "ambient": 0.25, "melodic": 0.25, "layer3": 0.32 },
-    "vaporwave-el": { "ambient": 0.25, "melodic": 0.28, "layer3": 0.32 },
-    "outerwilds-el": { "ambient": 0.22, "melodic": 0.25, "layer3": 0.30 },
-    "crucible-sb": { "ambient": 0.30, "melodic": 0.32, "layer3": 0.32 },
-    "cathedral-hymn-el": { "ambient": 0.27, "melodic": 0.27, "layer3": 0.30 },
-    "lost-transmission-el": { "ambient": 0.22, "melodic": 0.22, "layer3": 0.28 },
-    "underwater-requiem-el": { "ambient": 0.25, "melodic": 0.25, "layer3": 0.32 }
+    "cinematic-el": {
+      "ambient": 0.25,
+      "melodic": 0.25,
+      "layer3": 0.45
+    },
+    "musicbox-sb": {
+      "ambient": 0.3,
+      "melodic": 0.3,
+      "layer3": 0.4
+    },
+    "synthwave-el": {
+      "ambient": 0.22,
+      "melodic": 0.22,
+      "layer3": 0.38
+    },
+    "flagship-sb": {
+      "ambient": 1,
+      "melodic": 0.5,
+      "layer3": 0.5
+    },
+    "vaporwave-el": {
+      "ambient": 0.25,
+      "melodic": 0.28,
+      "layer3": 0.32
+    },
+    "outerwilds-el": {
+      "ambient": 0.22,
+      "melodic": 0.25,
+      "layer3": 0.3
+    },
+    "crucible-sb": {
+      "ambient": 0.3,
+      "melodic": 0.32,
+      "layer3": 0.32
+    },
+    "cathedral-hymn-el": {
+      "ambient": 0.27,
+      "melodic": 0.27,
+      "layer3": 0.3
+    },
+    "lost-transmission-el": {
+      "ambient": 0.22,
+      "melodic": 0.22,
+      "layer3": 0.28
+    },
+    "underwater-requiem-el": {
+      "ambient": 0.25,
+      "melodic": 0.25,
+      "layer3": 0.32
+    }
   }
 }

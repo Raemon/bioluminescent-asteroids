@@ -33,9 +33,10 @@
 //   synthwave-el  ElevenLabs analog-synthwave Juno pad + soft lead + pulsed
 //          synth-bass arp on the off-beats (synthwave-appropriate motion,
 //          octave-low to fill the space the lead leaves).
-//   flagship-sb  Self-built flagship: rhythmic 16th-note arp + smooth calliope
-//          melody + sparse chime counter-melody (interlocks with the arp's
-//          rest slots — adds bell-tone colour without doubling rhythm).
+//   flagship-sb  Self-built flagship: rhythmic 16th-note arp + theremin-like
+//          ghost lead (detuned unison, delayed vibrato, portamento) + sparse
+//          inharmonic glass bells with dotted-quarter ping-pong echo (strikes
+//          land in the lead's rests so the two voices interlock).
 //   vaporwave-el  ElevenLabs dawn/vaporwave: glassy string-choir pad (ambient) +
 //          sparse felt-bell sustains (melodic) + bright crystal-glockenspiel
 //          arpeggio (layer 3). All three stems live in mid-upper register so

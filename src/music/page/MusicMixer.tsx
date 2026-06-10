@@ -60,14 +60,14 @@ const VARIATION_META: Record<Variation, VariationInfo> = {
     gains: { ambient: 0.30, melodic: 0.30, layer3: 0.40 },
   },
   "synthwave-el": {
-    label: "synthwave-el — Juno pad + soft lead + synth-bass arp",
-    blurb: "ElevenLabs analog-synthwave Juno pad (ambient) + soft lead (melodic) + pulsed synth-bass arp on off-beats (layer 3).",
-    gains: { ambient: 0.22, melodic: 0.22, layer3: 0.30 },
+    label: "synthwave-el — Juno pad + soft lead + echo-cascade pluck",
+    blurb: "ElevenLabs analog-synthwave Juno pad (ambient) + soft lead (melodic) + plucked detuned-saw motif with dotted-eighth ping-pong delay cascading through the upper register (layer 3).",
+    gains: { ambient: 0.22, melodic: 0.22, layer3: 0.38 },
   },
   "flagship-sb": {
-    label: "flagship-sb — 16th-note arp + solo cello + female choir",
-    blurb: "Rhythmic 16th-note arp (ambient) + slow solo-cello sustain (melodic) + sparse female-choir 'ahh' pad (layer 3). Cello + choir onsets land only on beats so nothing reads off-grid against the bass clock.",
-    gains: { ambient: 0.25, melodic: 0.25, layer3: 0.45 },
+    label: "flagship-sb — 16th-note arp + ghost lead + glass bells",
+    blurb: "Rhythmic 16th-note arp (ambient) + theremin-like detuned ghost lead with delayed vibrato and portamento (melodic, G4-G5) + sparse inharmonic glass-bell strikes with dotted-quarter ping-pong echo (layer 3, G5-E6). All procedural, all onsets on the quarter-beat grid; lead and bells interlock in each other's rests.",
+    gains: { ambient: 1.0, melodic: 0.5, layer3: 0.5 },
   },
   "vaporwave-el": {
     label: "vaporwave-el — glassy string-choir pad + felt bells + crystal glockenspiel",

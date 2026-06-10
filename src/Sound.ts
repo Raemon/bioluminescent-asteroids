@@ -119,7 +119,7 @@ export type HaloMusicVariation =
   | "cinematic-el"   // ElevenLabs 32-second C-pedal cinematic bed + sustained-tone piano
   | "musicbox-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
   | "synthwave-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + layer 3
-  | "flagship-sb"    // 32-second C-pedal flagship — pulsing arp (ambient) + solo cello (melodic, VPO3) + female choir (layer 3, VPO3); all onsets on-beat
+  | "flagship-sb"    // 32-second C-pedal flagship — pulsing arp (ambient) + theremin-like ghost lead (melodic) + sparse glass bells (layer 3); all procedural, all onsets on-beat
   | "vaporwave-el"   // ElevenLabs 32-second C-pedal dawn/vaporwave — glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio
   | "outerwilds-el"  // ElevenLabs 32-second Outer-Wilds folk — distant drone pad + fingerpicked G-rooted acoustic guitar + sparse plucked D-centered acoustic-guitar countermelody (layer 3)
   | "crucible-sb"    // 32-second boss-fight climactic track — C-minor brooding pedal + heartbeat sub (ambient) / rising marcato brass riff (melodic) / heroic French horn + timpani (layer 3). Force-picked when isBossWave(wave).
@@ -2635,10 +2635,12 @@ export class Sound {
       // +6.8 dB above the ≥4 dB pass threshold. Going higher risks the
       // analog pad fighting the bass field.
       case "synthwave-el": return 0.22;
-      // flagship-sb pairs the rhythmic 16th-note arp ambient with a slow solo-cello
-      // melodic line (VPO3 sustain). Every cello onset lands on a quarter-beat
-      // (mostly downbeats), so the layer never punches off-grid against the
-      // bass clock. Audit at gain 0.25 keeps lo-mid clean by +7 dB; bass +20 dB.
+      // flagship-sb pairs the rhythmic 16th-note arp ambient with a procedural
+      // theremin-like ghost lead (G4-G5, detuned unison + delayed vibrato +
+      // portamento). The lead's energy lives in 500-2k (63%), well clear of the
+      // bass family. Single-stem audit passes with bass +52 dB, lo-mid +6.6 dB.
+      // Tuned gains live in music-config.json (melodic balances against the
+      // ambient's user-tuned gain there).
       case "flagship-sb": return 0.25;
       // vaporwave-el is a bright EL dawn/vaporwave variation. Ambient = glassy
       // string-choir pad in the mid-upper register; melodic = sparse felt-bell
@@ -2690,11 +2692,16 @@ export class Sound {
     switch (variation) {
       case "cinematic-el": return 0.22;   // solo violin, three single-pitch bow strokes (A4, C5, G4)
       case "musicbox-sb": return 0.40;   // warm felt-glockenspiel arpeggio
-      case "synthwave-el": return 0.30;   // synthwave plucked synth-bass arp
-      // flagship-sb layer 3 is a VPO3 female-choir "ahh" pad. Onsets only on phrase
-      // downbeats (beats 0 and 8 of each 16-beat phrase) so the slow choir
-      // attack hides any rhythmic poke. Choir RMS is very soft (-32 dBFS) so
-      // gain 0.45 still leaves +5 dB lo-mid headroom in the full 3-layer mix.
+      // synthwave-el layer 3 is a plucked detuned-saw motif (C5-C6) whose
+      // dotted-eighth ping-pong delay cascades through the upper register the
+      // ambient + melodic stems leave empty. No energy below 500 Hz, so the
+      // full 3-layer stack at gain 0.38 still leaves lo-mid +6.2 dB.
+      case "synthwave-el": return 0.38;
+      // flagship-sb layer 3 is a procedural glass-bell counter-line — three
+      // inharmonic strikes per phrase (G5-E6) with dotted-quarter ping-pong
+      // echo, placed in the ghost lead's rests. Essentially zero energy below
+      // 500 Hz (lo-mid 1.4%), so the bass field never sees it. Tuned gain
+      // lives in music-config.json.
       case "flagship-sb": return 0.45;
       // vaporwave-el layer3 is a bright crystal-glockenspiel arpeggio in the upper
       // register. Audit at gain 0.32 (in the full 3-layer mix above) leaves
