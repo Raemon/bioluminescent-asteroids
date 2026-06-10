@@ -239,7 +239,7 @@ const syncHaloAmbient = (game: Game) => {
 
   if (HALO_MUSIC_POOL.length > 0) {
     // Pre-rendered music path. Three layers: ambient (4x) + melodic (6x) + layer3 (12x).
-    // On boss waves, force the dedicated climactic variation. The crucible
+    // On boss waves, force the dedicated climactic variation. The boss
     // theme replaces the random halo pick AND blocks the 24x climax swap so
     // the boss-fight track plays for the entire engagement.
     const bossWave = isBossWave(game.wave);

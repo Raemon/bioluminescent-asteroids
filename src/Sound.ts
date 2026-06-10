@@ -2598,8 +2598,8 @@ export class Sound {
       // the bass field: ambient sub +15.4, bass +15.5, lo_mid +16.9 dB; melodic
       // lo_mid +10.8 dB margin. Same fallback-base (0.30) shared by ambient+melodic.
       case "vigil-sb": return 0.30;
-      // knell-sb is the alternate boss-fight track (A/B vs crucible-sb).
-      // Ambient = C-minor pad + C1 lub-dub heartbeat; melodic = driving
+      // knell-sb is the funeral death-knell track (earmarked for the level-20
+      // boss). Ambient = C-minor pad + C1 lub-dub heartbeat; melodic = driving
       // staccato string-ensemble ostinato (GM 48) + tremolo swells (GM 44).
       // Full 3-layer stack at 0.30/0.32/0.32 against the bass field: sub
       // +11.7, bass +20.9, lo_mid +7.7 dB margin.
@@ -5899,7 +5899,7 @@ export class Sound {
   // A4 — the devil's interval against the music's C-minor pedal) sliding
   // down through a closing lowpass into a noise crash. Reads as "everything
   // just went wrong" — explicitly dissonant against the brooding-but-tonal
-  // crucible-sb pedal so the player feels the harmony break. About 1.2s
+  // vigil-sb boss pedal so the player feels the harmony break. About 1.2s
   // total: 0.3s of held tritone bite + 0.7s pitch-down dive + 0.2s noise
   // tail. Tuned loud (peak ~0.65) so it cuts through whatever halo music
   // happens to be playing.
