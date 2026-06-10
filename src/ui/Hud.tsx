@@ -35,9 +35,9 @@ export const Hud = () => (
           <span id="combo-value">0</span>
           <span id="combo-label">rhythm</span>
         </div>
-        <div id="echo" className="hidden">
-          <span id="echo-value">0</span>
-          <span id="echo-label">echo</span>
+        <div id="resonance" className="hidden">
+          <span id="resonance-value">0</span>
+          <span id="resonance-label">resonance</span>
         </div>
       </div>
     </div>

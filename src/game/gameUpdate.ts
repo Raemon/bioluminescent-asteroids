@@ -29,7 +29,7 @@ import {
   expireGoldCrystal,
 } from "./collisions";
 import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState, finalizeRecorder } from "./lifecycle";
-import { syncHud, syncPowerupHud, syncComboHud, syncEchoHud } from "./hud";
+import { syncHud, syncPowerupHud, syncComboHud, syncResonanceHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
 import { snapshotShipKill } from "./killSnapshot";
 import { updatePopups, popupDriftBonus } from "./popups";
@@ -442,7 +442,7 @@ const updatePlaying = (game: Game, dt: number) => {
   runCollisionPasses(game);
   evaluateClosedBeats(game);
   syncPowerupHud(game);
-  syncEchoHud(game);
+  syncResonanceHud(game);
   if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning && !game.tutorialActive) advanceWave(game);
 };
 

@@ -222,8 +222,8 @@ export class Game implements HudElements {
   scoreFlashEl: HTMLElement;
   comboEl: HTMLElement;
   comboValueEl: HTMLElement;
-  echoEl: HTMLElement;
-  echoValueEl: HTMLElement;
+  resonanceEl: HTMLElement;
+  resonanceValueEl: HTMLElement;
   waveEl: HTMLElement;
   livesEl: HTMLElement;
   overlayEl: HTMLElement;
@@ -309,8 +309,8 @@ export class Game implements HudElements {
     this.scoreFlashEl = hud.scoreFlashEl;
     this.comboEl = hud.comboEl;
     this.comboValueEl = hud.comboValueEl;
-    this.echoEl = hud.echoEl;
-    this.echoValueEl = hud.echoValueEl;
+    this.resonanceEl = hud.resonanceEl;
+    this.resonanceValueEl = hud.resonanceValueEl;
     this.waveEl = hud.waveEl;
     this.livesEl = hud.livesEl;
     this.overlayEl = hud.overlayEl;

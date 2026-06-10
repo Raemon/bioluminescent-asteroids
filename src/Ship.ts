@@ -23,7 +23,7 @@ export class Ship {
   heading = -Math.PI / 2;
   rotTapRate = 0.1; // slow turn rate while inside the tap window
   rotTapHoldTime = 0.04; // hold time before ramping past tap rate
-  rotRampTime = 0.4 // blend time from tap rate to full rate
+  rotRampTime = 0.15 // blend time from tap rate to full rate
   rotMaxSpeed = 4; // steady turn rate once fully ramped
   rotInertia = false; // spin coasts on release instead of stopping
   rotVel = 0; // current angular velocity

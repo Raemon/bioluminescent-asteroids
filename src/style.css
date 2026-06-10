@@ -155,10 +155,10 @@ html:has(#sound-root), body:has(> #sound-root) {
   text-transform: uppercase;
 }
 
-/* Echo (+N): the shattered-bassteroid bonus. Cool cyan against the gold Rhythm
-   row so the two multipliers read as distinct mechanics; the "+" prefix
+/* Resonance (+N): the shattered-bassteroid bonus. Cool cyan against the gold
+   Rhythm row so the two multipliers read as distinct mechanics; the "+" prefix
    telegraphs that it adds to (rather than multiplies) the rhythm total. */
-#echo {
+#resonance {
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.18em;
@@ -170,11 +170,11 @@ html:has(#sound-root), body:has(> #sound-root) {
   transition: opacity 0.12s ease-out, transform 0.12s ease-out;
 }
 
-#echo.hidden { opacity: 0; transform: translateY(-2px); }
+#resonance.hidden { opacity: 0; transform: translateY(-2px); }
 
-#echo-value::before { content: "+"; opacity: 0.55; margin-right: 1px; }
+#resonance-value::before { content: "+"; opacity: 0.55; margin-right: 1px; }
 
-#echo-label {
+#resonance-label {
   font-size: 10px;
   opacity: 0.65;
   text-transform: uppercase;
