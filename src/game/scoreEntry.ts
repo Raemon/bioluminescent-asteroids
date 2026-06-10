@@ -560,9 +560,8 @@ const launchReplay = async (game: Game, scoreId: number) => {
 };
 
 // up/down on title + gameover slide the yellow selector toward the centre of
-//   the visible 11-row window; once centred (or already centred, as on the
-//   gameover "Your Standing" view), further presses scroll the underlying list
-//   by clamping selection ± 1 against the row count.
+// the visible window; once centred, further presses scroll the underlying
+// list by clamping selection ± 1 against the row count.
 export const moveLeaderboardSelection = (game: Game, delta: number) => {
   if (!game.leaderboardActive) return;
   const total = game.leaderboardRows.length;

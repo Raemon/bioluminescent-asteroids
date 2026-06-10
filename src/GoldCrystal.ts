@@ -17,8 +17,8 @@ export const GOLD_CRYSTAL_REVEAL_SCORE = ENTITY_CONFIG.goldCrystal.revealScore;
 export const GOLD_CRYSTAL_SCORE = ENTITY_CONFIG.goldCrystal.pickupScore;
 
 const LIFETIME = ENTITY_CONFIG.goldCrystal.lifetime;
-// gem explodes at full brightness when LIFETIME runs out, so no fade tail.
-const FADE_TAIL = 0;
+// final fraction of life spent fading + flickering as a warp-out warning.
+const FADE_TAIL = LIFETIME * 0.22;
 
 export class GoldCrystal {
   pos: Vec;
@@ -69,16 +69,19 @@ export class GoldCrystal {
     return Math.hypot(dx, dy) < this.radius + pointRadius;
   }
 
-  // Tail-end fade so the player gets a visual warning the gem is about to vanish.
-  private fadeAlpha(): number {
+  // Tail-end fade + quickening flicker warning the gem is about to warp out.
+  private fadeAlpha(time: number): number {
     const remaining = LIFETIME - this.age;
     if (remaining >= FADE_TAIL) return 1;
-    return Math.max(0, remaining / FADE_TAIL);
+    const tail = Math.max(0, remaining / FADE_TAIL);
+    // flicker speeds up as tail → 0 so the urgency reads even while still bright.
+    const flicker = 0.7 + 0.3 * Math.sin(time * (8 + (1 - tail) * 22));
+    return tail * flicker;
   }
 
   render(ctx: CanvasRenderingContext2D, t: number) {
     const time = t * 0.001;
-    const fade = this.fadeAlpha();
+    const fade = this.fadeAlpha(time);
     const pulse = 0.78 + 0.22 * Math.sin(time * 2.4 + this.age * 1.7);
 
     ctx.save();

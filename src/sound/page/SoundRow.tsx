@@ -110,9 +110,6 @@ export const SoundRow = ({ object, action, showObjectLabel, checked, onToggle, r
             {object.label}
           </div>
         )}
-        {/* <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[14px] text-[#e0f7ff]">
-          {action.verb}
-        </div> */}
         <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] tracking-[0.05em] text-[rgba(214,236,255,0.9)]">
           {sublabelFor(action)}
         </div>

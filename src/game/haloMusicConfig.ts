@@ -85,6 +85,10 @@ export function isHauntingWave(wave: number): boolean {
 // climactic C-minor brass theme replaces the random halo pick during the
 // fight. Kept out of HALO_MUSIC_POOL so it doesn't appear at random on
 // non-boss waves.
+//
+// "knell-sb" is the alternate boss candidate (tolling bell + ghost choir +
+// string ostinato) — auditionable on the /music page; swap it in here to
+// hear it on the boss wave.
 export const BOSS_MUSIC_VARIATION: HaloMusicVariation = "crucible-sb";
 
 // Effective per-wave pool used by the pickers below. Internal waves 12–20

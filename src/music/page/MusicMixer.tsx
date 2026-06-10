@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PianoKeyboard } from "./PianoKeyboard";
 import { HALO_MUSIC_POOL } from "../../game/haloMusicConfig";
+import { BEAT_GRID } from "../../game/rhythmConstants";
 import { getChannelVolume, setChannelVolume } from "../../game/audioPrefs";
 import {
   loadMusicConfig,
@@ -19,14 +20,8 @@ import {
 } from "../../musicConfig";
 import type { HaloMusicVariation } from "../../Sound";
 
-// Beat grid (seconds per quarter beat) and bass measure length must match the
-// game so the pulse here lines up with how it'd feel in real gameplay. See
-// src/game/rhythmConstants.ts and src/Asteroid.ts.
-const BEAT_GRID = 0.5;
-// Baked bgBeat mp3s — same files Sound.ts plays in-game. Downbeat is
-// pitchRatio 1.0, offbeat is 1.122 (whole-step lift). Both at intensity 1.0
-// (the maxed-out late-wave thud) so the pulse here matches what the player
-// hears when the pulsar is closing in.
+// Baked bgBeat mp3s — same downbeat + offbeat files Sound.ts plays in-game,
+// so the pulse here matches what the player hears late-wave.
 const BG_BEAT_DOWN_URL = "/sounds/baked/bgBeat__101.0000.mp3";
 const BG_BEAT_OFF_URL = "/sounds/baked/bgBeat__113.2000.mp3";
 
@@ -84,6 +79,11 @@ const VARIATION_META: Record<Variation, VariationInfo> = {
     blurb: "Force-picked during the level-10 boss fight (kept out of HALO_MUSIC_POOL so it doesn't roll randomly). Ambient = C-minor pedal + C1 heartbeat sub-pulse every 2 beats; melodic = stabbing marcato brass riff climbing the minor pentatonic; layer 3 = sustained French horn call-and-response + sparse C2/G2 timpani downbeat strikes. The track stays minor while the player is below 24x — the 24x climax crossfade is suppressed on the boss wave so this theme plays for the entire engagement.",
     gains: { ambient: 0.30, melodic: 0.32, layer3: 0.32 },
   },
+  "knell-sb": {
+    label: "knell-sb — alternate boss theme: lub-dub heartbeat + string ostinato + ghost choir & tolling bell",
+    blurb: "Alternate boss-fight candidate (A/B against crucible-sb — not wired to the boss wave yet). Ambient = C-minor pad + C1 lub-dub double-pulse heartbeat + faint G5 shimmer swelling mid-loop; melodic = relentless staccato string-ensemble eighth-note ostinato around C3/Eb3/G3 with tremolo-string swells into each phrase; layer 3 = ghost choir singing a Dies-irae-shaded descending motif (C5-Bb4-Ab4-G4) + tubular bell tolling each phrase downbeat. Same A-A'-B-A2 shape as crucible: the B phrase stops the ostinato and lifts to Cmaj7 before the minor resolve.",
+    gains: { ambient: 0.30, melodic: 0.32, layer3: 0.32 },
+  },
   "cathedral-hymn-el": {
     label: "cathedral-hymn-el — bowed-string cathedral pad + distant felt piano + low monastic chant",
     blurb: "ElevenLabs haunting variation, post-boss (waves 12–20). Ambient = slow legato bowed-string pad in a cathedral, long reverb tail; melodic = sparse distant felt-piano single tones, one note per measure; layer 3 = quiet low monastic male chant on 'ooo/aaa' vowels, sotto-voce. Designed to feel sacred and slightly otherworldly without tipping into horror.",
@@ -111,7 +111,7 @@ const PLACEHOLDER_META: VariationInfo = {
 // randomly, but the mixer page should still expose it for tuning and
 // audition. Append after the pool so the listing order matches "random
 // rotation first, then specials".
-const NON_POOL_VARIATIONS: readonly Variation[] = ["crucible-sb", "cathedral-hymn-el", "lost-transmission-el", "underwater-requiem-el"];
+const NON_POOL_VARIATIONS: readonly Variation[] = ["crucible-sb", "knell-sb", "cathedral-hymn-el", "lost-transmission-el", "underwater-requiem-el"];
 const VARIATIONS: readonly (VariationInfo & { id: Variation })[] = [
   ...HALO_MUSIC_POOL.map((id) => ({
     id: id as Variation,

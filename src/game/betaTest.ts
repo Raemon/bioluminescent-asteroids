@@ -223,8 +223,8 @@ const closePanel = () => {
 
 const isOpen = (): boolean => !!panelEl && !panelEl.classList.contains("hidden");
 
-// Why: handoff to a fresh ship + clean collections mirrors startGame, but skips spawnWave and
-//   instead applies only the user-selected elements so the run shows exactly what was chosen.
+// Like startGame but skips spawnWave — applies only the selected elements
+// so the run shows exactly what was chosen.
 const startBetaWave = (game: Game) => {
   game.sound.resume();
   // Reset run state
@@ -262,8 +262,7 @@ const startBetaWave = (game: Game) => {
   game.comets = [];
   game.waveEvents = newWaveEventSchedule();
 
-  // Why: shuffled bass order isn't read by beta (we spawn explicit kinds), but keep it set so
-  //   downstream code that may peek at it has valid data.
+  // Beta spawns explicit kinds, but keep bassOrder valid for any peekers.
   game.bassOrder = BASS_KINDS.slice();
   game.particles = new ParticleSystem();
   game.ship = new Ship(v(game.w / 2, game.h / 2));
@@ -276,7 +275,7 @@ const startBetaWave = (game: Game) => {
   game.state = "playing";
   game.overlayEl.classList.add("hidden");
 
-  // Why: apply each selected element after state is reset so spawn helpers see the fresh ship.
+  // Apply after reset so spawn helpers see the fresh ship.
   for (const id of selected) {
     const el = ELEMENTS.find((e) => e.id === id);
     if (el) el.apply(game);
@@ -287,8 +286,8 @@ const startBetaWave = (game: Game) => {
   closePanel();
 };
 
-// Why: Cmd-B (Mac) or Ctrl-B (others) toggles the panel. preventDefault so the browser doesn't
-//   eat it (Cmd-B bolds text in some inputs).
+// Cmd/Ctrl-B toggles the panel. preventDefault so the browser doesn't
+// eat it (Cmd-B bolds text in some inputs).
 export const installBetaTest = (game: Game) => {
   window.addEventListener("keydown", (e) => {
     const isToggle = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b";

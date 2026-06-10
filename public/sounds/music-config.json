@@ -37,6 +37,11 @@
       "melodic": 0.32,
       "layer3": 0.32
     },
+    "knell-sb": {
+      "ambient": 0.3,
+      "melodic": 0.32,
+      "layer3": 0.32
+    },
     "cathedral-hymn-el": {
       "ambient": 0.27,
       "melodic": 0.27,

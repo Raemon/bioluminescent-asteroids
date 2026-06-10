@@ -375,15 +375,6 @@ const queueDriftBonusForGem = (game: Game, g: GoldCrystal) => {
 };
 
 // Off-beat / weak shot: same "wasted upgrade" feedback as shooting a canister
-// — no score, no popup, just the sad destroyed sound + white burst. Teaches
-// the player the gem is strictly a rhythm target.
-const wasteGoldCrystal = (game: Game, g: GoldCrystal) => {
-  game.sound.play("explosionSmall", 1, g.pos);
-  game.sound.play("canisterDestroyed", 1, g.pos);
-  game.shake = Math.min(game.shake + 0.25, 1.2);
-  emitCanisterPop(game.particles, g);
-};
-
 // Lifetime ran out before the player grabbed or shot the gem. Same
 // "lost upgrade" feedback as a wasted shot so an unattended gem doesn't
 // just silently vanish — the bang nudges the player to notice next time.
@@ -393,6 +384,10 @@ export const expireGoldCrystal = (game: Game, g: GoldCrystal) => {
   game.shake = Math.min(game.shake + 0.25, 1.2);
   emitCanisterPop(game.particles, g);
 };
+
+// Shot the gem instead of flying through it — no score, no popup. Same
+// "lost upgrade" feedback; teaches the player the gem is a rhythm target.
+const wasteGoldCrystal = expireGoldCrystal;
 
 // deflection burst differs from kill bursts so the player feels the shield saved them.
 export const popShield = (game: Game) => {

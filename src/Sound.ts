@@ -123,6 +123,7 @@ export type HaloMusicVariation =
   | "vaporwave-el"   // ElevenLabs 32-second C-pedal dawn/vaporwave — glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio
   | "outerwilds-el"  // ElevenLabs 32-second Outer-Wilds folk — distant drone pad + fingerpicked G-rooted acoustic guitar + sparse plucked D-centered acoustic-guitar countermelody (layer 3)
   | "crucible-sb"    // 32-second boss-fight climactic track — C-minor brooding pedal + heartbeat sub (ambient) / rising marcato brass riff (melodic) / heroic French horn + timpani (layer 3). Force-picked when isBossWave(wave).
+  | "knell-sb"       // Alternate boss-fight track (A/B vs crucible-sb) — C-minor pad + lub-dub heartbeat (ambient) / driving staccato string ostinato + tremolo swells (melodic) / ghost choir on a Dies-irae-shaded motif + tolling tubular bell (layer 3).
   | "cathedral-hymn-el"     // Haunting post-boss (waves 12–20). Stone-cathedral bowed string pad / distant felt-piano line / low monastic male chant (layer 3).
   | "lost-transmission-el"  // Haunting post-boss (waves 12–20). AM-radio analog pad / frail musical-saw lead / whispered breaths with faint radio crackle (layer 3).
   | "underwater-requiem-el" // Haunting post-boss (waves 12–20). Submerged orchestral pad / glass-harmonica lead / ghostly upper-register celesta countermelody (layer 3).
@@ -1013,76 +1014,6 @@ export class Sound {
     } finally {
       // Always swap Tone back to the live AudioContext, even if rendering throws.
       Tone.setContext(this.ctx as unknown as BaseAudioContext as never);
-    }
-  }
-
-  // Render one voice recipe into an AudioBuffer for the sound editor's
-  // page-load pre-render. Routes play(name) through an OfflineAudioContext
-  // by temporarily swapping this.ctx / this.master, then restoring.
-  //
-  // The hand-built voice methods read this.ctx/this.master directly, so the
-  // swap transparently redirects every createOscillator/createBuffer/connect
-  // to the offline graph. The 10 Tone-native voices (fireBeat, bgBeat, bass*,
-  // chime, powerup, waveClear, cometNote) won't render meaningfully via this
-  // path — they need Tone.setContext to be pointed at the offline context,
-  // which the editor doesn't currently do; pre-render falls back to silent
-  // buffers for those. (The runtime baked-buffer pipeline still serves the
-  // game's actual playback.)
-  async renderOfflineVoice(
-    name: SoundName,
-    pitchRatio: number,
-    durationSec: number,
-    sampleRate: number,
-  ): Promise<AudioBuffer | null> {
-    const OAC = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
-    if (!OAC) return null;
-    const length = Math.max(1, Math.ceil(durationSec * sampleRate));
-    const offline = new OAC(1, length, sampleRate);
-
-    const savedCtx = this.ctx;
-    const savedMaster = this.master;
-    const savedEnabled = this.enabled;
-    const savedThrust = this.thrustNode;
-    const savedReverseThrust = this.reverseThrustNode;
-    const savedSideThrust = this.sideThrustNode;
-
-    // Build a fresh master node + compressor inside the offline graph that
-    // mirrors the live tone chain (master → compressor → destination), so
-    // the rendered buffer sounds like what the player hears.
-    const offlineMaster = offline.createGain();
-    offlineMaster.gain.value = 0.6;
-    const offlineComp = offline.createDynamicsCompressor();
-    offlineComp.threshold.value = -12;
-    offlineComp.knee.value = 12;
-    offlineComp.ratio.value = 4;
-    offlineComp.attack.value = 0.005;
-    offlineComp.release.value = 0.15;
-    offlineMaster.connect(offlineComp);
-    offlineComp.connect(offline.destination);
-
-    this.ctx = offline as unknown as AudioContext;
-    this.master = offlineMaster;
-    this.enabled = true;
-    // Detach any live thrust node so play("thrust") starts cleanly on the
-    // offline ctx. We restore the live one in `finally`.
-    this.thrustNode = null;
-    this.reverseThrustNode = null;
-    this.sideThrustNode = null;
-
-    try {
-      this.play(name, pitchRatio);
-      const rendered = await offline.startRendering();
-      return rendered;
-    } catch (e) {
-      console.warn(`renderOfflineVoice(${name}) failed`, e);
-      return null;
-    } finally {
-      this.ctx = savedCtx;
-      this.master = savedMaster;
-      this.enabled = savedEnabled;
-      this.thrustNode = savedThrust;
-      this.reverseThrustNode = savedReverseThrust;
-      this.sideThrustNode = savedSideThrust;
     }
   }
 
@@ -2666,6 +2597,12 @@ export class Sound {
       // 0.30/0.32/0.32 against the bass field: sub +10.2, bass +19.5, lo_mid
       // +11.1 dB margin. Same fallback-base value (0.30) used by ambient+melodic.
       case "crucible-sb": return 0.30;
+      // knell-sb is the alternate boss-fight track (A/B vs crucible-sb).
+      // Ambient = C-minor pad + C1 lub-dub heartbeat; melodic = driving
+      // staccato string-ensemble ostinato (GM 48) + tremolo swells (GM 44).
+      // Full 3-layer stack at 0.30/0.32/0.32 against the bass field: sub
+      // +11.7, bass +20.9, lo_mid +7.7 dB margin.
+      case "knell-sb": return 0.30;
       // cathedral-hymn-el: bowed stone-cathedral string pad (ambient) + distant
       // felt-piano single tones (melodic). Comfortable headroom at 0.27 —
       // bass +22 dB, lo_mid +8.5 dB in the audit.
@@ -2719,6 +2656,11 @@ export class Sound {
       // reinforce the bass anchor without introducing a new pitch. Audit at
       // gain 0.32 leaves bass +22.6 dB, lo_mid +11.9 dB margin (well above pass).
       case "crucible-sb": return 0.32;
+      // knell-sb layer 3 = ghost choir (GM 52) on a Dies-irae-shaded descending
+      // motif + tubular bell (GM 14) tolling each phrase downbeat. 62% of its
+      // energy lives in 500-2k, well clear of the bass family. Audit at gain
+      // 0.32 leaves bass +60.8 dB, lo_mid +16.1 dB margin.
+      case "knell-sb": return 0.32;
       // cathedral-hymn-el layer 3 = low monastic male chant on "ooo/aaa" vowels.
       // Bass-register voice; kept quiet (0.30) so the chant reads as a distant
       // presence under the pad rather than a foreground vocal line.

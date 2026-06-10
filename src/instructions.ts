@@ -419,12 +419,10 @@ type RhythmState = {
   particles: Particle[];
   t: number;
   beatTime: number;
-  phase: "approach" | "lockOn" | "fire" | "destroyed" | "reset";
+  phase: "approach" | "destroyed";
   phaseElapsed: number;
   // when we last fired — used so we draw a quick muzzle hint
   lastFireAt: number;
-  // sequence index — first run shows a SLOW miss, second run shows the locked rhythm hit
-  cycleIndex: number;
 };
 
 // Asteroid drifts horizontally across the canvas at a known speed.
@@ -433,7 +431,7 @@ const RHYTHM_ASTEROID_VX = -32;
 // Asteroid + ship geometry are hand-tuned so the ship's natural reticule
 // distance (RHYTHM_BULLET_SPEED * BEAT_GRID) lands on top of the asteroid's
 // first beat-dot when the ship is correctly aimed — gives a clean visual
-// "lock". See the derivation in the comment in initRhythm below.
+// "lock".
 const RHYTHM_ASTEROID_SPAWN_X = 340;
 const RHYTHM_ASTEROID_SPAWN_Y = 75;
 const RHYTHM_ASTEROID_RADIUS = 18;
@@ -448,11 +446,8 @@ const spawnRhythmAsteroid = (): Asteroid =>
   );
 
 const initRhythm = (_w: number, _h: number): RhythmState => ({
-  // Geometry: with BEAT_GRID=0.7 and RHYTHM_BULLET_SPEED=320, the reticule
-  // sits 224 px ahead of the ship along its heading. The asteroid's first
-  // beat-dot is at (spawnX - (radius+6) - |vx|*BEAT_GRID, spawnY). With the
-  // ship at (216, 170) and the asteroid at (480, 92) → first dot ≈ (425, 92),
-  // ship → dot distance ≈ 224 px = reticule reach. Reticule lands on the dot.
+  // Ship + asteroid geometry is hand-tuned so the reticule reach
+  // (RHYTHM_BULLET_SPEED * BEAT_GRID) lands on the asteroid's first beat-dot.
   ship: { pos: { x: RHYTHM_SHIP_X, y: RHYTHM_SHIP_Y }, heading: -0.5, thrustOn: false, vel: { x: 0, y: 0 }, invuln: 0 },
   asteroid: spawnRhythmAsteroid(),
   bullets: [],
@@ -462,7 +457,6 @@ const initRhythm = (_w: number, _h: number): RhythmState => ({
   phase: "approach",
   phaseElapsed: 0,
   lastFireAt: -10,
-  cycleIndex: 0,
 });
 
 const updateRhythm = (s: RhythmState, dt: number, _w: number, _h: number) => {
@@ -560,7 +554,6 @@ const updateRhythm = (s: RhythmState, dt: number, _w: number, _h: number) => {
     // predictable moment, keeping the demo cadence consistent.
     s.beatTime = 0;
     s.lastFireAt = -10;
-    s.cycleIndex++;
   }
 };
 

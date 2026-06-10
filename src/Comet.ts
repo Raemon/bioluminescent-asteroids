@@ -76,7 +76,7 @@ export class Comet {
     return Math.min(inT, outT);
   }
 
-  update(dt: number, w: number, h: number) {
+  update(dt: number, _w: number, _h: number) {
     this.age += dt;
     addScaledMut(this.pos, this.vel, dt);
     this.glowTrail.update(dt, this.pos.x, this.pos.y);
@@ -97,15 +97,6 @@ export class Comet {
     if (this.age >= this.lifetime) {
       this.alive = false;
       return;
-    }
-    const margin = 240;
-    if (
-      this.pos.x < -margin || this.pos.x > w + margin ||
-      this.pos.y < -margin || this.pos.y > h + margin
-    ) {
-      // Comet has drifted off the field. Let the music tail keep playing
-      // until the lifetime expires — the Sound side handles fade — but stop
-      // updating the trail so we don't accumulate samples in negative space.
     }
   }
 

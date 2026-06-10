@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { BEAT_GRID } from "../game/rhythmConstants";
 
 // Beat-locked intro overlay. Three flavors share one component:
 //   - "latency":    "Latency calibrated" — fades in, holds, fades out.
@@ -8,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 // gates the sim the same way `calibrationIntro` does). When the sequence is
 // done, we fire `intro-sequence:done` and the lifecycle hands off to play.
 
-const BEAT_SEC = 0.5; // matches BEAT_GRID in game/rhythmConstants.ts
+const BEAT_SEC = BEAT_GRID;
 
 type Kind = "latency" | "fullHints" | "shortHint";
 
