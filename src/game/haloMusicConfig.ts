@@ -33,10 +33,11 @@
 //   synthwave-el  ElevenLabs analog-synthwave Juno pad + soft lead + pulsed
 //          synth-bass arp on the off-beats (synthwave-appropriate motion,
 //          octave-low to fill the space the lead leaves).
-//   flagship-sb  Self-built flagship: rhythmic 16th-note arp + theremin-like
-//          ghost lead (detuned unison, delayed vibrato, portamento) + sparse
-//          inharmonic glass bells with dotted-quarter ping-pong echo (strikes
-//          land in the lead's rests so the two voices interlock).
+//   flagship-sb  Self-built rhythmic 16th-note arp (ambient) + lush solo
+//          nylon-string guitar (melodic, ElevenLabs — slow lyrical line, hall
+//          reverb) + singing solo violin (layer 3, ElevenLabs — upper register,
+//          HPF'd). Cinematic and beautiful; the EL acoustic voices ride the
+//          procedural pulse.
 //   vaporwave-el  ElevenLabs dawn/vaporwave: glassy string-choir pad (ambient) +
 //          sparse felt-bell sustains (melodic) + bright crystal-glockenspiel
 //          arpeggio (layer 3). All three stems live in mid-upper register so
@@ -66,9 +67,11 @@ export const HALO_MUSIC_POOL: readonly HaloMusicVariation[] = ["cinematic-el", "
 // designed to feel creepier/more haunting than the standard rotation while
 // still beautiful: cathedral hymn with a low monastic chant, an AM-radio
 // ghost transmission with whispered breaths, and a submerged requiem with
-// ghostly celesta. Each is 32 s C-pedal-tolerant just like the standard
-// pool, so the same combo-tier layering still works.
-export const HAUNTING_MUSIC_POOL: readonly HaloMusicVariation[] = ["cathedral-hymn-el", "lost-transmission-el", "underwater-requiem-el"];
+// ghostly celesta. spectral-toll-sb adds a fourth: a deep C/G drone under a
+// mournful solo cello, answered by sparse procedural glass bells. Each is 32 s
+// C-pedal-tolerant just like the standard pool, so the same combo-tier layering
+// still works.
+export const HAUNTING_MUSIC_POOL: readonly HaloMusicVariation[] = ["cathedral-hymn-el", "lost-transmission-el", "underwater-requiem-el", "spectral-toll-sb"];
 
 // Internal-wave range during which HAUNTING_MUSIC_POOL replaces HALO_MUSIC_POOL.
 // Display level = wave - 1, so internal 12..20 = display 11..19. Internal

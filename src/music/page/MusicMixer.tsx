@@ -60,9 +60,9 @@ const VARIATION_META: Record<Variation, VariationInfo> = {
     gains: { ambient: 0.22, melodic: 0.22, layer3: 0.38 },
   },
   "flagship-sb": {
-    label: "flagship-sb — 16th-note arp + ghost lead + glass bells",
-    blurb: "Rhythmic 16th-note arp (ambient) + theremin-like detuned ghost lead with delayed vibrato and portamento (melodic, G4-G5) + sparse inharmonic glass-bell strikes with dotted-quarter ping-pong echo (layer 3, G5-E6). All procedural, all onsets on the quarter-beat grid; lead and bells interlock in each other's rests.",
-    gains: { ambient: 1.0, melodic: 0.5, layer3: 0.5 },
+    label: "flagship-sb — 16th-note arp + nylon guitar + solo violin",
+    blurb: "Procedural rhythmic 16th-note arp (ambient) + lush solo nylon-string guitar, slow and lyrical with hall reverb (melodic, ElevenLabs, HPF'd 120 Hz) + singing legato solo violin in the upper register (layer 3, ElevenLabs, HPF'd 300 Hz). Cinematic and beautiful — the EL acoustic voices ride the procedural pulse.",
+    gains: { ambient: 1.0, melodic: 0.25, layer3: 0.30 },
   },
   "vaporwave-el": {
     label: "vaporwave-el — glassy string-choir pad + felt bells + crystal glockenspiel",
@@ -99,6 +99,11 @@ const VARIATION_META: Record<Variation, VariationInfo> = {
     blurb: "ElevenLabs haunting variation, post-boss (waves 12–20). Ambient = submerged orchestral string pad, heavy lowpass + watery shimmer reverb; melodic = faint sustained glass-harmonica tones; layer 3 = sparse upper-register celesta countermelody (HPF'd 500 Hz to clear the bass kit). Mournful and beautiful.",
     gains: { ambient: 0.25, melodic: 0.25, layer3: 0.32 },
   },
+  "spectral-toll-sb": {
+    label: "spectral-toll-sb — deep C/G drone + mournful cello + glass bells",
+    blurb: "Haunting variation, post-boss (waves 12–20). Ambient = deep C/G open-fifth drone (ElevenLabs, bowed bass + low choir); melodic = mournful solo cello, slow legato (ElevenLabs); layer 3 = sparse inharmonic glass-bell strikes with dotted-quarter ping-pong echo (procedural, G5-E6, placed in the cello's rests). Sorrowful and beautiful.",
+    gains: { ambient: 0.27, melodic: 0.27, layer3: 0.45 },
+  },
 };
 
 const PLACEHOLDER_META: VariationInfo = {
@@ -111,7 +116,7 @@ const PLACEHOLDER_META: VariationInfo = {
 // randomly, but the mixer page should still expose it for tuning and
 // audition. Append after the pool so the listing order matches "random
 // rotation first, then specials".
-const NON_POOL_VARIATIONS: readonly Variation[] = ["crucible-sb", "knell-sb", "cathedral-hymn-el", "lost-transmission-el", "underwater-requiem-el"];
+const NON_POOL_VARIATIONS: readonly Variation[] = ["crucible-sb", "knell-sb", "cathedral-hymn-el", "lost-transmission-el", "underwater-requiem-el", "spectral-toll-sb"];
 const VARIATIONS: readonly (VariationInfo & { id: Variation })[] = [
   ...HALO_MUSIC_POOL.map((id) => ({
     id: id as Variation,

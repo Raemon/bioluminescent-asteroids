@@ -11,8 +11,8 @@ import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
 import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
-import { popupCombo, popupScore } from "./popups";
-import { resonanceBonus } from "./resonanceBonus";
+import { popupCombo, popupScore, popupResonance } from "./popups";
+import { resonanceBonus, resonanceValueOf } from "./resonanceBonus";
 import { checkBonusLife } from "./bonusLife";
 import { BEAT_GRID } from "./rhythmConstants";
 import {
@@ -144,10 +144,11 @@ const awardScoreForKill = (
 ): number => {
   let scoreEarned = baseScore;
   if (isOnBeatHit) {
-    // Rhythm (×beatCombo) and Resonance (+pieces-1 per shattered bass voice)
-    //   combine additively into one effective multiplier — see resonanceBonus.
-    const multiplier = game.beatCombo + resonanceBonus(game);
-    scoreEarned = Math.round(scoreEarned * multiplier);
+    // Resonance folds into the item's value first (the live bass fragments'
+    //   summed bounty), then Rhythm multiplies the lot — so a shattered field
+    //   pays its +10/+25-per-piece bonus times the current combo.
+    const multiplier = game.beatCombo;
+    scoreEarned = Math.round((scoreEarned + resonanceBonus(game)) * multiplier);
     game.sound.play("comboSparkle", 1, hitPos);
     game.sound.playComboChime(multiplier, hitPos);
     if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
@@ -267,7 +268,15 @@ const finishAsteroidKillCore = (
   //   before the second drifts past the engagement ring on the same tick.
   const claimed = newBeatClaimSet();
   for (const c of children) alignSplitChildToRhythm(game, c, claimed);
-  if (a.isBass()) restartChildBassDrones(game, children);
+  if (a.isBass()) {
+    restartChildBassDrones(game, children);
+    // Each fresh fragment sprouts a "+N" tag (its own resonance worth) that
+    //   rides along with it so the player can read what the break is now worth.
+    for (const c of children) {
+      const value = resonanceValueOf(c);
+      if (value > 0) game.popups.push(popupResonance(c, value));
+    }
+  }
   return children;
 };
 

@@ -1,18 +1,27 @@
 import type { Game } from "../Game";
+import type { Asteroid, AsteroidSize } from "../Asteroid";
 
-// Resonance bonus: each bassteroid voice currently shattered into multiple pieces
-//   adds (pieces − 1) to the on-beat multiplier. A whole, unbroken bassteroid
-//   contributes 0 (one piece); breaking it into 2 → +1, into 4 → +3. The four
-//   voices (bassA–D) are independent lineages, so each only counts its own pieces.
-//   The bonus stacks additively onto the Rhythm combo (see awardScoreForKill) and
-//   applies to ALL on-beat kills, not just bass kills — sweep the field while the
-//   broken pieces still ring.
+// Per-piece resonance value by size. Large bassteroids are worth nothing (an
+//   unbroken rock gives no bonus); the medium and small fragments a break leaves
+//   behind are each worth a flat point bounty while they're still on the field.
+export const RESONANCE_VALUE: Record<AsteroidSize, number> = {
+  large: 0,
+  medium: 10,
+  small: 25,
+};
+
+// One bassteroid piece's standalone contribution — used both for the live-field
+//   total and for the "+N" tag that follows each fresh fragment after a break.
+export const resonanceValueOf = (a: Asteroid): number =>
+  a.isBass() ? RESONANCE_VALUE[a.size] : 0;
+
+// Resonance bonus: the summed value of every live bassteroid piece on the field.
+//   Each piece contributes independently of the others, so destroying one medium
+//   leaves its sibling still worth +10. Added to a kill's base score before the
+//   Rhythm multiply (see awardScoreForKill), and applied to ALL on-beat kills, not
+//   just bass kills — sweep the field while the broken pieces still ring.
 export const resonanceBonus = (game: Game): number => {
-  const perVoice: Record<string, number> = {};
-  for (const a of game.asteroids) {
-    if (a.isBass()) perVoice[a.kind] = (perVoice[a.kind] ?? 0) + 1;
-  }
   let bonus = 0;
-  for (const kind in perVoice) bonus += Math.max(0, perVoice[kind] - 1);
+  for (const a of game.asteroids) bonus += resonanceValueOf(a);
   return bonus;
 };

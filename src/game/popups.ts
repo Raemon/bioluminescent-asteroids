@@ -17,6 +17,12 @@ export type Popup = {
   popDuration: number;
   holdUntil: number;
   fadeGain: number;
+  // when set, the popup tracks this entity's position each frame (plus the
+  // followOffset) instead of drifting on its own vel — used for the resonance
+  // "+N" tags that ride along with a freshly-split bassteroid fragment. The
+  // target is dropped from tracking once it leaves the field (see updatePopups).
+  follow?: { pos: Vec };
+  followOffset?: Vec;
   // when set, replaces the default text fill at render time — lets a popup
   // composite its own glyphs (e.g. keycaps for the Side Engines pickup).
   draw?: (ctx: CanvasRenderingContext2D, p: Popup, alpha: number, scale: number) => void;
@@ -120,7 +126,28 @@ export const popupScore = (pos: Vec, points: number): Popup => ({
   holdUntil: 0, fadeGain: 1.4,
 });
 
-// "Bonus Life" floats off the ship every 50k points — white so it reads as a
+// "+N" resonance tag that rides along with a freshly-split bassteroid fragment,
+//   announcing what that piece is now worth toward the field's resonance bonus.
+//   Holds at full alpha for 1.5s pinned to the fragment, then fades over 0.5s.
+//   Cyan to match the Resonance HUD readout and read distinctly from the gold
+//   rhythm popups. No vel — the follow target supplies all the motion.
+const RESONANCE_POPUP_LIFE = 2.0;
+const RESONANCE_POPUP_FADE = 0.5;
+export const popupResonance = (target: { pos: Vec }, value: number): Popup => ({
+  pos: { x: target.pos.x, y: target.pos.y },
+  vel: { x: 0, y: 0 },
+  life: RESONANCE_POPUP_LIFE,
+  maxLife: RESONANCE_POPUP_LIFE,
+  text: `+${value}`,
+  font: "700 16px 'Space Grotesk', system-ui, sans-serif",
+  fill: "#6ad8ff",
+  shadowColor: "rgba(80, 200, 255, 0.85)",
+  decayX: 1, decayY: 1,
+  popPeak: 0.35, popDuration: 0.15,
+  holdUntil: RESONANCE_POPUP_FADE / RESONANCE_POPUP_LIFE, fadeGain: 1,
+  follow: target,
+  followOffset: { x: 0, y: -18 },
+});
 // bright milestone against the cyan/gold of the combat HUD.
 export const popupBonusLife = (pos: Vec): Popup => ({
   pos: { x: pos.x + 26, y: pos.y - 4 },
@@ -173,10 +200,18 @@ export const popupBeatDebug = (pos: Vec, prefix: string, onBeat: boolean, offset
 export const updatePopups = (popups: Popup[], dt: number): Popup[] => {
   for (const p of popups) {
     p.life -= dt;
-    p.pos.x += p.vel.x * dt;
-    p.pos.y += p.vel.y * dt;
-    p.vel.x *= p.decayX;
-    p.vel.y *= p.decayY;
+    if (p.follow) {
+      // Pin to the tracked fragment (+ offset). If that rock is destroyed it's
+      // removed from the field but the popup keeps its stale ref — its pos stops
+      // updating, so the tag simply freezes where the piece died and fades out.
+      p.pos.x = p.follow.pos.x + (p.followOffset?.x ?? 0);
+      p.pos.y = p.follow.pos.y + (p.followOffset?.y ?? 0);
+    } else {
+      p.pos.x += p.vel.x * dt;
+      p.pos.y += p.vel.y * dt;
+      p.vel.x *= p.decayX;
+      p.vel.y *= p.decayY;
+    }
   }
   return popups.filter((p) => p.life > 0);
 };

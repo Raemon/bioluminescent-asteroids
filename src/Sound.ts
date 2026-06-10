@@ -119,7 +119,8 @@ export type HaloMusicVariation =
   | "cinematic-el"   // ElevenLabs 32-second C-pedal cinematic bed + sustained-tone piano
   | "musicbox-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
   | "synthwave-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + layer 3
-  | "flagship-sb"    // 32-second C-pedal flagship — pulsing arp (ambient) + theremin-like ghost lead (melodic) + sparse glass bells (layer 3); all procedural, all onsets on-beat
+  | "flagship-sb"    // 32-second C-pedal flagship — pulsing procedural arp (ambient) + lush solo nylon-guitar (melodic, EL) + singing solo violin (layer 3, EL); cinematic and beautiful
+  | "spectral-toll-sb"      // Haunting post-boss (waves 12–20). Deep C/G drone (ambient, EL) / mournful solo cello (melodic, EL) / sparse inharmonic glass bells with ping-pong echo (layer 3, procedural).
   | "vaporwave-el"   // ElevenLabs 32-second C-pedal dawn/vaporwave — glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio
   | "outerwilds-el"  // ElevenLabs 32-second Outer-Wilds folk — distant drone pad + fingerpicked G-rooted acoustic guitar + sparse plucked D-centered acoustic-guitar countermelody (layer 3)
   | "crucible-sb"    // 32-second boss-fight climactic track — C-minor brooding pedal + heartbeat sub (ambient) / rising marcato brass riff (melodic) / heroic French horn + timpani (layer 3). Force-picked when isBossWave(wave).
@@ -2566,12 +2567,11 @@ export class Sound {
       // +6.8 dB above the ≥4 dB pass threshold. Going higher risks the
       // analog pad fighting the bass field.
       case "synthwave-el": return 0.22;
-      // flagship-sb pairs the rhythmic 16th-note arp ambient with a procedural
-      // theremin-like ghost lead (G4-G5, detuned unison + delayed vibrato +
-      // portamento). The lead's energy lives in 500-2k (63%), well clear of the
-      // bass family. Single-stem audit passes with bass +52 dB, lo-mid +6.6 dB.
-      // Tuned gains live in music-config.json (melodic balances against the
-      // ambient's user-tuned gain there).
+      // flagship-sb pairs the rhythmic 16th-note arp ambient with a lush solo
+      // nylon-string guitar (melodic, EL — slow lyrical line, hall reverb,
+      // HPF'd at 120 Hz). Single-stem audit at 0.25 keeps lo-mid clean by
+      // +8.5 dB, bass +25.9 dB. Tuned gains live in music-config.json (the
+      // ambient there is user-set to 1.0; melodic balances against it).
       case "flagship-sb": return 0.25;
       // vaporwave-el is a bright EL dawn/vaporwave variation. Ambient = glassy
       // string-choir pad in the mid-upper register; melodic = sparse felt-bell
@@ -2615,6 +2615,11 @@ export class Sound {
       // glass-harmonica lead (melodic). Balanced; gain 0.25 leaves bass +29 dB,
       // lo_mid +11 dB margin.
       case "underwater-requiem-el": return 0.25;
+      // spectral-toll-sb (haunting, waves 12–20): deep C/G drone (ambient, EL) +
+      // mournful solo cello (melodic, EL). Both lean low — the drone is sub/bass
+      // heavy by design — but the bass kit still wins: at 0.27 the ambient leaves
+      // sub +16, bass +20 dB and the cello lo_mid +9.8 dB.
+      case "spectral-toll-sb": return 0.27;
       default:      return 0.30;
     }
   }
@@ -2634,12 +2639,11 @@ export class Sound {
       // ambient + melodic stems leave empty. No energy below 500 Hz, so the
       // full 3-layer stack at gain 0.38 still leaves lo-mid +6.2 dB.
       case "synthwave-el": return 0.38;
-      // flagship-sb layer 3 is a procedural glass-bell counter-line — three
-      // inharmonic strikes per phrase (G5-E6) with dotted-quarter ping-pong
-      // echo, placed in the ghost lead's rests. Essentially zero energy below
-      // 500 Hz (lo-mid 1.4%), so the bass field never sees it. Tuned gain
-      // lives in music-config.json.
-      case "flagship-sb": return 0.45;
+      // flagship-sb layer 3 is a singing solo violin (EL), upper register,
+      // HPF'd at 300 Hz so its body clears the arp + bass field. At 0.30 the
+      // violin leaves lo_mid +11 dB, bass +55 dB. Tuned gain lives in
+      // music-config.json.
+      case "flagship-sb": return 0.30;
       // vaporwave-el layer3 is a bright crystal-glockenspiel arpeggio in the upper
       // register. Audit at gain 0.32 (in the full 3-layer mix above) leaves
       // lo-mid +5.8 dB and mid +5.9 dB margin against the bass field.
@@ -2671,6 +2675,11 @@ export class Sound {
       // underwater-requiem-el layer 3 = upper-register celesta countermelody,
       // HPF'd at 500 Hz. Sits high above bass kit; 0.32 leaves +22 dB lo_mid.
       case "underwater-requiem-el": return 0.32;
+      // spectral-toll-sb layer 3 = sparse procedural glass bells (G5-E6) with
+      // dotted-quarter ping-pong echo, essentially zero energy below 500 Hz
+      // (lo_mid 1.4%). At 0.45 the full 3-layer stack still leaves lo_mid
+      // +8.7 dB against the bass field.
+      case "spectral-toll-sb": return 0.45;
       default:      return 0.40;
     }
   }
