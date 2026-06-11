@@ -2760,11 +2760,17 @@ export class Sound {
     void this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3"));
   }
 
-  // Warm a list of variations one-at-a-time during idle gaps, so each
-  // decodeAudioData completion lands far enough from the next that the
-  // audio scheduler isn't starved by a burst of back-to-back decodes.
-  // Use this for music that isn't needed for several minutes (haunting
-  // pool, boss variation) — the eager pool stays on preloadHaloMusic.
+  // Warm a list of variations one-at-a-time with a real time gap between
+  // stems. Serializing alone isn't enough: chaining decode → idle → decode
+  // keeps a core busy continuously for the first several seconds of play
+  // (requestIdleCallback fires within ~a frame), which audibly skips bgBeat
+  // pulses right when the bare pulse is all the player hears. These tracks
+  // aren't needed until waves 11–12 (minutes away), so each stem can afford
+  // to wait: 15 stems × 6 s ≈ 90 s, each decode an isolated background blip
+  // the audio scheduler rides through. The eager pool stays on
+  // preloadHaloMusic.
+  private static readonly DEFERRED_MUSIC_INITIAL_DELAY_MS = 8000;
+  private static readonly DEFERRED_MUSIC_STEM_GAP_MS = 6000;
   preloadHaloMusicSequential(variations: readonly HaloMusicVariation[]): void {
     if (variations.length === 0) return;
     this.ensureContext();
@@ -2785,9 +2791,9 @@ export class Sound {
       const next = queue.shift();
       if (!next) return;
       this.loadHaloMusicBuffer(this.haloMusicUrl(next.variation, next.layer))
-        .finally(() => idle(drain));
+        .finally(() => setTimeout(() => idle(drain), Sound.DEFERRED_MUSIC_STEM_GAP_MS));
     };
-    idle(drain);
+    setTimeout(() => idle(drain), Sound.DEFERRED_MUSIC_INITIAL_DELAY_MS);
   }
 
   // Start (or hot-restart) the pre-rendered halo music for a variation. If a

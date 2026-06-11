@@ -51,3 +51,17 @@
 
 ### Discriminating test for the user (per page load, buffers are cached in a Map)
 - Same-tab second run should start clean; a fresh page load should stutter again in the first ~10-30s. Stutters should stop once the 15 stems finish decoding.
+
+## Event: "flagship-sb ambient 1.0 is accidental" disconfirmed
+
+### Prediction
+- Expected: the 1.0 ambient gain in music-config.json was an accidentally committed /music audition value; fixing it to 0.25 is safe.
+- Observed: Sound.ts:2570-2575 documents it explicitly — "Tuned gains live in music-config.json (the ambient there is user-set to 1.0; melodic balances against it)."
+- Why this is disconfirming: the value is a deliberate authored mix decision, not a leftover.
+
+### Status update
+- `disconfirmed`: "1.0 is accidental"; the planned config edit is withdrawn.
+- `still plausible`: flagship-sb runs ~10 dB above its audit point and could clip when stacked with the bass field — but that is the author's choice and not the reported bug. Flagged to user, not changed.
+
+## Fix applied
+- `preloadHaloMusicSequential` now waits 8 s before the first stem and 6 s between stems (was: one requestIdleCallback ≈ one frame), so the 15 deferred decodes land as isolated events over ~90 s instead of a continuous serial chain at the moment play begins. Boss (wave 11) / haunting (wave 12) are still warmed minutes early.
