@@ -1,5 +1,5 @@
 import type { Game } from "../Game";
-import { Asteroid, AsteroidKind, AsteroidSize, BASS_MEASURE_LENGTH, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
+import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
 import { spawnComet as spawnCometAtEdge } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
@@ -144,15 +144,16 @@ export const alignBassBeat = (game: Game, asteroid: Asteroid) => {
 // (glass prisons, the bell-toll cathedral fragment) can take centre stage.
 // The bell decorator is held back to CFG.bell.firstWave for the same reason,
 // so it lands as a post-boss reveal rather than a mid-rhythm colour.
-export const activeSpecialsForWave = (game: Game, wave: number): AsteroidKind[] => {
+// Each bass slot rolls a fresh kind from the full BASS_KINDS pool, so any of
+// the four colours can show up on any bass wave (re-rolled per wave spawn).
+export const activeSpecialsForWave = (_game: Game, wave: number): AsteroidKind[] => {
   if (wave < 3) return [];
   const bassAllowed = wave <= CFG.bassteroid.maxLevel;
-  if (wave === 3) return bassAllowed ? [game.bassOrder[0]] : [];
-  if (wave === 4) return bassAllowed ? [game.bassOrder[1]] : [];
-  const specials: AsteroidKind[] = bassAllowed ? [game.bassOrder[0], game.bassOrder[1]] : [];
-  const lateUnlockOrder: AsteroidKind[] = bassAllowed
-    ? ["chime", "warble", game.bassOrder[2], game.bassOrder[3]]
-    : ["chime", "warble"];
+  const randomBass = (): AsteroidKind => BASS_KINDS[Math.floor(rng() * BASS_KINDS.length)];
+  if (wave === 3) return bassAllowed ? [randomBass()] : [];
+  if (wave === 4) return bassAllowed ? [randomBass()] : [];
+  const specials: AsteroidKind[] = bassAllowed ? [randomBass(), randomBass()] : [];
+  const lateUnlockOrder: AsteroidKind[] = ["chime", "warble"];
   const lateCount = Math.max(0, Math.min(lateUnlockOrder.length, Math.floor((wave - 5) / 2)));
   for (let i = 0; i < lateCount; i++) specials.push(lateUnlockOrder[i]);
   if (wave >= CFG.bell.firstWave) specials.push("bell");
@@ -346,7 +347,7 @@ const rollHeadlineEvents = (game: Game) => {
   // Rhythm additively boosts the alien-size rolls and the shockwave roll.
   //   Comet is left on its existing curve — only aliens + shockwave were asked for.
   const bonus = rhythmChanceBonus(game);
-  const alienGate = game.wave >= CFG.alien.firstWave;
+  const alienGate = game.wave >= CFG.alien.firstWave || (game.wave < 10 && game.beatCombo >= 12);
   const alienSizeRoll = (size: AlienSize): HeadlineRoll => ({
     gate: alienGate && CFG.alienSizeShare(game.wave, size) > 0,
     baseChance: CFG.alien.chancePerWave * CFG.alienSizeShare(game.wave, size) + bonus,

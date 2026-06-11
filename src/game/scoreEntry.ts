@@ -20,7 +20,18 @@ import { startReplay } from "./lifecycle";
 // gameUpdate.ts don't have to know about DOM details or network state.
 
 const setStatus = (game: Game, msg: string, kind: "info" | "error" | "success" = "info") => {
-  game.scoreEntryStatusEl.textContent = msg;
+  // "press enter" refers to the key — render the key name white so it pops
+  //   against the tinted status text.
+  const keyMatch = msg.match(/^(.*press )(enter)(.*)$/i);
+  if (keyMatch) {
+    const keyEl = document.createElement("span");
+    keyEl.className = "status-key";
+    keyEl.textContent = keyMatch[2];
+    game.scoreEntryStatusEl.textContent = "";
+    game.scoreEntryStatusEl.append(keyMatch[1], keyEl, keyMatch[3]);
+  } else {
+    game.scoreEntryStatusEl.textContent = msg;
+  }
   game.scoreEntryStatusEl.classList.remove("error", "success");
   if (kind === "error") game.scoreEntryStatusEl.classList.add("error");
   else if (kind === "success") game.scoreEntryStatusEl.classList.add("success");

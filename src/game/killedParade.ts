@@ -2,6 +2,7 @@ import type { Game } from "../Game";
 import { KilledSnapshot } from "./killSnapshot";
 import { BEAT_GRID } from "./rhythmConstants";
 import { SoundName } from "../Sound";
+import { formatScore } from "./formatScore";
 
 // high enough scroll speed that sprites move visibly between beats — reads as marching past.
 const PARADE_PX_PER_BEAT = 140;
@@ -262,7 +263,7 @@ const finishScoreFlash = (ctx: CanvasRenderingContext2D, points: number, ageBeat
   const popIn = Math.min(1, ageBeats / 0.25);
   const scale = 1 + (1 - popIn) * 0.6;
   ctx.scale(scale, scale);
-  ctx.fillText(`+${points}`, 0, 0);
+  ctx.fillText(`+${formatScore(points)}`, 0, 0);
   ctx.restore();
 };
 

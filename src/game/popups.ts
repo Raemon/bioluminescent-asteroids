@@ -1,5 +1,6 @@
 import { Vec, rand } from "../vec";
 import { PowerupKind, POWERUP_HUE } from "../Canister";
+import { formatScore } from "./formatScore";
 
 // one shape powers combo/pickup/debug overlays so all three share the tick + render loop.
 export type Popup = {
@@ -141,7 +142,7 @@ export const popupScore = (pos: Vec, points: number): Popup => ({
   vel: { x: rand(-10, 10), y: -60 },
   life: SCORE_POPUP_LIFE,
   maxLife: SCORE_POPUP_LIFE,
-  text: `+${points}`,
+  text: `+${formatScore(points)}`,
   font: "600 18px 'Space Grotesk', system-ui, sans-serif",
   fill: "#e6f4ff",
   shadowColor: "rgba(200, 230, 255, 0.85)",
@@ -163,7 +164,7 @@ export const popupBassEcho = (
   vel: { x: 0, y: 0 },
   life: BASS_ECHO_POPUP_LIFE,
   maxLife: BASS_ECHO_POPUP_LIFE,
-  text: `+${value}`,
+  text: `+${formatScore(value)}`,
   font: "700 15px 'Space Grotesk', system-ui, sans-serif",
   fill: `hsl(${target.hue}, 95%, 78%)`,
   shadowColor: `hsla(${target.hue}, 95%, 65%, 0.85)`,

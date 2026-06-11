@@ -1,5 +1,6 @@
 import type { Game } from "../Game";
 import { displayWave } from "./waveDirector";
+import { formatScorePadded } from "./formatScore";
 
 // Staged reveal for the game-over / mission-aborted screen. Three lines
 //   fade in left-of-the-parade in sequence:
@@ -45,7 +46,7 @@ export const showGameOverIntro = (game: Game, headlineKind: "gameover" | "aborte
     : `You reached Wave ${displayWave(game.wave)}`;
   setLine("gameover-wave", waveLine);
   setLine("gameover-peak-value", `${game.maxCombo}x`);
-  setLine("gameover-score", `Score: ${String(game.score).padStart(6, "0")}`);
+  setLine("gameover-score", `Score: ${formatScorePadded(game.score)}`);
 
   resetVisibility(root);
   // force reflow so the .in transitions actually animate on restart.

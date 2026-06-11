@@ -1051,6 +1051,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 .score-entry-status.error { color: #ffb8b8; }
 .score-entry-status.success { color: #b8f3c8; }
+.score-entry-status .status-key { color: #fff; }
 
 #replay-save-toggle {
   display: inline-flex;

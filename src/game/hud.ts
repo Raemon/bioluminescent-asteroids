@@ -1,6 +1,7 @@
 import type { Game } from "../Game";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { displayWave } from "./waveDirector";
+import { formatScore, formatScorePadded } from "./formatScore";
 
 // cache the DOM handles once so per-frame syncs don't repeat document.getElementById calls.
 export type HudElements = {
@@ -101,7 +102,7 @@ export const flashScoreGain = (game: Game, points: number) => {
   // Glow tracks the same linear curve, then re-mapped into a smaller range
   // so even small flashes still glow a little.
   const glow = 0.55 + ((scale - SCORE_FLASH_MIN_SCALE) / (SCORE_FLASH_MAX_SCALE - SCORE_FLASH_MIN_SCALE)) * 0.45;
-  el.textContent = `+${points}`;
+  el.textContent = `+${formatScore(points)}`;
   el.style.setProperty("--scale", scale.toFixed(3));
   el.style.setProperty("--glow", glow.toFixed(3));
   el.classList.remove("flashing");
@@ -112,7 +113,7 @@ export const flashScoreGain = (game: Game, points: number) => {
 
 // collapses score/wave/lives/combo DOM writes into one call so handlers stay one-liners.
 export const syncHud = (game: Game) => {
-  game.scoreEl.textContent = String(game.score).padStart(6, "0");
+  game.scoreEl.textContent = formatScorePadded(game.score);
   game.waveEl.textContent = `WAVE ${displayWave(game.wave)}`;
   const lifeSpans: string[] = [];
   for (let i = 0; i < game.lives; i++) lifeSpans.push("<span></span>");

@@ -2,6 +2,7 @@ import type { Game } from "../Game";
 import { syncHud } from "./hud";
 import { BEAT_GRID } from "./rhythmConstants";
 import { checkBonusLife } from "./bonusLife";
+import { formatScore } from "./formatScore";
 
 // end-of-wave summary text — one row appears per beat with a paired
 //   sound, then the bonus drains into the score at four ticks per beat with
@@ -186,8 +187,8 @@ export const showWaveSummary = (
   setRow(root, "max", `x${maxRhythm}`);
   setRow(root, "final", `x${finalRhythm}`);
   setRow(root, "drift", String(driftBonuses));
-  setRow(root, "bonus", String(bonus));
-  setRow(root, "score", String(game.score));
+  setRow(root, "bonus", formatScore(bonus));
+  setRow(root, "score", formatScore(game.score));
 
   // Reset visual state and force reflow so the entrance animation re-plays.
   root.classList.remove("fade-out");
@@ -223,8 +224,8 @@ export const showWaveSummary = (
       remaining -= delta;
       displayedScore += delta;
       game.score += delta;
-      bonusValueEl.textContent = String(remaining);
-      scoreValueEl.textContent = String(displayedScore);
+      bonusValueEl.textContent = formatScore(remaining);
+      scoreValueEl.textContent = formatScore(displayedScore);
       pulseScore(scoreValueEl);
       syncHud(game);
       checkBonusLife(game);
