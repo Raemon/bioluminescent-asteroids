@@ -1,5 +1,52 @@
 [
   {
+    "id": "2026-06-12-46c1ac0",
+    "date": "2026-06-12",
+    "title": "New boss music, echo bonus, and bullet deflection",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Two new boss-fight music tracks — Vigil and Knell — replace the old boss theme.",
+          "A new post-boss haunting track, Spectral Toll, plays after defeating the boss.",
+          "Solid crystals now deflect weak bullets instead of absorbing them, with particle effects showing the bounce.",
+          "A new Echo bonus tracks bass hits on asteroids and adds to your score multiplier.",
+          "Bass lightning arcs now visually connect bass-echo hits during gameplay.",
+          "Rhythm bonus popups appear when you hit shots in time with the beat."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Music stems now load gradually at run start instead of all at once, reducing beat stutter in the opening seconds."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Scores are now formatted consistently across the HUD, game over screen, and wave summary.",
+          "The synthwave music layer has been retuned with a new upper-register pluck echo cascade for better presence in the mix."
+        ]
+      }
+    ],
+    "commits": [
+      "46c1ac0",
+      "ac50ff7",
+      "27c845a",
+      "a415851",
+      "9623fd2",
+      "679a619",
+      "3841c1c",
+      "629c1b4",
+      "3db5666",
+      "a23aed5",
+      "3c4e3cb",
+      "720db00",
+      "1a50671",
+      "fd93e88"
+    ]
+  },
+  {
     "id": "2026-06-09-38dd07e",
     "date": "2026-06-09",
     "title": "Touch controls added for mobile play",
