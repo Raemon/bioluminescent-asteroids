@@ -152,6 +152,12 @@ export const BASS_MAX_SPLIT_LEVEL = 2;
 // this table.
 export const ASTEROID_HP = ENTITY_CONFIG.asteroid.hp;
 
+// Combo-halo gap: the halo outline floats this many pixels outside the hull,
+// uniform along every edge and across every bassteroid size (a center-scale
+// multiplier would push long hull extremities much further out than the
+// flanks, and would scale the gap with the rock).
+const BASS_HALO_GAP_PX = 14;
+
 // Bassteroids carry the asteroid-HP table scaled by the bass multiplier so
 // the rhythm system has real teeth — even a rhythm-bullet (4 damage) needs
 // four hits to crack a large bassteroid, matching the "armoured" silhouette.
@@ -542,6 +548,10 @@ export class Asteroid {
   maxHp = 0;
   cracks: AsteroidCrack[] = [];
   bassShip: BassShip | null = null;
+  // Combo-halo outline: each module polygon offset outward by a fixed pixel
+  // gap (mitered, so corners stay sharp). Hull + radius never change after
+  // construction, so the offset polygons are built once and cached here.
+  haloOutline: { x: number; y: number }[][] | null = null;
   // Lingering "I just played a beat" flare. Independent from `flashAmount`
   // (the bullet-hit flash) so a beat-flash and a hit-flash can co-exist
   // without overwriting each other. Set to 1.0 in tickBassBeats and decays
@@ -2711,7 +2721,7 @@ export class Asteroid {
     return fragmentList;
   }
 
-  render(ctx: CanvasRenderingContext2D, t: number) {
+  render(ctx: CanvasRenderingContext2D, t: number, comboHalo?: { intensity: number; beatPulse: number }) {
     if (this.isBoss()) {
       // Dormant boss draws the swelling planetoid silhouette + the slow
       // architecture reveal; live boss draws the fully-built body with the
@@ -2727,7 +2737,7 @@ export class Asteroid {
     if (this.kind === "bossEmber") { this.renderBossEmber(ctx, t); return; }
     if (this.kind === "wraith") { this.renderWraith(ctx, t); return; }
     if (this.isBass()) {
-      this.renderBass(ctx);
+      this.renderBass(ctx, comboHalo);
       return;
     }
     ctx.save();
@@ -2969,6 +2979,69 @@ export class Asteroid {
     ctx.closePath();
   }
 
+  // Builds the combo-halo outline: every hull module polygon pushed outward
+  // by a constant pixel gap. Each edge is shifted along its outward normal
+  // and adjacent shifted edges are re-intersected, so the offset is uniform
+  // along every edge and corners stay sharp (mitered) instead of rounding
+  // or drifting the way a center-scale does. Pixel-space (already × radius).
+  buildHaloOutline(gapPx: number): { x: number; y: number }[][] {
+    const polys: { x: number; y: number }[][] = [];
+    if (!this.bassShip) return polys;
+    for (const module of this.bassShip.modules) {
+      const pts = module.vertices.map((vt) => ({ x: vt.x * this.radius, y: vt.y * this.radius }));
+      const n = pts.length;
+      // Shoelace sign tells us which perpendicular of each edge points outward.
+      let area = 0;
+      for (let i = 0; i < n; i++) {
+        const a = pts[i], b = pts[(i + 1) % n];
+        area += a.x * b.y - b.x * a.y;
+      }
+      const sign = area > 0 ? 1 : -1;
+      // Edge i runs pts[i] → pts[i+1]; anchors[i] is its start shifted out by gapPx.
+      const dirs: { x: number; y: number }[] = [];
+      const anchors: { x: number; y: number }[] = [];
+      for (let i = 0; i < n; i++) {
+        const a = pts[i], b = pts[(i + 1) % n];
+        const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        const d = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+        dirs.push(d);
+        anchors.push({ x: a.x + sign * d.y * gapPx, y: a.y - sign * d.x * gapPx });
+      }
+      const out: { x: number; y: number }[] = [];
+      for (let i = 0; i < n; i++) {
+        // Offset vertex i = intersection of shifted edge (i-1) and shifted edge i.
+        const j = (i + n - 1) % n;
+        const cross = dirs[j].x * dirs[i].y - dirs[j].y * dirs[i].x;
+        if (Math.abs(cross) < 1e-6) {
+          // Collinear edges — just push the vertex straight out.
+          out.push({ x: pts[i].x + sign * dirs[i].y * gapPx, y: pts[i].y - sign * dirs[i].x * gapPx });
+          continue;
+        }
+        const dx = anchors[i].x - anchors[j].x;
+        const dy = anchors[i].y - anchors[j].y;
+        const t = (dx * dirs[i].y - dy * dirs[i].x) / cross;
+        out.push({ x: anchors[j].x + dirs[j].x * t, y: anchors[j].y + dirs[j].y * t });
+      }
+      polys.push(out);
+    }
+    return polys;
+  }
+
+  // Trace the cached combo-halo outline into the current path (local space,
+  // caller already translated/rotated). Built lazily — hull and radius never
+  // change after construction, so the offset polygons are computed once.
+  traceHaloOutline(ctx: CanvasRenderingContext2D) {
+    if (!this.haloOutline) this.haloOutline = this.buildHaloOutline(BASS_HALO_GAP_PX);
+    ctx.beginPath();
+    for (const poly of this.haloOutline) {
+      for (let i = 0; i < poly.length; i++) {
+        if (i === 0) ctx.moveTo(poly[i].x, poly[i].y);
+        else ctx.lineTo(poly[i].x, poly[i].y);
+      }
+      ctx.closePath();
+    }
+  }
+
   // Generic crack overlay used by both organic asteroids and bassteroids.
   // Draws one crack per HP lost (jagged fracture-lines radiating from the
   // impact point) as a dark inner stroke plus a thin bright over-stroke
@@ -3028,7 +3101,7 @@ export class Asteroid {
   // (one per HP lost) + a big bright beat flare on the beat. The beat flare
   // gates the visual rhythm — when all four kinds are active it reads as a
   // syncopated lighthouse sweep across the screen.
-  renderBass(ctx: CanvasRenderingContext2D) {
+  renderBass(ctx: CanvasRenderingContext2D, comboHalo?: { intensity: number; beatPulse: number }) {
     const baseHue = this.hue;
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
@@ -3061,6 +3134,38 @@ export class Asteroid {
     const beatScale = 1 + 0.06 * this.beatFlash;
     ctx.scale(beatScale, beatScale);
     ctx.globalCompositeOperation = "lighter";
+
+    // Combo halo: at 4+ rhythm (ship halo tier 2) every bassteroid wears the
+    // same gold beat-pulsing outline the ship does, shifting to white at 12+
+    // (tier 3) — same hue/sat/light/alpha math as shipComboHalo.paintActiveHalo,
+    // gated by tier2 so it only exists once the ship halo has turned gold.
+    // Eased by the ship's comboHaloIntensity so it ignites and fades in
+    // lockstep with the ship's own halo. Traced on the bassteroid's silhouette
+    // (just outside the hull) so it reads as the rock joining the combo, not a
+    // HUD ring.
+    if (comboHalo) {
+      const tier2 = Math.max(0, Math.min(1, comboHalo.intensity - 1));
+      const tier3 = Math.max(0, Math.min(1, comboHalo.intensity - 2));
+      if (tier2 > 0.001) {
+        const hue = 195 + (45 - 195) * tier2;
+        const sat = 100 * (1 - tier3);
+        const light = 78 + (100 - 78) * tier3;
+        const alpha = (0.65 + 0.35 * comboHalo.beatPulse) * tier2;
+        // The bassteroid body is a big bright additive sprite, so a ship-width
+        // 1.6px stroke vanishes against it — the halo needs to scale with the
+        // rock and carry its own glow. Same path stroked twice: a wide faint
+        // pass is the aura, a narrow bright pass is the rim (the same trick
+        // the beat flare above uses instead of shadowBlur).
+        const w = Math.max(2, this.radius * 0.09);
+        this.traceHaloOutline(ctx);
+        ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${Math.min(100, light - 10)}%, ${0.4 * alpha})`;
+        ctx.lineWidth = w * 3.2;
+        ctx.stroke();
+        ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
+        ctx.lineWidth = w;
+        ctx.stroke();
+      }
+    }
 
     if (this.sprite) {
       ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);

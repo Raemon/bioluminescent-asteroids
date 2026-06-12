@@ -87,6 +87,13 @@ export const Overlay = () => {
       >
         sound →
       </a>
+      <a
+        id="music-link"
+        href="/music"
+        className={isLocalhost() ? "" : "hidden"}
+      >
+        music →
+      </a>
       <div id="overlay-title-group">
         <h1 id="overlay-title">Pulsar Drift</h1>
         <p id="overlay-subtitle">A Meditative Rhythm Journey</p>

@@ -511,6 +511,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 #overlay.hidden { display: none; }
 
 #sound-link,
+#music-link,
 #devlog-link,
 #instructions-link {
   position: absolute;
@@ -533,10 +534,13 @@ html:has(#sound-root), body:has(> #sound-root) {
 #instructions-link { left: 28px; }
 #devlog-link { left: 135px; }
 #sound-link { left: 250px; }
+#music-link { left: 355px; }
 
 #sound-link.hidden { display: none; }
+#music-link.hidden { display: none; }
 
 #sound-link:hover,
+#music-link:hover,
 #devlog-link:hover,
 #instructions-link:hover {
   color: #6ad7ff;

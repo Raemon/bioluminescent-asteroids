@@ -26,8 +26,8 @@ export const DEFAULT_BINDINGS: Bindings = {
   precisionTurn: ["shift"],
   thrust: ["arrowup"],
   reverse: ["arrowdown"],
-  sidePort: [],
-  sideStarboard: [],
+  sidePort: ["z"],
+  sideStarboard: ["x"],
   fire: [" "],
   pause: ["escape"],
 };

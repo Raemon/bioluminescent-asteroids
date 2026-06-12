@@ -59,11 +59,6 @@ const VARIATION_META: Record<Variation, VariationInfo> = {
     blurb: "ElevenLabs analog-synthwave Juno pad (ambient) + soft lead (melodic) + plucked detuned-saw motif with dotted-eighth ping-pong delay cascading through the upper register (layer 3).",
     gains: { ambient: 0.22, melodic: 0.22, layer3: 0.38 },
   },
-  "flagship-sb": {
-    label: "flagship-sb — 16th-note arp + nylon guitar + solo violin",
-    blurb: "Procedural rhythmic 16th-note arp (ambient) + lush solo nylon-string guitar, slow and lyrical with hall reverb (melodic, ElevenLabs, HPF'd 120 Hz) + singing legato solo violin in the upper register (layer 3, ElevenLabs, HPF'd 300 Hz). Cinematic and beautiful — the EL acoustic voices ride the procedural pulse.",
-    gains: { ambient: 1.0, melodic: 0.25, layer3: 0.30 },
-  },
   "vaporwave-el": {
     label: "vaporwave-el — glassy string-choir pad + felt bells + crystal glockenspiel",
     blurb: "ElevenLabs dawn/vaporwave: glassy string-choir pad (ambient) + sparse felt-bell sustains (melodic) + bright crystal-glockenspiel arpeggio (layer 3). All stems live mid-upper register so the bass field stays clean.",

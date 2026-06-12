@@ -71,11 +71,11 @@ export const ENTITY_CONFIG = {
     hp: { big: 4, medium: 2, small: 1 } as Record<AlienSize, number>,
     score: { big: 400, medium: 220, small: 130 } as Record<AlienSize, number>,
     speed: {
-      big: [50, 80],
-      medium: [70, 110],
-      small: [95, 140],
+      big: [33, 53],
+      medium: [47, 73],
+      small: [63, 93],
     } as Record<AlienSize, [number, number]>,
-    bulletSpeed: { big: 220, medium: 280, small: 400 } as Record<AlienSize, number>,
+    bulletSpeed: { big: 110, medium: 140, small: 200 } as Record<AlienSize, number>,
   },
 
   comet: {

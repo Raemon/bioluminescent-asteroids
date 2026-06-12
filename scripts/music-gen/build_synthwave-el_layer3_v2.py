@@ -4,15 +4,15 @@ The previous layer 3 (FluidSynth synth-bass arp, C2/G2 quarter notes) sat in
 the same sub-500 Hz register as the ambient and melodic stems — the whole
 variation has ~87% of its energy below 500 Hz and the 12x reward was
 spectrally invisible. This version goes the opposite way: a sparse plucked
-detuned-saw motif in C5-C6 whose dotted-eighth ping-pong delay fills the
-empty upper register with cascading syncopation — the classic synthwave
-sequencer-echo move, voiced here as a round sine-dominant pluck so it glows
-under the mix rather than buzzing on top of it.
+detuned-saw motif in C5-C6 whose straight-eighth ping-pong delay fills the
+empty upper register with cascading motion — the synthwave sequencer-echo
+move, voiced here as a round sine-dominant pluck so it glows under the mix
+rather than buzzing on top of it.
 
 Structure follows the variation's A-A'-B-A' phrase plan. Each measure
-strikes only 2-3 notes; the 375 ms delay (dotted eighth at 120 BPM) supplies
-the rest of the motion, echoing across the 0.5 s beat grid so the cascade
-lands on-beat, off-beat, on-beat... in turn.
+strikes only 2-3 notes; the 250 ms delay (straight eighth at 120 BPM)
+supplies the rest of the motion, every echo landing cleanly on the eighth-
+note grid (on-beat / off-beat / on-beat) so the cascade stays locked.
 
 Phrase colour tones (top of the motif):
   A   E6   (maj 3rd)
@@ -40,7 +40,7 @@ BEAT_S = 60.0 / BPM            # 0.5
 MEASURE_S = 4 * BEAT_S         # 2.0
 LOOP_S = 32.0
 
-DELAY_S = 0.375                # dotted eighth
+DELAY_S = 0.250                # straight eighth — echoes land on the grid
 DELAY_FEEDBACK = 0.48
 DELAY_MIN_GAIN = 0.04
 

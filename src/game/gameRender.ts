@@ -67,7 +67,10 @@ const paintEntityLayers = (
   renderTrails(game, ctx);
   for (const c of game.comets) c.render(ctx);
   for (const s of game.shards) s.render(ctx);
-  for (const a of game.asteroids) a.render(ctx, game.time);
+  // bassteroids wear the ship's 4+/12+ combo halo — share the ship's eased
+  // intensity + the live beat pulse so every halo on the field rides one rhythm.
+  const comboHalo = { intensity: game.ship.comboHaloIntensity, beatPulse: currentBeatPulse(game) };
+  for (const a of game.asteroids) a.render(ctx, game.time, comboHalo);
   for (const c of game.canisters) c.render(ctx, game.time);
   for (const g of game.goldCrystals) g.render(ctx, game.time);
   for (const al of game.aliens) al.render(ctx, game.time);

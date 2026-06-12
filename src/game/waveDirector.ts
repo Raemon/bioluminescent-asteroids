@@ -347,7 +347,7 @@ const rollHeadlineEvents = (game: Game) => {
   // Rhythm additively boosts the alien-size rolls and the shockwave roll.
   //   Comet is left on its existing curve — only aliens + shockwave were asked for.
   const bonus = rhythmChanceBonus(game);
-  const alienGate = game.wave >= CFG.alien.firstWave || (game.wave < 10 && game.beatCombo >= 12);
+  const alienGate = game.wave >= 10 || (game.wave < 10 && game.beatCombo >= 12);
   const alienSizeRoll = (size: AlienSize): HeadlineRoll => ({
     gate: alienGate && CFG.alienSizeShare(game.wave, size) > 0,
     baseChance: CFG.alien.chancePerWave * CFG.alienSizeShare(game.wave, size) + bonus,

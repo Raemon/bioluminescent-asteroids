@@ -33,11 +33,6 @@
 //   synthwave-el  ElevenLabs analog-synthwave Juno pad + soft lead + pulsed
 //          synth-bass arp on the off-beats (synthwave-appropriate motion,
 //          octave-low to fill the space the lead leaves).
-//   flagship-sb  Self-built rhythmic 16th-note arp (ambient) + lush solo
-//          nylon-string guitar (melodic, ElevenLabs — slow lyrical line, hall
-//          reverb) + singing solo violin (layer 3, ElevenLabs — upper register,
-//          HPF'd). Cinematic and beautiful; the EL acoustic voices ride the
-//          procedural pulse.
 //   vaporwave-el  ElevenLabs dawn/vaporwave: glassy string-choir pad (ambient) +
 //          sparse felt-bell sustains (melodic) + bright crystal-glockenspiel
 //          arpeggio (layer 3). All three stems live in mid-upper register so
@@ -60,7 +55,7 @@ import { rng } from "./rng";
 // synth pad) starts — the field stays at bass-only.
 export const PLAY_COMBO_MUSIC = true;
 
-export const HALO_MUSIC_POOL: readonly HaloMusicVariation[] = ["cinematic-el", "musicbox-sb", "synthwave-el", "flagship-sb", "vaporwave-el", "outerwilds-el"];
+export const HALO_MUSIC_POOL: readonly HaloMusicVariation[] = ["cinematic-el", "musicbox-sb", "synthwave-el", "vaporwave-el", "outerwilds-el"];
 
 // Post-boss "haunting" pool. Picked from on internal waves 12–20 (display
 // levels 11–19) instead of HALO_MUSIC_POOL. Three ElevenLabs variations

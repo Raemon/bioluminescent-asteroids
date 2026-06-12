@@ -119,7 +119,6 @@ export type HaloMusicVariation =
   | "cinematic-el"   // ElevenLabs 32-second C-pedal cinematic bed + sustained-tone piano
   | "musicbox-sb"   // Self-built 32-second C-pedal procedural pad + held-tone felt piano
   | "synthwave-el"   // ElevenLabs 32-second C-pedal analog-synthwave: Juno-style pad + soft lead + layer 3
-  | "flagship-sb"    // 32-second C-pedal flagship — pulsing procedural arp (ambient) + lush solo nylon-guitar (melodic, EL) + singing solo violin (layer 3, EL); cinematic and beautiful
   | "spectral-toll-sb"      // Haunting post-boss (waves 12–20). Deep C/G drone (ambient, EL) / mournful solo cello (melodic, EL) / sparse inharmonic glass bells with ping-pong echo (layer 3, procedural).
   | "vaporwave-el"   // ElevenLabs 32-second C-pedal dawn/vaporwave — glassy string-choir pad + sparse felt-bell sustains + bright crystal-glockenspiel arpeggio
   | "outerwilds-el"  // ElevenLabs 32-second Outer-Wilds folk — distant drone pad + fingerpicked G-rooted acoustic guitar + sparse plucked D-centered acoustic-guitar countermelody (layer 3)
@@ -2567,12 +2566,6 @@ export class Sound {
       // +6.8 dB above the ≥4 dB pass threshold. Going higher risks the
       // analog pad fighting the bass field.
       case "synthwave-el": return 0.22;
-      // flagship-sb pairs the rhythmic 16th-note arp ambient with a lush solo
-      // nylon-string guitar (melodic, EL — slow lyrical line, hall reverb,
-      // HPF'd at 120 Hz). Single-stem audit at 0.25 keeps lo-mid clean by
-      // +8.5 dB, bass +25.9 dB. Tuned gains live in music-config.json (the
-      // ambient there is user-set to 1.0; melodic balances against it).
-      case "flagship-sb": return 0.25;
       // vaporwave-el is a bright EL dawn/vaporwave variation. Ambient = glassy
       // string-choir pad in the mid-upper register; melodic = sparse felt-bell
       // sustains. Both layers were generated to live above the bass band
@@ -2640,11 +2633,6 @@ export class Sound {
       // ambient + melodic stems leave empty. No energy below 500 Hz, so the
       // full 3-layer stack at gain 0.38 still leaves lo-mid +6.2 dB.
       case "synthwave-el": return 0.38;
-      // flagship-sb layer 3 is a singing solo violin (EL), upper register,
-      // HPF'd at 300 Hz so its body clears the arp + bass field. At 0.30 the
-      // violin leaves lo_mid +11 dB, bass +55 dB. Tuned gain lives in
-      // music-config.json.
-      case "flagship-sb": return 0.30;
       // vaporwave-el layer3 is a bright crystal-glockenspiel arpeggio in the upper
       // register. Audit at gain 0.32 (in the full 3-layer mix above) leaves
       // lo-mid +5.8 dB and mid +5.9 dB margin against the bass field.
@@ -5084,11 +5072,9 @@ export class Sound {
   // kill. All variants open with the same three universal anchor notes on a
   // C pedal (C2 → G2 → D3 — root, fifth, ninth), then branch into a scale
   // that matches the currently-playing halo music's modal colour:
-  //   musicbox-sb / cinematic-el / flagship-sb → C minor / dorian-leaning (haunting Eb, Bb)
+  //   musicbox-sb / cinematic-el → C minor / dorian-leaning (haunting Eb, Bb)
   //   synthwave-el                 → C major pentatonic (open, hopeful)
   //   no music (default)    → C dorian without 3rd (mode-neutral)
-  // flagship-sb additionally drifts toward Cmaj7 colour at higher combos so the line
-  // crosses the same major/minor ambiguity its arp does.
   // Voice: soft sine pad — slow attack, long round decay, gentle detune for
   // analog-synth warmth. No spatial panning: a melody should sit centered in
   // the mix instead of jumping with each kill.
@@ -5122,14 +5108,6 @@ export class Sound {
       329.63, 392.00, 440.00, 523.25, 587.33,
       659.25, 783.99, 880.00,
     ];
-    const TAIL_BITTERSWEET: number[] = [
-      // E, G, Bb, C, Eb, F, G, Bb, C, D, Eb, G, Bb — smears Eb (minor3) with
-      // E natural and Bb (Cmaj7 longing). flagship-sb cycles all three colours, so
-      // the chime crosses them too instead of committing to one.
-      164.81, 196.00, 233.08, 261.63, 311.13,
-      349.23, 392.00, 466.16, 523.25, 587.33,
-      622.25, 783.99, 932.33,
-    ];
     const TAIL_NO_3RD: number[] = [
       // F, G, A, C, D, F, G, A, C, D, F, G, A — C dorian/mixolydian crossover
       // with the major/minor 3rd avoided entirely. Mode-safe default when no
@@ -5141,7 +5119,6 @@ export class Sound {
     const tailFor = (): number[] => {
       const v = this.haloMusic?.variation;
       if (v === "synthwave-el") return TAIL_MAJOR;
-      if (v === "flagship-sb") return TAIL_BITTERSWEET;
       if (v === "musicbox-sb" || v === "cinematic-el") return TAIL_MINOR_DORIAN;
       return TAIL_NO_3RD;
     };

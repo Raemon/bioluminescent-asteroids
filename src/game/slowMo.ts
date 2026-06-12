@@ -2,12 +2,12 @@
 // beatTime and bass audio all step at SLOW_MO_FACTOR speed. The player
 // ship and the slowMoTimer itself keep wall-clock dt so the player's
 // reactions feel responsive and the effect doesn't extend its own lifespan.
-export const SLOW_MO_DURATION = 24;
+export const SLOW_MO_DURATION = 72;
 export const SLOW_MO_FACTOR = 0.5;
 // Ease the music-clock factor 1.0 ↔ SLOW_MO_FACTOR over this many seconds at
 // each edge of the slow-mo window. The pulsar's quarter-note beat audibly
 // stretches into and out of slow-mo instead of snapping rate-changes mid-bar.
-export const SLOW_MO_RAMP = 1.5;
+export const SLOW_MO_RAMP = 3.5;
 
 // Smoothstep eases the slowdown so the beat doesn't decelerate at a constant
 // rate — the rate-of-change itself fades in/out, which is what makes it read
