@@ -103,7 +103,9 @@ export class Ship {
     hoverStartBeatTime: number | null;
     completionBeatTime: number | null;
     zoneEnterBeatTime: number | null;
-  }> = [{ hoverStartBeatTime: null, completionBeatTime: null, zoneEnterBeatTime: null }];
+    fadeOutStartTime: number | null;
+    lastRingCenter: { x: number; y: number } | null;
+  }> = [{ hoverStartBeatTime: null, completionBeatTime: null, zoneEnterBeatTime: null, fadeOutStartTime: null, lastRingCenter: null }];
   get hoverDotRingState() { return this.hoverDotRingStates[0]; }
 
   constructor(pos: Vec) { this.pos = pos; }

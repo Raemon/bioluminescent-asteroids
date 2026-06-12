@@ -61,22 +61,31 @@ const findFirstHittingBullet = (bullets: Bullet[], target: CollidableTarget): Bu
 const consumeBullet = (b: Bullet) => { if (!b.pierce) b.life = 0; };
 
 // A shot that can't break the target's armour ricochets: velocity reflects about
-// the surface normal (center→bullet), the bullet is shoved just clear of the
-// hitbox so it doesn't re-trigger next frame, and sparks fly back along the
-// normal. The bullet keeps its damage tier — a bounced on-beat shot is still
-// on-beat if it goes on to land elsewhere.
-const deflectBulletOff = (game: Game, b: Bullet, a: Asteroid) => {
+// the surface normal (center→bullet), drops to half speed (the crystal eats the
+// rest), the bullet is shoved just clear of the hitbox so it doesn't re-trigger
+// next frame, and sparks fly back along the normal. The bullet keeps its damage
+// tier — a bounced on-beat shot is still on-beat if it goes on to land elsewhere.
+// Half the momentum the blocked damage *would* have transferred still shoves the
+// crystal, so a fully-armoured rock can still be nudged by sustained fire.
+const deflectBulletOff = (game: Game, b: Bullet, a: Asteroid, blockedDmg: number) => {
   let nx = b.pos.x - a.pos.x;
   let ny = b.pos.y - a.pos.y;
   const len = Math.hypot(nx, ny) || 1;
   nx /= len;
   ny /= len;
+  // the blocked shot shoves the crystal along its *incoming* heading (captured
+  // before we reflect b.vel), so the rock gets pushed the way the bullet was going.
+  const inVx = b.vel.x;
+  const inVy = b.vel.y;
   const vdotn = b.vel.x * nx + b.vel.y * ny;
   // only reflect the inward component — a glancing shot already leaving keeps going.
   if (vdotn < 0) {
     b.vel.x -= 2 * vdotn * nx;
     b.vel.y -= 2 * vdotn * ny;
   }
+  a.applyKnockback(inVx, inVy, blockedDmg * 0.5);
+  b.vel.x *= 0.5;
+  b.vel.y *= 0.5;
   // push outside the hitbox along the normal so the next frame starts clear.
   // Use the faceted surface radius at this angle (crystals peak well past their
   // nominal radius) plus a small margin so the deflected shot can't re-collide.
@@ -85,7 +94,12 @@ const deflectBulletOff = (game: Game, b: Bullet, a: Asteroid) => {
   b.pos.x = a.pos.x + nx * clear;
   b.pos.y = a.pos.y + ny * clear;
   b.trail.length = 0;
-  emitBounceSparks(game.particles, b.pos, { x: nx, y: ny }, a.hue);
+  // impact reads the blocked momentum the same way applyKnockback does (vs the
+  // rock's mass) so the spark spray scales with how hard the shot rang it.
+  const impact = Math.min(1, blockedDmg / Math.max(1, a.maxHp));
+  a.flashAmount = Math.max(a.flashAmount, 0.5 * impact);
+  game.sound.play("tink", 0.5 + 0.4 * impact, a.pos);
+  emitBounceSparks(game.particles, b.pos, { x: nx, y: ny }, a.hue, impact);
 };
 
 // walk every rock so multi-hit HP and on-kill splits both resolve in one collision pass.
@@ -111,7 +125,7 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     // the target's armour deflects instead of landing — no damage, no combo,
     // and the shot ricochets off the surface so it can travel on.
     if (dmg <= a.damageReduction) {
-      deflectBulletOff(game, b, a);
+      deflectBulletOff(game, b, a, dmg);
       return null;
     }
     consumeBullet(b);

@@ -3,7 +3,11 @@
     "allow": [
       "Bash(npx tsc *)",
       "Bash(venv/bin/python analyze.py inspect ../../public/sounds/halo-music/synthwave-el-layer3.mp3)",
-      "Bash(venv/bin/python *)"
+      "Bash(venv/bin/python *)",
+      "Skill(run)",
+      "Bash(npm run *)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(pkill *)"
     ]
   }
 }

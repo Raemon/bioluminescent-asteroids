@@ -323,6 +323,11 @@ export class Sound {
   // a sharper attack that settles into the same chill on-beat pulse as the base hum.
   // Null until startFirstDotLockHum fires; cleared by stopFirstDotLockHum on hover loss.
   private firstDotLockHum: FirstDotHumNode | null = null;
+  // Major-third harmony hum (E4) that joins only once a drift shot is fully enabled (ring locked)
+  // AND the reticule is still inside the tight hover radius — completing the C-E-G-C triad. Unlike
+  // the lock fifth, it drops the instant the reticule leaves the small radius, so it tracks the
+  // tighter hover band rather than the persistent lock state.
+  private firstDotHarmonyHum: FirstDotHumNode | null = null;
   // Per-bassteroid ambient drone, keyed by the Asteroid instance. Only
   // populated for medium/small bass pieces (a large piece is "sealed" — it
   // hasn't been broken open yet).
@@ -1171,6 +1176,7 @@ export class Sound {
     if (!on) this.stopFirstDotHum();
     if (!on) this.stopFirstDotOctaveHum();
     if (!on) this.stopFirstDotLockHum();
+    if (!on) this.stopFirstDotHarmonyHum();
     if (!on) this.stopAllBassteroidDrones();
     if (!on) this.stopAllCometShimmers();
     if (!on) this.stopHaloAmbient();
@@ -1588,6 +1594,62 @@ export class Sound {
       try { node.vibratoLfo.stop(stopAt); } catch {}
       this.firstDotLockHum = null;
     }, Math.ceil(Sound.FIRST_DOT_LOCK_HUM_FAST_RELEASE_SEC * 1000) + 20);
+  }
+
+  // Major-third harmony hum (E4 = 329.63 Hz) layered on top of the C4/C5/G4 stack once the drift
+  // shot is fully enabled and the reticule is still inside the tight hover radius. It turns the
+  // open C+G+C voicing into a full C-major triad, so achieving and holding a lock reads as the
+  // chord "resolving". Tied to the tight hover band — it drops the instant the reticule slips off
+  // the small radius (the same gate that disables the drift shot), so it needs the lock fifth's
+  // fast release rather than the gentle two-stage tail.
+  private static readonly FIRST_DOT_HARMONY_HUM_PEAK_GAIN = 0.042;
+  private static readonly FIRST_DOT_HARMONY_HUM_ATTACK_SEC = 0.35;
+  private static readonly FIRST_DOT_HARMONY_HUM_FILTER_TROUGH_HZ = 820;
+  private static readonly FIRST_DOT_HARMONY_HUM_FILTER_PEAK_HZ = 1150;
+  // Called every frame the drift shot is enabled AND the reticule sits in the tight hover radius.
+  // Lazily spins up the voice with a soft swell on the first frame, resumes it if a prior exit had
+  // it mid-release (a quick slip-off-and-back doesn't re-pop to full volume), then rides the same
+  // on-beat formant pulse as the other hums.
+  updateFirstDotHarmonyHum(beatPhase01: number, beatGrid: number) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    if (!this.firstDotHarmonyHum) {
+      // E4 = 329.63 Hz — the major third above the C4 root, completing the triad.
+      this.firstDotHarmonyHum = this.createHumVoice(329.63, 4.5, 0.0035, Sound.FIRST_DOT_HARMONY_HUM_FILTER_TROUGH_HZ);
+      if (!this.firstDotHarmonyHum) return;
+      this.firstDotHarmonyHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_HARMONY_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_HARMONY_HUM_ATTACK_SEC);
+    }
+    const node = this.firstDotHarmonyHum;
+    if (node.releasing) {
+      this.resumeHumIfReleasing(node, t);
+      node.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_HARMONY_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_HARMONY_HUM_ATTACK_SEC);
+    }
+    if (beatGrid > 0) this.scheduleHumBeatPulse(node, t, beatPhase01, beatGrid, Sound.FIRST_DOT_HARMONY_HUM_FILTER_TROUGH_HZ, Sound.FIRST_DOT_HARMONY_HUM_FILTER_PEAK_HZ);
+  }
+
+  // fast release matching the lock fifth — the third must vanish inside FAST_RELEASE_SEC the
+  // moment the reticule leaves the tight radius so it doesn't linger past the drift-shot window.
+  private static readonly FIRST_DOT_HARMONY_HUM_FAST_RELEASE_SEC = 0.05;
+  stopFirstDotHarmonyHum() {
+    if (!this.firstDotHarmonyHum || !this.ctx) return;
+    const node = this.firstDotHarmonyHum;
+    if (node.releasing) return;
+    const t = this.ctx.currentTime;
+    const releaseEnd = t + Sound.FIRST_DOT_HARMONY_HUM_FAST_RELEASE_SEC;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.linearRampToValueAtTime(0.0001, releaseEnd);
+    node.releasing = true;
+    node.releaseCleanupTimer = setTimeout(() => {
+      if (this.firstDotHarmonyHum !== node) return;
+      const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
+      try { node.oscA.stop(stopAt); } catch {}
+      try { node.oscB.stop(stopAt); } catch {}
+      try { node.vibratoLfo.stop(stopAt); } catch {}
+      this.firstDotHarmonyHum = null;
+    }, Math.ceil(Sound.FIRST_DOT_HARMONY_HUM_FAST_RELEASE_SEC * 1000) + 20);
   }
 
   // Ambient drone played for the lifetime of a broken-open bassteroid. There

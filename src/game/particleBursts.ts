@@ -77,20 +77,41 @@ export const emitExplosion = (particles: ParticleSystem, shards: Shard[], a: Ast
 
 // a shot too weak to break armour bounces off — a tight, bright spray fired back
 // along the impact normal reads as "deflected" rather than "absorbed".
-export const emitBounceSparks = (particles: ParticleSystem, pos: Vec, normal: Vec, hue: number) => {
+// A blocked shot doesn't chip the crystal, so the bounce has to carry the
+// felt-impact on its own: a fan of sparks back along the surface normal plus a
+// short ring of white-hot flecks at the contact point that read as a hard,
+// non-damaging clang. `impact` (0..1) scales the spray width and brightness so
+// a heavier blocked hit visibly hits harder.
+export const emitBounceSparks = (particles: ParticleSystem, pos: Vec, normal: Vec, hue: number, impact = 0.5) => {
   const baseAngle = Math.atan2(normal.y, normal.x);
-  const count = 7;
+  const count = 9 + Math.round(impact * 8);
   for (let i = 0; i < count; i++) {
-    const angle = baseAngle + rand(-0.7, 0.7);
+    const angle = baseAngle + rand(-0.8, 0.8);
     particles.emit({
       pos: { ...pos },
-      vel: fromAngle(angle, rand(120, 280)),
-      life: rand(0.12, 0.28),
-      maxLife: 0.28,
-      size: rand(1.2, 2.2),
+      vel: fromAngle(angle, rand(140, 320 + impact * 200)),
+      life: rand(0.14, 0.34),
+      maxLife: 0.34,
+      size: rand(1.4, 2.6),
       hue: hue + rand(-10, 14),
       shrink: 1,
-      drag: 5.0,
+      drag: 4.5,
+    });
+  }
+  // Contact flash — a tight ring of bright flecks at the point of impact, very
+  // short-lived and densely overlapping so additive blending stacks them to a
+  // white-hot core. Sells the metallic "clang" without dust/debris.
+  const flecks = 5 + Math.round(impact * 6);
+  for (let i = 0; i < flecks; i++) {
+    particles.emit({
+      pos: { ...pos },
+      vel: fromAngle(rand(0, TAU), rand(40, 120)),
+      life: rand(0.06, 0.16),
+      maxLife: 0.16,
+      size: rand(1.6, 3.0),
+      hue: hue + rand(-6, 6),
+      shrink: 1,
+      drag: 7.0,
     });
   }
 };

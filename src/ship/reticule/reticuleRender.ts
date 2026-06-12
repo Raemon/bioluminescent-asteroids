@@ -45,6 +45,8 @@ type HoverRingState = {
   hoverStartBeatTime: number | null;
   completionBeatTime: number | null;
   zoneEnterBeatTime: number | null;
+  fadeOutStartTime: number | null;
+  lastRingCenter: Vec | null;
 };
 type ReticuleState = {
   trajectoryTracks: TrajectoryTrackMap;
@@ -74,6 +76,7 @@ const HOVER_DOT_PULSE_PERIOD_SEC = 2.0;
 // aim disc, and the soundwaves carry the rhythmic pulse.
 const HOVER_DOT_RESTING_ALPHA = 0.18;
 const HOVER_DOT_FADE_SEC = 0.4;
+const HOVER_DOT_FADEOUT_SEC = 0.1;
 const HOVER_DOT_HSL = RETICULE_DASH_HSL;
 // lock flare: brightens the dot-ring arcs briefly at lock acquisition. Marks "lock acquired"
 // — the octave-up hum starts here too. Tutorial gate fires on elapsed >= TUTORIAL_HOVER_SEC
@@ -242,6 +245,7 @@ const computeReticulePositions = (
 // ring just crossed into "filled" this frame (rising-edge signal for the audio companion).
 const paintHoverDotRing = (
   ctx: CanvasRenderingContext2D, center: Vec, elapsed: number, beatTime: number, beatGrid: number,
+  fadeOutAlpha: number = 1,
 ): { fillJustCompleted: boolean } => {
   const slotDuration = HOVER_RING_SLOT_SEC;
   const visibleCount = Math.min(HOVER_DOT_COUNT, Math.floor(elapsed / slotDuration) + 1);
@@ -266,12 +270,14 @@ const paintHoverDotRing = (
   const arcHsl = burstEnvelope > 0
     ? lerpHsl(HOVER_DOT_HSL, HOVER_FLARE_WARM_HSL, burstEnvelope)
     : HOVER_DOT_HSL;
+  // apply overall fadeOut multiplier (used when reticule leaves the trigger zone)
+  const effectiveAlphaMultiplier = fadeOutAlpha;
   // soundwaves emit BEFORE arcs so the arcs and the dot/aim disc paint on top of them.
   // The first wave fires one beat before fill completes (HOVER_WAVE_LEAD_BEATS), so the
   // pulse is already underway by the time the arcs finish locking in.
   const wavesStartSec = fillCompleteSec - HOVER_WAVE_LEAD_BEATS * beatGrid;
   if (elapsed >= wavesStartSec) {
-    paintSoundwaves(ctx, center, elapsed - wavesStartSec, beatTime, beatGrid);
+    paintSoundwaves(ctx, center, elapsed - wavesStartSec, beatTime, beatGrid, fadeOutAlpha);
   }
   // white center flash on lock acquisition — sized to the bullet's on-beat hit radius so the
   // moment of lock visually anchors on the actual hit zone, not the wider dashed dot ring.
@@ -281,11 +287,11 @@ const paintHoverDotRing = (
     // settling in rather than a strobe.
     const env = Math.sin(t * Math.PI);
     ctx.save();
-    ctx.fillStyle = `hsla(0, 0%, 100%, ${HOVER_CENTER_FLASH_PEAK_ALPHA * env})`;
+    ctx.fillStyle = `hsla(0, 0%, 100%, ${HOVER_CENTER_FLASH_PEAK_ALPHA * env * fadeOutAlpha})`;
     ctx.beginPath();
     ctx.arc(center.x, center.y, BULLET_HIT_RADIUS_ON_BEAT, 0, TAU);
     ctx.fill();
-    ctx.strokeStyle = `hsla(0, 0%, 100%, ${0.6 * env})`;
+    ctx.strokeStyle = `hsla(0, 0%, 100%, ${0.6 * env * fadeOutAlpha})`;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([]);
     ctx.beginPath();
@@ -303,7 +309,7 @@ const paintHoverDotRing = (
     const t = Math.min(1, Math.max(0, age / HOVER_ARC_FADE_IN_SEC));
     const sweepEase = 1 - Math.pow(1 - t, 3);
     const alphaEase = Math.sqrt(t);
-    const alpha = Math.min(1, baseAlpha * alphaEase * arcAlphaBoost);
+    const alpha = Math.min(1, baseAlpha * alphaEase * arcAlphaBoost * effectiveAlphaMultiplier);
     ctx.strokeStyle = `hsla(${arcHsl}, ${alpha})`;
     const mid = start + i * slot;
     const ccwEnd = mid - HOVER_ARC_SWEEP / 2;
@@ -322,6 +328,7 @@ const paintHoverDotRing = (
 // `lockAge` is seconds since the ring filled (≥0 when fully built).
 const paintSoundwaves = (
   ctx: CanvasRenderingContext2D, center: Vec, lockAge: number, beatTime: number, beatGrid: number,
+  fadeOutAlpha: number = 1,
 ) => {
   if (beatGrid <= 0) return;
   ctx.lineCap = "round";
@@ -355,7 +362,7 @@ const paintSoundwaves = (
     const peakAlpha = isLockWave ? HOVER_LOCK_WAVE_PEAK_ALPHA : HOVER_WAVE_PEAK_ALPHA;
     const lineWidth = isLockWave ? HOVER_LOCK_WAVE_LINE_WIDTH : HOVER_WAVE_LINE_WIDTH;
     ctx.lineWidth = lineWidth;
-    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${peakAlpha * envelope})`;
+    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${peakAlpha * envelope * fadeOutAlpha})`;
     ctx.beginPath();
     ctx.arc(center.x, center.y, r, 0, TAU);
     ctx.stroke();
@@ -415,7 +422,7 @@ export const renderShipReticules = (
   // grow the Ship's hover-ring array to match if range extended this frame; never shrink (so a
   // brief range loss doesn't wipe a partially-locked ring).
   while (state.hoverDotRings.length < slotPositionIndices.length) {
-    state.hoverDotRings.push({ hoverStartBeatTime: null, completionBeatTime: null, zoneEnterBeatTime: null });
+    state.hoverDotRings.push({ hoverStartBeatTime: null, completionBeatTime: null, zoneEnterBeatTime: null, fadeOutStartTime: null, lastRingCenter: null });
   }
   const apex = ship.pos;
   const { center: aimCircleCenter, radius: aimCircleRadius } = computeAimCircle(ship, beatGrid);
@@ -502,6 +509,10 @@ export const renderShipReticules = (
     else sound.stopFirstDotOctaveHum();
     if (anyLocked) sound.updateFirstDotLockHum(beatPhase01, beatGrid);
     else sound.stopFirstDotLockHum();
+    // major-third harmony joins only while the drift shot is enabled (ring locked) AND the
+    // reticule is still in the tight hover radius — it drops the instant either gate opens.
+    if (anyLocked && anyHover) sound.updateFirstDotHarmonyHum(beatPhase01, beatGrid);
+    else sound.stopFirstDotHarmonyHum();
   }
   ctx.restore();
 };
@@ -584,16 +595,46 @@ const snapToPrevSubBeat = (beatTime: number, beatGrid: number): number => {
 
 // per-ring state machine + visual paint for the tight target-area lock ring. Drives the dashed
 // clockwise fill and stamps completionBeatTime + fires the fifth (lock) hum on the rising edge.
+// When hover ends, fades out the ring over HOVER_DOT_FADEOUT_SEC before clearing the state.
 const updateHoverRing = (
-  ring: { hoverStartBeatTime: number | null; completionBeatTime: number | null },
+  ring: { hoverStartBeatTime: number | null; completionBeatTime: number | null; fadeOutStartTime: number | null; lastRingCenter: Vec | null },
   hovering: boolean, ringCenter: Vec | null,
   ctx: CanvasRenderingContext2D, beatTime: number, beatGrid: number, sound: Sound | null,
 ): void => {
+  // start fade-out if we were hovering and now we're not
+  if (!hovering && ring.hoverStartBeatTime !== null && ring.fadeOutStartTime === null) {
+    ring.fadeOutStartTime = beatTime;
+  }
+
+  // handle fade-out animation
+  if (ring.fadeOutStartTime !== null) {
+    const fadeElapsed = beatTime - ring.fadeOutStartTime;
+    const fadeT = Math.min(1, fadeElapsed / HOVER_DOT_FADEOUT_SEC);
+    const fadeOutAlpha = 1 - fadeT;
+
+    if (ring.lastRingCenter !== null) {
+      const elapsed = beatTime - ring.hoverStartBeatTime!;
+      paintHoverDotRing(ctx, ring.lastRingCenter, elapsed, beatTime, beatGrid, fadeOutAlpha);
+    }
+
+    if (fadeT >= 1) {
+      ring.hoverStartBeatTime = null;
+      ring.completionBeatTime = null;
+      ring.fadeOutStartTime = null;
+      ring.lastRingCenter = null;
+    }
+    return;
+  }
+
   if (!hovering || ringCenter === null) {
     ring.hoverStartBeatTime = null;
     ring.completionBeatTime = null;
+    ring.lastRingCenter = null;
     return;
   }
+
+  ring.lastRingCenter = ringCenter;
+
   if (ring.hoverStartBeatTime === null) {
     // anchor the fill's internal clock to the previous quarter-of-a-beat tick so each arc-tick
     // is phase-aligned to the song's sub-beat grid. Snapping backward (vs forward) avoids any
