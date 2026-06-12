@@ -75,6 +75,26 @@ export const emitExplosion = (particles: ParticleSystem, shards: Shard[], a: Ast
   }
 };
 
+// a shot too weak to break armour bounces off — a tight, bright spray fired back
+// along the impact normal reads as "deflected" rather than "absorbed".
+export const emitBounceSparks = (particles: ParticleSystem, pos: Vec, normal: Vec, hue: number) => {
+  const baseAngle = Math.atan2(normal.y, normal.x);
+  const count = 7;
+  for (let i = 0; i < count; i++) {
+    const angle = baseAngle + rand(-0.7, 0.7);
+    particles.emit({
+      pos: { ...pos },
+      vel: fromAngle(angle, rand(120, 280)),
+      life: rand(0.12, 0.28),
+      maxLife: 0.28,
+      size: rand(1.2, 2.2),
+      hue: hue + rand(-10, 14),
+      shrink: 1,
+      drag: 5.0,
+    });
+  }
+};
+
 // heavier dark debris reads "cracked, not killed" — distinguishes a chip from a kill.
 export const emitCrackParticles = (particles: ParticleSystem, a: Asteroid, onBeat: boolean) => {
   emitBurst(particles, {

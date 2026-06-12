@@ -133,10 +133,15 @@ export const ENTITY_CONFIG = {
     // (not applied post-hoc) so the crystal still crosses the kill range on a
     // beat, just later and more ponderously.
     largeSpawnSpeedMul: 0.5,
-    largeHp: 16,
+    largeHp: 9,
     largeScore: 400,
     smallHp: 4,
     smallScore: 200,
+    // Subtracted from every incoming hit before it touches HP. A plain 1-damage
+    // shot does nothing and visibly bounces off; only on-beat (4) and boosted
+    // (8) shots get through, the latter chipping 1 HP. Faceted ice should feel
+    // like it wants a real hit, not a peashooter.
+    damageReduction: 7,
     // Standalone solidCrystalSmall — a rare "treat" spawn on its own roll
     // (4 HP shard, smallScore on kill). Same cadence the tink roll used.
     smallSpawn: {

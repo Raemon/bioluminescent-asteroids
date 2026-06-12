@@ -173,6 +173,7 @@ export const BASS_HP: Record<AsteroidSize, number> = {
 // cleanup still demands a few well-timed shots.
 export const SOLID_CRYSTAL_HP_LARGE = ENTITY_CONFIG.solidCrystal.largeHp;
 export const SOLID_CRYSTAL_HP_SMALL = ENTITY_CONFIG.solidCrystal.smallHp;
+export const SOLID_CRYSTAL_DAMAGE_REDUCTION = ENTITY_CONFIG.solidCrystal.damageReduction;
 
 // Glass prison — the shell that locks a wraith in stasis. Tougher than a
 // solid crystal so even a rhythm-saturated player has to commit to breaking
@@ -546,6 +547,10 @@ export class Asteroid {
   // table — see `ASTEROID_HP` / `BASS_HP`.
   hp = 0;
   maxHp = 0;
+  // Flat amount subtracted from every incoming hit before it touches HP. A hit
+  // whose raw damage doesn't exceed this is fully absorbed — no HP lost, no
+  // crack, the shot bounces off. Solid crystals set this; 0 for everything else.
+  damageReduction = 0;
   cracks: AsteroidCrack[] = [];
   bassShip: BassShip | null = null;
   // Combo-halo outline: each module polygon offset outward by a fixed pixel
@@ -698,6 +703,7 @@ export class Asteroid {
       // Slightly oversized vs a stock large — reads as a more menacing target
       // without towering over the field. Smalls keep stock size.
       this.radius = SOLID_CRYSTAL_LARGE_RADIUS;
+      this.damageReduction = SOLID_CRYSTAL_DAMAGE_REDUCTION;
     }
     if (kind === "glassPrison") {
       // Slightly taller/thinner-feeling than a normal large; the elongated
@@ -1927,15 +1933,20 @@ export class Asteroid {
     this.flashAmount = 1;
   }
 
-  // Apply `amount` damage to this asteroid. Decrements HP and returns
-  // whether it's now dead. Non-killing hits reveal one or more cracks (the
-  // number revealed scales with the damage dealt so a 4-damage rhythm hit
-  // visibly cracks the asteroid harder than a 1-damage plain hit, even if
-  // it didn't kill). Caller is responsible for sound, particles, and split.
-  applyDamage(amount: number = 1): { killed: boolean } {
-    this.hp = Math.max(0, this.hp - amount);
+  // Apply `amount` damage to this asteroid. `damageReduction` is subtracted
+  // first; a hit that doesn't break through deals no HP loss and reports
+  // `bounced` so the caller can deflect the shot instead of consuming it as a
+  // real hit. Decrements HP and returns whether it's now dead. Non-killing
+  // hits reveal one or more cracks (the number revealed scales with the damage
+  // dealt so a 4-damage rhythm hit visibly cracks the asteroid harder than a
+  // 1-damage plain hit, even if it didn't kill). Caller is responsible for
+  // sound, particles, and split.
+  applyDamage(amount: number = 1): { killed: boolean; bounced: boolean; dealt: number } {
+    const dealt = Math.max(0, amount - this.damageReduction);
+    if (dealt <= 0) return { killed: false, bounced: true, dealt: 0 };
+    this.hp = Math.max(0, this.hp - dealt);
     this.flashAmount = 1;
-    return { killed: this.hp <= 0 };
+    return { killed: this.hp <= 0, bounced: false, dealt };
   }
 
   // a non-killing hit should visibly shove the target — fraction of "kill-worth"

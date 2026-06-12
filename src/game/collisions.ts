@@ -16,7 +16,7 @@ import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebas
 import { BEAT_GRID } from "./rhythmConstants";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
-import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup } from "./particleBursts";
+import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup, emitBounceSparks } from "./particleBursts";
 import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup } from "./popups";
 import { checkBonusLife } from "./bonusLife";
 import {
@@ -60,6 +60,34 @@ const findFirstHittingBullet = (bullets: Bullet[], target: CollidableTarget): Bu
 // pierce keeps the bullet alive so a single shot can punch through a row of targets.
 const consumeBullet = (b: Bullet) => { if (!b.pierce) b.life = 0; };
 
+// A shot that can't break the target's armour ricochets: velocity reflects about
+// the surface normal (center→bullet), the bullet is shoved just clear of the
+// hitbox so it doesn't re-trigger next frame, and sparks fly back along the
+// normal. The bullet keeps its damage tier — a bounced on-beat shot is still
+// on-beat if it goes on to land elsewhere.
+const deflectBulletOff = (game: Game, b: Bullet, a: Asteroid) => {
+  let nx = b.pos.x - a.pos.x;
+  let ny = b.pos.y - a.pos.y;
+  const len = Math.hypot(nx, ny) || 1;
+  nx /= len;
+  ny /= len;
+  const vdotn = b.vel.x * nx + b.vel.y * ny;
+  // only reflect the inward component — a glancing shot already leaving keeps going.
+  if (vdotn < 0) {
+    b.vel.x -= 2 * vdotn * nx;
+    b.vel.y -= 2 * vdotn * ny;
+  }
+  // push outside the hitbox along the normal so the next frame starts clear.
+  // Use the faceted surface radius at this angle (crystals peak well past their
+  // nominal radius) plus a small margin so the deflected shot can't re-collide.
+  const surface = a.radiusAtAngle(Math.atan2(ny, nx) - a.rotation);
+  const clear = surface + b.hitRadius() + 2;
+  b.pos.x = a.pos.x + nx * clear;
+  b.pos.y = a.pos.y + ny * clear;
+  b.trail.length = 0;
+  emitBounceSparks(game.particles, b.pos, { x: nx, y: ny }, a.hue);
+};
+
 // walk every rock so multi-hit HP and on-kill splits both resolve in one collision pass.
 const handleBulletAsteroidHits = (game: Game) => {
   const surviving: Asteroid[] = [];
@@ -76,11 +104,18 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
   for (const b of game.bullets) {
     if (b.life <= 0) continue;
     if (!a.collidesWith(b.pos, b.hitRadius())) continue;
-    consumeBullet(b);
     const onBeat = isHitOnBeat(game, b);
-    logBulletHit(game, "HIT asteroid", b);
     const isDriftShot = onBeat && b.driftEligibleAtHit();
     const dmg = b.damage() * (isDriftShot ? 4 : 1);
+    // Peek at the outcome before consuming the bullet: a hit too weak to break
+    // the target's armour deflects instead of landing — no damage, no combo,
+    // and the shot ricochets off the surface so it can travel on.
+    if (dmg <= a.damageReduction) {
+      deflectBulletOff(game, b, a);
+      return null;
+    }
+    consumeBullet(b);
+    logBulletHit(game, "HIT asteroid", b);
     const { killed } = a.applyDamage(dmg);
     game.shake = Math.min(game.shake + (killed ? 0.4 : 0.2), 1.2);
     applyHitToCombo(game, onBeat, b.pos);
