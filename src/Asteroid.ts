@@ -156,7 +156,7 @@ export const ASTEROID_HP = ENTITY_CONFIG.asteroid.hp;
 // uniform along every edge and across every bassteroid size (a center-scale
 // multiplier would push long hull extremities much further out than the
 // flanks, and would scale the gap with the rock).
-const BASS_HALO_GAP_PX = 14;
+const BASS_HALO_GAP_PX = 8;
 
 // Bassteroids carry the asteroid-HP table scaled by the bass multiplier so
 // the rhythm system has real teeth — even a rhythm-bullet (4 damage) needs
@@ -654,6 +654,61 @@ const unionOutline = (polys: HPt[][]): HPt[][] => {
   }
   return loops;
 };
+
+// ── Halo-outline cache ───────────────────────────────────────────────────
+// unionOutline is an O(edges²) clip + chain — cheap for one rock but a visible
+// frame spike when several bassteroids ignite their combo halo on the same
+// beat (e.g. the boss wave spawns one of every kind). The outline depends only
+// on (module geometry, radius, gap), all fixed at construction, so we build it
+// once per distinct shape and memoize. Gen-0 rocks of the same kind+size share
+// an entry; split children (custom inherited geometry) get their own, built
+// once on the split rather than every frame. prewarmHaloOutlines() fills every
+// gen-0 combo at module load so nothing computes during gameplay.
+const haloOutlineCache = new Map<string, { x: number; y: number }[][]>();
+
+const haloCacheKey = (ship: BassShip, radius: number, gapPx: number): string => {
+  // Round to 0.001 unit so float jitter in inherited geometry still hits the
+  // same key; radius+gap fold in because the offset is in pixels (gap doesn't
+  // scale with radius), so the same modules at a different tier differ.
+  let s = `${radius.toFixed(2)}|${gapPx}|`;
+  for (const m of ship.modules) {
+    for (const vt of m.vertices) s += `${Math.round(vt.x * 1000)},${Math.round(vt.y * 1000)};`;
+    s += "/";
+  }
+  return s;
+};
+
+const computeHaloOutline = (ship: BassShip, radius: number, gapPx: number): { x: number; y: number }[][] => {
+  const offset = ship.modules
+    .filter((m) => m.vertices.length >= 3)
+    .map((m) =>
+      offsetPolygon(m.vertices.map((vt) => ({ x: vt.x * radius, y: vt.y * radius })), gapPx),
+    );
+  if (offset.length === 0) return [];
+  if (offset.length === 1) return offset;
+  return unionOutline(offset);
+};
+
+const getHaloOutline = (ship: BassShip, radius: number, gapPx: number): { x: number; y: number }[][] => {
+  const key = haloCacheKey(ship, radius, gapPx);
+  let cached = haloOutlineCache.get(key);
+  if (!cached) {
+    cached = computeHaloOutline(ship, radius, gapPx);
+    haloOutlineCache.set(key, cached);
+  }
+  return cached;
+};
+
+// Warm the cache for every gen-0 bassteroid at module load, so the union-clip
+// never runs during a frame. Gen-0 rocks always spawn at "large" (split tiers
+// carry custom inherited geometry and memoize on their first split, off the
+// combo-ignition frame).
+const prewarmHaloOutlines = () => {
+  for (const kind of BASS_KINDS) {
+    getHaloOutline(buildBassteroidShape(kind), SIZE_RADIUS.large, BASS_HALO_GAP_PX);
+  }
+};
+prewarmHaloOutlines();
 
 export class Asteroid {
   pos: Vec;
@@ -3185,22 +3240,16 @@ export class Asteroid {
   // union (rather than each module) drops the interior shared edges that used
   // to criss-cross multi-module rocks, while still following the true outer
   // perimeter exactly — every concave notch and sharp corner preserved.
-  // Pixel-space (already × radius); built lazily and cached.
+  // Pixel-space (already × radius); served from the shared shape cache so the
+  // O(edges²) clip runs once per distinct shape, never per frame.
   buildHaloOutline(gapPx: number): { x: number; y: number }[][] {
     if (!this.bassShip) return [];
-    const offset = this.bassShip.modules
-      .filter((m) => m.vertices.length >= 3)
-      .map((m) =>
-        offsetPolygon(m.vertices.map((vt) => ({ x: vt.x * this.radius, y: vt.y * this.radius })), gapPx),
-      );
-    if (offset.length === 0) return [];
-    if (offset.length === 1) return offset;
-    return unionOutline(offset);
+    return getHaloOutline(this.bassShip, this.radius, gapPx);
   }
 
   // Trace the cached combo-halo outline into the current path (local space,
-  // caller already translated/rotated). Built lazily — hull and radius never
-  // change after construction, so the offset polygons are computed once.
+  // caller already translated/rotated). The shape cache means the offset
+  // polygons are computed once per (geometry, radius, gap) and reused.
   traceHaloOutline(ctx: CanvasRenderingContext2D) {
     if (!this.haloOutline) this.haloOutline = this.buildHaloOutline(BASS_HALO_GAP_PX);
     ctx.beginPath();
