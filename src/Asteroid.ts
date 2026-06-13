@@ -7,6 +7,10 @@ import { drawGlow } from "./glow";
 
 const HUE_PALETTE = [185, 200, 220, 250, 280, 310, 330];
 
+// Cap on how far the boss laser aim can rotate per windup beat, so a circling
+// player can outrun the sweep instead of being snapped onto.
+const MAX_AIM_TURN_PER_BEAT = 0.32;
+
 // Lazy-init so the first cursor pick comes from the seeded RNG (after startGame
 // calls seedRng) rather than module-load Math.random — replays would diverge.
 let huePaletteCursor = -1;
@@ -2699,9 +2703,10 @@ export class Asteroid {
 
   // Tick the targeting aim toward the player once per beat across the windup.
   // Beats 4..7 land at t = 1.5, 2.0, 2.5, 3.0 → indices 0..3. On each new
-  // beat the aim steps a fixed fraction of the remaining gap toward the
-  // player's current position, so the sightline visibly walks onto the player
-  // over four discrete ticks and the player can read where the shot commits.
+  // beat the aim *rotates* toward the player by at most a capped angular step,
+  // so the sightline slews around like a turret rather than snapping onto a
+  // moving target. The cap means a player who keeps circling the boss can
+  // outrun the sweep — the shot only lands if you let the line catch you.
   // Beat 7 (index 3) is the final tick; the aim then holds for the beat-8
   // fire, so juking after the last tick slips the shot. Outside the windup
   // the aim tracks the player each frame so an idle eye still looks alive.
@@ -2717,11 +2722,21 @@ export class Asteroid {
     const beatIndex = Math.floor((tNow - 1.5) / 0.5);
     if (beatIndex > this.bossAimBeatIndex) {
       this.bossAimBeatIndex = beatIndex;
-      // Step a portion of the way to the player; later ticks close more of the
-      // gap so the aim converges and lands tight on the final beat.
-      const step = 0.4 + 0.2 * beatIndex;
-      this.bossEyeAimX += (this.bossTrackedShipX - this.bossEyeAimX) * step;
-      this.bossEyeAimY += (this.bossTrackedShipY - this.bossEyeAimY) * step;
+      // Current aim direction and the direction to the player, both as angles.
+      const cur = Math.atan2(this.bossEyeAimY - this.pos.y, this.bossEyeAimX - this.pos.x);
+      const target = Math.atan2(this.bossTrackedShipY - this.pos.y, this.bossTrackedShipX - this.pos.x);
+      // Shortest signed angular gap.
+      let diff = target - cur;
+      while (diff > Math.PI) diff -= TAU;
+      while (diff < -Math.PI) diff += TAU;
+      // Turn toward the player, but no faster than MAX_AIM_TURN_PER_BEAT.
+      const turn = Math.max(-MAX_AIM_TURN_PER_BEAT, Math.min(MAX_AIM_TURN_PER_BEAT, diff));
+      const next = cur + turn;
+      // Re-project the aim point out to the player's distance so the telegraph
+      // line reaches the same span as the shot.
+      const dist = Math.max(1, Math.hypot(this.bossTrackedShipX - this.pos.x, this.bossTrackedShipY - this.pos.y));
+      this.bossEyeAimX = this.pos.x + Math.cos(next) * dist;
+      this.bossEyeAimY = this.pos.y + Math.sin(next) * dist;
     }
   }
 
