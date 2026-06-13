@@ -848,7 +848,7 @@ export class Asteroid {
   // For bossEmber: tiny inert pupil — no firing, just drifts. No state
   // beyond hue/radius is needed, this flag is implicit in kind.
 
-  // ---- 8-beat boss rhythm. Cycle = 8 beats × 0.5s = 4.0s ----
+  // ---- boss rhythm. Cycle = 16 beats × 0.5s = 8.0s; laser fires on beat 8 ----
   // Phase within the cycle (seconds 0..4). Driven by gameUpdate from
   // game.beatTime each tick. Used by the live boss and by post-break
   // fragments to fire their flash + plasma on the assigned slot.
@@ -2705,7 +2705,7 @@ export class Asteroid {
   // Beat 7 (index 3) is the final tick; the aim then holds for the beat-8
   // fire, so juking after the last tick slips the shot. Outside the windup
   // the aim tracks the player each frame so an idle eye still looks alive.
-  // `tNow` is the phase within the 4.0s cycle.
+  // `tNow` is the phase within the 8.0s cycle.
   private tickLaserAim(tNow: number) {
     const inWindup = tNow >= 1.5 && tNow < 3.5;
     if (!inWindup) {
@@ -2804,14 +2804,15 @@ export class Asteroid {
     return didLunge;
   }
 
-  // Step the 8-beat boss rhythm and return slot events for this tick.
-  // beatTime = game.beatTime in seconds. The 4.0s cycle:
+  // Step the 16-beat boss rhythm and return slot events for this tick.
+  // beatTime = game.beatTime in seconds. The 8.0s cycle:
   //   beat 1 (t=0.0) top hemisphere flashes (post-break: top fires plasma)
   //   beat 3 (t=1.0) bottom hemisphere flashes (post-break: bottom fires)
   //   beat 4 (t=1.5) laser charge ramp begins + aim locks (4-beat windup)
   //   beat 5 (t=2.0) brass iris ring flashes
   //   beat 7 (t=3.0) pupil flash #1
   //   beat 8 (t=3.5) pupil flash #2 + laser fires
+  //   beats 9-16 (t=4.0-8.0) rest, so the laser fires once per 8s block
   // The live whole-body boss runs every slot. Post-break hemispheres run
   // only their assigned half; bossEye runs iris + pupil + laser.
   tickBossRhythm(beatTime: number): {
@@ -2831,7 +2832,7 @@ export class Asteroid {
       firePlasma: null as null | "top" | "bottom",
     };
     if (!this.isBossLikeRhythmHolder()) return events;
-    const CYCLE = 4.0;
+    const CYCLE = 8.0;
     const tPrev = this.bossRhythmT;
     const tNow = beatTime - Math.floor(beatTime / CYCLE) * CYCLE;
     // First time this asteroid joins the rhythm — pre-arm any slots already
@@ -2845,7 +2846,7 @@ export class Asteroid {
       this.bossDidIris = tNow >= 2.0;
       this.bossDidPupil1 = tNow >= 3.0;
       this.bossDidPupil2 = tNow >= 3.5;
-      this.bossPlasmaFired = tNow >= 0.0 && tNow < 1.0 ? false : tNow >= 1.0 && tNow < 4.0;
+      this.bossPlasmaFired = tNow >= 0.0 && tNow < 1.0 ? false : tNow >= 1.0;
       return events;
     }
     this.bossRhythmT = tNow;
@@ -4079,12 +4080,14 @@ export class Asteroid {
       ctx.restore();
     }
 
-    // Dark silhouette body — the same subdued near-black the background planet
-    // wore, so the quiet phase reads as part of the backdrop. A faint
-    // directional gradient fades in only as the reveal builds.
+    // Dark silhouette body — matches the background planet's near-black so the
+    // quiet phase reads as part of the backdrop, not a thing to shoot. Stays
+    // essentially black until the reveal window, when it lifts toward a faintly
+    // lit body.
     ctx.save();
-    const dark = 4 + phase.revealT * 8;
-    ctx.fillStyle = `hsl(${baseHue + 4}, 70%, ${dark}%)`;
+    const dark = 1 + phase.revealT * 11;
+    const sat = 90 - phase.revealT * 20;
+    ctx.fillStyle = `hsl(${baseHue}, ${sat}%, ${dark}%)`;
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, TAU);
     ctx.fill();
@@ -4168,16 +4171,19 @@ export class Asteroid {
     // uncovering a vesica-shaped gap that the brass aperture + iris fill.
     if (phase.lidOpen > 0.001) this.paintBossEyeOpening(ctx, r, phase.lidOpen, t);
 
-    // Outline rim — barely-there during the quiet silhouette, sharpening as
-    // the body resolves. This is what sells "thing in space against starfield".
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.strokeStyle = `hsla(${baseHue + 12}, 100%, 65%, ${0.12 + 0.68 * phase.revealT})`;
-    ctx.lineWidth = 1.2 + 1.6 * phase.revealT;
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, TAU);
-    ctx.stroke();
-    ctx.restore();
+    // Outline rim — fully absent during the quiet silhouette so the body has no
+    // edge to give it away against the starfield, then sharpens in as the reveal
+    // builds. This is what sells "thing in space" once the boss is waking.
+    if (phase.revealT > 0.001) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = `hsla(${baseHue + 12}, 100%, 65%, ${0.8 * phase.revealT})`;
+      ctx.lineWidth = 1.2 + 1.6 * phase.revealT;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     ctx.restore();
   }
@@ -5388,7 +5394,7 @@ export const spawnBossAt = (
   const dx = cx - pos.x;
   const dy = cy - pos.y;
   const norm = Math.max(1, Math.hypot(dx, dy));
-  const speed = 24;
+  const speed = 5;
   const vel = v((dx / norm) * speed, (dy / norm) * speed);
   return new Asteroid({ x: pos.x, y: pos.y }, vel, "large", undefined, "boss");
 };

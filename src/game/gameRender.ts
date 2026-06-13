@@ -88,8 +88,10 @@ const paintEntityLayers = (
 // Exported so the ship-rotation snap (gameUpdate) can use the same target set as the reticule.
 // Alien bullets are deliberately excluded — they're incoming threats, not things you shoot,
 // and painting trajectories for them clutters the field with predictions the player can't act on.
+// The dormant boss is excluded too — during its approach it's meant to read as part of the
+// background planet, so the reticule must not light it up or treat it as a lockable target.
 export const targetsForReticule = (game: Game) => [
-  ...game.asteroids,
+  ...game.asteroids.filter((a) => !(a.isBoss() && a.bossPhase === "dormant")),
   ...game.comets,
   ...game.aliens,
   ...game.canisters,
