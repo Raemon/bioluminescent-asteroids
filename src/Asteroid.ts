@@ -10,6 +10,9 @@ const HUE_PALETTE = [185, 200, 220, 250, 280, 310, 330];
 // Cap on how far the boss laser aim can rotate per windup beat, so a circling
 // player can outrun the sweep instead of being snapped onto.
 const MAX_AIM_TURN_PER_BEAT = 0.32;
+// Time constant for easing the displayed aim toward the committed aim, so the
+// line slews smoothly across the discrete per-beat steps (~150ms to close).
+const AIM_DISPLAY_TAU = 0.07;
 
 // Lazy-init so the first cursor pick comes from the seeded RNG (after startGame
 // calls seedRng) rather than module-load Math.random — replays would diverge.
@@ -319,17 +322,22 @@ const buildBassteroidShape = (kind: "bassA" | "bassB" | "bassC" | "bassD"): Bass
   };
 };
 
-// Partition a parent's modules into `count` spatially-coherent chunks so a
-// split child can render as "a piece of the original ship" rather than a
-// scaled-down copy of the whole thing. We pick a random axis through the
-// parent's centroid, sort modules by their centroid's projection onto that
-// axis, and slice the sorted list into `count` contiguous groups. Lights are
-// then assigned to whichever group's centroid is nearest.
+// ── Deterministic fragmentation ──────────────────────────────────────────
+// A bassteroid breaks the same way every time: a hand-authored fragment tree
+// per kind, not a random projection-axis slice. This buys two things the old
+// random partition couldn't:
+//   1. The full set of split-child shapes is finite and known at build time,
+//      so prewarmHaloOutlines() can bake every combo-halo outline before the
+//      game starts — nothing computes during a frame, ever.
+//   2. The smallest pieces are authored to be single connected blobs (every
+//      module in a leaf shares an edge with another, with hand-placed "sliver"
+//      quads bridging any appendage that only touched the now-absent core), so
+//      a terminal small never reads as "two pieces you could still split".
 //
-// Each output BassShip's vertices are re-expressed in child-radius units:
-// chunks are translated so the group centroid sits at local origin, and
-// scaled so the chunk's bounding radius ~= 1 (i.e. the existing renderer's
-// `vertex * this.radius` pipeline lands it at the child's tier radius).
+// Fragments are authored in the ORIGINAL LARGE's local frame (radius=1); the
+// child inherits its parent's exact sub-geometry rather than a re-derived one,
+// so a medium and the small carved from it line up. normalizeFragment() then
+// recentres + rescales to the child's own radius=1 footprint.
 const moduleCentroid = (m: BassModule): Vec => {
   let sx = 0;
   let sy = 0;
@@ -340,82 +348,126 @@ const moduleCentroid = (m: BassModule): Vec => {
   return v(sx / m.vertices.length, sy / m.vertices.length);
 };
 
-const partitionBassShip = (ship: BassShip, count: number): BassShip[] => {
-  if (count <= 1) return [ship];
-  const axisAngle = rand(0, TAU);
-  const ax = Math.cos(axisAngle);
-  const ay = Math.sin(axisAngle);
-  const annotated = ship.modules.map(m => {
+type BassFragment = { modules: BassModule[]; lights: BassLight[] };
+// One kind's tree: two mediums, each carving into two terminal smalls.
+type BassSplitTree = { mediums: { fragment: BassFragment; smalls: [BassFragment, BassFragment] }[] };
+
+// Recentre a fragment's vertices on its own centroid and rescale so its max
+// vertex radius is 1 — the existing `vertex * this.radius` render pipeline then
+// lands it at the child tier's footprint. Lights ride along with the same
+// transform. (Same math the old random partition used, factored out.)
+const normalizeFragment = (frag: BassFragment): BassShip => {
+  if (frag.modules.length === 0) return { modules: [], lights: [] };
+  let gx = 0;
+  let gy = 0;
+  let n = 0;
+  for (const m of frag.modules) {
     const c = moduleCentroid(m);
-    return { module: m, centroid: c, proj: c.x * ax + c.y * ay };
-  });
-  annotated.sort((a, b) => a.proj - b.proj);
-  // Slice into `count` contiguous groups (last group absorbs the remainder).
-  const groups: typeof annotated[] = [];
-  const base = Math.floor(annotated.length / count);
-  const extra = annotated.length - base * count;
-  let cursor = 0;
-  for (let i = 0; i < count; i++) {
-    const take = base + (i < extra ? 1 : 0);
-    groups.push(annotated.slice(cursor, cursor + take));
-    cursor += take;
+    gx += c.x;
+    gy += c.y;
+    n++;
   }
-  // Build a child BassShip per group. Centre vertices around the group's
-  // centroid, then rescale so the chunk's max vertex radius is 1 — that way
-  // when the renderer multiplies by the child's tier radius, the visible
-  // chunk fills the child's footprint cleanly.
-  return groups.map(group => {
-    if (group.length === 0) return { modules: [], lights: [] };
-    let gx = 0;
-    let gy = 0;
-    for (const entry of group) {
-      gx += entry.centroid.x;
-      gy += entry.centroid.y;
+  gx /= n;
+  gy /= n;
+  let maxR = 0;
+  for (const m of frag.modules) {
+    for (const p of m.vertices) {
+      const r = Math.hypot(p.x - gx, p.y - gy);
+      if (r > maxR) maxR = r;
     }
-    gx /= group.length;
-    gy /= group.length;
-    let maxR = 0;
-    for (const entry of group) {
-      for (const p of entry.module.vertices) {
-        const r = Math.hypot(p.x - gx, p.y - gy);
-        if (r > maxR) maxR = r;
-      }
-    }
-    const scale = maxR > 0 ? 1 / maxR : 1;
-    const modules = group.map(entry => ({
-      vertices: entry.module.vertices.map(p => v((p.x - gx) * scale, (p.y - gy) * scale)),
-    }));
-    // Assign each light to the nearest group by centroid distance, then
-    // recentre/rescale to match.
-    const lights: BassLight[] = [];
-    for (const light of ship.lights) {
-      let bestIdx = 0;
-      let bestDist = Infinity;
-      for (let i = 0; i < groups.length; i++) {
-        if (groups[i].length === 0) continue;
-        let cx = 0;
-        let cy = 0;
-        for (const entry of groups[i]) {
-          cx += entry.centroid.x;
-          cy += entry.centroid.y;
-        }
-        cx /= groups[i].length;
-        cy /= groups[i].length;
-        const d = Math.hypot(light.pos.x - cx, light.pos.y - cy);
-        if (d < bestDist) {
-          bestDist = d;
-          bestIdx = i;
-        }
-      }
-      if (groups[bestIdx] === group) {
-        lights.push({
-          pos: v((light.pos.x - gx) * scale, (light.pos.y - gy) * scale),
-          size: light.size * scale,
-        });
-      }
-    }
-    return { modules, lights };
-  });
+  }
+  const scale = maxR > 0 ? 1 / maxR : 1;
+  return {
+    modules: frag.modules.map(m => ({ vertices: m.vertices.map(p => v((p.x - gx) * scale, (p.y - gy) * scale)) })),
+    lights: frag.lights.map(l => ({ pos: v((l.pos.x - gx) * scale, (l.pos.y - gy) * scale), size: l.size * scale })),
+  };
+};
+
+// Pull a subset of a kind's hand-built modules/lights by index, optionally with
+// extra authored modules (the bridging "slivers"). Keeps the authoring tables
+// terse: most fragments are just "modules 0,2,4 plus this one quad".
+const frag = (kind: "bassA" | "bassB" | "bassC" | "bassD", moduleIdx: number[], lightIdx: number[], extra: BassModule[] = []): BassFragment => {
+  const ship = buildBassteroidShape(kind);
+  return {
+    modules: [...moduleIdx.map(i => ship.modules[i]), ...extra],
+    lights: lightIdx.map(i => ship.lights[i]),
+  };
+};
+
+// Authored split trees. Module/light indices reference buildBassteroidShape().
+// `extra` quads are sliver bridges so a leaf with an orphaned appendage still
+// reads as one solid piece. See each kind's silhouette comment above.
+const BASS_SPLIT_TREES: Record<"bassA" | "bassB" | "bassC" | "bassD", BassSplitTree> = {
+  // Hauler: hull(0) is the spine; split fore/aft. Each pod pairs with a hull
+  // sliver under it (slivers overrun the pod inner edge so there's no seam).
+  bassA: {
+    mediums: [
+      {
+        fragment: frag("bassA", [1], [0], [rect(-0.15, -0.28, 0.55, 0.28)]),
+        smalls: [
+          frag("bassA", [1], [0], [rect(0.2, -0.2, 0.55, 0.2)]),
+          frag("bassA", [], [], [rect(-0.15, -0.28, 0.3, 0.28)]),
+        ],
+      },
+      {
+        fragment: frag("bassA", [2, 3, 4], [1, 2, 3], [rect(-0.85, -0.34, -0.15, 0.34)]),
+        smalls: [
+          frag("bassA", [2], [1], [rect(-0.55, -0.34, 0.25, -0.05)]),
+          frag("bassA", [3, 4], [2, 3], [rect(-0.85, -0.05, -0.15, 0.34)]),
+        ],
+      },
+    ],
+  },
+  // Tri-cluster: hub(3) + struts(4,5,6) join the three hex pods(0,1,2). Top pod
+  // vs the two lower pods. The lower-pod medium carries a center bridge so its
+  // two strut+pod arms stay joined once the hub is gone.
+  bassB: {
+    mediums: [
+      {
+        fragment: frag("bassB", [0, 3, 4], [0, 3]),
+        smalls: [frag("bassB", [0, 4], [0]), frag("bassB", [3], [3])],
+      },
+      {
+        fragment: frag("bassB", [1, 2, 5, 6], [1, 2], [rect(-0.16, 0.13, 0.16, 0.25)]),
+        smalls: [frag("bassB", [1, 5], [1]), frag("bassB", [2, 6], [2])],
+      },
+    ],
+  },
+  // Cross: core(0) + four arms. Split into (top+left) and (bottom+right); each
+  // arm keeps a half-core sliver so the broken mount stays attached.
+  bassC: {
+    mediums: [
+      {
+        fragment: frag("bassC", [1, 4], [1, 3], [rect(-0.32, -0.32, 0.0, 0.32), rect(-0.14, -0.32, 0.14, 0.0)]),
+        smalls: [
+          frag("bassC", [1], [1], [rect(-0.14, -0.32, 0.14, 0.0)]),
+          frag("bassC", [4], [3], [rect(-0.32, -0.14, 0.0, 0.14)]),
+        ],
+      },
+      {
+        fragment: frag("bassC", [2, 3], [0, 2], [rect(0.0, -0.32, 0.32, 0.32), rect(-0.14, 0.0, 0.14, 0.32)]),
+        smalls: [
+          frag("bassC", [2], [0], [rect(-0.14, 0.0, 0.14, 0.32)]),
+          frag("bassC", [3], [2], [rect(0.0, -0.14, 0.32, 0.14)]),
+        ],
+      },
+    ],
+  },
+  // Tower: vertical stack — cockpit(0) / mid(1) / lower(2) / nose(3), wings(4,5)
+  // bolt onto the mid block. Split cockpit+mid+wings (upper) vs lower+nose
+  // (engine), so the wings ride with the mid block they actually touch.
+  bassD: {
+    mediums: [
+      {
+        fragment: frag("bassD", [0, 1, 4, 5], [0, 1, 2]),
+        smalls: [frag("bassD", [0], [0, 1]), frag("bassD", [1, 4, 5], [2])],
+      },
+      {
+        fragment: frag("bassD", [2, 3], [3]),
+        smalls: [frag("bassD", [2], []), frag("bassD", [3], [3])],
+      },
+    ],
+  },
 };
 
 // Build a simplified closed silhouette from a BassShip — the outer hull of
@@ -687,10 +739,10 @@ const unionOutline = (polys: HPt[][]): HPt[][] => {
 // frame spike when several bassteroids ignite their combo halo on the same
 // beat (e.g. the boss wave spawns one of every kind). The outline depends only
 // on (module geometry, radius, gap), all fixed at construction, so we build it
-// once per distinct shape and memoize. Gen-0 rocks of the same kind+size share
-// an entry; split children (custom inherited geometry) get their own, built
-// once on the split rather than every frame. prewarmHaloOutlines() fills every
-// gen-0 combo at module load so nothing computes during gameplay.
+// once per distinct shape and memoize. Because fragmentation is deterministic
+// (see BASS_SPLIT_TREES), the complete shape set — every kind's large, mediums,
+// and smalls — is known up front, so prewarmHaloOutlines() bakes all of them at
+// module load and nothing ever computes during gameplay.
 const haloOutlineCache = new Map<string, { x: number; y: number }[][]>();
 
 const haloCacheKey = (ship: BassShip, radius: number, gapPx: number): string => {
@@ -726,13 +778,20 @@ const getHaloOutline = (ship: BassShip, radius: number, gapPx: number): { x: num
   return cached;
 };
 
-// Warm the cache for every gen-0 bassteroid at module load, so the union-clip
-// never runs during a frame. Gen-0 rocks always spawn at "large" (split tiers
-// carry custom inherited geometry and memoize on their first split, off the
-// combo-ignition frame).
+// Warm the cache for EVERY bassteroid shape at module load — the gen-0 large,
+// both gen-1 mediums, and all four gen-2 smalls of each kind — so the O(edges²)
+// union-clip never runs during a frame, not even on a split-child's first
+// render. The fragment trees are deterministic, so this is the complete set
+// (4 kinds × 7 shapes = 28 outlines), all baked before the game starts.
 const prewarmHaloOutlines = () => {
   for (const kind of BASS_KINDS) {
     getHaloOutline(buildBassteroidShape(kind), SIZE_RADIUS.large, BASS_HALO_GAP_PX);
+    for (const m of BASS_SPLIT_TREES[kind].mediums) {
+      getHaloOutline(normalizeFragment(m.fragment), SIZE_RADIUS.medium, BASS_HALO_GAP_PX);
+      for (const s of m.smalls) {
+        getHaloOutline(normalizeFragment(s), SIZE_RADIUS.small, BASS_HALO_GAP_PX);
+      }
+    }
   }
 };
 prewarmHaloOutlines();
@@ -766,6 +825,10 @@ export class Asteroid {
   // 1 = gen-1 medium (terminal — its final hit destroys it outright).
   // Always 0 for non-bass kinds.
   splitLevel = 0;
+  // Which authored medium (0 or 1) of BASS_SPLIT_TREES[kind] this gen-1 piece
+  // came from, so it carves into the matching pair of gen-2 smalls. -1 for a
+  // gen-0 large (it picks the medium index at split time) and non-bass kinds.
+  bassMediumIndex = -1;
   // Game-time (seconds) at which this bassteroid should fire its next
   // beat. Set by Game when the asteroid is spawned / split. Unused for
   // non-bass kinds.
@@ -840,6 +903,10 @@ export class Asteroid {
   // player who jukes during beats 7→8 actually dodges the bolt.
   bossEyeAimX = 0;
   bossEyeAimY = 0;
+  // Displayed aim angle — eased toward the committed aim each frame so the
+  // telegraph/beam slews smoothly between the discrete per-beat re-target
+  // steps instead of snapping. -999 = uninitialised (snap to committed first).
+  bossAimDisplayAngle = -999;
   // Per-fragment local-space orientation marker. For bossHemisphere this is
   // the angle of the cut diameter (so the straight edge faces a known
   // direction); for bossPlate it's the original modular hue band the plate
@@ -2638,6 +2705,21 @@ export class Asteroid {
     // age out where they were — no special-case handling needed.
     if (this.trail) this.trail.update(dt, this.pos.x, this.pos.y);
     if (this.radiator) this.radiator.update(dt, this.pos.x, this.pos.y, this.vel.x, this.vel.y);
+    // Ease the displayed laser aim toward the committed aim so the telegraph
+    // and beam slew smoothly across the discrete per-beat re-target steps.
+    if (this.isBoss() || this.kind === "bossEye") {
+      const committed = Math.atan2(this.bossEyeAimY - this.pos.y, this.bossEyeAimX - this.pos.x);
+      if (this.bossAimDisplayAngle === -999) {
+        this.bossAimDisplayAngle = committed;
+      } else {
+        let d = committed - this.bossAimDisplayAngle;
+        while (d > Math.PI) d -= TAU;
+        while (d < -Math.PI) d += TAU;
+        // Exponential approach with a ~150ms time constant (1 - e^(-dt/τ)).
+        const k = 1 - Math.exp(-dt / AIM_DISPLAY_TAU);
+        this.bossAimDisplayAngle += d * k;
+      }
+    }
     if (this.flashAmount > 0) this.flashAmount = Math.max(0, this.flashAmount - dt * 4);
     // Beat flare decays a touch slower than the hit flash so the visible
     // pulse rides the audio kick all the way through the beat window.
@@ -2965,6 +3047,10 @@ export class Asteroid {
   // telegraph renderer and by the bullet-spawn so the rendered sightline
   // matches the shot.
   eyeAimAngle(): number {
+    // The eased display angle, so the telegraph and the bolt both follow the
+    // smooth slew rather than the committed aim's per-beat jumps. Falls back to
+    // the committed direction before the display angle is seeded.
+    if (this.bossAimDisplayAngle !== -999) return this.bossAimDisplayAngle;
     const dx = this.bossEyeAimX - this.pos.x;
     const dy = this.bossEyeAimY - this.pos.y;
     return Math.atan2(dy, dx);
@@ -3212,11 +3298,16 @@ export class Asteroid {
       const baseAngle = impactDir
         ? Math.atan2(impactDir.y, impactDir.x)
         : Math.atan2(this.vel.y, this.vel.x);
-      // Carve the parent's silhouette into 2 spatially-coherent chunks so
-      // each child wears a recognisable piece of the original. Gen-1 mediums
-      // split a gen-0 hand-built ship; gen-2 smalls split the gen-1 chunk
-      // again — the fragmentation compounds naturally.
-      const chunks = partitionBassShip(this.bassShip!, 2);
+      // Carve the parent into its 2 authored fragments (deterministic — same
+      // pieces every time). A gen-0 large yields its two mediums; a gen-1
+      // medium yields the two smalls authored for the medium it came from, so
+      // each terminal small is a single connected blob, no gaps. Every shape
+      // here was prewarmed at module load, so no halo union runs at runtime.
+      const tree = BASS_SPLIT_TREES[this.kind as "bassA" | "bassB" | "bassC" | "bassD"];
+      const childFragments: BassFragment[] =
+        childLevel === 1
+          ? tree.mediums.map(m => m.fragment)
+          : tree.mediums[this.bassMediumIndex].smalls;
       for (let i = 0; i < 2; i++) {
         // Fan ±~0.9 rad off the bullet's heading (one to each side), forward
         // of the impact point — within ~±π/2, so both pieces head away from
@@ -3224,15 +3315,18 @@ export class Asteroid {
         const sideOffset = (i === 0 ? -1 : 1) * (0.9 + rand(-0.2, 0.2));
         const a = baseAngle + sideOffset + rand(-0.2, 0.2);
         const speedMag = splitChildSpeed(this.vel, childSize);
-        const child = new Asteroid({ ...this.pos }, fromAngle(a, speedMag), childSize, this.hue, this.kind, chunks[i]);
+        const child = new Asteroid({ ...this.pos }, fromAngle(a, speedMag), childSize, this.hue, this.kind, normalizeFragment(childFragments[i]));
         child.splitLevel = childLevel;
+        // A gen-1 medium records which authored medium it is so its own split
+        // reaches the right smalls pair; gen-2 smalls are terminal.
+        if (childLevel === 1) child.bassMediumIndex = i;
         child.measureOffset = childOffsets[i];
         // Broken pieces tumble. Mediums (gen-1) drift with a gentle wobble;
         // smalls (gen-2) — the lightest fragments — spin noticeably faster.
         const spinMag = childSize === "medium" ? rand(0.4, 0.9) : rand(1.4, 2.6);
         child.rotSpeed = spinMag * (rng() < 0.5 ? -1 : 1);
-        // Warm the inherited-geometry outline now, off the render path, so the
-        // O(edges²) union doesn't run live on the child's combo-ignition frame.
+        // Outline was baked at module load (deterministic shape set); resolve
+        // the cached entry now so the first render is a pure lookup.
         child.haloOutline = child.buildHaloOutline(BASS_HALO_GAP_PX);
         fragmentList.push(child);
       }

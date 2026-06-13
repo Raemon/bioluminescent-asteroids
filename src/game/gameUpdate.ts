@@ -263,6 +263,16 @@ const syncHaloAmbient = (game: Game) => {
       } else {
         game.sound.setHaloMusicMelodicLayer(hasMelodic);
         game.sound.setHaloMusicLayer3(hasLayer3);
+        // Entered the boss wave holding a halo from the prior wave: the random
+        // track is still playing and the !haloMusic branch above never ran, so
+        // force a swap to the boss theme. climaxActive doubles as the swap-in-
+        // flight guard so a frame's worth of re-entry can't stack crossfades.
+        if (bossWave && game.sound.haloMusic.variation !== BOSS_MUSIC_VARIATION && !game.sound.haloMusic.climaxActive) {
+          const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
+          const measureAlignDelay = nextDownbeat - game.beatTime;
+          game.beatPhaseCorrection = 0;
+          void game.sound.crossfadeHaloMusic(BOSS_MUSIC_VARIATION, measureAlignDelay, game.beatTime);
+        }
         if (hasClimax && !game.sound.haloMusic.climaxActive && !bossWave) {
           const next = pickHaloMusicVariationExcluding(game.sound.haloMusic.variation, game.wave);
           const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
@@ -728,7 +738,7 @@ const fireBossEyeBolt = (game: Game, a: Asteroid) => {
   // see Asteroid.tickLaserAim). The beam enters from one side, slashes
   // through where the player was, and exits the far side, so juking out of
   // the sweep's arc dodges it.
-  const angle = Math.atan2(a.bossEyeAimY - a.pos.y, a.bossEyeAimX - a.pos.x);
+  const angle = a.eyeAimAngle();
   fireBossSweepBeam(game, a, angle);
   game.sound.play("alienFireBig", 1.0, a.pos);
   game.sound.play("bossPulse", 1.0, a.pos);
