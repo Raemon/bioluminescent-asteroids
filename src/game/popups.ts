@@ -97,6 +97,40 @@ export const popupDriftBonus = (pos: Vec, withSubtitle = false): Popup => {
   };
 };
 
+// shown the first time a shot glances off an armoured crystal — teaches the
+//   player that under-powered hits bounce, and that Rhythm is how you hit harder.
+//   Red label over a cyan "gain more Rhythm" prompt, mirroring DRIFT SHOT's two-line shape.
+const INSUFFICIENT_DAMAGE_POPUP_LIFE = 1.8;
+export const popupInsufficientDamage = (pos: Vec): Popup => {
+  const labelFont = "700 17px 'Space Grotesk', system-ui, sans-serif";
+  const subFont = "600 13px 'Space Grotesk', system-ui, sans-serif";
+  const fill = "#ff6a6a";
+  const shadow = "rgba(255, 90, 90, 0.85)";
+  return {
+    pos: { x: pos.x, y: pos.y - 18 },
+    vel: { x: rand(-8, 8), y: -55 },
+    life: INSUFFICIENT_DAMAGE_POPUP_LIFE,
+    maxLife: INSUFFICIENT_DAMAGE_POPUP_LIFE,
+    text: "INSUFFICIENT DAMAGE",
+    font: labelFont,
+    fill,
+    shadowColor: shadow,
+    decayX: 0.94, decayY: 0.94,
+    popPeak: 0.4, popDuration: 0.15,
+    holdUntil: 0.55, fadeGain: 1.4,
+    draw: (ctx) => {
+      ctx.font = labelFont;
+      ctx.fillStyle = fill;
+      ctx.shadowColor = shadow;
+      ctx.fillText("INSUFFICIENT DAMAGE", 0, -8);
+      ctx.font = subFont;
+      ctx.fillStyle = "#9be8ff";
+      ctx.shadowColor = "rgba(120, 220, 255, 0.85)";
+      ctx.fillText("GAIN MORE RHYTHM", 0, 12);
+    },
+  };
+};
+
 // shared shape for the streak-bonus labels — sized/animated like DRIFT SHOT
 //   but each gets its own color so the three bonuses read distinctly.
 const popupBonusLabel = (pos: Vec, text: string, fill: string, shadowColor: string): Popup => ({

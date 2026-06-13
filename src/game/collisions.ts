@@ -17,7 +17,7 @@ import { BEAT_GRID } from "./rhythmConstants";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup, emitBounceSparks } from "./particleBursts";
-import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup } from "./popups";
+import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage } from "./popups";
 import { checkBonusLife } from "./bonusLife";
 import {
   applyHitToCombo,
@@ -100,6 +100,11 @@ const deflectBulletOff = (game: Game, b: Bullet, a: Asteroid, blockedDmg: number
   a.flashAmount = Math.max(a.flashAmount, 0.5 * impact);
   game.sound.play("tink", 0.5 + 0.4 * impact, a.pos);
   emitBounceSparks(game.particles, b.pos, { x: nx, y: ny }, a.hue, impact);
+  // first glance off this rock teaches the player that weak hits bounce.
+  if (!a.glanceTipShown) {
+    a.glanceTipShown = true;
+    game.popups.push(popupInsufficientDamage(b.pos));
+  }
 };
 
 // walk every rock so multi-hit HP and on-kill splits both resolve in one collision pass.

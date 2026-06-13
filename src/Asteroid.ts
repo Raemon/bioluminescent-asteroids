@@ -849,6 +849,9 @@ export class Asteroid {
   // whose raw damage doesn't exceed this is fully absorbed — no HP lost, no
   // crack, the shot bounces off. Solid crystals set this; 0 for everything else.
   damageReduction = 0;
+  // True once a bullet has glanced off this rock's armour and we've shown the
+  // "Insufficient damage" tip for it — so the hint fires at most once per rock.
+  glanceTipShown = false;
   cracks: AsteroidCrack[] = [];
   bassShip: BassShip | null = null;
   // Combo-halo outline: each module polygon offset outward by a fixed pixel
