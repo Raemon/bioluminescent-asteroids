@@ -1,5 +1,43 @@
 [
   {
+    "id": "2026-06-13-8af7010",
+    "date": "2026-06-13",
+    "title": "Boss rework, meteor showers, and cathedral asteroids",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Meteor showers now appear as fast-moving flocks of meteors with their own sound effects and scoring.",
+          "The boss fires a sustained sweeping beam attack from its eye.",
+          "Bell asteroids now shatter into carved debris pieces: keystones, glass shards, column drums, and rubble blocks.",
+          "Bell asteroids now come in five distinct cathedral archetypes — lancet wall, rose facade, spire tower, arcade, and buttress ruin — each with unique visuals."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Boss attack cycle extended to 8 seconds; the laser fires on beat 8 with a more visible windup.",
+          "Boss targeting reticule no longer locks onto the boss during its dormant approach phase.",
+          "Boss eye bolts now aim more accurately using the last tracked targeting line."
+        ]
+      },
+      {
+        "heading": "Tuning",
+        "items": [
+          "Bass asteroid halo gap tightened from 14px to 8px for a cleaner outline.",
+          "Boss spawn speed reduced for better pacing and visual impact."
+        ]
+      }
+    ],
+    "commits": [
+      "8af7010",
+      "2e9627d",
+      "ae8b85c",
+      "450f45d",
+      "5481c0f"
+    ]
+  },
+  {
     "id": "2026-06-12-46c1ac0",
     "date": "2026-06-12",
     "title": "New boss music, echo bonus, and bullet deflection",
