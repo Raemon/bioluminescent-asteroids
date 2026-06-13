@@ -19,6 +19,7 @@ import { v } from "./vec";
 import { Popup } from "./game/popups";
 import type { BassLightning } from "./game/bassLightning";
 import { LaserBeam } from "./game/laserShot";
+import { BossBeam } from "./game/bossBeam";
 import { KilledSnapshot } from "./game/killSnapshot";
 import type { HighscoreRow } from "./game/highscores";
 import type { KillBucket } from "./game/killBuckets";
@@ -57,6 +58,8 @@ export class Game implements HudElements {
   // Laser-shot beams from the "lasershot" upgrade — one per release of the
   //   charge. Short-lived visuals (damage resolves on spawn); see game/laserShot.ts.
   lasers: LaserBeam[] = [];
+  // Sustained sweeping beams fired by the boss eye — see game/bossBeam.ts.
+  bossBeams: BossBeam[] = [];
   popups: Popup[] = [];
   // bass-echo arcs from a firing bassteroid to an on-rhythm kill — see
   //   game/bassLightning.ts for the trigger conditions and rendering.

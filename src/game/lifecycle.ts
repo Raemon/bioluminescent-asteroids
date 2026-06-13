@@ -159,6 +159,7 @@ export const showTitle = (game: Game) => {
   stopAllPersistentAudio(game);
   game.aliens = [];
   game.alienBullets = [];
+  game.bossBeams = [];
   game.waveEvents = newWaveEventSchedule();
   game.slowMoTimer = 0;
   game.sound.bgBeatIntensity = 0;
@@ -511,6 +512,7 @@ const resetRunCollections = (game: Game) => {
   stopAllPersistentAudio(game);
   game.aliens = [];
   game.alienBullets = [];
+  game.bossBeams = [];
   game.waveEvents = newWaveEventSchedule();
 };
 

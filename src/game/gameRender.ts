@@ -8,6 +8,7 @@ import { computeConeFrame } from "../ship/reticule/coneGeometry";
 import { pickCenterMostTargetForFocus, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
 import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
 import { renderLasers, renderLaserChargeDots } from "./laserShot";
+import { renderBossBeams } from "./bossBeam";
 import { rng } from "./rng";
 
 // shake is purely cosmetic; isolate its math so render() reads top-down.
@@ -75,6 +76,7 @@ const paintEntityLayers = (
   for (const g of game.goldCrystals) g.render(ctx, game.time);
   for (const al of game.aliens) al.render(ctx, game.time);
   for (const ab of game.alienBullets) ab.render(ctx);
+  renderBossBeams(ctx, game.bossBeams);
   for (const b of game.bullets) b.render(ctx);
   renderLasers(ctx, game.lasers);
   if (focusedTarget) paintFocusGlow(ctx, focusedTarget);

@@ -224,6 +224,7 @@ export type SoundName =
   | "wraithScream"
   | "wraithHit"
   | "wraithLunge"
+  | "wraithDeath"
   | "bossPulse"
   | "bossEyeOpenStinger";
 
@@ -3352,6 +3353,7 @@ export class Sound {
       case "wraithScream": this.playWraithScream(); break;
       case "wraithHit": this.playWraithHit(); break;
       case "wraithLunge": this.playWraithLunge(); break;
+      case "wraithDeath": this.playWraithDeath(); break;
       case "bossPulse": this.playBossPulse(); break;
       case "bossEyeOpenStinger": this.playBossEyeOpenStinger(); break;
     }
@@ -5581,11 +5583,12 @@ export class Sound {
   }
 
   // Haunting wraith scream — the sound the captive makes the moment the
-  // glass prison shatters. Built from layered voices:
+  // glass prison shatters. Tuned to C-minor so it reads as a sung cry, not
+  // a siren. Built from layered voices:
   //   (1) An initial "crack" noise burst — the shell breaking.
-  //   (2) A detuned-sawtooth cry with an anguished pitch contour: snaps UP
-  //       to a peak (the moment of pain) before sliding down. Wider detuning
-  //       so the beating reads as raw and torn, not clean.
+  //   (2) A detuned-sawtooth cry pinned to scale degrees: snaps UP from G4
+  //       to the C5 peak (the moment of pain) before sagging down and
+  //       settling on Eb3, the haunting minor third.
   //   (2b) Sub-octave sine doubling — gives the cry weight.
   //   (2c) A piercing high overtone at a dissonant interval (a minor 9th
   //        above the fundamental) — the "fingernails on the throat" layer
@@ -5623,15 +5626,16 @@ export class Sound {
       src.stop(t + crackDur + 0.02);
     }
 
-    // (2) Detuned saw cry with an anguished contour. Pitch SNAPS up from
-    // 540Hz to ~880Hz in ~0.18s (the moment of pain), then slides down to
-    // 95Hz. Wider detuning (28 cents) makes the cry feel torn, not sung.
+    // (2) Detuned saw cry with an anguished contour, now pinned to C-minor
+    // scale degrees so the cry reads as a sung note rather than a siren.
+    // Snaps up from G4 to the C5 peak (the moment of pain), then sags down
+    // and settles on Eb3 — the minor third, the haunting "still here" tone.
     // Lowpass opens during the peak so upper harmonics cut through, then
-    // closes as the cry sinks.
+    // closes as the cry sinks. Detuning eased to 16c: present but more vocal.
     const cryDur = 1.8;
-    const cryStartHz = 540;
-    const cryPeakHz = 880;
-    const cryEndHz = 95;
+    const cryStartHz = 392.0;  // G4
+    const cryPeakHz = 523.25;  // C5
+    const cryEndHz = 155.56;   // Eb3
     const peakT = 0.18;
     const cryFilter = this.ctx.createBiquadFilter();
     cryFilter.type = "lowpass";
@@ -5659,7 +5663,7 @@ export class Sound {
     vibrato.connect(vibratoGain);
     vibrato.start(t);
     vibrato.stop(t + cryDur + 0.05);
-    for (const detune of [-28, 28]) {
+    for (const detune of [-16, 16]) {
       const saw = this.ctx.createOscillator();
       saw.type = "sawtooth";
       saw.detune.value = detune;
@@ -5686,20 +5690,23 @@ export class Sound {
     subCryGain.connect(this.master);
     subCry.start(t);
     subCry.stop(t + cryDur + 0.05);
-    // (2c) Piercing dissonant overtone — a square wave a minor-9th (×2.118)
-    // above the fundamental through a high-Q bandpass so it reads as a
-    // shrill formant. Loudest during the peak, ducks with the sob.
+    // (2c) Piercing dissonant overtone — a square wave a TRITONE (×1.4142,
+    // the "diabolus in musica") above the fundamental through a high-Q
+    // bandpass so it reads as a shrill, ominous formant. A real interval
+    // rather than a raw beat, so it's unsettling-on-purpose rather than just
+    // out of tune. Loudest during the peak, ducks with the sob.
+    const TRITONE = 1.41421;
     const overtone = this.ctx.createOscillator();
     overtone.type = "square";
-    overtone.frequency.setValueAtTime(cryStartHz * 2.118, t);
-    overtone.frequency.exponentialRampToValueAtTime(cryPeakHz * 2.118, t + peakT);
-    overtone.frequency.exponentialRampToValueAtTime(cryEndHz * 2.118, t + cryDur * 0.94);
+    overtone.frequency.setValueAtTime(cryStartHz * TRITONE, t);
+    overtone.frequency.exponentialRampToValueAtTime(cryPeakHz * TRITONE, t + peakT);
+    overtone.frequency.exponentialRampToValueAtTime(cryEndHz * TRITONE, t + cryDur * 0.94);
     const overtoneBp = this.ctx.createBiquadFilter();
     overtoneBp.type = "bandpass";
     overtoneBp.Q.value = 14;
-    overtoneBp.frequency.setValueAtTime(cryStartHz * 2.118, t);
-    overtoneBp.frequency.exponentialRampToValueAtTime(cryPeakHz * 2.118, t + peakT);
-    overtoneBp.frequency.exponentialRampToValueAtTime(cryEndHz * 2.118, t + cryDur * 0.94);
+    overtoneBp.frequency.setValueAtTime(cryStartHz * TRITONE, t);
+    overtoneBp.frequency.exponentialRampToValueAtTime(cryPeakHz * TRITONE, t + peakT);
+    overtoneBp.frequency.exponentialRampToValueAtTime(cryEndHz * TRITONE, t + cryDur * 0.94);
     const overtoneGain = this.ctx.createGain();
     overtoneGain.gain.setValueAtTime(0.0001, t);
     overtoneGain.gain.exponentialRampToValueAtTime(0.16, t + peakT);
@@ -5745,8 +5752,8 @@ export class Sound {
     const sub = this.ctx.createOscillator();
     const subGain = this.ctx.createGain();
     sub.type = "sine";
-    sub.frequency.setValueAtTime(38, subStartT);
-    sub.frequency.exponentialRampToValueAtTime(28, t + totalDur);
+    sub.frequency.setValueAtTime(38.89, subStartT); // D#1, leans into the Eb the cry settles on
+    sub.frequency.exponentialRampToValueAtTime(32.70, t + totalDur); // C1 — root resolves under the dread
     subGain.gain.setValueAtTime(0.0001, t);
     subGain.gain.exponentialRampToValueAtTime(0.32, subStartT + 0.5);
     subGain.gain.setValueAtTime(0.32, t + 1.8);
@@ -5826,49 +5833,237 @@ export class Sound {
     }
   }
 
-  // Faint dash-rush sound fired the instant a wraith lunges. A short,
-  // high-passed noise sweep (whoosh) plus a hint of pitched air movement.
-  // Sits quiet under the scream/hit so it reads as motion-cue rather than
-  // a new threat sound — the player hears the "breath of the lunge" rather
-  // than a stab. ~0.25s total.
+  // Soft creepy-but-musical lunge — a sighing exhale on a falling minor
+  // third (Bb4 → G4), the wraith "breathing toward you". A muted breathy
+  // whoosh gives the air-movement texture; a pair of soft triangles carries
+  // the pitched sigh through a closing lowpass so it reads as a hushed voice
+  // rather than a stab. Sits quiet under the scream/hit. ~0.32s total.
   private playWraithLunge() {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    // Whoosh — noise through a bandpass that sweeps down (air rushing past).
-    const whooshDur = 0.22;
-    const whooshBuf = this.makeNoiseBuffer(whooshDur);
+    const sighDur = 0.30;
+    const sighStartHz = 466.16; // Bb4
+    const sighEndHz = 392.0;    // G4 — falling minor third, a soft sigh
+    // Whoosh — breathy noise through a bandpass that tracks the sigh pitch
+    // and softens (lower gain, gentler attack) so it's air, not a hiss-stab.
+    const whooshBuf = this.makeNoiseBuffer(sighDur);
     if (whooshBuf) {
       const src = this.ctx.createBufferSource();
       src.buffer = whooshBuf;
       const bp = this.ctx.createBiquadFilter();
       bp.type = "bandpass";
-      bp.Q.value = 3.5;
-      bp.frequency.setValueAtTime(1800, t);
-      bp.frequency.exponentialRampToValueAtTime(420, t + whooshDur);
+      bp.Q.value = 4.5;
+      bp.frequency.setValueAtTime(sighStartHz * 2, t);
+      bp.frequency.exponentialRampToValueAtTime(sighEndHz * 1.4, t + sighDur);
       const g = this.ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.08, t + 0.015);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + whooshDur);
+      g.gain.exponentialRampToValueAtTime(0.045, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + sighDur);
       src.connect(bp);
       bp.connect(g);
       g.connect(this.master);
       src.start(t);
-      src.stop(t + whooshDur + 0.02);
+      src.stop(t + sighDur + 0.02);
     }
-    // Sub-airy pitched layer — a sine that pitches down quickly, very low
-    // gain. Adds a hint of "weight shifting" under the noise.
+    // Pitched sigh — two softly-detuned triangles on the falling third,
+    // through a closing lowpass so the breath swallows the tone as it lands.
+    const sighFilter = this.ctx.createBiquadFilter();
+    sighFilter.type = "lowpass";
+    sighFilter.Q.value = 2;
+    sighFilter.frequency.setValueAtTime(2400, t);
+    sighFilter.frequency.exponentialRampToValueAtTime(700, t + sighDur);
+    const sighGain = this.ctx.createGain();
+    sighGain.gain.setValueAtTime(0.0001, t);
+    sighGain.gain.exponentialRampToValueAtTime(0.05, t + 0.04);
+    sighGain.gain.setValueAtTime(0.05, t + 0.14);
+    sighGain.gain.exponentialRampToValueAtTime(0.0001, t + sighDur);
+    sighFilter.connect(sighGain);
+    sighGain.connect(this.master);
+    for (const detune of [-9, 9]) {
+      const o = this.ctx.createOscillator();
+      o.type = "triangle";
+      o.detune.value = detune;
+      o.frequency.setValueAtTime(sighStartHz, t);
+      o.frequency.exponentialRampToValueAtTime(sighEndHz, t + sighDur * 0.85);
+      o.connect(sighFilter);
+      o.start(t);
+      o.stop(t + sighDur + 0.05);
+    }
+    // Sub-octave shadow — a quiet sine an octave below the sigh, the
+    // "weight shifting" under the breath.
     const sub = this.ctx.createOscillator();
     const subGain = this.ctx.createGain();
     sub.type = "sine";
-    sub.frequency.setValueAtTime(220, t);
-    sub.frequency.exponentialRampToValueAtTime(90, t + 0.20);
+    sub.frequency.setValueAtTime(sighStartHz * 0.5, t);
+    sub.frequency.exponentialRampToValueAtTime(sighEndHz * 0.5, t + sighDur * 0.85);
     subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(0.04, t + 0.01);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    subGain.gain.exponentialRampToValueAtTime(0.035, t + 0.03);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + sighDur);
     sub.connect(subGain);
     subGain.connect(this.master);
     sub.start(t);
-    sub.stop(t + 0.25);
+    sub.stop(t + sighDur + 0.05);
+  }
+
+  // Wraith death — the captive's release. Deliberately reminiscent of the
+  // birth scream (same detuned-saw cry voice, breath texture, and a soft
+  // reverb tail) but the emotional arc is INVERTED: instead of snapping up
+  // in pain then sagging to a haunting minor third, the cry RISES and
+  // resolves, and an Eb-major arpeggio (Eb–G–Bb, the relative major of the
+  // scream's C-minor) blooms underneath — the soul let go, ascending into
+  // the light. Built from:
+  //   (1) A soft inhale-shimmer noise swell (the gasp before release) —
+  //       the gentle counterpart to the scream's sharp shell-crack.
+  //   (2) A detuned-saw cry on the SAME voice as the scream, now sliding
+  //       UP from Eb4 and easing to a held Bb4, opening (not closing) its
+  //       lowpass — the cry resolving rather than breaking.
+  //   (3) An Eb-major arpeggio of soft triangle "bells" that bloom in
+  //       sequence (Eb4, G4, Bb4, Eb5) — the satisfying musical payoff.
+  //   (4) A warm sub root on Eb2 that swells and lingers — the dread sub's
+  //       consonant twin, grounding the chord instead of unsettling it.
+  //   (5) A soft reverb-style ringing tail, echoing the scream's tail so
+  //       the two sounds feel like one creature's bookends.
+  private playWraithDeath() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const totalDur = 2.2;
+
+    // (1) Inhale-shimmer — highpassed noise that swells in softly (the gasp),
+    // the gentle inverse of the scream's sharp shell-crack.
+    const gaspDur = 0.5;
+    const gaspBuf = this.makeNoiseBuffer(gaspDur);
+    if (gaspBuf) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = gaspBuf;
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.setValueAtTime(1200, t);
+      hp.frequency.exponentialRampToValueAtTime(3200, t + gaspDur);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.10, t + 0.12);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + gaspDur);
+      src.connect(hp);
+      hp.connect(g);
+      g.connect(this.master);
+      src.start(t);
+      src.stop(t + gaspDur + 0.02);
+    }
+
+    // (2) Resolving cry — same detuned-saw voice as the scream, sliding UP
+    // from Eb4 and easing to a held Bb4 (an ascending perfect-ish rise into
+    // the chord's fifth). Lowpass OPENS as it rises — the voice clearing,
+    // not breaking. Gentle vibrato, narrower detuning than the scream so it
+    // reads as settled rather than torn.
+    const cryDur = 1.5;
+    const cryStartHz = 311.13; // Eb4
+    const cryEndHz = 466.16;   // Bb4
+    const riseT = 0.6;
+    const cryFilter = this.ctx.createBiquadFilter();
+    cryFilter.type = "lowpass";
+    cryFilter.Q.value = 4;
+    cryFilter.frequency.setValueAtTime(900, t);
+    cryFilter.frequency.exponentialRampToValueAtTime(3600, t + riseT);
+    cryFilter.frequency.setValueAtTime(3600, t + cryDur * 0.7);
+    cryFilter.frequency.exponentialRampToValueAtTime(1200, t + cryDur);
+    const cryGain = this.ctx.createGain();
+    cryGain.gain.setValueAtTime(0.0001, t);
+    cryGain.gain.exponentialRampToValueAtTime(0.20, t + 0.10);
+    cryGain.gain.setValueAtTime(0.20, t + cryDur * 0.6);
+    cryGain.gain.exponentialRampToValueAtTime(0.0001, t + cryDur);
+    cryFilter.connect(cryGain);
+    cryGain.connect(this.master);
+    const vibrato = this.ctx.createOscillator();
+    vibrato.type = "sine";
+    vibrato.frequency.value = 5.2;
+    const vibratoGain = this.ctx.createGain();
+    vibratoGain.gain.value = 14;
+    vibrato.connect(vibratoGain);
+    vibrato.start(t);
+    vibrato.stop(t + cryDur + 0.05);
+    for (const detune of [-10, 10]) {
+      const saw = this.ctx.createOscillator();
+      saw.type = "sawtooth";
+      saw.detune.value = detune;
+      saw.frequency.setValueAtTime(cryStartHz, t);
+      saw.frequency.exponentialRampToValueAtTime(cryEndHz, t + riseT);
+      vibratoGain.connect(saw.frequency);
+      saw.connect(cryFilter);
+      saw.start(t);
+      saw.stop(t + cryDur + 0.05);
+    }
+
+    // (3) Eb-major bloom — soft triangle "bells" arpeggiating up the chord
+    // (Eb4, G4, Bb4, Eb5), each entering a beat after the last. The musical
+    // payoff: the dissonant scream resolves into a clean major triad.
+    const chord = [311.13, 392.0, 466.16, 622.25]; // Eb4, G4, Bb4, Eb5
+    const ctx = this.ctx;
+    const master = this.master;
+    chord.forEach((hz, i) => {
+      const onset = t + 0.18 + i * 0.16;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "triangle";
+      o.frequency.value = hz;
+      g.gain.setValueAtTime(0.0001, onset);
+      g.gain.exponentialRampToValueAtTime(0.14, onset + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, onset + 1.1);
+      // soft sine octave doubling so each bell has a glassy sheen
+      const oc = ctx.createOscillator();
+      const ocg = ctx.createGain();
+      oc.type = "sine";
+      oc.frequency.value = hz * 2;
+      ocg.gain.setValueAtTime(0.0001, onset);
+      ocg.gain.exponentialRampToValueAtTime(0.05, onset + 0.02);
+      ocg.gain.exponentialRampToValueAtTime(0.0001, onset + 0.8);
+      o.connect(g);
+      g.connect(master);
+      oc.connect(ocg);
+      ocg.connect(master);
+      o.start(onset);
+      o.stop(onset + 1.2);
+      oc.start(onset);
+      oc.stop(onset + 0.9);
+    });
+
+    // (4) Warm sub root — Eb2, the consonant twin of the scream's dread sub.
+    // Swells and lingers to ground the chord rather than unsettle it.
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    sub.type = "sine";
+    sub.frequency.value = 77.78; // Eb2
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.26, t + 0.4);
+    subGain.gain.setValueAtTime(0.26, t + 1.4);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + totalDur);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + totalDur + 0.05);
+
+    // (5) Soft reverb tail — bandpass-flickered noise echoing off, the same
+    // gesture as the scream's tail so the two sounds bookend the creature.
+    const tailDur = 1.2;
+    const tailStart = t + 0.6;
+    const tailBuf = this.makeNoiseBuffer(tailDur);
+    if (tailBuf) {
+      const tail = this.ctx.createBufferSource();
+      tail.buffer = tailBuf;
+      const tailFilter = this.ctx.createBiquadFilter();
+      tailFilter.type = "bandpass";
+      tailFilter.Q.value = 10;
+      tailFilter.frequency.setValueAtTime(622.25, tailStart); // Eb5, in-chord
+      tailFilter.frequency.exponentialRampToValueAtTime(311.13, tailStart + tailDur); // Eb4
+      const tailGain = this.ctx.createGain();
+      tailGain.gain.setValueAtTime(0.0001, tailStart);
+      tailGain.gain.exponentialRampToValueAtTime(0.07, tailStart + 0.08);
+      tailGain.gain.exponentialRampToValueAtTime(0.0001, tailStart + tailDur);
+      tail.connect(tailFilter);
+      tailFilter.connect(tailGain);
+      tailGain.connect(this.master);
+      tail.start(tailStart);
+      tail.stop(tailStart + tailDur + 0.02);
+    }
   }
 
   // Deep, slow chest-thump played on each boss flash beat. A sine sub at

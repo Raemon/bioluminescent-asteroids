@@ -41,6 +41,7 @@ import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderbo
 import { showGameOverIntro } from "./gameOverIntro";
 import { isDown, wasPressed } from "./controlBindings";
 import { tickLaserShot } from "./laserShot";
+import { fireBossSweepBeam, tickBossBeams } from "./bossBeam";
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
@@ -613,6 +614,7 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   compactInPlace(game.lasers, (l) => l.alive);
   for (const ab of game.alienBullets) ab.update(musicDt, game.w, game.h);
   compactInPlace(game.alienBullets, (ab) => ab.life > 0);
+  tickBossBeams(game, musicDt);
   for (const s of game.shards) s.update(musicDt);
   compactInPlace(game.shards, (s) => s.life > 0);
   for (const c of game.canisters) {
@@ -717,28 +719,13 @@ const tickWraiths = (game: Game, dt: number) => {
 };
 
 const fireBossEyeBolt = (game: Game, a: Asteroid) => {
-  // Fire along the targeting line's last snap — it re-aimed at the player on
-  // each windup beat and locked on beat 7 (see Asteroid.tickLaserAim). The
-  // bolt commits to that line, so juking after the final snap dodges it.
+  // Emit a sustained beam that sweeps across the locked aim direction (the
+  // line re-aimed at the player on each windup beat and locked on beat 7 —
+  // see Asteroid.tickLaserAim). The beam enters from one side, slashes
+  // through where the player was, and exits the far side, so juking out of
+  // the sweep's arc dodges it.
   const angle = Math.atan2(a.bossEyeAimY - a.pos.y, a.bossEyeAimX - a.pos.x);
-  // Fast, react-now bolt — the long windup is the warning; once it fires it
-  // should cross the gap quickly rather than drift like the plasma balls.
-  const speed = ENTITY_CONFIG.boss.eyeBulletSpeed * 2.6;
-  const muzzleDist = (a.isBoss() ? a.bossEyeRadius : a.radius) * 1.1;
-  const muzzleX = a.pos.x + Math.cos(angle) * muzzleDist;
-  const muzzleY = a.pos.y + Math.sin(angle) * muzzleDist;
-  const bullet = new AlienBullet(
-    { x: muzzleX, y: muzzleY },
-    { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
-    "big",
-    a.hue,
-    true,
-  );
-  bullet.isBossLaser = true;
-  // Born inside the live boss's hitbox — skip self-collision so the bolt
-  // actually reaches the player instead of detonating on the boss body.
-  bullet.owner = a;
-  game.alienBullets.push(bullet);
+  fireBossSweepBeam(game, a, angle);
   game.sound.play("alienFireBig", 1.0, a.pos);
   game.sound.play("bossPulse", 1.0, a.pos);
 };

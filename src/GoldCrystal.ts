@@ -29,6 +29,12 @@ export class GoldCrystal {
   radius = ENTITY_CONFIG.goldCrystal.radius;
   age = 0;
   alive = true;
+  // Optional drift-to-park: rhythm-aligned gems fly from the crystal's death
+  // site to a solved spot on the player's one-beat aim ring, arriving exactly
+  // when `parkAge` is reached, then freeze. `parkTarget` null = free drift.
+  parkTarget: Vec | null = null;
+  parkAge = 0;
+  private parkOrigin: Vec | null = null;
   // 3D-ish tumble axes mirror the canister so the gem reads as a real
   // rotating object rather than a flat icon.
   rotX: number;
@@ -50,16 +56,34 @@ export class GoldCrystal {
     this.rotSpeedZ = rand(-1.0, 1.0);
   }
 
+  // Glide this gem from its current spot to `target`, arriving at age `arriveAge`
+  // and parking there. Used by the rhythm-aligned drop so the gem lands on the
+  // player's one-beat aim ring right on the downbeat.
+  driftToPark(target: Vec, arriveAge: number) {
+    this.parkOrigin = { ...this.pos };
+    this.parkTarget = { ...target };
+    this.parkAge = arriveAge;
+  }
+
   update(dt: number, _w: number, _h: number) {
     this.age += dt;
     this.rotX += this.rotSpeedX * dt;
     this.rotY += this.rotSpeedY * dt;
     this.rotZ += this.rotSpeedZ * dt;
-    // Gentle drift; the gem isn't supposed to chase or flee, it just floats
-    // where the rock died.
-    addScaledMut(this.pos, this.vel, dt);
-    // Slow the drift over time so it eventually settles near its origin.
-    scaleMut(this.vel, Math.max(0, 1 - dt * 0.6));
+    if (this.parkTarget && this.parkOrigin) {
+      // Smoothstep glide from the death site to the solved aim-ring spot over
+      // one beat, then hold. Eased so the gem decelerates into its park.
+      const t = this.parkAge > 0 ? Math.min(1, this.age / this.parkAge) : 1;
+      const e = t * t * (3 - 2 * t);
+      this.pos.x = this.parkOrigin.x + (this.parkTarget.x - this.parkOrigin.x) * e;
+      this.pos.y = this.parkOrigin.y + (this.parkTarget.y - this.parkOrigin.y) * e;
+    } else {
+      // Gentle drift; the gem isn't supposed to chase or flee, it just floats
+      // where the rock died.
+      addScaledMut(this.pos, this.vel, dt);
+      // Slow the drift over time so it eventually settles near its origin.
+      scaleMut(this.vel, Math.max(0, 1 - dt * 0.6));
+    }
     if (this.age >= LIFETIME) this.alive = false;
   }
 
@@ -189,13 +213,19 @@ export const spawnGoldCrystalAt = (pos: Vec, parentVel: Vec): GoldCrystal => {
   return new GoldCrystal({ ...pos }, drift);
 };
 
-// Spawn a fan of gems aligned to the next N beat-slots from the player's
-// vantage. Gem k sits where a bullet fired (k+1) beats from now lands one
-// beat later, assuming the player keeps coasting and only rotates to aim.
-// Aim circle used by the reticule system: center = shipPos + shipVel*0.4*beat,
-// radius = bulletSpeed*beat. k beats of pre-fire drift add shipVel*k*beat,
-// so gem k = shipPos + shipVel*(k+1+0.4)*beat + dir_k*bulletSpeed*beat.
-// Drift is zero so the gem stays parked at the solved slot.
+// Drop a fan of gems at the crystal's death site, then drift each one out to a
+// solved spot on the player's one-beat aim ring so that — if the pilot keeps
+// coasting and just rotates — the reticule lines up on one of them exactly one
+// beat from now. The lead gem sits on the radial line from the player through
+// the death site (so it reads as drifting straight toward or away from the
+// ship); the rest fan slightly around it as nearby alternates.
+//
+// Geometry mirrors computeAimCircle evaluated one beat in the future, when the
+// coasting ship sits at shipPos + shipVel*beat:
+//   center = shipPos + shipVel*beat + shipVel*0.4*beat = shipPos + shipVel*1.4*beat
+//   radius = shipRadius + 4 + bulletSpeed*beat
+// A gem placed on that circle is reachable by a one-beat shot from the ship's
+// future pose, so rotating to aim drops the reticule right onto it.
 export const spawnRhythmAlignedGems = (
   shipPos: Vec,
   shipVel: Vec,
@@ -204,26 +234,30 @@ export const spawnRhythmAlignedGems = (
   count: number,
   bulletSpeed: number,
   beatGrid: number,
+  shipRadius: number,
 ): GoldCrystal[] => {
-  const toDeath = sub(deathPos, shipPos);
+  const center = v(
+    shipPos.x + shipVel.x * 1.4 * beatGrid,
+    shipPos.y + shipVel.y * 1.4 * beatGrid,
+  );
+  const aimRadius = shipRadius + 4 + bulletSpeed * beatGrid;
+  // aim outward from the future aim-circle center toward the kill site so the
+  // lead gem drifts along the player→death line; fall back to ship facing when
+  // the rock died on top of that center.
+  const toDeath = sub(deathPos, center);
   const baseDist = len(toDeath);
-  // aim outward from the ship toward the kill site; fall back to facing
-  // when the rock died on top of the player.
   const baseAngle = baseDist > 1 ? Math.atan2(toDeath.y, toDeath.x) : shipHeading;
   // small fan so gems read as distinct targets, not a single column.
   const SPREAD_PER_GEM = 0.11;
   const startOffset = -((count - 1) * SPREAD_PER_GEM) / 2;
-  const aimRadius = bulletSpeed * beatGrid;
   const gems: GoldCrystal[] = [];
   for (let k = 0; k < count; k++) {
     const angle = baseAngle + startOffset + k * SPREAD_PER_GEM;
     const dir = fromAngle(angle);
-    const driftBeats = (k + 1 + 0.4) * beatGrid;
-    const gemPos = v(
-      shipPos.x + shipVel.x * driftBeats + dir.x * aimRadius,
-      shipPos.y + shipVel.y * driftBeats + dir.y * aimRadius,
-    );
-    gems.push(new GoldCrystal(gemPos, v(0, 0)));
+    const target = v(center.x + dir.x * aimRadius, center.y + dir.y * aimRadius);
+    const gem = new GoldCrystal({ ...deathPos }, v(0, 0));
+    gem.driftToPark(target, beatGrid);
+    gems.push(gem);
   }
   return gems;
 };

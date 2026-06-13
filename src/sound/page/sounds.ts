@@ -231,6 +231,7 @@ export const OBJECTS: GameObject[] = [
     actions: [
       { verb: "takes a hit", sound: "wraithHit", trigger: beat(2) },
       { verb: "lunges (every 2 measures)", sound: "wraithLunge", trigger: beat(8) },
+      { verb: "release cry on death", sound: "wraithDeath", trigger: beat(8) },
     ],
   },
 
@@ -370,7 +371,7 @@ const MENTIONED_SOUNDS = [
   "bassKick", "bassPluck", "bassBoom", "bassSnap", "bassHit", "bassEcho",
   "chime", "bell", "warble", "tink",
   "crystalShatterLarge", "crystalShatterSmall",
-  "wraithScream", "wraithHit", "wraithLunge",
+  "wraithScream", "wraithHit", "wraithLunge", "wraithDeath",
   // aliens
   "alienFireBig", "alienFireMedium", "alienFireSmall", "alienHit", "alienExplode",
   // comets

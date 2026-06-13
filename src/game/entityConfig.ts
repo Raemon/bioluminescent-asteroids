@@ -126,7 +126,7 @@ export const ENTITY_CONFIG = {
     firstWave: 2,
     perSpawnChance: 0.12,
     // large variant renders slightly oversized to feel more dangerous.
-    largeRadius: 43,
+    largeRadius: 35,
     // Large solid crystals are heavy — they drift in noticeably slower than
     // their size band would suggest, so the player has time to read the tough
     // target and line up. Fed to the rhythm aligner as a scaled speed band
@@ -141,7 +141,7 @@ export const ENTITY_CONFIG = {
     // shot does nothing and visibly bounces off; only on-beat (4) and boosted
     // (8) shots get through, the latter chipping 1 HP. Faceted ice should feel
     // like it wants a real hit, not a peashooter.
-    damageReduction: 7,
+    damageReduction: 3,
     // Standalone solidCrystalSmall — a rare "treat" spawn on its own roll
     // (4 HP shard, smallScore on kill). Same cadence the tink roll used.
     smallSpawn: {
@@ -156,7 +156,7 @@ export const ENTITY_CONFIG = {
   // the wraith.
   glassPrison: {
     firstWave: 12,
-    perSpawnChance: 0.18,
+    perSpawnChance: 0.33,
     radius: 46,
     hp: 16,
     score: 600,
@@ -192,9 +192,10 @@ export const ENTITY_CONFIG = {
     foreshadowWaves: [10] as readonly number[],
     // The whole-body large solidifies out of the grown background planet;
     // the killing hit cracks it into two hemispheres + an eye-core. Mediums
-    // are the hemispheres (~70% of full-body radius); smalls are the plate
-    // fragments that come off them.
-    radius: { large: 132, medium: 62, small: 30 } as Record<AsteroidSize, number>,
+    // are the hemispheres — kept close to the full-body radius so the halves
+    // read as genuine cleaved chunks of the planet, not shrunken mediums.
+    // Smalls are the plate fragments that come off them.
+    radius: { large: 132, medium: 104, small: 30 } as Record<AsteroidSize, number>,
     hp: { large: 60, medium: 18, small: 6 } as Record<AsteroidSize, number>,
     score: { large: 2500, medium: 800, small: 300 } as Record<AsteroidSize, number>,
     // The eye-core is a third gen-1 fragment alongside the two hemispheres:

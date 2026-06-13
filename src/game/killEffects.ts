@@ -209,6 +209,10 @@ const finishAsteroidKillCore = (
     game.sound.play("wraithScream", 1, a.pos);
   } else if (a.kind === "wraith") {
     emitWraithDeath(game.particles, a);
+    // Release cry — layered ON TOP of the per-shot wraithHit thud the caller
+    // plays. Echoes the birth scream's voice but resolves into an Eb-major
+    // bloom: the captive let go, ascending. Position-aware pan from the kill.
+    game.sound.play("wraithDeath", 1, a.pos);
   } else {
     emitExplosion(game.particles, game.shards, a, isOnBeatHit);
   }
@@ -250,6 +254,7 @@ const finishAsteroidKillCore = (
       a.embeddedGemCount,
       ship.bulletSpeed,
       BEAT_GRID,
+      ship.radius,
     );
     for (const g of gems) game.goldCrystals.push(g);
   }

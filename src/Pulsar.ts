@@ -616,9 +616,27 @@ export class Pulsar {
       const relY = cy + orbitY - ppy;
       const px = ppx + relX * cosR - relY * sinR;
       const py = ppy + relX * sinR + relY * cosR;
-      const size = planet.baseSize * (1 + approach * planet.growthRate);
+      let size: number;
+      let colorApproach: number;
+      if (isBossPlanet) {
+        // Normalized progress 0→1 where 1 = full size at the boss wave
+        // (approach ≈ 0.60 at wave 11). Eased with a power curve so the
+        // planet stays a small distant speck for many early waves and only
+        // swells noticeably in the final stretch.
+        const FULL_APPROACH = 0.60;
+        const fullness = Math.min(1, approach / FULL_APPROACH);
+        const easedFullness = Math.pow(fullness, 2.8);
+        size = planet.baseSize * (1 + easedFullness * planet.growthRate);
+        // Color stays pure black until the planet is nearly full size, then
+        // the hue floods in over the final stretch so it "arrives" right as
+        // the planetoid finishes looming into the level.
+        colorApproach = approach * Math.max(0, (fullness - 0.82) / 0.18);
+      } else {
+        size = planet.baseSize * (1 + approach * planet.growthRate);
+        colorApproach = approach;
+      }
 
-      this.renderPlanet(ctx, planet, px, py, size, ppx, ppy, r, approach, beat, flare, isBossPlanet);
+      this.renderPlanet(ctx, planet, px, py, size, ppx, ppy, r, colorApproach, beat, flare, isBossPlanet);
     }
 
     this.renderShockwave(ctx);
