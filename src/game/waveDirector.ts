@@ -68,7 +68,13 @@ const alignIncomingToRhythm = (game: Game, a: Asteroid, claimed?: BeatClaimSet) 
 // the debris is aligned to a stale "ghost ship" position and a moving
 // player never sees combo-able children.
 export const alignSplitChildToRhythm = (game: Game, child: Asteroid, claimed?: BeatClaimSet) => {
-  if (child.isBossFamily()) return;
+  if (child.isBossFamily()) {
+    // Boss fragments don't get velocity-aligned (their fan trajectory is
+    // fixed), but the beat-active shards still need their first flash slot
+    // seeded from the measureOffset the splitter assigned.
+    if (child.isBeatFragment()) seedBeatFragmentSlot(game, child);
+    return;
+  }
   const speed = Math.hypot(child.vel.x, child.vel.y);
   if (speed < 1) return;
   alignVelocityToRhythm(child.pos, child.vel, {
@@ -136,6 +142,16 @@ export const alignBassBeat = (game: Game, asteroid: Asteroid) => {
   const k = Math.ceil((game.beatTime - gridSnappedOffset - 1e-6) / BASS_MEASURE_LENGTH);
   const raw = k * BASS_MEASURE_LENGTH + gridSnappedOffset;
   asteroid.nextBeatAt = Math.round(raw / BEAT_GRID) * BEAT_GRID;
+};
+
+// Beat-active boss shards flash on the same grid-snapped measure slot a
+// Bassteroid uses, so the first pulse lands on the next matching downbeat.
+const seedBeatFragmentSlot = (game: Game, a: Asteroid) => {
+  const gridSnappedOffset = Math.round(a.measureOffset / BEAT_GRID) * BEAT_GRID;
+  a.measureOffset = gridSnappedOffset;
+  const k = Math.ceil((game.beatTime - gridSnappedOffset - 1e-6) / BASS_MEASURE_LENGTH);
+  const raw = k * BASS_MEASURE_LENGTH + gridSnappedOffset;
+  a.nextBeatAt = Math.round(raw / BEAT_GRID) * BEAT_GRID;
 };
 
 // paired-wave intro (one bass, then both, then decorators) trains the player gradually.

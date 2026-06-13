@@ -25,9 +25,16 @@ export type BassLightning = {
   seed: number;
   // stable per-sample perpendicular jag (px); wobble animates on top.
   jags: number[];
+  // Boss-shard arcs render heavier — wider core, brighter glow, longer tail —
+  // so a late-game beat-fragment's echo reads as a bigger discharge than a
+  // Bassteroid splinter's.
+  big: boolean;
 };
 
 const LIGHTNING_LIFE = 0.55;
+// Boss-shard bolts hang on longer and jag harder than a Bassteroid arc.
+const BIG_LIFE_MUL = 1.45;
+const BIG_JAG_MUL = 1.6;
 const COMBO_REQUIRED = 4;
 const MAX_ARCS_PER_KILL = 3;
 const SAMPLE_SPACING = 14;
@@ -62,18 +69,22 @@ const sameSlot = (a: number, b: number): boolean => {
 };
 
 const newBolt = (source: Asteroid, target: Vec): BassLightning => {
+  const big = source.isBeatFragment();
   const d = Math.hypot(target.x - source.pos.x, target.y - source.pos.y);
   const n = Math.max(MIN_SAMPLES, Math.min(MAX_SAMPLES, Math.round(d / SAMPLE_SPACING)));
+  const jagAmp = big ? JAG_AMPLITUDE * BIG_JAG_MUL : JAG_AMPLITUDE;
   const jags: number[] = [];
-  for (let i = 0; i < n; i++) jags.push((rng() * 2 - 1) * JAG_AMPLITUDE);
+  for (let i = 0; i < n; i++) jags.push((rng() * 2 - 1) * jagAmp);
+  const life = big ? LIGHTNING_LIFE * BIG_LIFE_MUL : LIGHTNING_LIFE;
   return {
     source,
     target: { x: target.x, y: target.y },
     hue: source.hue,
-    life: LIGHTNING_LIFE,
-    maxLife: LIGHTNING_LIFE,
+    life,
+    maxLife: life,
     seed: rng() * TAU,
     jags,
+    big,
   };
 };
 
@@ -86,7 +97,7 @@ export const triggerBassLightning = (game: Game, targetPos: Vec, killed?: Astero
   const killSlot = measureSlot(beatCenter);
   const sources: Asteroid[] = [];
   for (const a of game.asteroids) {
-    if (!a.isBass() || a === killed) continue;
+    if ((!a.isBass() && !a.isBeatFragment()) || a === killed) continue;
     if (sameSlot(measureSlot(a.nextBeatAt), killSlot)) sources.push(a);
   }
   if (sources.length === 0) return;
@@ -202,9 +213,13 @@ export const renderBassLightnings = (
     if (env < 0.02) continue;
     const pts = buildBoltPoints(l, tSec);
     const lightness = 70;
-    strokePolyline(ctx, pts, 6.5, `hsla(${l.hue}, 100%, ${lightness}%, ${0.1 * env})`);
-    strokePolyline(ctx, pts, 2.6, `hsla(${l.hue}, 100%, ${lightness + 8}%, ${0.3 * env})`);
-    strokePolyline(ctx, pts, 1.2, `hsla(${l.hue}, 100%, 92%, ${0.75 * env})`);
+    // Boss-shard bolts get a fatter glow halo + brighter core so the larger
+    // discharge reads at a glance; a Bassteroid splinter's stays a thin zap.
+    const wMul = l.big ? 1.9 : 1;
+    const glowA = l.big ? 0.16 : 0.1;
+    strokePolyline(ctx, pts, 6.5 * wMul, `hsla(${l.hue}, 100%, ${lightness}%, ${glowA * env})`);
+    strokePolyline(ctx, pts, 2.6 * wMul, `hsla(${l.hue}, 100%, ${lightness + 8}%, ${0.3 * env})`);
+    strokePolyline(ctx, pts, 1.2 * (l.big ? 1.5 : 1), `hsla(${l.hue}, 100%, 92%, ${0.75 * env})`);
     drawSpectrumBars(ctx, l, pts, tSec, env, lightness);
   }
   ctx.restore();

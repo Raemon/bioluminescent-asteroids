@@ -2712,13 +2712,22 @@ export class Asteroid {
   // the aim tracks the player each frame so an idle eye still looks alive.
   // `tNow` is the phase within the 8.0s cycle.
   private tickLaserAim(tNow: number) {
+    // The aim re-targets only on the 4 windup beats (t = 1.5, 2.0, 2.5, 3.0).
+    // From the last tick it must HOLD through the fire (t=3.5) so the shot
+    // commits to the telegraphed line, not to wherever the ship slipped to by
+    // the fire frame — that hold is what lets a running player slip the shot.
+    // Only once the cycle has wrapped back into its early "idle" stretch
+    // (before the next windup) do we resume tracking the live ship position so
+    // an idle eye still looks alive.
     const inWindup = tNow >= 1.5 && tNow < 3.5;
-    if (!inWindup) {
+    const inIdle = tNow < 1.5;
+    if (inIdle) {
       this.bossAimBeatIndex = -1;
       this.bossEyeAimX = this.bossTrackedShipX;
       this.bossEyeAimY = this.bossTrackedShipY;
       return;
     }
+    if (!inWindup) return; // post-fire hold: keep the locked aim frozen
     const beatIndex = Math.floor((tNow - 1.5) / 0.5);
     if (beatIndex > this.bossAimBeatIndex) {
       this.bossAimBeatIndex = beatIndex;
@@ -3008,6 +3017,15 @@ export class Asteroid {
     return this.isBoss() || this.isBossFragment();
   }
 
+  // Terminal boss shards that ring like Bassteroids: they flash on a measure
+  // slot (silently — the boss music carries the audio), and as the planetoid
+  // breaks into more of them the collective pulse subdivides into faster beats
+  // (splitLevel rises). These also act as bass-echo lightning sources and
+  // carry a live-field resonance bounty. The ember stays inert.
+  isBeatFragment(): boolean {
+    return this.kind === "bossPlate" || this.kind === "bossIrisShard";
+  }
+
   // `impactDir` is the bullet's velocity direction at the moment of the kill.
   // Falls back to the parent's velocity direction when no impactDir is given
   // (e.g. shockwave splits).
@@ -3062,6 +3080,10 @@ export class Asteroid {
         // axis — that's the freshly-revealed cross-section of the broken
         // planet, with the inner ring laid bare.
         hemi.bossFragmentAngle = cutAxis + (sign === -1 ? Math.PI : 0);
+        // Seed a half-measure-apart base so each hemisphere's eventual plates
+        // subdivide off a distinct slot — the two halves' debris interleaves
+        // instead of stacking on the same beats.
+        hemi.measureOffset = i * (BASS_MEASURE_LENGTH / 2);
         // Inherit the parent's rhythm position + slot latches so each
         // fragment marches on the same downbeat the whole-body boss was on
         // when it cracked.
@@ -3085,6 +3107,9 @@ export class Asteroid {
       };
       const eyeSpeed = parentSpeed * rand(0.7, 1.0) + 30;
       const eye = new Asteroid(eyePos, fromAngle(baseAngle, eyeSpeed), "medium", this.hue, "bossEye");
+      // Offset the eye's base a quarter measure off the hemispheres so its two
+      // iris shards ring in the gaps between the plate flashes.
+      eye.measureOffset = BASS_MEASURE_LENGTH / 4;
       eye.bossIrisAngle = this.bossIrisAngle;
       eye.bossEyeAimX = this.bossEyeAimX;
       eye.bossEyeAimY = this.bossEyeAimY;
@@ -3120,6 +3145,13 @@ export class Asteroid {
         // hemisphere wore two color rings (each plate gets a distinct one,
         // the third samples a third). Modular indices into BASS_KIND_BASE.
         plate.bossPlateBand = (i + Math.floor(rng() * 2)) % 4;
+        // Beat-active like a Bassteroid: gen-2 (quarter-measure subdivision),
+        // each plate offset onto a distinct slot off the parent's so a single
+        // hemisphere's three plates fan across the measure rather than
+        // strobing in unison. Spread the hemisphere shatter across the field
+        // and the flashes thicken into the escalating pulse.
+        plate.splitLevel = 2;
+        plate.measureOffset = (this.measureOffset + i * (BASS_MEASURE_LENGTH / 4)) % BASS_MEASURE_LENGTH;
         fragmentList.push(plate);
       }
       return fragmentList;
@@ -3144,6 +3176,10 @@ export class Asteroid {
         // Track which side of the iris this shard came from so the renderer
         // can draw the brass rim arc on the correct edge.
         shard.bossFragmentAngle = sign === -1 ? -1 : 1;
+        // Beat-active like a Bassteroid: the two shards sit half a measure
+        // apart so the dead eye keeps ringing on opposite beats. See bossPlate.
+        shard.splitLevel = 2;
+        shard.measureOffset = (this.measureOffset + i * (BASS_MEASURE_LENGTH / 2)) % BASS_MEASURE_LENGTH;
         fragmentList.push(shard);
       }
       // The ember drifts slowly forward along the impact line — a tiny
@@ -3195,6 +3231,9 @@ export class Asteroid {
         // smalls (gen-2) — the lightest fragments — spin noticeably faster.
         const spinMag = childSize === "medium" ? rand(0.4, 0.9) : rand(1.4, 2.6);
         child.rotSpeed = spinMag * (rng() < 0.5 ? -1 : 1);
+        // Warm the inherited-geometry outline now, off the render path, so the
+        // O(edges²) union doesn't run live on the child's combo-ignition frame.
+        child.haloOutline = child.buildHaloOutline(BASS_HALO_GAP_PX);
         fragmentList.push(child);
       }
       return fragmentList;
@@ -5132,6 +5171,21 @@ export class Asteroid {
   // Plate fragment: a single Bassteroid-style modular shard, painted in
   // one of the four ring hues. Tumbles freely. Reads as a literal piece of
   // the equatorial band that just flew off.
+  // Trapezoidal plate silhouette with bevelled corners, in radius units so a
+  // beat bloom can re-trace it at a larger scale. Caller has already
+  // translated/rotated into the plate's local frame.
+  private traceBossPlatePath(ctx: CanvasRenderingContext2D, scale: number) {
+    const r = this.radius * scale;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.9, -r * 0.45);
+    ctx.lineTo(r * 0.65, -r * 0.7);
+    ctx.lineTo(r * 0.95, -r * 0.1);
+    ctx.lineTo(r * 0.75, r * 0.55);
+    ctx.lineTo(-r * 0.55, r * 0.75);
+    ctx.lineTo(-r * 0.95, r * 0.1);
+    ctx.closePath();
+  }
+
   renderBossPlate(ctx: CanvasRenderingContext2D, t: number) {
     const damageT = 1 - this.hp / Math.max(1, this.maxHp);
     const r = this.radius;
@@ -5141,6 +5195,23 @@ export class Asteroid {
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
     ctx.rotate(this.rotation);
+
+    // On-beat bloom — scaled copies of the plate silhouette pulse outward like
+    // a Bassteroid's, so the broken hull-plate rings on its measure slot
+    // instead of sitting inert. Drawn before the body so the rim reads on top.
+    if (this.beatFlash > 0) {
+      const a = this.beatFlash;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = `hsla(${hue + 20}, 100%, 65%, ${0.2 * a})`;
+      this.traceBossPlatePath(ctx, 1.7 + 0.6 * a);
+      ctx.fill();
+      ctx.strokeStyle = `hsla(${hue + 30}, 100%, 90%, ${0.9 * a})`;
+      ctx.lineWidth = 2.0 + 2.4 * a;
+      this.traceBossPlatePath(ctx, 1.2 + 0.18 * a);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Small hue-tinted halo
     ctx.save();
@@ -5157,27 +5228,13 @@ export class Asteroid {
     // Plate silhouette — a chunky trapezoidal panel with bevelled corners.
     // Hand-built shape so it doesn't read as a generic rock.
     ctx.fillStyle = `hsl(${hue}, 60%, 14%)`;
-    ctx.beginPath();
-    ctx.moveTo(-r * 0.9, -r * 0.45);
-    ctx.lineTo(r * 0.65, -r * 0.7);
-    ctx.lineTo(r * 0.95, -r * 0.1);
-    ctx.lineTo(r * 0.75, r * 0.55);
-    ctx.lineTo(-r * 0.55, r * 0.75);
-    ctx.lineTo(-r * 0.95, r * 0.1);
-    ctx.closePath();
+    this.traceBossPlatePath(ctx, 1);
     ctx.fill();
 
     // Panel inner gradient — bright top edge, dark bottom (suggests light
     // reflecting off the plated surface)
     ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(-r * 0.9, -r * 0.45);
-    ctx.lineTo(r * 0.65, -r * 0.7);
-    ctx.lineTo(r * 0.95, -r * 0.1);
-    ctx.lineTo(r * 0.75, r * 0.55);
-    ctx.lineTo(-r * 0.55, r * 0.75);
-    ctx.lineTo(-r * 0.95, r * 0.1);
-    ctx.closePath();
+    this.traceBossPlatePath(ctx, 1);
     ctx.clip();
     const sheen = ctx.createLinearGradient(0, -r, 0, r);
     sheen.addColorStop(0, `hsla(${hue + 10}, 90%, 50%, 0.55)`);
@@ -5194,17 +5251,11 @@ export class Asteroid {
     ctx.stroke();
     ctx.restore();
 
-    // Panel outline — bright rim
-    ctx.strokeStyle = `hsla(${hue + 20}, 100%, 75%, 0.9)`;
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.moveTo(-r * 0.9, -r * 0.45);
-    ctx.lineTo(r * 0.65, -r * 0.7);
-    ctx.lineTo(r * 0.95, -r * 0.1);
-    ctx.lineTo(r * 0.75, r * 0.55);
-    ctx.lineTo(-r * 0.55, r * 0.75);
-    ctx.lineTo(-r * 0.95, r * 0.1);
-    ctx.closePath();
+    // Panel outline — bright rim, whitens on the beat so the hit reads.
+    const rimLight = 75 + 20 * this.beatFlash;
+    ctx.strokeStyle = `hsla(${hue + 20}, 100%, ${rimLight}%, 0.9)`;
+    ctx.lineWidth = 1.4 + 1.2 * this.beatFlash;
+    this.traceBossPlatePath(ctx, 1);
     ctx.stroke();
 
     // One running light — pinprick glow at a corner
@@ -5238,6 +5289,28 @@ export class Asteroid {
     ctx.translate(this.pos.x, this.pos.y);
     ctx.rotate(this.rotation);
 
+    // On-beat bloom — a scaled copy of the crescent flares outward on the
+    // shard's measure slot, mirroring a Bassteroid's pulse so the dead eye's
+    // sliver keeps ringing.
+    if (this.beatFlash > 0) {
+      const a = this.beatFlash;
+      const bloomR = r * (1.5 + 0.5 * a);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = `hsla(${baseHue + 20}, 100%, 70%, ${0.18 * a})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, bloomR, side * -Math.PI / 2, side * Math.PI / 2, side < 0);
+      ctx.arc(0, 0, r * 0.55, side * Math.PI / 2, side * -Math.PI / 2, side > 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = `hsla(40, 100%, 88%, ${0.9 * a})`;
+      ctx.lineWidth = 1.6 + 2.0 * a;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * (1.18 + 0.1 * a), side * -Math.PI / 2, side * Math.PI / 2, side < 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Faint halo
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -5258,9 +5331,9 @@ export class Asteroid {
     ctx.closePath();
     ctx.fill();
 
-    // Brass rim on the outer arc
-    ctx.strokeStyle = `hsla(38, 90%, 60%, 0.9)`;
-    ctx.lineWidth = 1.8;
+    // Brass rim on the outer arc — whitens on the beat.
+    ctx.strokeStyle = `hsla(38, 90%, ${60 + 30 * this.beatFlash}%, 0.9)`;
+    ctx.lineWidth = 1.8 + 1.2 * this.beatFlash;
     ctx.beginPath();
     ctx.arc(0, 0, r, side * -Math.PI / 2, side * Math.PI / 2, side < 0);
     ctx.stroke();

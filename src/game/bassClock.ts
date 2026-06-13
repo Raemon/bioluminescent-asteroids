@@ -46,11 +46,19 @@ const tickBgBeats = (game: Game) => {
 // kind binds the voice; measureOffset varies so split children carry timbre to new beat slots.
 const tickBassAsteroids = (game: Game) => {
   for (const a of game.asteroids) {
-    if (!a.isBass()) continue;
+    // Beat-active boss shards ride the same clock as Bassteroids — they flash
+    // on their measure slot but stay silent (the boss music carries the audio,
+    // and a stack of fragment voices would muddy it). The spread of their
+    // offsets across the measure is what makes the broken-up planet read as an
+    // escalating, denser pulse.
+    const beatFragment = a.isBeatFragment();
+    if (!a.isBass() && !beatFragment) continue;
     while (game.beatTime >= a.nextBeatAt) {
-      const sound = BASS_KIND_SOUND[a.kind as "bassA" | "bassB" | "bassC" | "bassD"];
-      const pitchRatio = BASS_SPLIT_PITCH_RATIO[a.splitLevel] ?? 1;
-      game.sound.play(sound, pitchRatio, a.pos);
+      if (!beatFragment) {
+        const sound = BASS_KIND_SOUND[a.kind as "bassA" | "bassB" | "bassC" | "bassD"];
+        const pitchRatio = BASS_SPLIT_PITCH_RATIO[a.splitLevel] ?? 1;
+        game.sound.play(sound, pitchRatio, a.pos);
+      }
       a.beatFlash = 1.0;
       // re-snap to BEAT_GRID so accumulated float error can't drift the voice off the beat.
       a.nextBeatAt = Math.round((a.nextBeatAt + BASS_MEASURE_LENGTH) / BEAT_GRID) * BEAT_GRID;

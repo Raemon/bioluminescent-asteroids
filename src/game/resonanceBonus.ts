@@ -10,10 +10,16 @@ export const RESONANCE_VALUE: Record<AsteroidSize, number> = {
   small: 25,
 };
 
-// One bassteroid piece's standalone contribution — used for the live-field
-//   total and the bass-echo "+N" tag a lightning arc pins beside the piece.
+// Beat-active boss shards are worth more than a stock small piece — they're
+//   the rare late-game rubble that rings on its own slot, so cashing the field
+//   while it pulses pays out heavier than a Bassteroid splinter.
+const BEAT_FRAGMENT_VALUE = 40;
+
+// One ringing piece's standalone contribution — used for the live-field total
+//   and the bass-echo "+N" tag a lightning arc pins beside the piece. Both
+//   Bassteroid splinters and beat-active boss shards qualify.
 export const resonanceValueOf = (a: Asteroid): number =>
-  a.isBass() ? RESONANCE_VALUE[a.size] : 0;
+  a.isBass() ? RESONANCE_VALUE[a.size] : a.isBeatFragment() ? BEAT_FRAGMENT_VALUE : 0;
 
 // Resonance bonus: the summed value of every live bassteroid piece on the field.
 //   Each piece contributes independently of the others, so destroying one medium
