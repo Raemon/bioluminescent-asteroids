@@ -55,6 +55,12 @@ const tickBassAsteroids = (game: Game) => {
       // re-snap to BEAT_GRID so accumulated float error can't drift the voice off the beat.
       a.nextBeatAt = Math.round((a.nextBeatAt + BASS_MEASURE_LENGTH) / BEAT_GRID) * BEAT_GRID;
     }
+    // Split children beat on a fraction of the measure (splitDelta); recover
+    // this rock's actual interval from its split level so the phase ramp is
+    // correct for every tier, not just whole-measure rocks.
+    const interval = BASS_MEASURE_LENGTH / Math.pow(2, a.splitLevel);
+    const remaining = a.nextBeatAt - game.beatTime;
+    a.beatPhase = Math.max(0, Math.min(1, 1 - remaining / interval));
   }
 };
 

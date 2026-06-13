@@ -312,6 +312,12 @@ const handleBossWave = (game: Game): boolean => {
   const pos = game.pulsar.bossPlanetPos();
   game.pulsar.setBossPlanetState("active");
   game.asteroids.push(spawnBossAt(pos, game.w, game.h));
+  // one of each Bassteroid joins the boss; shared claim set keeps them on
+  // distinct beat slots.
+  const claimed = newBeatClaimSet();
+  for (const kind of BASS_KINDS) {
+    game.asteroids.push(spawnSpecial(game, kind, claimed));
+  }
   return true;
 };
 

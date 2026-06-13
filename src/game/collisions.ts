@@ -240,6 +240,7 @@ export const handleAlienBulletHits = (game: Game) => {
 const alienBulletDamagesAsteroid = (game: Game, ab: AlienBullet): boolean => {
   for (let i = 0; i < game.asteroids.length; i++) {
     const a = game.asteroids[i];
+    if (a === ab.owner) continue;
     if (!a.collidesWith(ab.pos, ab.radius)) continue;
     const { killed } = a.applyDamage(1);
     game.shake = Math.min(game.shake + (killed ? 0.3 : 0.15), 1.2);

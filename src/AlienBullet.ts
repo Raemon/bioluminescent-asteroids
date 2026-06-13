@@ -48,6 +48,11 @@ export class AlienBullet {
   // Optional cross-fade window at end of life. When set, alpha ramps from 1
   // at (life == fadeStartLife) down to 0 at (life == 0).
   fadeStartLife = 0;
+  // The asteroid that fired this bullet, if any. Collision skips it so a
+  // boss-eye bolt born deep inside the boss's own hitbox doesn't immediately
+  // collide with the body that fired it (the muzzle sits well inside the
+  // live boss's ~125px collision radius). Other asteroids still block it.
+  owner: object | null = null;
 
   constructor(pos: Vec, vel: Vec, size: AlienSize, hue: number, isBoss: boolean = false) {
     this.pos = { ...pos };

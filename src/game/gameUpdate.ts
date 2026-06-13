@@ -717,13 +717,13 @@ const tickWraiths = (game: Game, dt: number) => {
 };
 
 const fireBossEyeBolt = (game: Game, a: Asteroid) => {
-  // Aim straight at the ship's CURRENT position the frame the bolt fires —
-  // the beat-7 pupil flash is the visible telegraph; from there the player
-  // gets one half-beat to dodge before the beat-8 bolt commits.
-  const angle = Math.atan2(game.ship.pos.y - a.pos.y, game.ship.pos.x - a.pos.x);
-  a.bossEyeAimX = a.pos.x + Math.cos(angle) * 1000;
-  a.bossEyeAimY = a.pos.y + Math.sin(angle) * 1000;
-  const speed = ENTITY_CONFIG.boss.eyeBulletSpeed * 1.6;
+  // Fire along the targeting line's last snap — it re-aimed at the player on
+  // each windup beat and locked on beat 7 (see Asteroid.tickLaserAim). The
+  // bolt commits to that line, so juking after the final snap dodges it.
+  const angle = Math.atan2(a.bossEyeAimY - a.pos.y, a.bossEyeAimX - a.pos.x);
+  // Fast, react-now bolt — the long windup is the warning; once it fires it
+  // should cross the gap quickly rather than drift like the plasma balls.
+  const speed = ENTITY_CONFIG.boss.eyeBulletSpeed * 2.6;
   const muzzleDist = (a.isBoss() ? a.bossEyeRadius : a.radius) * 1.1;
   const muzzleX = a.pos.x + Math.cos(angle) * muzzleDist;
   const muzzleY = a.pos.y + Math.sin(angle) * muzzleDist;
@@ -735,6 +735,9 @@ const fireBossEyeBolt = (game: Game, a: Asteroid) => {
     true,
   );
   bullet.isBossLaser = true;
+  // Born inside the live boss's hitbox — skip self-collision so the bolt
+  // actually reaches the player instead of detonating on the boss body.
+  bullet.owner = a;
   game.alienBullets.push(bullet);
   game.sound.play("alienFireBig", 1.0, a.pos);
   game.sound.play("bossPulse", 1.0, a.pos);

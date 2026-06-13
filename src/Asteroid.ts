@@ -507,6 +507,154 @@ const rollCracks = (count: number): AsteroidCrack[] => {
   return cracks;
 };
 
+// ── Combo-halo outline geometry ──────────────────────────────────────────
+// The halo is the boundary of the *union* of a bassteroid's module polygons,
+// each pushed outward by a constant pixel gap. Offsetting per-module and
+// stroking them all (the old approach) drew the interior shared edges too,
+// criss-crossing wherever modules overlapped. Here we offset each module
+// (sharp mitered corners — a center-scale would drift, a disk Minkowski sum
+// would round), then keep only the offset edges that lie outside every other
+// inflated module, and chain the survivors into closed loops. Result: one
+// outline hugging the true outer perimeter, sharp corners preserved.
+
+type HPt = { x: number; y: number };
+
+// Offset a CCW-or-CW polygon outward by gap, mitering each corner (intersect
+// adjacent shifted edges). Returns vertices in the same winding as input.
+const offsetPolygon = (pts: HPt[], gap: number): HPt[] => {
+  const n = pts.length;
+  let area = 0;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    area += a.x * b.y - b.x * a.y;
+  }
+  const sign = area > 0 ? 1 : -1; // outward-normal selector
+  const dirs: HPt[] = [];
+  const anchors: HPt[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const d = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+    dirs.push(d);
+    anchors.push({ x: a.x + sign * d.y * gap, y: a.y - sign * d.x * gap });
+  }
+  const out: HPt[] = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + n - 1) % n;
+    const cross = dirs[j].x * dirs[i].y - dirs[j].y * dirs[i].x;
+    if (Math.abs(cross) < 1e-9) {
+      out.push({ x: pts[i].x + sign * dirs[i].y * gap, y: pts[i].y - sign * dirs[i].x * gap });
+      continue;
+    }
+    const dx = anchors[i].x - anchors[j].x;
+    const dy = anchors[i].y - anchors[j].y;
+    const t = (dx * dirs[i].y - dy * dirs[i].x) / cross;
+    out.push({ x: anchors[j].x + dirs[j].x * t, y: anchors[j].y + dirs[j].y * t });
+  }
+  return out;
+};
+
+const pointInPolygon = (px: number, py: number, poly: HPt[]): boolean => {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > py) !== (b.y > py)) {
+      const x = a.x + ((py - a.y) / (b.y - a.y)) * (b.x - a.x);
+      if (px < x) inside = !inside;
+    }
+  }
+  return inside;
+};
+
+// Outline of the union of several offset polygons. Each edge of each polygon
+// is cut at every crossing with edges of the *other* polygons, then a sub-edge
+// is kept iff its midpoint lies outside all other polygons. Kept sub-edges are
+// chained head-to-tail into closed loops. Winding is normalized so every input
+// polygon contributes outward-consistent edges.
+const unionOutline = (polys: HPt[][]): HPt[][] => {
+  // Normalize all to CCW so "outside-all-others" is winding-consistent.
+  const ccw = polys.map((p) => {
+    let area = 0;
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i], b = p[(i + 1) % p.length];
+      area += a.x * b.y - b.x * a.y;
+    }
+    return area < 0 ? [...p].reverse() : p;
+  });
+
+  const EPS = 1e-7;
+  const kept: { a: HPt; b: HPt }[] = [];
+  for (let pi = 0; pi < ccw.length; pi++) {
+    const poly = ccw[pi];
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      // Collect split parameters (t along a→b) from intersections with every
+      // edge of every other polygon.
+      const ts = [0, 1];
+      for (let qi = 0; qi < ccw.length; qi++) {
+        if (qi === pi) continue;
+        const other = ccw[qi];
+        for (let k = 0; k < other.length; k++) {
+          const c = other[k], d = other[(k + 1) % other.length];
+          const r = { x: b.x - a.x, y: b.y - a.y };
+          const s = { x: d.x - c.x, y: d.y - c.y };
+          const denom = r.x * s.y - r.y * s.x;
+          if (Math.abs(denom) < 1e-12) continue;
+          const t = ((c.x - a.x) * s.y - (c.y - a.y) * s.x) / denom;
+          const u = ((c.x - a.x) * r.y - (c.y - a.y) * r.x) / denom;
+          if (t > EPS && t < 1 - EPS && u > -EPS && u < 1 + EPS) ts.push(t);
+        }
+      }
+      ts.sort((m, n) => m - n);
+      for (let s = 0; s < ts.length - 1; s++) {
+        const t0 = ts[s], t1 = ts[s + 1];
+        if (t1 - t0 < EPS) continue;
+        const mt = (t0 + t1) / 2;
+        const mx = a.x + (b.x - a.x) * mt;
+        const my = a.y + (b.y - a.y) * mt;
+        let buried = false;
+        for (let qi = 0; qi < ccw.length; qi++) {
+          if (qi === pi) continue;
+          if (pointInPolygon(mx, my, ccw[qi])) { buried = true; break; }
+        }
+        if (buried) continue;
+        kept.push({
+          a: { x: a.x + (b.x - a.x) * t0, y: a.y + (b.y - a.y) * t0 },
+          b: { x: a.x + (b.x - a.x) * t1, y: a.y + (b.y - a.y) * t1 },
+        });
+      }
+    }
+  }
+
+  // Chain kept segments into closed loops by snapping endpoints to a grid.
+  const key = (p: HPt) => `${Math.round(p.x * 100)},${Math.round(p.y * 100)}`;
+  const adj = new Map<string, { seg: { a: HPt; b: HPt }; used: boolean }[]>();
+  for (const seg of kept) {
+    const ka = key(seg.a);
+    if (!adj.has(ka)) adj.set(ka, []);
+    adj.get(ka)!.push({ seg, used: false });
+  }
+  const loops: HPt[][] = [];
+  const allEntries = [...adj.values()].flat();
+  for (const start of allEntries) {
+    if (start.used) continue;
+    const loop: HPt[] = [];
+    let cur: { seg: { a: HPt; b: HPt }; used: boolean } | undefined = start;
+    let guard = 0;
+    const startKey = key(start.seg.a);
+    while (cur && !cur.used && guard++ < 10000) {
+      cur.used = true;
+      loop.push(cur.seg.a);
+      const nextKey = key(cur.seg.b);
+      if (nextKey === startKey) break;
+      const candidates = adj.get(nextKey);
+      cur = candidates?.find((c) => !c.used);
+    }
+    if (loop.length >= 3) loops.push(loop);
+  }
+  return loops;
+};
+
 export class Asteroid {
   pos: Vec;
   vel: Vec;
@@ -540,6 +688,11 @@ export class Asteroid {
   // beat. Set by Game when the asteroid is spawned / split. Unused for
   // non-bass kinds.
   nextBeatAt = 0;
+  // 0→1 progress through the current beat interval (0 just after a beat fires,
+  // 1 the instant before the next). Updated each tick from beatTime in
+  // bassClock; drives the halo shimmer and the pre-beat warm-up so the
+  // anticipation animation can ramp without threading beatTime into render().
+  beatPhase = 0;
   // Hitpoints. Every asteroid uses the HP/crack system now. Non-killing
   // bullet hits decrement `hp` and reveal one more entry in `cracks`; the
   // killing hit (hp → 0) explodes the asteroid (and splits it, for non-
@@ -639,9 +792,18 @@ export class Asteroid {
   // dormant→live. gameUpdate reads it to play the wrong-note stinger and
   // zero the player's combo, then clears it.
   bossJustOpenedEye = false;
-  // Laser charge ramp (0 → 1 across the beat-7→beat-8 window). Renderer
-  // reads this to crescendo the pupil core glow before the bolt leaves.
+  // Laser charge ramp (0 → 1 across the windup). Renderer reads this to
+  // crescendo the pupil core glow before the bolt leaves.
   bossLaserCharge = 0;
+  // Latest ship position cached by trackPlayer each tick — so the per-beat
+  // re-aim inside tickBossRhythm can snap the targeting line to the player
+  // without tickBossRhythm needing its own ship handle.
+  bossTrackedShipX = 0;
+  bossTrackedShipY = 0;
+  // Which windup beat the targeting line last re-aimed on. The line snaps to
+  // the player once per beat across the windup, then holds for the fire — so
+  // the player reads a line that "chases" them but commits a beat early.
+  bossAimBeatIndex = -1;
   // Latch flipped true after the post-break top/bottom hemispheres fire
   // their plasma ball on this cycle, reset on cycle wrap. Lives on every
   // boss-family asteroid so each hemisphere keeps its own state.
@@ -2014,6 +2176,9 @@ export class Asteroid {
   // outside `update()` because the asteroid module doesn't know about Ship.
   trackPlayer(shipX: number, shipY: number) {
     if (!this.isBoss() && this.kind !== "bossEye") return;
+    // Cache for the per-beat re-aim in tickBossRhythm.
+    this.bossTrackedShipX = shipX;
+    this.bossTrackedShipY = shipY;
     const target = Math.atan2(shipY - this.pos.y, shipX - this.pos.x);
     // Smoothly slew the iris toward the player along the shorter angular
     // path. Constant lerp factor keeps it from snapping during dodges so the
@@ -2022,12 +2187,33 @@ export class Asteroid {
     while (diff > Math.PI) diff -= TAU;
     while (diff < -Math.PI) diff += TAU;
     this.bossIrisAngle += diff * 0.18;
-    // Refresh the worldspace aim point unless the laser charge has locked
-    // in (beats 7→8). Once locked, the charging beam stays pointed at the
-    // beat-7 position so the player can dodge by moving.
-    if (this.bossLaserCharge < 0.02) {
-      this.bossEyeAimX = shipX;
-      this.bossEyeAimY = shipY;
+    // The worldspace aim point is no longer slewed here — the targeting line
+    // snaps to the player on each windup beat inside tickBossRhythm, so it
+    // reads as a discrete "re-target" tick rather than a smooth drag.
+  }
+
+  // Snap the targeting line to the player's current position once per beat
+  // during the 4-beat windup (beats 4..7, t=1.5/2.0/2.5/3.0), then hold for
+  // the beat-8 fire. The bolt commits to wherever the line points at beat 7,
+  // so the line visibly "chases" the player each beat but locks one beat
+  // before firing — dodge after the last snap and you slip the bolt. Outside
+  // the windup the aim follows the player continuously so an idle eye still
+  // looks alive. `tNow` is the phase within the 4.0s cycle.
+  private tickLaserAim(tNow: number) {
+    const inWindup = tNow >= 1.5 && tNow < 3.5;
+    if (!inWindup) {
+      this.bossAimBeatIndex = -1;
+      this.bossEyeAimX = this.bossTrackedShipX;
+      this.bossEyeAimY = this.bossTrackedShipY;
+      return;
+    }
+    // Beats 4..7 land at t = 1.5, 2.0, 2.5, 3.0 → indices 0..3. The final
+    // snap is index 3 (beat 7); beat 8 (t≥3.5) fires without re-aiming.
+    const beatIndex = Math.floor((tNow - 1.5) / 0.5);
+    if (beatIndex > this.bossAimBeatIndex) {
+      this.bossAimBeatIndex = beatIndex;
+      this.bossEyeAimX = this.bossTrackedShipX;
+      this.bossEyeAimY = this.bossTrackedShipY;
     }
   }
 
@@ -2114,8 +2300,9 @@ export class Asteroid {
   // beatTime = game.beatTime in seconds. The 4.0s cycle:
   //   beat 1 (t=0.0) top hemisphere flashes (post-break: top fires plasma)
   //   beat 3 (t=1.0) bottom hemisphere flashes (post-break: bottom fires)
+  //   beat 4 (t=1.5) laser charge ramp begins + aim locks (4-beat windup)
   //   beat 5 (t=2.0) brass iris ring flashes
-  //   beat 7 (t=3.0) pupil flash #1, laser charge ramp begins
+  //   beat 7 (t=3.0) pupil flash #1
   //   beat 8 (t=3.5) pupil flash #2 + laser fires
   // The live whole-body boss runs every slot. Post-break hemispheres run
   // only their assigned half; bossEye runs iris + pupil + laser.
@@ -2162,11 +2349,14 @@ export class Asteroid {
       this.bossDidPupil2 = false;
       this.bossPlasmaFired = false;
     }
-    if (tNow >= 3.0 && tNow < 3.5) this.bossLaserCharge = (tNow - 3.0) / 0.5;
+    // 4-beat windup: the targeting line ramps from beat 4 (t=1.5) to the
+    // beat-8 fire (t=3.5), giving the player 2s of warning before it commits.
+    if (tNow >= 1.5 && tNow < 3.5) this.bossLaserCharge = (tNow - 1.5) / 2.0;
     else if (tNow >= 3.5 && tNow < 3.75) this.bossLaserCharge = 1.0;
     else this.bossLaserCharge = Math.max(0, this.bossLaserCharge - 0.04);
 
     const role = this.bossRhythmRole();
+    if (role === "whole" || role === "eye") this.tickLaserAim(tNow);
 
     if (!this.bossDidTop && tNow >= 0.0) {
       if (role === "whole" || role === "top") {
@@ -2201,8 +2391,8 @@ export class Asteroid {
       if (role === "whole" || role === "eye") {
         this.bossPupilFlash = 1;
         events.pupilFlash = true;
-        this.bossEyeAimX = this.pos.x + Math.cos(this.bossIrisAngle) * 1000;
-        this.bossEyeAimY = this.pos.y + Math.sin(this.bossIrisAngle) * 1000;
+        // Aim was already locked at the windup start (t=1.5); don't re-snap
+        // here or the 4-beat telegraph would lie about the final direction.
       }
       this.bossDidPupil1 = true;
     }
@@ -2748,7 +2938,7 @@ export class Asteroid {
     if (this.kind === "bossEmber") { this.renderBossEmber(ctx, t); return; }
     if (this.kind === "wraith") { this.renderWraith(ctx, t); return; }
     if (this.isBass()) {
-      this.renderBass(ctx, comboHalo);
+      this.renderBass(ctx, t, comboHalo);
       return;
     }
     ctx.save();
@@ -2990,52 +3180,22 @@ export class Asteroid {
     ctx.closePath();
   }
 
-  // Builds the combo-halo outline: every hull module polygon pushed outward
-  // by a constant pixel gap. Each edge is shifted along its outward normal
-  // and adjacent shifted edges are re-intersected, so the offset is uniform
-  // along every edge and corners stay sharp (mitered) instead of rounding
-  // or drifting the way a center-scale does. Pixel-space (already × radius).
+  // Combo-halo outline: the boundary of the union of every module polygon,
+  // each inflated outward by gapPx with sharp mitered corners. Tracing the
+  // union (rather than each module) drops the interior shared edges that used
+  // to criss-cross multi-module rocks, while still following the true outer
+  // perimeter exactly — every concave notch and sharp corner preserved.
+  // Pixel-space (already × radius); built lazily and cached.
   buildHaloOutline(gapPx: number): { x: number; y: number }[][] {
-    const polys: { x: number; y: number }[][] = [];
-    if (!this.bassShip) return polys;
-    for (const module of this.bassShip.modules) {
-      const pts = module.vertices.map((vt) => ({ x: vt.x * this.radius, y: vt.y * this.radius }));
-      const n = pts.length;
-      // Shoelace sign tells us which perpendicular of each edge points outward.
-      let area = 0;
-      for (let i = 0; i < n; i++) {
-        const a = pts[i], b = pts[(i + 1) % n];
-        area += a.x * b.y - b.x * a.y;
-      }
-      const sign = area > 0 ? 1 : -1;
-      // Edge i runs pts[i] → pts[i+1]; anchors[i] is its start shifted out by gapPx.
-      const dirs: { x: number; y: number }[] = [];
-      const anchors: { x: number; y: number }[] = [];
-      for (let i = 0; i < n; i++) {
-        const a = pts[i], b = pts[(i + 1) % n];
-        const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-        const d = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
-        dirs.push(d);
-        anchors.push({ x: a.x + sign * d.y * gapPx, y: a.y - sign * d.x * gapPx });
-      }
-      const out: { x: number; y: number }[] = [];
-      for (let i = 0; i < n; i++) {
-        // Offset vertex i = intersection of shifted edge (i-1) and shifted edge i.
-        const j = (i + n - 1) % n;
-        const cross = dirs[j].x * dirs[i].y - dirs[j].y * dirs[i].x;
-        if (Math.abs(cross) < 1e-6) {
-          // Collinear edges — just push the vertex straight out.
-          out.push({ x: pts[i].x + sign * dirs[i].y * gapPx, y: pts[i].y - sign * dirs[i].x * gapPx });
-          continue;
-        }
-        const dx = anchors[i].x - anchors[j].x;
-        const dy = anchors[i].y - anchors[j].y;
-        const t = (dx * dirs[i].y - dy * dirs[i].x) / cross;
-        out.push({ x: anchors[j].x + dirs[j].x * t, y: anchors[j].y + dirs[j].y * t });
-      }
-      polys.push(out);
-    }
-    return polys;
+    if (!this.bassShip) return [];
+    const offset = this.bassShip.modules
+      .filter((m) => m.vertices.length >= 3)
+      .map((m) =>
+        offsetPolygon(m.vertices.map((vt) => ({ x: vt.x * this.radius, y: vt.y * this.radius })), gapPx),
+      );
+    if (offset.length === 0) return [];
+    if (offset.length === 1) return offset;
+    return unionOutline(offset);
   }
 
   // Trace the cached combo-halo outline into the current path (local space,
@@ -3112,7 +3272,7 @@ export class Asteroid {
   // (one per HP lost) + a big bright beat flare on the beat. The beat flare
   // gates the visual rhythm — when all four kinds are active it reads as a
   // syncopated lighthouse sweep across the screen.
-  renderBass(ctx: CanvasRenderingContext2D, comboHalo?: { intensity: number; beatPulse: number }) {
+  renderBass(ctx: CanvasRenderingContext2D, t: number, comboHalo?: { intensity: number; beatPulse: number }) {
     const baseHue = this.hue;
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
@@ -3160,20 +3320,59 @@ export class Asteroid {
       if (tier2 > 0.001) {
         const hue = 195 + (45 - 195) * tier2;
         const sat = 100 * (1 - tier3);
-        const light = 78 + (100 - 78) * tier3;
-        const alpha = (0.65 + 0.35 * comboHalo.beatPulse) * tier2;
-        // The bassteroid body is a big bright additive sprite, so a ship-width
-        // 1.6px stroke vanishes against it — the halo needs to scale with the
-        // rock and carry its own glow. Same path stroked twice: a wide faint
-        // pass is the aura, a narrow bright pass is the rim (the same trick
-        // the beat flare above uses instead of shadowBlur).
-        const w = Math.max(2, this.radius * 0.09);
+        const flash = this.beatFlash;
+
+        // Shimmer: a low-amplitude twinkle on the resting line so the halo is
+        // never perfectly static. Two incommensurate sines (one slow drift,
+        // one faster glint that travels via the phase term) keep it from
+        // reading as a single throb.
+        const shimmer =
+          0.5 +
+          0.5 * (0.6 * Math.sin(t * 0.0021 + this.beatPhase * 7) +
+                 0.4 * Math.sin(t * 0.0047 + this.pos.x * 0.03));
+
+        // Warm-up: in the last slice of the beat interval the rim tightens and
+        // brightens — a held breath before the downbeat. Eased so it ramps in
+        // gently over the final ~22% rather than snapping on.
+        const WARMUP_FROM = 0.78;
+        const warm =
+          this.beatPhase > WARMUP_FROM
+            ? Math.pow((this.beatPhase - WARMUP_FROM) / (1 - WARMUP_FROM), 1.6)
+            : 0;
+
+        // Resting line is faint now; the on-beat flash, the warm-up and the
+        // shimmer are what carry it. beatFlash still whites it out on the hit.
+        const light = Math.min(100, 70 + (100 - 70) * tier3 + 22 * flash + 12 * warm);
+        const alpha =
+          (0.22 + 0.12 * comboHalo.beatPulse + 0.08 * shimmer + 0.5 * flash + 0.2 * warm) * tier2;
+
+        // Expanding soundwave: on the beat, a copy of the perimeter blooms
+        // outward and fades. beatFlash decays from 1, so (1 - flash) is the
+        // wave's age — it starts tight on the rim and rides out to ~1.5×.
+        if (flash > 0.001) {
+          const age = 1 - flash;
+          const ringScale = 1 + 0.5 * age;
+          ctx.save();
+          ctx.scale(ringScale, ringScale);
+          this.traceHaloOutline(ctx);
+          ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${0.45 * flash * tier2})`;
+          ctx.lineWidth = Math.max(1, this.radius * 0.05) / ringScale;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // The bassteroid body is a big bright additive sprite, so a hairline
+        // stroke vanishes against it — the halo carries its own glow. Same
+        // path stroked twice: a wide faint aura pass, a narrow bright rim pass
+        // (the trick the beat flare uses instead of shadowBlur). Both widen on
+        // the beat and the warm-up so the anticipation reads as a bloom.
+        const w = Math.max(1, this.radius * 0.04);
         this.traceHaloOutline(ctx);
-        ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${Math.min(100, light - 10)}%, ${0.4 * alpha})`;
-        ctx.lineWidth = w * 3.2;
+        ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${Math.min(100, light - 10)}%, ${(0.3 + 0.2 * flash + 0.15 * warm) * alpha})`;
+        ctx.lineWidth = w * (2.4 + 2.4 * flash + 1.2 * warm);
         ctx.stroke();
         ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
-        ctx.lineWidth = w;
+        ctx.lineWidth = w * (1 + 0.3 * warm);
         ctx.stroke();
       }
     }
@@ -3479,42 +3678,66 @@ export class Asteroid {
     ctx.restore();
   }
 
-  // Charging laser beam: a faint sightline that grows brighter and wider
-  // across beats 7→8, then vanishes the moment the bolt fires. World-space
-  // (drawn outside the boss-local transform).
+  // Targeting line (NOT a laser): a thin crisp sightline from the eye to the
+  // locked aim point, capped by a lock-on reticle that contracts as the
+  // windup charges. The aim point snaps to the player once per beat (see
+  // tickLaserAim), so the whole reticle jumps toward the player each beat
+  // and then holds for the fire. World-space (outside the boss-local
+  // transform). Drawn source-over so it reads as a HUD overlay, not energy.
   paintBossLaserChargeBeam(ctx: CanvasRenderingContext2D) {
     const charge = this.bossLaserCharge;
     if (charge <= 0.02) return;
     const a = this.eyeAimAngle();
     const startR = (this.kind === "bossEye" ? this.radius : this.bossEyeRadius) * 1.05;
-    const len = 2400;
     const sx = this.pos.x + Math.cos(a) * startR;
     const sy = this.pos.y + Math.sin(a) * startR;
-    const ex = this.pos.x + Math.cos(a) * (startR + len);
-    const ey = this.pos.y + Math.sin(a) * (startR + len);
+    // Reticle sits on the locked aim point — clamped to a minimum reach so a
+    // player sitting on top of the eye still gets a readable crosshair.
+    const aimDist = Math.hypot(this.bossEyeAimX - this.pos.x, this.bossEyeAimY - this.pos.y);
+    const reach = Math.max(startR + 40, aimDist);
+    const tx = this.pos.x + Math.cos(a) * reach;
+    const ty = this.pos.y + Math.sin(a) * reach;
+    const alpha = 0.35 + 0.55 * charge;
+    const stroke = `hsla(${this.hue}, 100%, 62%, ${alpha})`;
+
     ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    const grad = ctx.createLinearGradient(sx, sy, ex, ey);
-    const alpha = 0.22 + 0.7 * charge;
-    grad.addColorStop(0, `hsla(48, 100%, 92%, ${alpha})`);
-    grad.addColorStop(0.18, `hsla(${this.hue + 25}, 100%, 75%, ${alpha * 0.85})`);
-    grad.addColorStop(0.65, `hsla(${this.hue + 8}, 100%, 55%, ${alpha * 0.5})`);
-    grad.addColorStop(1, `hsla(${this.hue}, 100%, 50%, 0)`);
-    ctx.strokeStyle = grad;
-    ctx.lineCap = "round";
-    ctx.lineWidth = 1.2 + 6.0 * charge;
+    // Dashed sightline from the eye out to the reticle. Thin and hard-edged.
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([10, 8]);
     ctx.beginPath();
     ctx.moveTo(sx, sy);
-    ctx.lineTo(ex, ey);
+    ctx.lineTo(tx, ty);
     ctx.stroke();
-    // Narrow hot core inside the wider charge beam — emphasizes that the
-    // beam is focusing, not just glowing.
-    ctx.strokeStyle = `hsla(48, 100%, 98%, ${0.4 + 0.55 * charge})`;
-    ctx.lineWidth = 0.6 + 2.2 * charge;
+    ctx.setLineDash([]);
+
+    // Lock-on reticle: an outer ring that contracts from wide to tight as the
+    // charge completes (acquiring → locked), plus a small inner ring and a
+    // four-tick crosshair so it reads unmistakably as a target marker.
+    const ringR = 26 - 14 * charge;
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(ex, ey);
+    ctx.arc(tx, ty, ringR, 0, TAU);
     ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(tx, ty, ringR * 0.45, 0, TAU);
+    ctx.stroke();
+    // Crosshair ticks — gapped so the centre stays clear over the ship.
+    const tickOut = ringR + 7;
+    const tickIn = ringR * 0.45 + 3;
+    for (let k = 0; k < 4; k++) {
+      const ang = a + (k * TAU) / 4; // align two ticks along the sightline
+      ctx.beginPath();
+      ctx.moveTo(tx + Math.cos(ang) * tickIn, ty + Math.sin(ang) * tickIn);
+      ctx.lineTo(tx + Math.cos(ang) * tickOut, ty + Math.sin(ang) * tickOut);
+      ctx.stroke();
+    }
+    // Centre dot brightens to near-white as the lock completes — the "fire
+    // imminent" cue without resorting to a glowing beam.
+    ctx.fillStyle = `hsla(${this.hue}, 100%, ${60 + 35 * charge}%, ${alpha})`;
+    ctx.beginPath();
+    ctx.arc(tx, ty, 1.5 + 1.5 * charge, 0, TAU);
+    ctx.fill();
     ctx.restore();
   }
 
