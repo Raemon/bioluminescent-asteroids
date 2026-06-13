@@ -78,6 +78,9 @@ export const hitSoundFor = (
   // each get their own size-scaled shatter.
   if (a.kind === "solidCrystal") return "crystalShatterLarge";
   if (a.kind === "solidCrystalSmall") return "crystalShatterSmall";
+  // A cathedral glass shard is still lit stained glass — it rings/shatters
+  // like cut glass rather than going off with a stone-rubble thud.
+  if (a.kind === "glassShard") return "crystalShatterSmall";
   // The prison's shell IS cut glass — same shatter as a solid crystal. The
   // scream is layered ON TOP by finishAsteroidKillCore (it isn't returned
   // here because callers also use this for the on-crack chip sound).
@@ -302,6 +305,9 @@ export const onAsteroidKilledByBullet = (
   const isCrystalShatter = sound === "crystalShatterLarge" || sound === "crystalShatterSmall";
   const pitch = isCrystalShatter && isOnBeatHit ? 0 : 1;
   game.sound.play(sound, pitch, a.pos);
+  // Layer the meaty armored-impact on a large shot's killing blow too, so the
+  // hit that cleaves the boss lands as heavily as the chips along the way.
+  playBossImpactIfLarge(game, a, b);
   return finishAsteroidKillCore(game, a, b.vel, isOnBeatHit, scoreEarned, comboAtKill, b.pos);
 };
 
@@ -318,10 +324,23 @@ export const onAsteroidKilledByRam = (game: Game, a: Asteroid, shipVel: Vec): As
 // every rhythm-good hit along the way, not just the kill shot.
 const bassChipScore = (a: Asteroid): number => Math.max(1, Math.round(a.scoreValue() / 4));
 
+// A heavy/large shot — the big on-beat/boosted/pierce rounds (and the charged
+// laser, which arrives flagged the same way). These are the hits that should
+// land a meaty "bossHit" against the armored planetoid.
+const isLargeShot = (b: Bullet): boolean => b.onBeat || b.boosted || b.superBoosted || b.pierce;
+
+// A satisfying armored-impact "CHONK" when a large shot connects with the boss
+// family. Plays on both cracks and kills so chipping the 60-HP body feels
+// weighty the whole way down, not just on the finishing blow.
+const playBossImpactIfLarge = (game: Game, a: Asteroid, b: Bullet) => {
+  if (a.isBossFamily() && isLargeShot(b)) game.sound.play("bossHit", 1, a.pos);
+};
+
 // bullet crack — bassHit announces the chip; sparkle layers on if it was on-beat.
 // Bassteroid chips also pay out (small) points + combo popup so multi-hit kills feel rewarding.
 export const onAsteroidCrackedByBullet = (game: Game, a: Asteroid, b: Bullet, isOnBeatHit: boolean) => {
   if (a.isBass()) game.sound.play("bassHit", 1, a.pos);
+  playBossImpactIfLarge(game, a, b);
   emitCrackParticles(game.particles, a, isOnBeatHit);
   if (isOnBeatHit) game.sound.play("comboSparkle", 1, b.pos);
   if (a.isBass()) awardScoreForKill(game, b.pos, bassChipScore(a), isOnBeatHit, b.driftEligibleAtHit());
@@ -362,7 +381,12 @@ export const onAlienCracked = (game: Game, isOnBeatHit: boolean, pos: Vec) => {
 // Off-rhythm hits also get a sadder explosion variant so the audio tells the
 // player they wasted the celestial visitor.
 export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: boolean) => {
-  const scoreEarned = isOnBeatHit ? Math.round(1000 * game.beatCombo) : 500;
+  // Meteors are the cheaper flock: an on-beat hit pays 500 × combo vs the
+  // comet's 1000 × combo, but there are many of them. Off-beat pays the same
+  // flat amount halved.
+  const onBeatBase = c.isMeteor ? ENTITY_CONFIG.meteorShower.baseScore : 1000;
+  const offBeat = c.isMeteor ? ENTITY_CONFIG.meteorShower.baseScore / 2 : 500;
+  const scoreEarned = isOnBeatHit ? Math.round(onBeatBase * game.beatCombo) : offBeat;
   game.score += scoreEarned;
   flashScoreGain(game, scoreEarned);
   checkBonusLife(game);

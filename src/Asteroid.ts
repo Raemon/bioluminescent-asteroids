@@ -78,7 +78,19 @@ export type AsteroidSize = "large" | "medium" | "small";
 // "wraith" is what crawls out. It has no baked sprite (drawn live every
 // frame from drifting noise layers and writhing tendrils), pursues the ship
 // in a slow slither, and occasionally lunges. Eats a few bullets to finish.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "goldCrystal" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith";
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "goldCrystal" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock";
+
+// The cathedral ("bell") asteroid rolls one of these archetypes at spawn. Each
+// reads as a different fragment of a civilization's basilica carved out of the
+// asteroid belt — its own silhouette harmonics + its own carved-into-rock
+// interior painter, all sharing the weathered-stone frame. See
+// `paintCathedralFragmentBody`, which dispatches on this.
+export type CathedralArchetype = "lancetWall" | "roseFacade" | "spireTower" | "arcade" | "buttressRuin";
+const CATHEDRAL_ARCHETYPES: ReadonlyArray<CathedralArchetype> = ["lancetWall", "roseFacade", "spireTower", "arcade", "buttressRuin"];
+// Terminal small kinds a cathedral asteroid shatters into — carved debris that
+// makes conceptual sense as broken building pieces (cf. how bassteroids break
+// into recognisable ship chunks). None of these split further.
+const CATHEDRAL_DEBRIS_KINDS: ReadonlyArray<AsteroidKind> = ["cathedralKeystone", "glassShard", "columnDrum", "rubbleBlock"];
 
 export const BASS_KINDS: ReadonlyArray<"bassA" | "bassB" | "bassC" | "bassD"> = ["bassA", "bassB", "bassC", "bassD"];
 
@@ -93,9 +105,6 @@ export const BOSS_HP = ENTITY_CONFIG.boss.hp;
 // Boss hue. Matches the menace-rim red used by the foreshadowing planet so
 // the "the planetoid just dropped in" read is unbroken. Children inherit.
 export const BOSS_HUE = ENTITY_CONFIG.boss.hue;
-// Half-arc the eye's sweep beam slashes through, centred on the locked aim.
-// Shared by the telegraph wedge and the beam itself so they always agree.
-export const BOSS_SWEEP_HALF = 0.62;
 
 export const SIZE_SPAWN_SPEED = ENTITY_CONFIG.asteroid.spawnSpeed;
 
@@ -119,6 +128,12 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   solidCrystalSmall: 232,
   glassPrison: 258,
   wraith: 286,
+  // Cathedral debris inherits the parent bell's hue at spawn, so these are
+  // only fallbacks for the rare case one is constructed standalone.
+  cathedralKeystone: 285,
+  glassShard: 285,
+  columnDrum: 285,
+  rubbleBlock: 285,
 };
 
 // Solid crystal large asteroids render slightly bigger than a stock large so
@@ -187,6 +202,11 @@ export const GLASS_PRISON_RADIUS = ENTITY_CONFIG.glassPrison.radius;
 // it pursues and writhes so it's hard to line up cleanly.
 export const WRAITH_HP = ENTITY_CONFIG.wraith.hp;
 export const WRAITH_RADIUS = ENTITY_CONFIG.wraith.radius;
+
+// Cathedral debris (carved building chunks a "bell" shatters into). Tougher
+// than a stock small so clearing the rubble still asks for a couple of clean
+// shots — same intent as solidCrystalSmall — and terminal (no further split).
+export const CATHEDRAL_DEBRIS_HP = 2;
 
 // Vertex list (local-space, normalised to radius=1) for one armoured panel
 // of a bassteroid. Each kind is a fixed cluster of these panels — drawn with
@@ -792,6 +812,11 @@ export class Asteroid {
   // and the death payout.
   embeddedGemSpots: { x: number; y: number; r: number; tilt: number }[] = [];
 
+  // Which cathedral archetype this "bell" asteroid wears (lancet wall, rose
+  // facade, spire tower, arcade, buttress ruin). Rolled at construction; picks
+  // both the silhouette harmonics and the interior painter. Unused off-kind.
+  cathedralArchetype: CathedralArchetype = "lancetWall";
+
   // Level-10 boss reveal phase. "dormant" plays the 8s grow-and-rotate
   // foreshadow animation and is invulnerable. "live" is the normal damageable
   // engagement. Only meaningful when isBossFamily().
@@ -858,6 +883,10 @@ export class Asteroid {
   // without tickBossRhythm needing its own ship handle.
   bossTrackedShipX = 0;
   bossTrackedShipY = 0;
+  // Windup beat index the targeting aim last ticked on. The aim steps toward
+  // the player once per beat across the windup (beats 4..7) so the player
+  // reads a sightline visibly walking onto them, then locking for the fire.
+  bossAimBeatIndex = -1;
   // Latch flipped true after the post-break top/bottom hemispheres fire
   // their plasma ball on this cycle, reset on cycle wrap. Lives on every
   // boss-family asteroid so each hemisphere keeps its own state.
@@ -940,6 +969,13 @@ export class Asteroid {
         this.wraithTendrils.push((i / tendrilCount) * TAU + rand(-0.4, 0.4));
       }
     }
+    if (kind === "bell") {
+      // Roll the cathedral archetype up front — buildHarmonicsForKind reads it
+      // to pick a silhouette that suits the architecture (a spire is tall and
+      // narrow, an arcade is wide and squat, etc.), and paintCathedralFragment
+      // -Body dispatches the interior on it.
+      this.cathedralArchetype = CATHEDRAL_ARCHETYPES[Math.floor(rng() * CATHEDRAL_ARCHETYPES.length)];
+    }
     if (isBoss) {
       // Boss is huge — override the size table so its physical footprint
       // matches its visual identity as a planetoid that just dropped in.
@@ -1002,7 +1038,9 @@ export class Asteroid {
                     ? GLASS_PRISON_HP
                     : kind === "wraith"
                       ? WRAITH_HP
-                      : ASTEROID_HP[size];
+                      : CATHEDRAL_DEBRIS_KINDS.includes(kind)
+                        ? CATHEDRAL_DEBRIS_HP
+                        : ASTEROID_HP[size];
     this.hp = this.maxHp;
     // For most asteroids each HP gets its own pre-rolled crack so the
     // damage state escalates predictably. The boss has a much higher HP
@@ -1030,6 +1068,12 @@ export class Asteroid {
     // Bell asteroid is a chunk of cathedral wall — moderate-count polygon
     // (chipped masonry edge) rather than a smooth organic curve.
     else if (kind === "bell") this.outlineSamples = 22;
+    // Cathedral debris: glass shard is a hard-edged sliver (few vertices, kiki);
+    // keystone is a chunky wedge; column drum + rubble keep more vertices for a
+    // chipped-stone edge.
+    else if (kind === "glassShard") this.outlineSamples = 6;
+    else if (kind === "cathedralKeystone") this.outlineSamples = 8;
+    else if (kind === "columnDrum" || kind === "rubbleBlock") this.outlineSamples = 16;
     this.outline = this.computeOutline();
     this.nuclei = [];
     const nucleusCount = size === "large" ? 5 : size === "medium" ? 3 : 2;
@@ -1112,13 +1156,33 @@ export class Asteroid {
       freqs = [5, 7, 9, 11];
       ampScale = 0.7;
     } else if (kind === "bell") {
-      // Cathedral wall fragment. Low harmonics give it an elongated, chunky
-      // silhouette (1 = lopsided body, 2 = vertical bias, 4 = jagged-spire
-      // notches) so the outline reads "broken slab of building" rather than
-      // a smooth blob. paintCathedralFragmentBody does the architectural
-      // detailing on the interior; the outline just has to read as masonry.
-      freqs = [1, 2, 4];
-      ampScale = 1.5;
+      // Cathedral fragment carved from an asteroid. The archetype picks the
+      // gross proportion: a spire/tower wants a tall narrow body, an arcade
+      // wants a wide squat slab, etc. Low harmonics give the chunky "broken
+      // slab of building" silhouette; paintCathedralFragmentBody does the
+      // architectural detailing on the interior.
+      switch (this.cathedralArchetype) {
+        case "spireTower": freqs = [1, 2, 3]; ampScale = 1.2; break;
+        case "arcade":     freqs = [1, 2, 4]; ampScale = 1.4; break;
+        case "roseFacade": freqs = [2, 3, 5]; ampScale = 1.1; break;
+        case "buttressRuin": freqs = [1, 3, 5]; ampScale = 1.7; break;
+        default:           freqs = [1, 2, 4]; ampScale = 1.5; break;
+      }
+    } else if (kind === "cathedralKeystone") {
+      // A wedge-shaped voussoir / keystone chunk — strong 1-harmonic gives the
+      // tapered "fat at one end" wedge, 3 jags the broken edges.
+      freqs = [1, 3]; ampScale = 1.8;
+    } else if (kind === "glassShard") {
+      // A sharp sliver of stained glass — high amp on a low freq makes a long
+      // pointed splinter; the low sample count keeps the edges hard.
+      freqs = [1, 2]; ampScale = 2.0;
+    } else if (kind === "columnDrum") {
+      // A section of carved column / capital — nearly round (a drum of stone)
+      // with light fluting wobble.
+      freqs = [2, 6]; ampScale = 0.6;
+    } else if (kind === "rubbleBlock") {
+      // A plain chipped masonry block — chunky irregular polygon.
+      freqs = [1, 2, 4]; ampScale = 1.3;
     } else if (kind === "warble") {
       // Wobbly elongated lobes: strong 3-fold + odd higher mode.
       freqs = [3, 5, 8];
@@ -1259,6 +1323,10 @@ export class Asteroid {
     if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall") this.paintSolidCrystalBody(ctx);
     if (this.kind === "glassPrison") this.paintGlassPrisonBody(ctx);
     if (this.kind === "bell") this.paintCathedralFragmentBody(ctx);
+    if (this.kind === "cathedralKeystone") this.paintKeystoneBody(ctx);
+    if (this.kind === "glassShard") this.paintGlassShardBody(ctx);
+    if (this.kind === "columnDrum") this.paintColumnDrumBody(ctx);
+    if (this.kind === "rubbleBlock") this.paintRubbleBlockBody(ctx);
 
     return canvas;
   }
@@ -1442,252 +1510,561 @@ export class Asteroid {
     ctx.restore();
   }
 
-  // The bell asteroid reads as a chunk of cathedral wall drifting through
-  // space — weathered stone masonry, a tall gothic-arch window with stained
-  // glass, and a rose-tracery medallion above. Painted at sprite-build time
-  // (pre-baked) so it pans/rotates with the rock for free. Clipped to the
-  // organic outline so the chipped masonry edge bleeds naturally into the
-  // jagged stone silhouette.
-  private paintCathedralFragmentBody(ctx: CanvasRenderingContext2D) {
-    const H = this.hue;
-    const R = this.radius;
-
-    ctx.save();
+  // Trace this asteroid's organic outline as a path (no fill/stroke). Shared by
+  // the cathedral painters for clip + rim work.
+  private traceOutline(ctx: CanvasRenderingContext2D, scale = 1) {
     ctx.beginPath();
     for (let i = 0; i < this.outlineSamples; i++) {
       const angle = (i / this.outlineSamples) * TAU;
-      const r = this.outline[i];
+      const r = this.outline[i] * scale;
       const x = Math.cos(angle) * r;
       const y = Math.sin(angle) * r;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
     ctx.closePath();
-    ctx.clip();
+  }
 
-    // Weathered stone base — desaturated cool grey with a hint of the bell's
-    // hue (so a row of bells still reads as a unified family even though the
-    // dominant colour is stone, not the saturated hue the harmonic-blob bell
-    // used). Light falls from upper-left like the other paint methods.
-    ctx.globalCompositeOperation = "source-over";
-    const stoneGrad = ctx.createRadialGradient(-R * 0.35, -R * 0.45, R * 0.1, 0, 0, R * 1.3);
-    stoneGrad.addColorStop(0, `hsla(${H}, 14%, 58%, 1)`);
-    stoneGrad.addColorStop(0.5, `hsla(${H}, 12%, 38%, 1)`);
-    stoneGrad.addColorStop(1, `hsla(${H + 6}, 18%, 14%, 1)`);
-    ctx.fillStyle = stoneGrad;
-    ctx.beginPath();
-    ctx.arc(0, 0, R * 1.4, 0, TAU);
-    ctx.fill();
-
-    // Masonry block lines — a coarse offset-brick grid drawn as thin dark
-    // mortar strokes. The clip handles bleed past the outline. Bell
-    // asteroids are taller-than-wide thanks to the harmonic mix, so courses
-    // run horizontally and the staggered joints fall on alternating rows.
-    ctx.strokeStyle = `hsla(${H}, 18%, 8%, 0.65)`;
-    ctx.lineWidth = 0.8;
-    const courseHeight = R * 0.22;
-    ctx.beginPath();
-    for (let row = -4; row <= 4; row++) {
-      const y = row * courseHeight;
-      ctx.moveTo(-R * 1.4, y);
-      ctx.lineTo(R * 1.4, y);
-    }
-    ctx.stroke();
-    ctx.beginPath();
-    const jointWidth = R * 0.36;
-    for (let row = -4; row <= 4; row++) {
-      const y0 = row * courseHeight;
-      const y1 = (row + 1) * courseHeight;
-      const stagger = row % 2 === 0 ? 0 : jointWidth / 2;
-      for (let col = -5; col <= 5; col++) {
-        const x = col * jointWidth + stagger;
-        ctx.moveTo(x, y0);
-        ctx.lineTo(x, y1);
-      }
-    }
-    ctx.stroke();
-
-    // Stone-grain mottling — darker and lighter splotches scattered across
-    // the body so the masonry doesn't read as a flat tiled grid. Positions
-    // pre-rolled deterministically from harmonic phases so each bell has
-    // its own weathered pattern.
-    const phaseSeed = this.harmonics.reduce((s, h) => s + h.phase, 0);
-    const splotchCount = 9;
-    for (let i = 0; i < splotchCount; i++) {
-      const a = phaseSeed + (i / splotchCount) * TAU + Math.sin(i * 1.7) * 0.5;
-      const d = R * (0.25 + 0.55 * Math.abs(Math.sin(i * 2.3 + phaseSeed)));
-      const sx = Math.cos(a) * d;
-      const sy = Math.sin(a) * d;
-      const sr = R * (0.14 + 0.10 * Math.cos(i * 1.1));
-      const darker = i % 2 === 0;
-      const lightness = darker ? 22 : 64;
-      const alpha = darker ? 0.30 : 0.18;
-      const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, sr);
-      grad.addColorStop(0, `hsla(${H + (darker ? -6 : 12)}, ${darker ? 20 : 14}%, ${lightness}%, ${alpha})`);
-      grad.addColorStop(1, `hsla(${H}, 12%, 38%, 0)`);
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(sx, sy, sr, 0, TAU);
-      ctx.fill();
-    }
-
-    // Tall gothic lancet window — pointed arch on top, vertical sides, a
-    // sill at the bottom. Sits in the upper half of the fragment so the
-    // chipped foot of the wall reads as broken stone.
-    const windowTop = -R * 0.62;
-    const windowBottom = R * 0.22;
-    const windowHalfW = R * 0.20;
-    const archTip = -R * 0.78;
-
-    const windowPath = (inset: number) => {
-      const hw = windowHalfW - inset;
-      const top = windowTop + inset;
-      const bot = windowBottom - inset;
-      const tip = archTip + inset * 0.6;
-      ctx.beginPath();
-      ctx.moveTo(-hw, bot);
-      ctx.lineTo(-hw, top);
-      ctx.quadraticCurveTo(-hw, tip, 0, tip);
-      ctx.quadraticCurveTo( hw, tip,  hw, top);
-      ctx.lineTo( hw, bot);
-      ctx.closePath();
-    };
-
-    // Outer stone reveal — thin dark frame just outside the glass.
-    ctx.fillStyle = `hsla(${H}, 14%, 10%, 0.95)`;
-    windowPath(-1.5);
-    ctx.fill();
-
-    // Stained-glass fill — jewel-tone band of the bell's hue, lit as if a
-    // colder light source were behind. Lighter at the top (where the apex
-    // catches more light) gives the glass depth.
-    const glassGrad = ctx.createLinearGradient(0, windowTop, 0, windowBottom);
-    glassGrad.addColorStop(0, `hsla(${H + 12}, 85%, 70%, 1)`);
-    glassGrad.addColorStop(0.5, `hsla(${H}, 80%, 50%, 1)`);
-    glassGrad.addColorStop(1, `hsla(${H - 14}, 75%, 30%, 1)`);
-    ctx.fillStyle = glassGrad;
-    windowPath(0);
-    ctx.fill();
-
-    // Glass facet seams — three vertical mullions splitting the window
-    // into four lights, plus a transom across the middle. Dark hairlines
-    // so the panes still read as a single coloured field.
-    ctx.save();
-    windowPath(0);
-    ctx.clip();
-    ctx.strokeStyle = `hsla(${H - 10}, 30%, 8%, 0.85)`;
-    ctx.lineWidth = 1.1;
-    ctx.beginPath();
-    for (let i = 1; i <= 3; i++) {
-      const x = -windowHalfW + (i / 4) * (2 * windowHalfW);
-      ctx.moveTo(x, archTip);
-      ctx.lineTo(x, windowBottom);
-    }
-    const transomY = (windowTop + windowBottom) / 2 + R * 0.05;
-    ctx.moveTo(-windowHalfW, transomY);
-    ctx.lineTo( windowHalfW, transomY);
-    ctx.stroke();
-    ctx.restore();
-
-    // Stone tracery — a thicker arched stroke framing the glass, bright on
-    // the upper-left edge (sunlit) and darker on the inner reveal.
-    ctx.strokeStyle = `hsla(${H}, 12%, 70%, 0.85)`;
-    ctx.lineWidth = 2.0;
-    windowPath(0);
-    ctx.stroke();
-    ctx.strokeStyle = `hsla(${H}, 18%, 14%, 0.75)`;
-    ctx.lineWidth = 0.9;
-    windowPath(1.6);
-    ctx.stroke();
-
-    // Stone sill below the window — a horizontal step casting a thin
-    // shadow onto the wall below, anchoring the window in the architecture.
-    const sillTop = windowBottom + R * 0.01;
-    const sillH = R * 0.05;
-    const sillW = windowHalfW + R * 0.06;
-    ctx.fillStyle = `hsla(${H}, 14%, 50%, 1)`;
-    ctx.fillRect(-sillW, sillTop, sillW * 2, sillH);
-    ctx.fillStyle = `hsla(${H}, 18%, 12%, 0.55)`;
-    ctx.fillRect(-sillW, sillTop + sillH, sillW * 2, R * 0.025);
-
-    // Rose tracery medallion above the window — a small circular wheel of
-    // stained-glass petals. Reads as "this fragment came from somewhere
-    // with intent", not just generic ruin.
-    const roseY = archTip - R * 0.20;
-    const roseR = R * 0.10;
-    ctx.strokeStyle = `hsla(${H}, 12%, 70%, 0.8)`;
-    ctx.lineWidth = 2.0;
-    ctx.beginPath();
-    ctx.arc(0, roseY, roseR, 0, TAU);
-    ctx.stroke();
-    ctx.fillStyle = `hsla(${H + 6}, 80%, 52%, 1)`;
-    ctx.beginPath();
-    ctx.arc(0, roseY, roseR - 1.2, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = `hsla(${H - 10}, 30%, 10%, 0.85)`;
-    ctx.lineWidth = 0.9;
-    ctx.beginPath();
-    const petalCount = 6;
-    for (let i = 0; i < petalCount; i++) {
-      const a = (i / petalCount) * TAU;
-      ctx.moveTo(0, roseY);
-      ctx.lineTo(Math.cos(a) * (roseR - 1.5), roseY + Math.sin(a) * (roseR - 1.5));
-    }
-    ctx.stroke();
-    ctx.fillStyle = `hsla(${H + 14}, 90%, 80%, 0.95)`;
-    ctx.beginPath();
-    ctx.arc(0, roseY, roseR * 0.18, 0, TAU);
-    ctx.fill();
-
-    // Faint warm interior bleed through the glass — soft halo radiating
-    // from each lit opening as if a torch were burning inside. Drawn
-    // additive after the glass so it brightens the surrounding stone.
-    ctx.globalCompositeOperation = "lighter";
-    const bleedR = R * 0.45;
-    const bleed = ctx.createRadialGradient(0, (windowTop + windowBottom) / 2, 0, 0, (windowTop + windowBottom) / 2, bleedR);
-    bleed.addColorStop(0, `hsla(${H + 8}, 80%, 60%, 0.22)`);
-    bleed.addColorStop(1, `hsla(${H}, 70%, 40%, 0)`);
-    ctx.fillStyle = bleed;
-    ctx.beginPath();
-    ctx.arc(0, (windowTop + windowBottom) / 2, bleedR, 0, TAU);
-    ctx.fill();
-    const roseBleed = ctx.createRadialGradient(0, roseY, 0, 0, roseY, R * 0.22);
-    roseBleed.addColorStop(0, `hsla(${H + 14}, 85%, 70%, 0.28)`);
-    roseBleed.addColorStop(1, `hsla(${H}, 70%, 40%, 0)`);
-    ctx.fillStyle = roseBleed;
-    ctx.beginPath();
-    ctx.arc(0, roseY, R * 0.22, 0, TAU);
-    ctx.fill();
-
-    // Chipped masonry rim — thick dark stroke around the silhouette so
-    // the jagged stone edge reads clearly against the starfield.
+  // The chipped-masonry double rim every cathedral piece wears: a thick dark
+  // outer stroke (occlusion contact against the starfield) + a thin bright
+  // inset stroke (sunlit stone catching the upper-left light).
+  private paintStoneRim(ctx: CanvasRenderingContext2D, H: number) {
     ctx.globalCompositeOperation = "source-over";
     ctx.lineJoin = "miter";
     ctx.miterLimit = 4;
-    const rimPath = () => {
-      ctx.beginPath();
-      for (let i = 0; i < this.outlineSamples; i++) {
-        const angle = (i / this.outlineSamples) * TAU;
-        const r = this.outline[i];
-        const x = Math.cos(angle) * r;
-        const y = Math.sin(angle) * r;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-    };
-    ctx.strokeStyle = `hsla(${H}, 22%, 8%, 0.9)`;
+    ctx.strokeStyle = `hsla(${H}, 22%, 7%, 0.92)`;
     ctx.lineWidth = 3.0;
-    rimPath();
+    this.traceOutline(ctx);
     ctx.stroke();
-    ctx.strokeStyle = `hsla(${H + 6}, 18%, 70%, 0.45)`;
+    ctx.strokeStyle = `hsla(${H + 6}, 18%, 72%, 0.45)`;
     ctx.lineWidth = 0.9;
+    this.traceOutline(ctx, 0.96);
+    ctx.stroke();
+  }
+
+  // Weathered raw-asteroid stone: an offset upper-left hot-spot body gradient +
+  // a scatter of deterministic crater pits (each with a bright lit lip and a
+  // dark floor) so the surface reads as living rock the architecture was carved
+  // OUT OF — not a clean built wall. Seeded from the harmonic phases so each
+  // bell weathers differently but stably across the bake.
+  private paintAsteroidStone(ctx: CanvasRenderingContext2D, H: number, R: number) {
+    ctx.globalCompositeOperation = "source-over";
+    const stoneGrad = ctx.createRadialGradient(-R * 0.4, -R * 0.5, R * 0.1, 0, 0, R * 1.35);
+    stoneGrad.addColorStop(0, `hsla(${H}, 13%, 56%, 1)`);
+    stoneGrad.addColorStop(0.5, `hsla(${H}, 11%, 36%, 1)`);
+    stoneGrad.addColorStop(1, `hsla(${H + 8}, 18%, 12%, 1)`);
+    ctx.fillStyle = stoneGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 1.45, 0, TAU);
+    ctx.fill();
+
+    // Crater pits — concave dimples in the raw rock. Bright up-left lip, dark
+    // down-right floor = a believable mini-terminator per pit.
+    const seed = this.harmonics.reduce((s, h) => s + h.phase * h.freq, 0);
+    const pitCount = 7;
+    for (let i = 0; i < pitCount; i++) {
+      const a = seed + (i / pitCount) * TAU + Math.sin(i * 2.1 + seed) * 0.6;
+      const d = R * (0.30 + 0.55 * Math.abs(Math.cos(i * 1.7 + seed)));
+      const px = Math.cos(a) * d;
+      const py = Math.sin(a) * d;
+      const pr = R * (0.10 + 0.09 * Math.abs(Math.sin(i * 1.3 + seed)));
+      const floor = ctx.createRadialGradient(px + pr * 0.2, py + pr * 0.2, 0, px, py, pr);
+      floor.addColorStop(0, `hsla(${H}, 16%, 14%, 0.5)`);
+      floor.addColorStop(1, `hsla(${H}, 12%, 36%, 0)`);
+      ctx.fillStyle = floor;
+      ctx.beginPath();
+      ctx.arc(px, py, pr, 0, TAU);
+      ctx.fill();
+      const lip = ctx.createRadialGradient(px - pr * 0.4, py - pr * 0.4, 0, px - pr * 0.4, py - pr * 0.4, pr * 0.9);
+      lip.addColorStop(0, `hsla(${H + 10}, 14%, 66%, 0.32)`);
+      lip.addColorStop(1, `hsla(${H}, 12%, 40%, 0)`);
+      ctx.fillStyle = lip;
+      ctx.beginPath();
+      ctx.arc(px - pr * 0.4, py - pr * 0.4, pr * 0.9, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  // Draw a beveled recess into the stone: this is what sells "carved into the
+  // asteroid" rather than "a window pasted on a wall". The opening is filled
+  // dark (the hollow), then an inner highlight stroke on the upper-left edge
+  // (stone catching light as it steps down) and a darker stroke on the lower-
+  // right (the cut face in shadow). `pathFn(inset)` traces the opening at a
+  // given inset so callers reuse their own opening shape.
+  private paintCarvedRecess(ctx: CanvasRenderingContext2D, H: number, pathFn: (inset: number) => void) {
+    ctx.fillStyle = `hsla(${H}, 14%, 30%, 1)`;
+    pathFn(-3.0);
+    ctx.fill();
+    ctx.fillStyle = `hsla(${H}, 16%, 9%, 1)`;
+    pathFn(-1.0);
+    ctx.fill();
     ctx.save();
-    ctx.scale(0.96, 0.96);
-    rimPath();
+    pathFn(-3.0);
+    ctx.clip();
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = `hsla(${H + 8}, 16%, 70%, 0.6)`;
+    ctx.lineWidth = 1.6;
+    ctx.translate(-1.1, -1.1);
+    pathFn(-1.2);
     ctx.stroke();
     ctx.restore();
+    ctx.save();
+    pathFn(-3.0);
+    ctx.clip();
+    ctx.strokeStyle = `hsla(${H}, 22%, 6%, 0.7)`;
+    ctx.lineWidth = 1.6;
+    ctx.translate(1.1, 1.1);
+    pathFn(-1.2);
+    ctx.stroke();
+    ctx.restore();
+  }
 
+  // Fill an opening with lit stained glass + leaded seams + a warm interior
+  // bleed. `pathFn(inset)` traces the opening; `cx,cy` is the glow centre and
+  // `top,bot` the vertical span for the lighting gradient; `seams` draws the
+  // leading inside a clip.
+  private paintStainedGlass(
+    ctx: CanvasRenderingContext2D,
+    H: number,
+    pathFn: (inset: number) => void,
+    top: number,
+    bot: number,
+    cx: number,
+    cy: number,
+    glowR: number,
+    seams: () => void,
+  ) {
+    const glassGrad = ctx.createLinearGradient(0, top, 0, bot);
+    glassGrad.addColorStop(0, `hsla(${H + 14}, 88%, 72%, 1)`);
+    glassGrad.addColorStop(0.5, `hsla(${H}, 82%, 50%, 1)`);
+    glassGrad.addColorStop(1, `hsla(${H - 16}, 76%, 28%, 1)`);
+    ctx.fillStyle = glassGrad;
+    pathFn(0);
+    ctx.fill();
+
+    ctx.save();
+    pathFn(0);
+    ctx.clip();
+    ctx.strokeStyle = `hsla(${H - 10}, 32%, 8%, 0.85)`;
+    ctx.lineWidth = 1.0;
+    seams();
+    ctx.restore();
+
+    ctx.strokeStyle = `hsla(${H}, 12%, 72%, 0.85)`;
+    ctx.lineWidth = 1.8;
+    pathFn(0);
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${H}, 18%, 13%, 0.7)`;
+    ctx.lineWidth = 0.9;
+    pathFn(1.5);
+    ctx.stroke();
+
+    ctx.globalCompositeOperation = "lighter";
+    const bleed = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+    bleed.addColorStop(0, `hsla(${H + 8}, 82%, 62%, 0.26)`);
+    bleed.addColorStop(1, `hsla(${H}, 70%, 40%, 0)`);
+    ctx.fillStyle = bleed;
+    ctx.beginPath();
+    ctx.arc(cx, cy, glowR, 0, TAU);
+    ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // Lay a band of dressed masonry courses behind an archetype's feature so the
+  // carved architecture sits on worked stone, not raw rock — offset-brick
+  // mortar lines within the vertical band [yTop, yBot].
+  private paintMasonryBand(ctx: CanvasRenderingContext2D, H: number, R: number, yTop: number, yBot: number) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(-R * 1.5, yTop, R * 3, yBot - yTop);
+    ctx.clip();
+    ctx.fillStyle = `hsla(${H}, 12%, 42%, 0.5)`;
+    ctx.fillRect(-R * 1.5, yTop, R * 3, yBot - yTop);
+    ctx.strokeStyle = `hsla(${H}, 18%, 8%, 0.6)`;
+    ctx.lineWidth = 0.8;
+    const courseH = R * 0.2;
+    ctx.beginPath();
+    for (let y = yTop; y <= yBot; y += courseH) {
+      ctx.moveTo(-R * 1.5, y);
+      ctx.lineTo(R * 1.5, y);
+    }
+    ctx.stroke();
+    ctx.beginPath();
+    const joint = R * 0.34;
+    let row = 0;
+    for (let y = yTop; y < yBot; y += courseH) {
+      const stagger = row % 2 === 0 ? 0 : joint / 2;
+      for (let col = -5; col <= 5; col++) {
+        const x = col * joint + stagger;
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + courseH);
+      }
+      row++;
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Trace a gothic lancet (pointed-arch) opening centred at cx.
+  private lancetPath(ctx: CanvasRenderingContext2D, cx: number, halfW: number, top: number, bot: number, tip: number, inset: number) {
+    const hw = halfW - inset;
+    const t = top + inset;
+    const b = bot - inset;
+    const tp = tip + inset * 0.6;
+    ctx.beginPath();
+    ctx.moveTo(cx - hw, b);
+    ctx.lineTo(cx - hw, t);
+    ctx.quadraticCurveTo(cx - hw, tp, cx, tp);
+    ctx.quadraticCurveTo(cx + hw, tp, cx + hw, t);
+    ctx.lineTo(cx + hw, b);
+    ctx.closePath();
+  }
+
+  // A round rose / wheel window of stained-glass petals carved at (cx, cy).
+  private paintRoseWindow(ctx: CanvasRenderingContext2D, H: number, cx: number, cy: number, rr: number, petals: number) {
+    const ringPath = (inset: number) => {
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr - inset, 0, TAU);
+    };
+    this.paintCarvedRecess(ctx, H, ringPath);
+    ctx.fillStyle = `hsla(${H + 6}, 82%, 52%, 1)`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr - 1.2, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = `hsla(${H - 10}, 32%, 9%, 0.85)`;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    for (let i = 0; i < petals; i++) {
+      const a = (i / petals) * TAU;
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(a) * (rr - 1.5), cy + Math.sin(a) * (rr - 1.5));
+    }
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr * 0.6, 0, TAU);
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${H}, 12%, 72%, 0.8)`;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr, 0, TAU);
+    ctx.stroke();
+    ctx.fillStyle = `hsla(${H + 16}, 92%, 82%, 0.95)`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr * 0.16, 0, TAU);
+    ctx.fill();
+    ctx.globalCompositeOperation = "lighter";
+    const bleed = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr * 2.0);
+    bleed.addColorStop(0, `hsla(${H + 14}, 86%, 70%, 0.30)`);
+    bleed.addColorStop(1, `hsla(${H}, 70%, 40%, 0)`);
+    ctx.fillStyle = bleed;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr * 2.0, 0, TAU);
+    ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // ----- Archetype: lancet wall (the classic — one tall pointed window) -----
+  private paintLancetWall(ctx: CanvasRenderingContext2D, H: number, R: number) {
+    this.paintMasonryBand(ctx, H, R, -R * 0.95, R * 0.55);
+    const top = -R * 0.6, bot = R * 0.24, halfW = R * 0.22, tip = -R * 0.8;
+    const path = (inset: number) => this.lancetPath(ctx, 0, halfW, top, bot, tip, inset);
+    this.paintCarvedRecess(ctx, H, path);
+    this.paintStainedGlass(ctx, H, path, top, bot, 0, (top + bot) / 2, R * 0.5, () => {
+      ctx.beginPath();
+      for (let i = 1; i <= 3; i++) {
+        const x = -halfW + (i / 4) * (2 * halfW);
+        ctx.moveTo(x, tip);
+        ctx.lineTo(x, bot);
+      }
+      const ty = (top + bot) / 2 + R * 0.05;
+      ctx.moveTo(-halfW, ty);
+      ctx.lineTo(halfW, ty);
+      ctx.stroke();
+    });
+    const sillW = halfW + R * 0.06;
+    ctx.fillStyle = `hsla(${H}, 14%, 50%, 1)`;
+    ctx.fillRect(-sillW, bot + R * 0.01, sillW * 2, R * 0.05);
+    ctx.fillStyle = `hsla(${H}, 18%, 11%, 0.55)`;
+    ctx.fillRect(-sillW, bot + R * 0.06, sillW * 2, R * 0.025);
+    this.paintRoseWindow(ctx, H, 0, tip - R * 0.18, R * 0.1, 6);
+  }
+
+  // ----- Archetype: rose facade (a big wheel window over twin lancets) -----
+  private paintRoseFacade(ctx: CanvasRenderingContext2D, H: number, R: number) {
+    this.paintMasonryBand(ctx, H, R, -R * 0.9, R * 0.7);
+    this.paintRoseWindow(ctx, H, 0, -R * 0.28, R * 0.3, 8);
+    const top = R * 0.12, bot = R * 0.6, halfW = R * 0.1, tip = R * 0.0;
+    for (const cx of [-R * 0.22, R * 0.22]) {
+      const path = (inset: number) => this.lancetPath(ctx, cx, halfW, top, bot, tip, inset);
+      this.paintCarvedRecess(ctx, H, path);
+      this.paintStainedGlass(ctx, H, path, top, bot, cx, (top + bot) / 2, R * 0.25, () => {
+        ctx.beginPath();
+        ctx.moveTo(cx, tip);
+        ctx.lineTo(cx, bot);
+        ctx.stroke();
+      });
+    }
+  }
+
+  // ----- Archetype: spire / belfry tower (tall, stacked slit openings) -----
+  private paintSpireTower(ctx: CanvasRenderingContext2D, H: number, R: number) {
+    this.paintMasonryBand(ctx, H, R, -R * 1.0, R * 0.9);
+    const halfW = R * 0.08;
+    for (let i = 0; i < 3; i++) {
+      const cy0 = -R * 0.55 + i * R * 0.42;
+      const top = cy0, bot = cy0 + R * 0.26, tip = cy0 - R * 0.1;
+      const path = (inset: number) => this.lancetPath(ctx, 0, halfW, top, bot, tip, inset);
+      this.paintCarvedRecess(ctx, H, path);
+      this.paintStainedGlass(ctx, H, path, top, bot, 0, (top + bot) / 2, R * 0.22, () => {
+        ctx.beginPath();
+        ctx.moveTo(0, tip);
+        ctx.lineTo(0, bot);
+        ctx.stroke();
+      });
+    }
+    ctx.strokeStyle = `hsla(${H}, 12%, 76%, 0.85)`;
+    ctx.lineWidth = 1.6;
+    const fy = -R * 0.78;
+    ctx.beginPath();
+    ctx.moveTo(0, fy - R * 0.12);
+    ctx.lineTo(0, fy + R * 0.1);
+    ctx.moveTo(-R * 0.07, fy - R * 0.03);
+    ctx.lineTo(R * 0.07, fy - R * 0.03);
+    ctx.stroke();
+  }
+
+  // ----- Archetype: arcade (a row of small round-arch openings) -----
+  private paintArcade(ctx: CanvasRenderingContext2D, H: number, R: number) {
+    this.paintMasonryBand(ctx, H, R, -R * 0.5, R * 0.5);
+    const top = -R * 0.18, bot = R * 0.32, halfW = R * 0.13, tip = -R * 0.34;
+    for (const cx of [-R * 0.5, 0, R * 0.5]) {
+      const path = (inset: number) => this.lancetPath(ctx, cx, halfW, top, bot, tip, inset);
+      this.paintCarvedRecess(ctx, H, path);
+      this.paintStainedGlass(ctx, H, path, top, bot, cx, (top + bot) / 2, R * 0.28, () => {
+        ctx.beginPath();
+        ctx.moveTo(cx, tip);
+        ctx.lineTo(cx, bot);
+        ctx.stroke();
+      });
+    }
+    ctx.fillStyle = `hsla(${H}, 14%, 50%, 1)`;
+    ctx.fillRect(-R * 0.85, bot + R * 0.03, R * 1.7, R * 0.05);
+    ctx.fillStyle = `hsla(${H}, 18%, 11%, 0.5)`;
+    ctx.fillRect(-R * 0.85, bot + R * 0.08, R * 1.7, R * 0.025);
+  }
+
+  // ----- Archetype: buttressed ruin (a broken flying-buttress stub) -----
+  private paintButtressRuin(ctx: CanvasRenderingContext2D, H: number, R: number) {
+    this.paintMasonryBand(ctx, H, R, -R * 0.7, R * 0.8);
+    ctx.save();
+    ctx.strokeStyle = `hsla(${H}, 13%, 44%, 1)`;
+    ctx.lineWidth = R * 0.16;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.6, R * 0.55);
+    ctx.quadraticCurveTo(-R * 0.1, -R * 0.1, R * 0.35, -R * 0.2);
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${H + 8}, 14%, 66%, 0.7)`;
+    ctx.lineWidth = R * 0.04;
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.6, R * 0.5);
+    ctx.quadraticCurveTo(-R * 0.12, -R * 0.16, R * 0.33, -R * 0.25);
+    ctx.stroke();
+    ctx.restore();
+    const top = -R * 0.45, bot = R * 0.2, halfW = R * 0.12, tip = -R * 0.6;
+    const cx = R * 0.42;
+    const path = (inset: number) => this.lancetPath(ctx, cx, halfW, top, bot, tip, inset);
+    this.paintCarvedRecess(ctx, H, path);
+    this.paintStainedGlass(ctx, H, path, top, bot, cx, (top + bot) / 2, R * 0.3, () => {
+      ctx.beginPath();
+      ctx.moveTo(cx, tip);
+      ctx.lineTo(cx, bot);
+      ctx.stroke();
+    });
+    ctx.fillStyle = `hsla(${H}, 16%, 24%, 0.8)`;
+    for (let i = -2; i <= 2; i++) {
+      const tx = i * R * 0.22;
+      ctx.fillRect(tx, R * 0.6, R * 0.12, R * 0.18);
+    }
+  }
+
+  // ===== Cathedral debris (terminal small fragments a bell shatters into) =====
+
+  // A wedge-shaped keystone / arch voussoir — the dressed stone block that
+  // locked an arch. Trapezoidal block face, chisel grooves, bright sunlit top.
+  private paintKeystoneBody(ctx: CanvasRenderingContext2D) {
+    const H = this.hue, R = this.radius;
+    ctx.save();
+    this.traceOutline(ctx);
+    ctx.clip();
+    this.paintAsteroidStone(ctx, H, R);
+    ctx.globalCompositeOperation = "source-over";
+    const face = ctx.createLinearGradient(-R, -R, R, R);
+    face.addColorStop(0, `hsla(${H + 6}, 14%, 62%, 1)`);
+    face.addColorStop(0.5, `hsla(${H}, 12%, 42%, 1)`);
+    face.addColorStop(1, `hsla(${H + 8}, 16%, 18%, 1)`);
+    ctx.fillStyle = face;
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.62, -R * 0.5);
+    ctx.lineTo(R * 0.62, -R * 0.5);
+    ctx.lineTo(R * 0.4, R * 0.62);
+    ctx.lineTo(-R * 0.4, R * 0.62);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = `hsla(${H}, 18%, 12%, 0.5)`;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (let i = -1; i <= 1; i++) {
+      ctx.moveTo(i * R * 0.26, -R * 0.46);
+      ctx.lineTo(i * R * 0.2, R * 0.56);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${H + 8}, 16%, 74%, 0.7)`;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.6, -R * 0.48);
+    ctx.lineTo(R * 0.6, -R * 0.48);
+    ctx.stroke();
+    this.paintStoneRim(ctx, H);
+    ctx.restore();
+  }
+
+  // A sharp sliver of stained glass — still lit, still ringing. The most
+  // colourful debris: a translucent jewel splinter with a glowing leaded edge.
+  private paintGlassShardBody(ctx: CanvasRenderingContext2D) {
+    const H = this.hue, R = this.radius;
+    ctx.save();
+    this.traceOutline(ctx);
+    ctx.clip();
+    ctx.globalCompositeOperation = "source-over";
+    const glass = ctx.createLinearGradient(-R, -R, R, R);
+    glass.addColorStop(0, `hsla(${H + 16}, 90%, 76%, 1)`);
+    glass.addColorStop(0.5, `hsla(${H}, 84%, 52%, 1)`);
+    glass.addColorStop(1, `hsla(${H - 18}, 78%, 30%, 1)`);
+    ctx.fillStyle = glass;
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 1.2, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = `hsla(${H - 12}, 34%, 10%, 0.7)`;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const a = i * 1.3 + 0.5;
+      ctx.moveTo(-R * 0.2, -R * 0.15);
+      ctx.lineTo(Math.cos(a) * R * 1.1 - R * 0.2, Math.sin(a) * R * 1.1 - R * 0.15);
+    }
+    ctx.stroke();
+    ctx.fillStyle = `hsla(${H + 20}, 95%, 92%, 0.85)`;
+    ctx.beginPath();
+    ctx.ellipse(-R * 0.32, -R * 0.34, R * 0.18, R * 0.08, -0.7, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = `hsla(${H - 8}, 40%, 8%, 0.9)`;
+    ctx.lineWidth = 2.2;
+    this.traceOutline(ctx);
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${H + 16}, 95%, 82%, 0.7)`;
+    ctx.lineWidth = 0.9;
+    this.traceOutline(ctx, 0.94);
+    ctx.stroke();
+    ctx.globalCompositeOperation = "lighter";
+    const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 1.6);
+    bloom.addColorStop(0, `hsla(${H + 10}, 90%, 64%, 0.30)`);
+    bloom.addColorStop(1, `hsla(${H}, 80%, 50%, 0)`);
+    ctx.fillStyle = bloom;
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 1.6, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // A drum of a carved column / capital — a near-cylindrical stone section
+  // with vertical fluting and a banded capital ring near the top.
+  private paintColumnDrumBody(ctx: CanvasRenderingContext2D) {
+    const H = this.hue, R = this.radius;
+    ctx.save();
+    this.traceOutline(ctx);
+    ctx.clip();
+    this.paintAsteroidStone(ctx, H, R);
+    ctx.globalCompositeOperation = "source-over";
+    const cyl = ctx.createLinearGradient(-R, 0, R, 0);
+    cyl.addColorStop(0, `hsla(${H + 6}, 13%, 30%, 0.8)`);
+    cyl.addColorStop(0.32, `hsla(${H + 8}, 14%, 64%, 0.85)`);
+    cyl.addColorStop(0.6, `hsla(${H}, 12%, 40%, 0.7)`);
+    cyl.addColorStop(1, `hsla(${H + 8}, 16%, 18%, 0.85)`);
+    ctx.fillStyle = cyl;
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 1.3, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = `hsla(${H}, 18%, 12%, 0.45)`;
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (let i = -3; i <= 3; i++) {
+      const x = i * R * 0.22;
+      ctx.moveTo(x, -R * 0.9);
+      ctx.lineTo(x, R * 0.9);
+    }
+    ctx.stroke();
+    ctx.fillStyle = `hsla(${H}, 14%, 52%, 1)`;
+    ctx.fillRect(-R * 1.2, -R * 0.5, R * 2.4, R * 0.12);
+    ctx.fillStyle = `hsla(${H}, 18%, 11%, 0.5)`;
+    ctx.fillRect(-R * 1.2, -R * 0.38, R * 2.4, R * 0.04);
+    ctx.fillStyle = `hsla(${H + 8}, 16%, 70%, 0.6)`;
+    ctx.fillRect(-R * 1.2, -R * 0.52, R * 2.4, R * 0.03);
+    this.paintStoneRim(ctx, H);
+    ctx.restore();
+  }
+
+  // A plain chipped masonry block — the least adorned debris. Dressed-stone
+  // courses + a single offset joint, weathered, no glass.
+  private paintRubbleBlockBody(ctx: CanvasRenderingContext2D) {
+    const H = this.hue, R = this.radius;
+    ctx.save();
+    this.traceOutline(ctx);
+    ctx.clip();
+    this.paintAsteroidStone(ctx, H, R);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.strokeStyle = `hsla(${H}, 18%, 9%, 0.6)`;
+    ctx.lineWidth = 1.0;
+    ctx.beginPath();
+    ctx.moveTo(-R * 1.3, -R * 0.2);
+    ctx.lineTo(R * 1.3, -R * 0.12);
+    ctx.moveTo(-R * 1.3, R * 0.38);
+    ctx.lineTo(R * 1.3, R * 0.42);
+    ctx.moveTo(R * 0.05, -R * 0.16);
+    ctx.lineTo(R * 0.02, R * 0.4);
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${H + 8}, 16%, 72%, 0.45)`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.9, -R * 0.55);
+    ctx.lineTo(R * 0.2, -R * 0.7);
+    ctx.stroke();
+    this.paintStoneRim(ctx, H);
+    ctx.restore();
+  }
+
+  // The cathedral ("bell") asteroid reads as a fragment of a basilica that a
+  // lost civilization carved out of an asteroid — weathered raw rock with
+  // architecture recessed INTO it (beveled openings, not pasted-on walls).
+  // Five archetypes (rolled at construction) give a row of bells real variety:
+  // a lancet-window wall, a rose-window facade, a tapering belfry, an arcade of
+  // small arches, and a buttressed ruin. Pre-baked, clipped to the organic
+  // silhouette so the carved face bleeds into the chipped stone edge.
+  private paintCathedralFragmentBody(ctx: CanvasRenderingContext2D) {
+    const H = this.hue;
+    const R = this.radius;
+    ctx.save();
+    this.traceOutline(ctx);
+    ctx.clip();
+    this.paintAsteroidStone(ctx, H, R);
+    switch (this.cathedralArchetype) {
+      case "roseFacade": this.paintRoseFacade(ctx, H, R); break;
+      case "spireTower": this.paintSpireTower(ctx, H, R); break;
+      case "arcade": this.paintArcade(ctx, H, R); break;
+      case "buttressRuin": this.paintButtressRuin(ctx, H, R); break;
+      default: this.paintLancetWall(ctx, H, R); break;
+    }
+    this.paintStoneRim(ctx, H);
     ctx.restore();
   }
 
@@ -2158,7 +2535,7 @@ export class Asteroid {
   }
 
   computeOutline(): number[] {
-    const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell";
+    const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
     const samples: number[] = [];
     for (let i = 0; i < this.outlineSamples; i++) {
       const angle = (i / this.outlineSamples) * TAU;
@@ -2267,8 +2644,9 @@ export class Asteroid {
     if (this.bossPupilFlash > 0) this.bossPupilFlash = Math.max(0, this.bossPupilFlash - dt * 2.4);
     // Whole-body boss reveal: ticks the dormant timer toward revealDuration,
     // then transitions to live. While dormant the asteroid cannot take
-    // damage (gateApplyDamage), the eye cannot fire, and rendering swells
-    // the silhouette + rotates the architecture into view.
+    // damage (gateApplyDamage) and the eye cannot fire. Rendering holds a
+    // quiet black silhouette for most of the window, then shudders, dusts off
+    // its crust, and opens the eye in the trailing revealActiveDuration.
     if (this.isBoss() && this.bossPhase === "dormant") {
       this.bossRevealT += dt;
       if (this.bossRevealT >= ENTITY_CONFIG.boss.revealDuration) {
@@ -2319,21 +2697,32 @@ export class Asteroid {
     // reads as a discrete "re-target" tick rather than a smooth drag.
   }
 
-  // Glide the targeting aim toward the player. Before the lock (beat 7,
-  // t=3.0) the aim continuously eases toward the player so the telegraph
-  // sweep-arc smoothly chases a dodging ship rather than snapping each beat.
-  // From the lock to the fire (t=3.0→3.5) the aim freezes, so juking in that
-  // final half-beat slips the sweep. `tNow` is the phase within the 4.0s
-  // cycle. The slew rate accelerates through the windup so the lock lands
-  // crisply on the player's late position.
+  // Tick the targeting aim toward the player once per beat across the windup.
+  // Beats 4..7 land at t = 1.5, 2.0, 2.5, 3.0 → indices 0..3. On each new
+  // beat the aim steps a fixed fraction of the remaining gap toward the
+  // player's current position, so the sightline visibly walks onto the player
+  // over four discrete ticks and the player can read where the shot commits.
+  // Beat 7 (index 3) is the final tick; the aim then holds for the beat-8
+  // fire, so juking after the last tick slips the shot. Outside the windup
+  // the aim tracks the player each frame so an idle eye still looks alive.
+  // `tNow` is the phase within the 4.0s cycle.
   private tickLaserAim(tNow: number) {
-    const locked = tNow >= 3.0 && tNow < 3.75;
-    if (locked) return;
-    // Faster slew as the windup matures so the aim catches up before lock.
-    const windupT = Math.max(0, Math.min(1, (tNow - 1.5) / 1.5));
-    const slew = 0.12 + 0.32 * windupT;
-    this.bossEyeAimX += (this.bossTrackedShipX - this.bossEyeAimX) * slew;
-    this.bossEyeAimY += (this.bossTrackedShipY - this.bossEyeAimY) * slew;
+    const inWindup = tNow >= 1.5 && tNow < 3.5;
+    if (!inWindup) {
+      this.bossAimBeatIndex = -1;
+      this.bossEyeAimX = this.bossTrackedShipX;
+      this.bossEyeAimY = this.bossTrackedShipY;
+      return;
+    }
+    const beatIndex = Math.floor((tNow - 1.5) / 0.5);
+    if (beatIndex > this.bossAimBeatIndex) {
+      this.bossAimBeatIndex = beatIndex;
+      // Step a portion of the way to the player; later ticks close more of the
+      // gap so the aim converges and lands tight on the final beat.
+      const step = 0.4 + 0.2 * beatIndex;
+      this.bossEyeAimX += (this.bossTrackedShipX - this.bossEyeAimX) * step;
+      this.bossEyeAimY += (this.bossTrackedShipY - this.bossEyeAimY) * step;
+    }
   }
 
   // Drives a wraith's pursuit, lunge cycle, and writhe phase. Called once
@@ -2856,6 +3245,48 @@ export class Asteroid {
       return fragmentList;
     }
     if (this.kind === "solidCrystalSmall") return [];
+    // Cathedral ("bell"): doesn't crumble into smaller cathedrals — it breaks
+    // into recognisable carved building pieces, the way a bassteroid breaks
+    // into ship chunks. A keystone (the wedge that locked an arch), a glowing
+    // stained-glass shard, a column drum, and a plain rubble block fan out from
+    // the impact. Each is a terminal small. Larger fragments throw more pieces;
+    // a small bell throws a representative subset so the read survives at every
+    // tier. The mandatory debris is glass + keystone (the iconic pair); column
+    // and rubble fill in for bigger breaks.
+    if (this.kind === "bell") {
+      const baseAngle = impactDir
+        ? Math.atan2(impactDir.y, impactDir.x)
+        : Math.atan2(this.vel.y, this.vel.x);
+      const parentSpeed = Math.hypot(this.vel.x, this.vel.y);
+      const ejectDist = this.radius * 0.45;
+      // Glass + keystone always; add column + rubble as the fragment grows.
+      const pieces: AsteroidKind[] =
+        this.size === "large" ? ["glassShard", "cathedralKeystone", "columnDrum", "rubbleBlock"]
+        : this.size === "medium" ? ["glassShard", "cathedralKeystone", "rubbleBlock"]
+        : ["glassShard", "cathedralKeystone"];
+      const fragmentList: Asteroid[] = [];
+      // Fan the pieces forward of the impact in an even spread so none flies
+      // straight back at the shooter.
+      const spread = 1.7;
+      for (let i = 0; i < pieces.length; i++) {
+        const frac = pieces.length === 1 ? 0 : i / (pieces.length - 1) - 0.5;
+        const childAngle = baseAngle + frac * spread + rand(-0.12, 0.12);
+        const childPos = {
+          x: this.pos.x + Math.cos(childAngle) * ejectDist,
+          y: this.pos.y + Math.sin(childAngle) * ejectDist,
+        };
+        // Glass shards fly fastest + spin hardest (lightest, sharpest); stone
+        // drums and rubble are heavier and tumble more slowly.
+        const isGlass = pieces[i] === "glassShard";
+        const speedMag = parentSpeed * rand(1.0, 1.4) + (isGlass ? rand(150, 210) : rand(90, 150));
+        const child = new Asteroid(childPos, fromAngle(childAngle, speedMag), "small", this.hue, pieces[i]);
+        child.rotSpeed = (isGlass ? rand(1.6, 2.8) : rand(0.6, 1.4)) * (rng() < 0.5 ? -1 : 1);
+        fragmentList.push(child);
+      }
+      return fragmentList;
+    }
+    // Cathedral debris is terminal — carved chunks don't subdivide further.
+    if (CATHEDRAL_DEBRIS_KINDS.includes(this.kind)) return [];
     if (this.size === "small") return [];
     return this.splitRegular(opts);
   }
@@ -3103,9 +3534,11 @@ export class Asteroid {
 
     const isPlain = this.kind === "normal" || this.kind === "goldCrystal";
     const nSat = isPlain ? 6 : 100;
-    // Bell asteroid is a baked architectural sprite — drifting bioluminescent
-    // nuclei would read as bright pinpricks floating on a stone wall.
-    if (this.kind !== "bell") {
+    // Bell asteroid + its carved debris are baked architectural sprites —
+    // drifting bioluminescent nuclei would read as bright pinpricks floating
+    // on a stone wall.
+    const isArchitectural = this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
+    if (!isArchitectural) {
       const nucleusList = this.nuclei;
       for (const n of nucleusList) {
         const driftR = n.dist + Math.sin(time * n.pulseSpeed + n.pulsePhase) * 2;
@@ -3541,36 +3974,69 @@ export class Asteroid {
   }
 
   // Boss eased reveal curve. 0 → 1 over the 8s dormant window, with a
-  // mid-window pause for the rotation reveal so the swell and the
-  // architecture-rotate read as two distinct beats. Phase breakdown:
-  //   0.00 - 0.60 : swell from ~level-9 silhouette to ~85% boss radius
-  //   0.60 - 0.74 : rotate-around (silhouette stays the same size, but the
-  //                 architecture continues sweeping from edge to front)
-  //   0.74 - 1.00 : final swell to full radius + the armored lids part and
-  //                 the eye opens (the body holds still so it opens facing
-  //                 the player)
-  // The eased "reveal" return value is the architecture-visibility factor,
-  // 0 = pure dark silhouette, 1 = fully painted. lidOpen is the 0..1
-  // eye-opening progress used by the multi-part lid animation.
-  bossDormantPhase(): { swellT: number; revealT: number; spinT: number; lidOpen: number } {
-    const t = Math.min(1, this.bossRevealT / Math.max(0.001, ENTITY_CONFIG.boss.revealDuration));
-    let swellT: number;
-    if (t < 0.60) swellT = (t / 0.60) * 0.85;
-    else if (t < 0.74) swellT = 0.85;
-    else swellT = 0.85 + ((t - 0.74) / 0.26) * 0.15;
-    // Architecture reveal stays at 0 (pure dark silhouette) until the
-    // rotate-around begins, then ramps in and is fully painted by the time
-    // the lids start parting.
-    const revealT = t < 0.22 ? 0 : t < 0.74 ? (t - 0.22) / 0.52 : 1;
-    // Spin settles to a flat stop just as the lid-open begins, so the eye
-    // opens square to the camera rather than mid-tumble.
-    const spinEase = t < 0.74 ? t / 0.74 : 1;
-    const spinT = spinEase * 1.5;
-    // Lid-open occupies the final 26% of the window. Eased so the lids creak
-    // apart slowly then snap wide at the end.
-    const lidRaw = Math.max(0, (t - 0.74) / 0.26);
-    const lidOpen = lidRaw * lidRaw * (3 - 2 * lidRaw);
-    return { swellT, revealT, spinT, lidOpen };
+  // Two-phase dormant intro keyed off absolute seconds:
+  //   quiet  (all but the last revealActiveDuration s): a black, subdued
+  //          silhouette slowly swelling toward full size — reads as part of
+  //          the background. No architecture, no colour, no motion.
+  //   active (the final revealActiveDuration s): the planetoid shudders,
+  //          dusts its crust off to expose the boss architecture, makes its
+  //          final swell to full radius, and the eye begins to crack. The eye
+  //          barely parts for most of this window, then snaps fully open over
+  //          the last 100ms.
+  // Returns: swellT (0..1 body size), revealT (0..1 architecture visibility),
+  // shudder (0..1 shake intensity), dust (0..1 crust-shedding amount), and
+  // lidOpen (0..1 eye-open progress).
+  bossDormantPhase(): { swellT: number; revealT: number; shudder: number; dust: number; lidOpen: number } {
+    const total = Math.max(0.001, ENTITY_CONFIG.boss.revealDuration);
+    const active = Math.min(total, ENTITY_CONFIG.boss.revealActiveDuration);
+    const elapsed = this.bossRevealT;
+    const activeStart = total - active;
+    // Seconds into the active window (negative while still quiet).
+    const aS = elapsed - activeStart;
+    // 0..1 progress through the active window.
+    const a = Math.max(0, Math.min(1, aS / active));
+
+    // Quiet swell: slow creep from the planet's last silhouette size up to
+    // ~88% across the whole long approach. Background-like, never hurried.
+    const quietProgress = Math.min(1, elapsed / activeStart);
+    const quietSwell = quietProgress * 0.88;
+    // Active swell: finish from 88% to full over the active window, eased so
+    // the body settles into its final size rather than lurching.
+    const activeSwell = a * a * (3 - 2 * a) * 0.12;
+    const swellT = aS < 0 ? quietSwell : 0.88 + activeSwell;
+
+    // Architecture only resolves during the active window — before that the
+    // body is a pure black disc. Ramps in over the first ~70% of the window
+    // (the dust-off) and is fully painted before the eye snaps open.
+    const revealT = aS < 0 ? 0 : Math.min(1, a / 0.7);
+
+    // Shudder ramps up across the active window (quadratic so it builds), so
+    // the planetoid trembles harder the closer it is to waking.
+    const shudder = aS < 0 ? 0 : a * a;
+    // Dust sheds most heavily in the first half of the active window as the
+    // crust breaks away, then tapers as the architecture stands revealed.
+    const dust = aS < 0 ? 0 : Math.sin(Math.min(1, a * 1.3) * Math.PI);
+
+    // Eye: barely cracks for most of the active window (creeps to ~0.14),
+    // then snaps fully open over the last 100ms, smoothly continuing from the
+    // partly-open form rather than jumping.
+    const snapWindow = 0.1; // seconds of the final fast open
+    const sliver = 0.08;    // how far the eye barely cracks before the snap
+    const secsLeft = total - elapsed;
+    let lidOpen: number;
+    if (aS < 0) {
+      lidOpen = 0;
+    } else if (secsLeft > snapWindow) {
+      // Slow creep to a bare sliver across the whole active window.
+      lidOpen = sliver * a;
+    } else {
+      // Final 100ms: smoothstep from the sliver to fully open, continuing
+      // smoothly from the partly-cracked form rather than jumping.
+      const s = Math.max(0, Math.min(1, 1 - secsLeft / snapWindow));
+      const eased = s * s * (3 - 2 * s);
+      lidOpen = sliver + (1 - sliver) * eased;
+    }
+    return { swellT, revealT, shudder, dust, lidOpen };
   }
 
   // Render the dormant whole-body boss: a swelling planet silhouette that
@@ -3583,28 +4049,39 @@ export class Asteroid {
     const r = this.radius * (0.42 + 0.58 * phase.swellT);
 
     ctx.save();
-    ctx.translate(this.pos.x, this.pos.y);
+    // Shudder: as the planetoid wakes it trembles in place, harder the closer
+    // it is to bursting. Pure cosmetic jitter — collisions are off while
+    // dormant. A fast wobble plus a coarse per-frame kick so it reads as a
+    // strained rumble, not a smooth orbit.
+    let shakeX = 0, shakeY = 0;
+    if (phase.shudder > 0.001) {
+      const amp = phase.shudder * 6;
+      shakeX = Math.sin(t * 0.05) * amp * 0.5 + (rng() - 0.5) * amp;
+      shakeY = Math.cos(t * 0.061) * amp * 0.5 + (rng() - 0.5) * amp;
+    }
+    ctx.translate(this.pos.x + shakeX, this.pos.y + shakeY);
 
-    // Soft outer corona — very dim during silhouette, ramps up as the
-    // architecture is revealed. Mirrors the eclipse rim-light look the
-    // background planet was wearing right before this.
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    const coronaA = 0.04 + 0.18 * phase.revealT + 0.05 * Math.sin(t * 0.002);
-    const coronaR = r * (1.25 + 0.18 * phase.revealT);
-    const corona = ctx.createRadialGradient(0, 0, r * 0.7, 0, 0, coronaR);
-    corona.addColorStop(0, `hsla(${baseHue}, 100%, 50%, ${coronaA * 0.5})`);
-    corona.addColorStop(0.55, `hsla(${baseHue - 8}, 100%, 45%, ${coronaA * 0.25})`);
-    corona.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
-    ctx.fillStyle = corona;
-    ctx.beginPath();
-    ctx.arc(0, 0, coronaR, 0, TAU);
-    ctx.fill();
-    ctx.restore();
+    // Soft outer corona — invisible during the quiet black approach, blooms
+    // only as the architecture is dusted off in the active window.
+    if (phase.revealT > 0.001) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const coronaA = 0.05 + 0.18 * phase.revealT;
+      const coronaR = r * (1.25 + 0.18 * phase.revealT);
+      const corona = ctx.createRadialGradient(0, 0, r * 0.7, 0, 0, coronaR);
+      corona.addColorStop(0, `hsla(${baseHue}, 100%, 50%, ${coronaA * 0.5})`);
+      corona.addColorStop(0.55, `hsla(${baseHue - 8}, 100%, 45%, ${coronaA * 0.25})`);
+      corona.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
+      ctx.fillStyle = corona;
+      ctx.beginPath();
+      ctx.arc(0, 0, coronaR, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
 
-    // Dark silhouette body — same hsl ramp as the background planet so the
-    // transition from one to the other is invisible. As the reveal builds,
-    // a subtle directional gradient appears (the sun side of the boss).
+    // Dark silhouette body — the same subdued near-black the background planet
+    // wore, so the quiet phase reads as part of the backdrop. A faint
+    // directional gradient fades in only as the reveal builds.
     ctx.save();
     const dark = 4 + phase.revealT * 8;
     ctx.fillStyle = `hsl(${baseHue + 4}, 70%, ${dark}%)`;
@@ -3613,15 +4090,18 @@ export class Asteroid {
     ctx.fill();
     ctx.restore();
 
-    // Architecture: drawn clipped to the disc, rotated by spinT so the
-    // modular ring sweeps into view from the edge. Alpha climbs with
-    // revealT so the body stays a clean silhouette early.
+    // Crust shedding — chunks of the dark exterior flake off and drift outward
+    // during the dust-off, exposing the architecture beneath. Deterministic
+    // per chunk so they stream consistently; driven by `dust`.
+    if (phase.dust > 0.001) this.paintBossDustOff(ctx, r, phase.dust, phase.revealT, t);
+
+    // Architecture: clipped to the disc, alpha climbing with revealT so the
+    // body stays a clean black silhouette until the crust breaks away.
     if (phase.revealT > 0.001) {
       ctx.save();
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, TAU);
       ctx.clip();
-      ctx.rotate(phase.spinT * TAU);
 
       // Equatorial Bassteroid-style ring of plated panels — four hue bands
       // (red/amber/blue/violet) span the visible arc. Modeled as a wide
@@ -3688,17 +4168,76 @@ export class Asteroid {
     // uncovering a vesica-shaped gap that the brass aperture + iris fill.
     if (phase.lidOpen > 0.001) this.paintBossEyeOpening(ctx, r, phase.lidOpen, t);
 
-    // Outline rim — soft during silhouette, sharpening as the body
-    // resolves. This is what sells "thing in space against starfield".
+    // Outline rim — barely-there during the quiet silhouette, sharpening as
+    // the body resolves. This is what sells "thing in space against starfield".
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.strokeStyle = `hsla(${baseHue + 12}, 100%, 65%, ${0.25 + 0.55 * phase.revealT})`;
-    ctx.lineWidth = 1.4 + 1.4 * phase.revealT;
+    ctx.strokeStyle = `hsla(${baseHue + 12}, 100%, 65%, ${0.12 + 0.68 * phase.revealT})`;
+    ctx.lineWidth = 1.2 + 1.6 * phase.revealT;
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, TAU);
     ctx.stroke();
     ctx.restore();
 
+    ctx.restore();
+  }
+
+  // Crust shedding for the dust-off: dark exterior flakes break loose around
+  // the limb and drift outward, plus a haze of fine dust motes — the rock
+  // sloughing off its disguise to expose the boss. `dust` 0..1 sets emission;
+  // `reveal` brightens the freshly-exposed under-edges. Deterministic per
+  // chunk (seeded off the boss hue) so a chunk streams smoothly across frames.
+  paintBossDustOff(ctx: CanvasRenderingContext2D, r: number, dust: number, reveal: number, t: number) {
+    const baseHue = this.hue;
+    ctx.save();
+    // Flaking plates: 14 dark shards lifting off the limb, each easing outward
+    // on its own phase. Drawn dark (they're crust) with a hot inner edge where
+    // they tore free.
+    const CHUNKS = 14;
+    for (let i = 0; i < CHUNKS; i++) {
+      const seed = Math.abs(Math.sin(baseHue * 7.3 + i * 53.7));
+      const ang = (i / CHUNKS) * TAU + seed * 0.6;
+      // Per-chunk drift phase loops so chunks keep peeling for the whole
+      // dust-off rather than launching once.
+      const ph = ((t * 0.0006 + seed) % 1);
+      const lift = ph * (0.5 + 0.5 * dust);
+      const cr = r * (0.07 + seed * 0.06);
+      const cx = Math.cos(ang) * (r * 0.92 + r * 0.7 * lift);
+      const cy = Math.sin(ang) * (r * 0.92 + r * 0.7 * lift);
+      const alpha = dust * (1 - ph) * 0.85;
+      if (alpha < 0.02) continue;
+      ctx.fillStyle = `hsla(${baseHue}, 60%, 6%, ${alpha})`;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, cr, cr * 0.7, ang, 0, TAU);
+      ctx.fill();
+      // Hot torn edge facing the body.
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = `hsla(${baseHue + 25}, 100%, 60%, ${alpha * reveal})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, cr, ang + Math.PI * 0.6, ang + Math.PI * 1.4);
+      ctx.stroke();
+      ctx.globalCompositeOperation = "source-over";
+    }
+    // Fine dust haze drifting off — a scatter of tiny motes in a ring just
+    // outside the limb, additive so they glint against the dark.
+    ctx.globalCompositeOperation = "lighter";
+    const MOTES = 40;
+    for (let i = 0; i < MOTES; i++) {
+      const s1 = Math.abs(Math.sin(baseHue * 3.1 + i * 12.9));
+      const s2 = Math.abs(Math.sin(baseHue * 9.7 + i * 4.33));
+      const ph = ((t * 0.0011 + s1) % 1);
+      const ang = s1 * TAU;
+      const rad = r * (0.95 + ph * 0.55);
+      const mx = Math.cos(ang) * rad;
+      const my = Math.sin(ang) * rad;
+      const alpha = dust * (1 - ph) * 0.5 * s2;
+      if (alpha < 0.02) continue;
+      ctx.fillStyle = `hsla(${baseHue + 15}, 80%, 55%, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(mx, my, 0.8 + s2 * 1.2, 0, TAU);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -3937,65 +4476,71 @@ export class Asteroid {
     ctx.restore();
   }
 
-  // Sweep telegraph: previews the ARC the beam is about to slash through.
-  // The aim glides toward the player across the windup (no per-beat snap),
-  // and the wedge spanning ±BOSS_SWEEP_HALF around it fills in + brightens as
-  // the charge completes, so the player reads "the beam will sweep across
-  // here" and clears the arc. World-space; drawn source-over as a HUD cue,
-  // distinct from the energy beam that follows.
+  // Targeting telegraph: a single crisp sightline down the locked aim, capped
+  // by a lock-on reticle. The aim ticks toward the player once per windup beat
+  // (see tickLaserAim), so the line visibly steps onto the player each beat
+  // and then holds — the player reads exactly where the beam will fire. The
+  // beam fires straight down this line, so the telegraph is an honest
+  // predictor of the shot. World-space; drawn source-over as a HUD cue.
   paintBossLaserChargeBeam(ctx: CanvasRenderingContext2D) {
     const charge = this.bossLaserCharge;
     if (charge <= 0.02) return;
     const a = this.eyeAimAngle();
     const startR = (this.kind === "bossEye" ? this.radius : this.bossEyeRadius) * 1.05;
     const aimDist = Math.hypot(this.bossEyeAimX - this.pos.x, this.bossEyeAimY - this.pos.y);
-    const reach = Math.max(startR + 60, aimDist + 80);
-    const dir = a >= 0 ? 1 : -1;
-    const a0 = a - dir * BOSS_SWEEP_HALF;
-    const a1 = a + dir * BOSS_SWEEP_HALF;
+    // The line runs the full length the beam will reach so the threat covers
+    // the same span as the shot, not just up to the player.
+    const reach = Math.max(startR + 200, aimDist + 600);
     const alpha = 0.3 + 0.6 * charge;
+    const sx = this.pos.x + Math.cos(a) * startR;
+    const sy = this.pos.y + Math.sin(a) * startR;
+    const ex = this.pos.x + Math.cos(a) * reach;
+    const ey = this.pos.y + Math.sin(a) * reach;
 
     ctx.save();
-    // Filled wedge — faint at first, intensifying as the shot nears. The
-    // gradient keeps it brightest near the eye and fading toward the tip so
-    // it reads as energy gathering at the source.
-    const wedge = ctx.createRadialGradient(this.pos.x, this.pos.y, startR, this.pos.x, this.pos.y, reach);
-    wedge.addColorStop(0, `hsla(${this.hue}, 100%, 60%, ${0.18 * charge})`);
-    wedge.addColorStop(1, `hsla(${this.hue}, 100%, 55%, 0)`);
-    ctx.fillStyle = wedge;
+    // Soft underlay along the line — widens slightly as the charge completes
+    // so the sightline thickens into "about to fire" without becoming a beam.
+    ctx.strokeStyle = `hsla(${this.hue}, 100%, 60%, ${0.12 * charge})`;
+    ctx.lineWidth = 4 + 6 * charge;
+    ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(this.pos.x, this.pos.y);
-    ctx.arc(this.pos.x, this.pos.y, reach, Math.min(a0, a1), Math.max(a0, a1));
-    ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
 
-    // Bounding rays of the sweep — the two edges the beam travels between.
-    ctx.strokeStyle = `hsla(${this.hue}, 100%, 64%, ${alpha * 0.8})`;
-    ctx.lineWidth = 1.4;
-    for (const edge of [a0, a1]) {
-      ctx.beginPath();
-      ctx.moveTo(this.pos.x + Math.cos(edge) * startR, this.pos.y + Math.sin(edge) * startR);
-      ctx.lineTo(this.pos.x + Math.cos(edge) * reach, this.pos.y + Math.sin(edge) * reach);
-      ctx.stroke();
-    }
-
-    // The live aim line — bright dashed sightline tracking the player. This
-    // is where the beam crosses, so it's the strongest cue.
+    // Crisp dashed sightline — the readable aim. Steps onto the player on each
+    // windup beat.
     ctx.strokeStyle = `hsla(${this.hue}, 100%, ${62 + 30 * charge}%, ${alpha})`;
     ctx.lineWidth = 1.4 + 1.2 * charge;
     ctx.setLineDash([10, 8]);
     ctx.beginPath();
-    ctx.moveTo(this.pos.x + Math.cos(a) * startR, this.pos.y + Math.sin(a) * startR);
-    ctx.lineTo(this.pos.x + Math.cos(a) * reach, this.pos.y + Math.sin(a) * reach);
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Lock dot on the aim point — brightens to near-white as the lock holds.
-    const lx = this.pos.x + Math.cos(a) * Math.min(reach, aimDist);
-    const ly = this.pos.y + Math.sin(a) * Math.min(reach, aimDist);
+    // Lock-on reticle on the aim point: an outer ring that contracts as the
+    // charge completes (acquiring → locked) plus a four-tick crosshair, so the
+    // exact target reads unmistakably.
+    const tx = this.pos.x + Math.cos(a) * Math.max(startR + 30, aimDist);
+    const ty = this.pos.y + Math.sin(a) * Math.max(startR + 30, aimDist);
+    const ringR = 26 - 14 * charge;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(tx, ty, ringR, 0, TAU);
+    ctx.stroke();
+    const tickOut = ringR + 7;
+    const tickIn = ringR + 2;
+    for (let k = 0; k < 4; k++) {
+      const ang = a + (k * TAU) / 4;
+      ctx.beginPath();
+      ctx.moveTo(tx + Math.cos(ang) * tickIn, ty + Math.sin(ang) * tickIn);
+      ctx.lineTo(tx + Math.cos(ang) * tickOut, ty + Math.sin(ang) * tickOut);
+      ctx.stroke();
+    }
     ctx.fillStyle = `hsla(${this.hue}, 100%, ${60 + 35 * charge}%, ${alpha})`;
     ctx.beginPath();
-    ctx.arc(lx, ly, 2 + 2 * charge, 0, TAU);
+    ctx.arc(tx, ty, 1.5 + 1.5 * charge, 0, TAU);
     ctx.fill();
     ctx.restore();
   }

@@ -1,4 +1,4 @@
-import { Vec, v, fromAngle, rand, TAU, addScaledMut } from "./vec";
+import { Vec, v, fromAngle, rand, randInt, TAU, addScaledMut } from "./vec";
 import { Trail } from "./Trail";
 import { rng } from "./game/rng";
 import { ENTITY_CONFIG } from "./game/entityConfig";
@@ -51,12 +51,24 @@ export class Comet {
   // extends a bit further but isn't part of the body — only the burning
   // core counts.
   static readonly HIT_RADIUS = ENTITY_CONFIG.comet.hitRadius;
-  readonly radius = Comet.HIT_RADIUS;
+  readonly radius: number;
 
-  constructor(pos: Vec, vel: Vec, hue: number) {
+  // A meteor is a smaller, faster, cheaper sibling that arrives in a staggered
+  // shower of several at once. It reuses the comet's rendering, collision and
+  // scoring, but plays no per-comet melody or shimmer drone (the shower has its
+  // own dramatic entrance sound instead) and doesn't shift the halo into comet
+  // mode. See spawnMeteorShower.
+  isMeteor = false;
+  // Uniform visual + hit scale relative to a full comet. 1 for comets; meteors
+  // shrink so the shower reads as a flock of lesser bodies.
+  scale: number;
+
+  constructor(pos: Vec, vel: Vec, hue: number, scale = 1) {
     this.pos = pos;
     this.vel = vel;
     this.hue = hue;
+    this.scale = scale;
+    this.radius = Comet.HIT_RADIUS * scale;
     this.glowTrail = new Trail(hue, 18, 0.32, "shimmer", 1.6);
   }
 
@@ -117,7 +129,7 @@ export class Comet {
       const aT = 1 - a.age / TAIL_LIFE;
       const segAlpha = Math.max(0, aT) * 0.55 * b;
       if (segAlpha <= 0.002) continue;
-      const width = 1.5 + 7 * Math.max(0, aT);
+      const width = (1.5 + 7 * Math.max(0, aT)) * this.scale;
       ctx.strokeStyle = `hsla(${this.hue}, 95%, 78%, ${segAlpha.toFixed(3)})`;
       ctx.lineWidth = width;
       ctx.lineCap = "round";
@@ -131,7 +143,7 @@ export class Comet {
     // visual feels coupled to the audio. Pulse amplitude is gentle (±15%)
     // because the bass kit already supplies the strong rhythmic accents.
     const pulse = 0.85 + 0.15 * Math.sin(this.noteIndex * 1.3 + this.age * 2);
-    const radius = 26 * pulse;
+    const radius = 26 * pulse * this.scale;
     const halo = ctx.createRadialGradient(this.pos.x, this.pos.y, 0, this.pos.x, this.pos.y, radius * 2.6);
     halo.addColorStop(0, `hsla(${this.hue}, 100%, 92%, ${(0.85 * b).toFixed(3)})`);
     halo.addColorStop(0.4, `hsla(${this.hue}, 95%, 80%, ${(0.35 * b).toFixed(3)})`);
@@ -179,4 +191,60 @@ export const spawnComet = (w: number, h: number): Comet => {
   // like the same celestial visitor across runs.
   const hue = rand(180, 290);
   return new Comet(from, vel, hue);
+};
+
+// A meteor shower: several smaller, faster meteors streaking the same way
+// across the field, staggered so they fan out into a moving flock rather than
+// arriving as one clump. Unlike the lone comet — a slow musical visitor — the
+// shower is a brief spectacle: each meteor is worth less but there are many,
+// and they cross fast, so the player has a tight window to comb through them.
+//
+// All meteors share one heading (same angle, 2× comet speed). They start on a
+// line perpendicular to that heading, spread across the entry edge, and each is
+// nudged back along the heading by a growing amount so the flock trails itself
+// diagonally instead of crossing the screen as a flat wall.
+const MS = ENTITY_CONFIG.meteorShower;
+export const spawnMeteorShower = (w: number, h: number): Comet[] => {
+  const count = randInt(MS.count[0], MS.count[1]);
+
+  // Same edge-to-centre framing as a comet so the flock crosses the play area.
+  const edge = Math.floor(rng() * 4);
+  const offset = 120;
+  let origin: Vec;
+  if (edge === 0) origin = v(-offset, rand(h * 0.15, h * 0.85));
+  else if (edge === 1) origin = v(w + offset, rand(h * 0.15, h * 0.85));
+  else if (edge === 2) origin = v(rand(w * 0.15, w * 0.85), -offset);
+  else origin = v(rand(w * 0.15, w * 0.85), h + offset);
+
+  const target = v(rand(w * 0.3, w * 0.7), rand(h * 0.3, h * 0.7));
+  const angle = Math.atan2(target.y - origin.y, target.x - origin.x);
+  // Match the comet's traversal speed, then double it — meteors move fast.
+  const distance = Math.hypot(target.x - origin.x, target.y - origin.y) * 2.4;
+  const speed = (distance / rand(14, 18)) * MS.speedMult;
+  const vel = fromAngle(angle, speed);
+
+  // Tight hue band, warmer than the comet's cyan/violet, so a shower reads as
+  // its own species at a glance.
+  const baseHue = rand(28, 60);
+
+  // Unit vectors along + perpendicular to the heading, for laying the flock out.
+  const along = fromAngle(angle, 1);
+  const perp = v(-along.y, along.x);
+
+  const meteors: Comet[] = [];
+  for (let i = 0; i < count; i++) {
+    // Spread across the perpendicular (centred on the origin) and stagger back
+    // along the heading so later meteors trail the leaders.
+    const spread = (i - (count - 1) / 2) * rand(40, 70);
+    const lag = i * rand(50, 110);
+    const pos = v(
+      origin.x + perp.x * spread - along.x * lag,
+      origin.y + perp.y * spread - along.y * lag,
+    );
+    const m = new Comet(pos, { ...vel }, baseHue + rand(-8, 8), MS.scale);
+    m.isMeteor = true;
+    m.lifetime = rand(MS.lifetime[0], MS.lifetime[1]);
+    meteors.push(m);
+  }
+  return meteors;
 };

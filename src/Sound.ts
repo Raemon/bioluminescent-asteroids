@@ -218,6 +218,7 @@ export type SoundName =
   | "cometNote"
   | "cometDestroyed"
   | "cometDestroyedSad"
+  | "meteorShower"
   | "canisterAppear"
   | "canisterDestroyed"
   | "comboLost"
@@ -226,6 +227,7 @@ export type SoundName =
   | "wraithLunge"
   | "wraithDeath"
   | "bossPulse"
+  | "bossHit"
   | "bossEyeOpenStinger";
 
 // Combo-milestone vocal pools. Each milestone (x6, x12) has its own folder
@@ -503,7 +505,7 @@ export class Sound {
   // missing entries still work (lazy alloc on first call), they just pay
   // the spawn-time stutter you're avoiding here.
   private prewarmNoiseBuffers() {
-    const durations = [0.018, 0.025, 0.08, 0.18, 0.3, 0.34, 0.4, 0.55, 3, 4, 6, 8];
+    const durations = [0.018, 0.025, 0.08, 0.18, 0.3, 0.34, 0.4, 0.55, 2.5, 3, 4, 6, 8];
     for (const d of durations) this.makeNoiseBuffer(d);
   }
 
@@ -2338,6 +2340,79 @@ export class Sound {
     droneOct.stop(t + TAIL + 0.2);
   }
 
+  // One-shot entrance for a meteor shower — bigger and more aggressive than the
+  // lone comet's slow "shhwwwoorrr". The flock arrives fast, so the cue is a
+  // hard descending shriek (a stack of detuned saws screaming downward) over a
+  // chest-punch sub boom and a bright broadband streak that whips across the
+  // stereo field. It announces "many fast bodies, NOW" rather than "a distant
+  // visitor approaches", and clears in ~2.5s so it doesn't muddy the bass bed.
+  playMeteorShower() {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+
+    // ── Descending shriek: three detuned saws screaming from ~1.8kHz down to
+    // ~180Hz over 0.7s through a resonant lowpass that tracks them, so the
+    // sweep reads as a single fat falling tone with teeth.
+    const shriekLp = this.ctx.createBiquadFilter();
+    shriekLp.type = "lowpass";
+    shriekLp.Q.value = 6;
+    shriekLp.frequency.setValueAtTime(2400, t);
+    shriekLp.frequency.exponentialRampToValueAtTime(260, t + 0.7);
+    const shriekGain = this.ctx.createGain();
+    shriekGain.gain.setValueAtTime(0.0001, t);
+    shriekGain.gain.exponentialRampToValueAtTime(0.3, t + 0.04);
+    shriekGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.95);
+    shriekLp.connect(shriekGain);
+    shriekGain.connect(this.master);
+    for (const detune of [0.99, 1.0, 1.013]) {
+      const osc = this.ctx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(1800 * detune, t);
+      osc.frequency.exponentialRampToValueAtTime(180 * detune, t + 0.7);
+      osc.connect(shriekLp);
+      osc.start(t);
+      osc.stop(t + 1.0);
+    }
+
+    // ── Sub boom: chest-punch sine sweeping down — the weight under the flock.
+    const sub = this.ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(160, t);
+    sub.frequency.exponentialRampToValueAtTime(34, t + 1.1);
+    const subGain = this.ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.6, t + 0.02);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + 1.7);
+
+    // ── Bright streak: broadband noise through a bandpass sweeping high→mid,
+    // the air-tearing hiss of many bodies entering at once. Short and sharp.
+    const streakBuf = this.makeNoiseBuffer(2.5);
+    if (streakBuf) {
+      const streak = this.ctx.createBufferSource();
+      streak.buffer = streakBuf;
+      const streakBp = this.ctx.createBiquadFilter();
+      streakBp.type = "bandpass";
+      streakBp.Q.value = 1.2;
+      streakBp.frequency.setValueAtTime(6000, t);
+      streakBp.frequency.exponentialRampToValueAtTime(700, t + 1.3);
+      const streakGain = this.ctx.createGain();
+      streakGain.gain.setValueAtTime(0.0001, t);
+      streakGain.gain.exponentialRampToValueAtTime(0.4, t + 0.05);
+      streakGain.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
+      streak.connect(streakBp);
+      streakBp.connect(streakGain);
+      streakGain.connect(this.master);
+      streak.start(t);
+      streak.stop(t + 2.5);
+    }
+  }
+
   stopAllCometShimmers() {
     for (const key of Array.from(this.cometShimmers.keys())) this.stopCometShimmer(key);
   }
@@ -3347,6 +3422,7 @@ export class Sound {
       case "cometNote": this.playCometNote(Math.round(effectivePitch)); break;
       case "cometDestroyed": this.playCometDestroyed(); break;
       case "cometDestroyedSad": this.playCometDestroyedSad(); break;
+      case "meteorShower": this.playMeteorShower(); break;
       case "canisterAppear": this.playCanisterAppear(); break;
       case "canisterDestroyed": this.playCanisterDestroyed(); break;
       case "comboLost": this.playComboLost(); break;
@@ -3355,6 +3431,7 @@ export class Sound {
       case "wraithLunge": this.playWraithLunge(); break;
       case "wraithDeath": this.playWraithDeath(); break;
       case "bossPulse": this.playBossPulse(); break;
+      case "bossHit": this.playBossHit(); break;
       case "bossEyeOpenStinger": this.playBossEyeOpenStinger(); break;
     }
 
@@ -6131,6 +6208,73 @@ export class Sound {
       g.connect(this.master);
       n.start(t);
       n.stop(t + 0.16);
+    }
+  }
+
+  // Boss impact — a heavy, satisfying hit when a big on-beat/charged shot
+  // slams into the armored planetoid. Three layers sell the weight: a deep
+  // sub thud for the body of the impact, a metallic inharmonic clang (two
+  // detuned partials a tritone-ish apart ringing out) for the armor plating,
+  // and a short bright noise crack for the point of contact. Tuned to land as
+  // a meaty "CHONK" distinct from the boss's own bossPulse voice.
+  private playBossHit() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+
+    // Sub thud — fast attack, quick pitch-drop, the mass of the impact.
+    const sub = this.ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(150, t);
+    sub.frequency.exponentialRampToValueAtTime(46, t + 0.16);
+    const subGain = this.ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, t);
+    subGain.gain.exponentialRampToValueAtTime(0.95, t + 0.006);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+    sub.connect(subGain);
+    subGain.connect(this.master);
+    sub.start(t);
+    sub.stop(t + 0.36);
+
+    // Metallic clang — two inharmonic partials ringing through a bandpass so
+    // the armor plate reads as struck metal, not a tuned note. Longer decay
+    // than the sub so the hit has a tail.
+    for (const partial of [196, 271]) {
+      const o = this.ctx.createOscillator();
+      o.type = "triangle";
+      o.frequency.setValueAtTime(partial * 2.3, t);
+      o.frequency.exponentialRampToValueAtTime(partial, t + 0.06);
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = partial * 1.6;
+      bp.Q.value = 4;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.3, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+      o.connect(bp);
+      bp.connect(g);
+      g.connect(this.master);
+      o.start(t);
+      o.stop(t + 0.42);
+    }
+
+    // Contact crack — a short bright noise transient for the point of impact.
+    const noiseBuf = this.makeNoiseBuffer(0.12);
+    if (noiseBuf) {
+      const n = this.ctx.createBufferSource();
+      n.buffer = noiseBuf;
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 1400;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.35, t + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+      n.connect(hp);
+      hp.connect(g);
+      g.connect(this.master);
+      n.start(t);
+      n.stop(t + 0.1);
     }
   }
 

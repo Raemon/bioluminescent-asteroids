@@ -88,6 +88,19 @@ export const ENTITY_CONFIG = {
     fadeOut: 2.0,
   },
 
+  // Rare flock of smaller, faster comets. Worth less each but many at once.
+  meteorShower: {
+    firstWave: 5,
+    chancePerWave: 0.12,
+    spawnWindow: [4, 16] as [number, number],
+    count: [3, 9] as [number, number],
+    scale: 0.45,
+    speedMult: 2,
+    // shorter than a comet — fast movers clear the field quickly.
+    lifetime: [10, 14] as [number, number],
+    baseScore: 500,
+  },
+
   shockwave: {
     firstWave: 4,
     chancePerWave: 1 / 15,
@@ -126,7 +139,7 @@ export const ENTITY_CONFIG = {
     firstWave: 2,
     perSpawnChance: 0.12,
     // large variant renders slightly oversized to feel more dangerous.
-    largeRadius: 35,
+    largeRadius: 30,
     // Large solid crystals are heavy — they drift in noticeably slower than
     // their size band would suggest, so the player has time to read the tough
     // target and line up. Fed to the rhythm aligner as a scaled speed band
@@ -208,10 +221,17 @@ export const ENTITY_CONFIG = {
     // both the iris laser and the post-break hemisphere plasma are snapped
     // to the boss's 8-beat rhythm (see Asteroid.tickBossRhythm).
     eyeBulletSpeed: 200,
-    // 8-second grow-and-reveal before the boss becomes live and damageable.
-    revealDuration: 8.0,
+    // Total dormant intro before the boss becomes live and damageable. For
+    // most of it the planetoid is a black, subdued, background-like silhouette
+    // slowly swelling to full size; only the trailing revealActiveDuration
+    // seconds carry the shudder / dust-off / eye-open.
+    revealDuration: 60.0,
+    // The trailing slice of revealDuration in which the boss shudders, dusts
+    // off its crust, and the eye opens. The rest is the quiet black approach.
+    revealActiveDuration: 8.0,
     // menace-rim red — matches the foreshadowing planet's tint.
     hue: 12,
+    damageReduction: 3,
   },
 
   bgBeatIntensity: {

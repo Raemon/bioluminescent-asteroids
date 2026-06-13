@@ -68,6 +68,7 @@ const tickBassAsteroids = (game: Game) => {
 const COMET_STEP = BEAT_GRID * 2;
 const tickCometMelodies = (game: Game) => {
   for (const c of game.comets) {
+    if (c.isMeteor) continue;
     while (game.beatTime >= c.nextNoteBeatTime) {
       game.sound.play("cometNote", c.noteIndex, c.pos);
       c.noteIndex += 1;

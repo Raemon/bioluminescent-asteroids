@@ -205,6 +205,10 @@ const transitionToGameOver = (game: Game) => {
 import { BOSS_MUSIC_VARIATION, HALO_MUSIC_POOL, PLAY_COMBO_MUSIC, pickHaloMusicVariation, pickHaloMusicVariationExcluding } from "./haloMusicConfig";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
 
+// Only true comets carry the phrygian shimmer the comet-mode pad voices around;
+// meteors are silent flock members, so they must not flip the halo pad.
+const hasMusicalComet = (game: Game): boolean => game.comets.some((c) => !c.isMeteor);
+
 // yellow-halo (combo ≥ 4) opens the ambient pad; combo ≥ 6 adds the
 //   melodic layer; combo ≥ 12 adds layer 3 (a single new musical element per
 //   variation — lonely violin / felt glockenspiel / synth-bass arp / chime
@@ -234,7 +238,7 @@ const syncHaloAmbient = (game: Game) => {
   if (!PLAY_COMBO_MUSIC) {
     if (game.sound.haloMusic) game.sound.stopHaloMusic();
     if (game.sound.haloAmbient) game.sound.stopHaloAmbient();
-    game.sound.setHaloAmbientCometMode(game.comets.length > 0);
+    game.sound.setHaloAmbientCometMode(hasMusicalComet(game));
     return;
   }
 
@@ -646,7 +650,7 @@ const updatePositionalAudio = (game: Game) => {
     }
   }
   for (const al of game.aliens) game.sound.updateAlienDrone(al, al.pos);
-  for (const c of game.comets) game.sound.updateCometShimmer(c, c.pos);
+  for (const c of game.comets) if (!c.isMeteor) game.sound.updateCometShimmer(c, c.pos);
 };
 
 // pruning is a separate pass so we don't mutate game.comets mid-iteration of the update loop.

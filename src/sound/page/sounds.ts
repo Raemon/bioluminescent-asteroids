@@ -270,6 +270,7 @@ export const OBJECTS: GameObject[] = [
       { verb: "plays melody note", sound: "cometNote", trigger: beat(2) },
       { verb: "killed on-beat (triumph)", sound: "cometDestroyed", trigger: beat(8) },
       { verb: "killed off-beat (sad)", sound: "cometDestroyedSad", trigger: beat(8) },
+      { verb: "meteor shower arrives (flock)", sound: "meteorShower", trigger: beat(8) },
     ],
   },
 
@@ -375,7 +376,7 @@ const MENTIONED_SOUNDS = [
   // aliens
   "alienFireBig", "alienFireMedium", "alienFireSmall", "alienHit", "alienExplode",
   // comets
-  "cometNote", "cometDestroyed", "cometDestroyedSad",
+  "cometNote", "cometDestroyed", "cometDestroyedSad", "meteorShower",
   // canisters / pickups
   "canisterAppear", "canisterDestroyed", "powerup",
   // world bed
@@ -392,7 +393,7 @@ type MentionedSound = (typeof MENTIONED_SOUNDS)[number];
 
 // Add a sound here only if it's intentionally omitted from the page (e.g.
 // system-only sound that shouldn't appear as a checkbox).
-type IntentionallyOmitted = "bossPulse" | "bossEyeOpenStinger";
+type IntentionallyOmitted = "bossPulse" | "bossHit" | "bossEyeOpenStinger";
 
 // Compile-time check: every SoundName must be in MENTIONED_SOUNDS or
 // IntentionallyOmitted. If you add a new SoundName and forget to wire it

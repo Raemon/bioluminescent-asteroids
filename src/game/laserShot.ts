@@ -181,6 +181,10 @@ const applyBeamToAsteroids = (game: Game, origin: Vec, dir: Vec, length: number,
     if (distance > a.radius) { surviving.push(a); continue; }
     const hitPos = v(origin.x + dir.x * t, origin.y + dir.y * t);
     const fakeBullet = makeFakeBullet(hitPos, dir);
+    // The laser is a charged shot — give the boss family the meaty armored
+    // impact every time it connects (the fake bullet is deliberately flagless,
+    // so the bossHit gate in killEffects won't catch it).
+    if (a.isBossFamily()) game.sound.play("bossHit", 1, a.pos);
     const { killed } = a.applyDamage(damage);
     game.shake = Math.min(game.shake + (killed ? 0.3 : 0.15), 1.2);
     if (!killed) {

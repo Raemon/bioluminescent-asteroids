@@ -1,6 +1,6 @@
 import type { Game } from "../Game";
 import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
-import { spawnComet as spawnCometAtEdge } from "../Comet";
+import { spawnComet as spawnCometAtEdge, spawnMeteorShower } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
 import { rand, v, TAU } from "../vec";
@@ -258,6 +258,19 @@ export const spawnComet = (game: Game) => {
   game.sound.startCometShimmer(c, c.pos);
 };
 
+// The rare meteor shower: a flock of small fast meteors. They share the comet
+// array (and its rendering/collision/scoring) but skip the per-comet melody and
+// shimmer — instead one dramatic entrance sweep announces the whole flock,
+// played at the lead meteor's position.
+export const spawnMeteorShowerEvent = (game: Game) => {
+  const meteors = spawnMeteorShower(game.w, game.h);
+  for (const m of meteors) {
+    applyRhythmSpeed(game, m.vel);
+    game.comets.push(m);
+  }
+  if (meteors.length > 0) game.sound.play("meteorShower", 1, meteors[0].pos);
+};
+
 // one entry replaces the previous if/else maze covering boss/foreshadow/normal wave dispatch.
 //   One `claimed` set is shared across the wave's asteroid + standalone
 //   solidCrystalSmall rolls so each fresh rock takes a distinct beat slot —
@@ -377,6 +390,14 @@ const rollHeadlineEvents = (game: Game) => {
       baseChance: CFG.comet.chancePerWave,
       fire: () => {
         maybeSchedule(game.waveEvents, 1, CFG.comet.spawnWindow, () => spawnComet(game));
+        return true;
+      },
+    },
+    {
+      gate: game.wave >= CFG.meteorShower.firstWave,
+      baseChance: CFG.meteorShower.chancePerWave,
+      fire: () => {
+        maybeSchedule(game.waveEvents, 1, CFG.meteorShower.spawnWindow, () => spawnMeteorShowerEvent(game));
         return true;
       },
     },
