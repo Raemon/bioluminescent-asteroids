@@ -1,5 +1,36 @@
 [
   {
+    "id": "2026-06-14-fab8a35",
+    "date": "2026-06-14",
+    "title": "Boss laser, beat fragments, and damage hint",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Boss laser aim now rotates like a turret — circling the boss lets you outrun the sweep instead of being snapped onto.",
+          "Destroyed boss hull plates and iris shards pulse on the beat with glowing blooms, keeping the rhythm alive as the planet breaks apart.",
+          "Beat-active boss debris produces heavier, wider lightning arcs than ordinary Bassteroid splinters.",
+          "A red 'INSUFFICIENT DAMAGE / GAIN MORE RHYTHM' tip now appears the first time a shot glances off an armoured rock.",
+          "Boss debris carries a Resonance bounty — cashing the field while fragments pulse pays out more than standard small pieces."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Entering the boss wave while a halo was already active now correctly transitions to the boss music instead of staying on the random track.",
+          "Bassteroids now always break into the same recognisable pieces — fragments are authored per shape, never random, so splits are consistent and stutter-free.",
+          "Boss laser beam fires along the telegraphed aim line rather than snapping to the ship's position at the last moment."
+        ]
+      }
+    ],
+    "commits": [
+      "fab8a35",
+      "85f9f59",
+      "c207c43",
+      "61c8a87"
+    ]
+  },
+  {
     "id": "2026-06-13-8af7010",
     "date": "2026-06-13",
     "title": "Boss rework, meteor showers, and cathedral asteroids",
