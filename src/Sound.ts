@@ -721,6 +721,11 @@ export class Sound {
   // no spatial position.
   private spatialPosForCall: Pos | null = null;
 
+  // Absolute audio-clock time a baked one-shot should start at, set by the
+  // lookahead pulse scheduler so the beat lands sample-accurately regardless
+  // of which rAF frame the decision was made on. Null = start immediately.
+  private scheduledWhenForCall: number | null = null;
+
   // Map a (channel, leg) pair to its underlying gain node. Used by
   // setChannelVolume so callers don't need to know about the live/baked
   // split.
@@ -846,7 +851,21 @@ export class Sound {
       } else {
         src.connect(sink);
       }
-      src.start();
+      const when = this.scheduledWhenForCall;
+      if (when !== null) {
+        // Already-past start times can't sound on time — clamp to "now" so the
+        // beat still plays, and surface the deficit in DEV so a frame-cost
+        // regression that eats the lookahead budget shows up loudly in the
+        // console instead of as subtle audible pulse lag.
+        const now = this.ctx.currentTime;
+        if (import.meta.env.DEV && when < now - 0.001) {
+          // eslint-disable-next-line no-console
+          console.warn(`[pulse-late] ${name} scheduled ${((now - when) * 1000).toFixed(1)}ms in the past`);
+        }
+        src.start(Math.max(when, now));
+      } else {
+        src.start();
+      }
       return true;
     }
     // Kick off async bake; subsequent calls will hit the cache.
@@ -1060,6 +1079,18 @@ export class Sound {
     const elapsed = this.ctx.currentTime - this.haloMusic.startedAtAudioTime;
     if (elapsed < 0) return null;
     return this.haloMusic.startedAtBeatTime + elapsed;
+  }
+
+  // Convert a beat-time delta (seconds of beatTime ahead of "now") into an
+  // absolute audio-clock start time. beatTime advances in music-seconds, which
+  // run at `playbackRate` of wall-clock under slow-mo, so a beatDelta maps to
+  // beatDelta / playbackRate audio-seconds. Returns null when the audio clock
+  // isn't running yet (pre-unlock / suspended) — caller falls back to immediate.
+  audioTimeForBeatDelta(beatDelta: number, playbackRate: number): number | null {
+    const now = this.runningAudioTime();
+    if (now === null) return null;
+    const rate = playbackRate > 0 ? playbackRate : 1;
+    return now + beatDelta / rate;
   }
 
   // Slow-mo: gameplay clock advances at SLOW_MO_FACTOR, so we match the
@@ -3314,6 +3345,26 @@ export class Sound {
     // simply checking key > 500.
     const bgBeatPitchKey = pitchRatio * 100 + intensityBucket + 1000;
     this.playBaked("bgBeat", bgBeatPitchKey);
+  }
+
+  // Lookahead-scheduled pulse entry points. The bass clock computes the
+  // absolute audio-clock time of each upcoming eighth-note slot and calls
+  // these for slots inside the lookahead window; src.start(when) then lands
+  // the buffer sample-accurately even if the deciding frame ran long. `when`
+  // is an AudioContext.currentTime value (seconds). These mirror the
+  // immediate playBgBeat / playBgBeatLight paths but stash the start time.
+  playBgBeatAt(pitchRatio: number, when: number) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    this.scheduledWhenForCall = when;
+    this.playBgBeat(pitchRatio);
+    this.scheduledWhenForCall = null;
+  }
+
+  playBgBeatLightAt(pitchRatio: number, when: number) {
+    this.scheduledWhenForCall = when;
+    this.playBgBeatLight(pitchRatio);
+    this.scheduledWhenForCall = null;
   }
 
   // Cached per requested duration. The samples are pure random noise — there's

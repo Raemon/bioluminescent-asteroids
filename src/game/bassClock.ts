@@ -14,31 +14,54 @@ export const BASS_KIND_SOUND: Record<"bassA" | "bassB" | "bassC" | "bassD", "bas
 // smalls land on A1/E2/D2/A2 → I/vi/V/ii flavour, pairs naturally with the C-F-G groundwork.
 export const BASS_SPLIT_PITCH_RATIO = [1, 1, 0.8409] as const;
 
+// How far ahead of the audio clock we schedule pulse hits. A frame stall up to
+// this long is absorbed silently: the beat was already handed to the audio
+// hardware with an absolute start time, so it sounds on the sample regardless
+// of when the next rAF frame lands. Too short and stalls leak through as lag;
+// too long and the pulse feels detached from on-screen gameplay.
+const PULSE_LOOKAHEAD = 0.12;
+
 // walks an eighth-note grid; sparkle tier adds lighter "and" hits between quarters
 // so sound + rhythm gate both double at high combo. Shares beatTime so slow-mo
 // drags the pulse along with the bass voices.
-const tickBgBeats = (game: Game) => {
+//
+// Lookahead-scheduled: rather than firing on the frame beatTime crosses a slot
+// boundary (which pins the hit to a frame edge and slips whenever a frame runs
+// long), we compute the absolute audio-clock time of each upcoming slot and
+// hand it to the audio hardware ahead of time. playbackRate scales beatTime →
+// audio-time so the pulse still slows correctly under slow-mo.
+const tickBgBeats = (game: Game, playbackRate = 1) => {
   const EIGHTH_GRID = BEAT_GRID / 2;
-  const eighthIdx = Math.floor(game.beatTime / EIGHTH_GRID);
-  // lastBgBeatIndex tracks eighth-note slots now. Reset is handled by the same
-  // backward-jump guard the old loop used.
-  if (eighthIdx < game.lastBgBeatIndex) game.lastBgBeatIndex = eighthIdx - 1;
-  while (game.lastBgBeatIndex < eighthIdx) {
+  // Schedule every slot whose start lands at or before (now + lookahead). The
+  // window is expressed in beatTime so it shrinks under slow-mo in lockstep
+  // with the slot grid. Backward jumps (post hard-snap) reset the index.
+  const horizonBeatTime = game.beatTime + PULSE_LOOKAHEAD * playbackRate;
+  const horizonIdx = Math.floor(horizonBeatTime / EIGHTH_GRID);
+  if (horizonIdx < game.lastBgBeatIndex) game.lastBgBeatIndex = horizonIdx - 1;
+  while (game.lastBgBeatIndex < horizonIdx) {
     game.lastBgBeatIndex += 1;
-    const isQuarter = (game.lastBgBeatIndex & 1) === 0;
+    const slotIdx = game.lastBgBeatIndex;
+    const slotBeatTime = slotIdx * EIGHTH_GRID;
+    const beatDelta = slotBeatTime - game.beatTime;
+    // Absolute audio-clock start; null before the context is running, in which
+    // case we fall back to playing immediately (warmup, pre-unlock).
+    const when = game.sound.audioTimeForBeatDelta(beatDelta, playbackRate);
+    const isQuarter = (slotIdx & 1) === 0;
     if (isQuarter) {
-      const quarterIdx = game.lastBgBeatIndex >> 1;
+      const quarterIdx = slotIdx >> 1;
       const isOffbeat = (quarterIdx & 1) === 1;
       // 1.122 = whole-step lift (E1→F#1) — distinct from the downbeat, mood intact.
       const pitchRatio = isOffbeat ? 1.122 : 1;
-      game.sound.play("bgBeat", pitchRatio);
+      if (when !== null) game.sound.playBgBeatAt(pitchRatio, when);
+      else game.sound.play("bgBeat", pitchRatio);
     } else if (game.beatCombo >= 32) {
       // Doubletime "and": land on the eighth between quarter beats. The next
       // quarter slot's parity determines pitch — alternating C#/D# so the
       // syncopation oscillates rather than stutters on a single pitch.
-      const nextQuarterIdx = (game.lastBgBeatIndex + 1) >> 1;
+      const nextQuarterIdx = (slotIdx + 1) >> 1;
       const nextIsOffbeat = (nextQuarterIdx & 1) === 1;
-      game.sound.playBgBeatLight(nextIsOffbeat ? 1.122 : 1);
+      if (when !== null) game.sound.playBgBeatLightAt(nextIsOffbeat ? 1.122 : 1, when);
+      else game.sound.playBgBeatLight(nextIsOffbeat ? 1.122 : 1);
     }
   }
 };
@@ -86,9 +109,10 @@ const tickCometMelodies = (game: Game) => {
 };
 
 // one entry advances beatTime + every audio voice so they all slow together under slow-mo.
-export const tickBassBeats = (game: Game, musicDt: number) => {
+// playbackRate (musicDt/wallDt) lets the pulse scheduler convert beatTime → audio-clock time.
+export const tickBassBeats = (game: Game, musicDt: number, playbackRate = 1) => {
   game.beatTime += musicDt;
-  tickBgBeats(game);
+  tickBgBeats(game, playbackRate);
   tickBassAsteroids(game);
   tickCometMelodies(game);
 };

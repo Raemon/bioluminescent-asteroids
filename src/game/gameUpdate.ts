@@ -445,7 +445,10 @@ const updatePlaying = (game: Game, dt: number) => {
   }
   tickBeatResnap(game);
   const musicDt = applyBeatPhaseCorrection(game, rawMusicDt);
-  tickBassBeats(game, musicDt);
+  // playbackRate maps beatTime → audio-clock seconds for the lookahead pulse
+  // scheduler; under slow-mo musicDt < dt so beats are scheduled further out.
+  const beatPlaybackRate = dt > 0 ? rawMusicDt / dt : 1;
+  tickBassBeats(game, musicDt, beatPlaybackRate);
   // pulsar runs against perceivedBeatTime so its flash lands with the *heard* bass voices.
   game.pulsar.update(dt, game.perceivedBeatTime, BEAT_GRID);
   game.ship.tickComboHalo(musicDt, currentBeatPulse(game));
