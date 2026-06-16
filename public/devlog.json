@@ -1,5 +1,23 @@
 [
   {
+    "id": "2026-06-16-4aa5ead",
+    "date": "2026-06-16",
+    "title": "Improved beat timing feel and title update",
+    "sections": [
+      {
+        "heading": "Changed",
+        "items": [
+          "The game title is now \"Pulsar\" instead of \"Pulsar Drift\".",
+          "The background beat now plays a short transient tick at the moment of each pulse, making the beat feel crisper and more precisely timed.",
+          "Background beat audio files have been updated with improved sound data."
+        ]
+      }
+    ],
+    "commits": [
+      "4aa5ead"
+    ]
+  },
+  {
     "id": "2026-06-16-19e3e19",
     "date": "2026-06-16",
     "title": "Improved audio beat timing accuracy",
