@@ -95,7 +95,7 @@ export const Overlay = () => {
         music →
       </a>
       <div id="overlay-title-group">
-        <h1 id="overlay-title">Pulsar Drift</h1>
+        <h1 id="overlay-title">Pulsar</h1>
         <p id="overlay-subtitle">A Meditative Rhythm Journey</p>
       </div>
       <div id="overlay-start-group">

@@ -145,7 +145,7 @@ export const showTitle = (game: Game) => {
   setReplayBindings(null);
   game.betaMode = false;
   game.state = "title";
-  game.overlayTitleEl.textContent = "Pulsar Drift";
+  game.overlayTitleEl.textContent = "Pulsar";
   game.overlayStartEl.textContent = "Start";
   game.overlayStartEl.classList.remove("hidden");
   game.overlayEl.classList.remove("hidden");

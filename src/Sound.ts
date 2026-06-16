@@ -959,6 +959,26 @@ export class Sound {
           ? (actualPitch === 1 ? "A#0" : "C1")
           : (actualPitch === 1 ? "A0" : "B0");
         kick.triggerAttackRelease(note, "8n", 0, velocity);
+        // The deep kick's energy lands well after sample 0 (all of it in
+        // sub-bass, where the ear localizes onsets poorly), so the pulse reads
+        // as slightly late vs the beat it's scheduled on. A short bandpassed
+        // noise transient at t=0 gives the ear a crisp onset to lock to while
+        // the kick keeps the weight — same trick fireBeat uses with its pluck.
+        // Scaled by levelMul so soft beats get a soft tick, not a fixed click.
+        // Set bgBeat.tickPeak to 0 in /sounds/config.json to A/B the tickless pulse.
+        const tickPeak = cfgN("bgBeat", "tickPeak", 0.12);
+        if (tickPeak > 0 && !isLight) {
+          const tickHz = cfgN("bgBeat", "tickHz", 1800);
+          const tickQ = cfgN("bgBeat", "tickQ", 1.4);
+          const tick = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.0005, decay: 0.006, sustain: 0, release: 0.01 } });
+          const tickFilter = new Tone.Filter({ type: "bandpass", frequency: tickHz, Q: tickQ });
+          const tickGain = new Tone.Gain(tickPeak * levelMul);
+          tick.connect(tickFilter);
+          tickFilter.connect(tickGain);
+          tickGain.connect(toneMaster);
+          tickGain.connect(reverbSend);
+          tick.triggerAttackRelease(0.006, 0);
+        }
         break;
       }
       case "bassKick": {
