@@ -1,5 +1,22 @@
 [
   {
+    "id": "2026-06-16-19e3e19",
+    "date": "2026-06-16",
+    "title": "Improved audio beat timing accuracy",
+    "sections": [
+      {
+        "heading": "Fixed",
+        "items": [
+          "Background beat pulses now schedule to the audio hardware in advance, preventing audible drift when a frame runs long.",
+          "Beats stay correctly timed during slow-motion gameplay instead of slipping with frame boundaries."
+        ]
+      }
+    ],
+    "commits": [
+      "19e3e19"
+    ]
+  },
+  {
     "id": "2026-06-14-fab8a35",
     "date": "2026-06-14",
     "title": "Boss laser, beat fragments, and damage hint",
