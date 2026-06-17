@@ -1,5 +1,5 @@
 import type { Game } from "../Game";
-import { Asteroid } from "../Asteroid";
+import { Asteroid, isGoldGem } from "../Asteroid";
 import { Alien } from "../Alien";
 import { AlienBullet } from "../AlienBullet";
 import { Comet } from "../Comet";
@@ -60,7 +60,7 @@ const asteroidBucket = (a: Asteroid): KillBucket => {
   if (a.isBass()) return "bassteroid";
   if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble") return a.kind;
   if (a.kind === "goldCrystal") return "goldCrystal";
-  if (a.kind === "goldGem") return "goldGem";
+  if (isGoldGem(a.kind)) return "goldGem";
   if (a.kind === "goldDiamond") return "goldCrystal";
   if (a.kind === "solidCrystal" || a.kind === "solidCrystalSmall") return "solidCrystal";
   if (a.kind === "glassPrison") return "glassPrison";
@@ -81,7 +81,7 @@ export const hitSoundFor = (
   if (a.kind === "solidCrystal") return "crystalShatterLarge";
   if (a.kind === "solidCrystalSmall") return "crystalShatterSmall";
   // gold gem is a big cut-crystal body; its shards shatter small.
-  if (a.kind === "goldGem") return "crystalShatterLarge";
+  if (isGoldGem(a.kind)) return "crystalShatterLarge";
   if (a.kind === "goldDiamond") return "crystalShatterSmall";
   // A cathedral glass shard is still lit stained glass — it rings/shatters
   // like cut glass rather than going off with a stone-rubble thud.

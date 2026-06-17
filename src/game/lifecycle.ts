@@ -669,6 +669,31 @@ export const toggleMute = (game: Game) => {
 export const startReplay = async (game: Game, bytes: Uint8Array): Promise<void> => {
   const payload = await decodeReplay(bytes);
   const player = new ReplayPlayer(payload);
+  seedReplayWorld(game, player);
+  // Fresh replay always begins playing at 1x with the playhead at frame 0.
+  game.replaySpeed = 1;
+  game.replaySeekTarget = null;
+  game.replayStepAccumulator = 0;
+  game.state = "replaying";
+  emitGameState(game);
+};
+
+// Rewind in place: rebuild the world at frame 0 for the *current* player so a
+//   backward seek can fast-forward to its target. Reuses the decoded payload —
+//   no re-fetch/decode. Called from the seek path with audio already muted.
+export const restartReplayWorld = (game: Game): void => {
+  const player = game.replayPlayer;
+  if (!player) return;
+  player.rewindToStart();
+  seedReplayWorld(game, player);
+  game.state = "replaying";
+};
+
+// Shared world setup for a replay player at frame 0. startGame resets
+//   game.replayPlayer to null and re-points game.input at the live keyboard,
+//   so we re-install both afterwards.
+const seedReplayWorld = (game: Game, player: ReplayPlayer): void => {
+  const payload = player.payload;
   // install the recording-time bindings *before* startGame, since startGame's
   //   recorder construction reads getBindings() (skipped on the replay path) and
   //   the wave-spawn doesn't need bindings — but every isDown call from frame 1
@@ -688,6 +713,4 @@ export const startReplay = async (game: Game, bytes: Uint8Array): Promise<void> 
   });
   game.replayPlayer = player;
   game.input = player.input;
-  game.state = "replaying";
-  emitGameState(game);
 };

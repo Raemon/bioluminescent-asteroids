@@ -16,6 +16,25 @@ export class ReplayPlayer {
     this.payload = payload;
   }
 
+  // Frames already consumed (== the playhead position for the scrubber).
+  position(): number {
+    return this.cursor;
+  }
+
+  total(): number {
+    return this.payload.frames.length;
+  }
+
+  // Reset the playhead so a fresh world (rebuilt by seedReplayWorld) can replay
+  //   from frame 0. The ReplayInput's key state resets too — otherwise a key
+  //   left "down" at the old cursor would leak into the re-sim.
+  rewindToStart(): void {
+    this.cursor = 0;
+    this.divergenceReported = false;
+    this.input.keys.clear();
+    this.input.justPressed.clear();
+  }
+
   // Returns the next recorded dt (seconds), or null when finished. Mutates
   // the ReplayInput's key state in place so the rest of the sim doesn't need
   // to know a replay is happening.

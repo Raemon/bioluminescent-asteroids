@@ -2818,16 +2818,12 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 .intro-sequence__line--close {
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  font-size: clamp(17px, 1.95vw, 30px);
-  color: #eafaff;
-  text-shadow: 0 0 22px rgba(76, 182, 255, 0.6), 0 0 56px rgba(76, 182, 255, 0.35);
+  color: #ffffff;
   margin-top: 8px;
 }
 
 .intro-sequence__accent {
-  color: #ffffff;
+  color: inherit;
 }
 
 /* ------------------------------------------------------------------------
@@ -2946,4 +2942,133 @@ html:has(#sound-root), body:has(> #sound-root) {
   .tc-btn { width: 56px; height: 56px; }
   .tc-btn svg { width: 22px; height: 22px; }
   .tc-cluster { gap: 12px; }
+}
+
+/* Replay scrubber — video-style transport pinned to the bottom during replay. */
+#replay-scrubber {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  z-index: 16;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(720px, 88vw);
+  padding: 10px 16px;
+  background: rgba(8, 18, 36, 0.82);
+  border: 1px solid rgba(106, 215, 255, 0.4);
+  border-radius: 10px;
+  box-shadow: 0 0 18px rgba(76, 182, 255, 0.25);
+  color: #d8f3ff;
+  font-family: inherit;
+  backdrop-filter: blur(4px);
+}
+
+.replay-scrubber__play {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #6ad7ff;
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+
+.replay-scrubber__play:hover { opacity: 1; }
+
+.replay-scrubber__play svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+  filter: drop-shadow(0 0 4px rgba(106, 215, 255, 0.8));
+}
+
+.replay-scrubber__time {
+  flex: 0 0 auto;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  color: #9fd6f0;
+  min-width: 34px;
+  text-align: center;
+}
+
+.replay-scrubber__bar {
+  position: relative;
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(106, 215, 255, 0.18);
+  cursor: pointer;
+}
+
+.replay-scrubber__bar::before {
+  /* fatten the hit target without changing the visual track height */
+  content: "";
+  position: absolute;
+  inset: -9px 0;
+}
+
+.replay-scrubber__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(106, 215, 255, 0.7), #6ad7ff);
+  box-shadow: 0 0 8px rgba(106, 215, 255, 0.6);
+}
+
+.replay-scrubber__knob {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #d8f3ff;
+  box-shadow: 0 0 8px rgba(106, 215, 255, 0.9);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.replay-scrubber__speeds {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+
+.replay-scrubber__speed {
+  padding: 3px 7px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: #9fd6f0;
+  background: rgba(106, 215, 255, 0.08);
+  border: 1px solid rgba(106, 215, 255, 0.28);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.replay-scrubber__speed:hover { color: #d8f3ff; border-color: rgba(106, 215, 255, 0.5); }
+
+.replay-scrubber__speed.is-active {
+  color: #06121f;
+  background: #6ad7ff;
+  border-color: #6ad7ff;
+  box-shadow: 0 0 8px rgba(106, 215, 255, 0.6);
+}
+
+@media (max-width: 560px) {
+  #replay-scrubber { gap: 8px; padding: 8px 10px; }
+  .replay-scrubber__speeds { gap: 3px; }
+  .replay-scrubber__speed { padding: 3px 5px; }
 }

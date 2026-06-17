@@ -122,7 +122,7 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   // without advancing game.time).
   renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.time / 1000, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
-  renderLaserChargeDots(ctx, game.ship, game.beatTime);
+  renderLaserChargeDots(ctx, game, game.beatTime);
   renderPopups(ctx, game.popups);
 };
 

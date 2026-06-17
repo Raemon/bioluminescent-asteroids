@@ -206,14 +206,13 @@ export const ENTITY_CONFIG = {
     },
   },
 
-  // Gold gem — a big, heavy, chunky solid-gold diamond. Tougher than a solid
-  // crystal in HP terms (8 HP) and almost inert in motion (heavy → drifts in
-  // slowly). The killing hit doesn't drop a pickup itself; instead it bursts
-  // into 4 fast goldDiamond shards fired in a 90° cross, rotated off the
-  // killing-shot axis so none flies straight back at the shooter. Each shard,
-  // when killed, pays out the normal gem-drop (same as a goldCrystal rock).
-  // Shards despawn when they leave the screen rather than wrapping, so a missed
-  // burst clears itself.
+  // Gold gem — a heavy, chunky solid-gold diamond. Tough in HP terms and almost
+  // inert in motion (heavy → drifts in slowly). The killing hit doesn't drop a
+  // pickup itself; instead it bursts into fast goldDiamond shards fired in an
+  // evenly-spaced fan, rotated off the killing-shot axis so none flies straight
+  // back at the shooter. Each shard, when killed, pays out the normal gem-drop
+  // (same as a goldCrystal rock). Two tiers share this block: a medium (4
+  // shards) and a big (8 shards) variant.
   goldGem: {
     // Rare guest across the early/mid arc (internal waves 3-10 → display 2-9),
     // then a recurring threat from the post-boss arc onward.
@@ -223,26 +222,36 @@ export const ENTITY_CONFIG = {
     // From this internal wave (display 11) the gem shows up much more often.
     frequentWave: 12,
     frequentChance: 0.18,
-    radius: 56,
     hp: 8,
     score: 800,
     // Heavy: drifts in noticeably slower than its size band, like a solid
     // crystal large, so the player can read the tough target and line up.
     spawnSpeedMul: 0.45,
-    // Number of shards fired on death.
-    shardCount: 4,
+    // When a gem slot fires, the chance it's the big 8-shard tier; otherwise medium.
+    bigChance: 0.25,
     // Shard launch speed (px/s). Fast — they read as flung-apart blades, not
     // drifting rubble.
     shardSpeed: 360,
+    medium: {
+      radius: 48,
+      shardCount: 4,
+    },
+    big: {
+      radius: 64,
+      shardCount: 8,
+    },
   },
 
   // Gold diamond — the fast shard a goldGem bursts into. No standalone spawn.
   // Terminal (no further split). Hazardous on contact but on death pays the
-  // usual gem-drop, same as a goldCrystal rock. Despawns offscreen.
+  // usual gem-drop, same as a goldCrystal rock. Lives a fixed lifetime then
+  // fades out (rather than only clearing when it flies offscreen).
   goldDiamond: {
     radius: 15,
     hp: 1,
     score: 100,
+    // Seconds a flung shard survives before it fades and despawns.
+    lifetime: 12,
     // Same gem-drop odds as a goldCrystal rock, reused so the shard reads as
     // "another cracked gem" rather than a new economy.
     upgradeChance: 0.4,

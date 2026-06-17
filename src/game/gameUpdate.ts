@@ -28,7 +28,7 @@ import {
   handleGoldCrystalPickups,
   expireGoldCrystal,
 } from "./collisions";
-import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState, finalizeRecorder } from "./lifecycle";
+import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState, finalizeRecorder, restartReplayWorld } from "./lifecycle";
 import { syncHud, syncPowerupHud, syncComboHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
 import { snapshotShipKill } from "./killSnapshot";
@@ -45,17 +45,18 @@ import { fireBossSweepBeam, tickBossBeams } from "./bossBeam";
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
-  // Replay overrides dt with the recorded value and feeds inputs through
-  //   the shared ReplayInput. When the stream is exhausted we transition to
-  //   gameover so the leaderboard "your standing" UI kicks in for the watcher.
-  //   Driven by replayPlayer presence (not game.state) so death → dying → respawn
-  //   keeps pulling recorded frames; otherwise the sim would run on live dt with
-  //   stale ReplayInput across the death+respawn span and diverge from the run.
-  if (game.replayPlayer) {
-    const replayDt = game.replayPlayer.nextFrame();
-    if (replayDt === null) { finishReplay(game); return; }
-    dt = replayDt;
-  }
+  // Replay drives the sim from recorded frames rather than live dt. The
+  //   scrubber controls how many recorded frames advance per render tick:
+  //   paused → 0, 1x → 1, 2x/4x → several. Seeks (rewind/fast-forward to a
+  //   target frame) are handled separately by stepping the sim with audio
+  //   muted. See runReplay for the speed/seek dispatch.
+  if (game.replayPlayer) { runReplay(game); return; }
+  advanceFrame(game, dt);
+};
+
+// One simulation+input frame. dt is the recorded value during replay (so
+//   scale-with-dt physics reproduces) or the live frame dt during normal play.
+const advanceFrame = (game: Game, dt: number) => {
   // First-run warm-up: the run has started but the world is held — only the beat
   //   ticks while the player practices the rhythm. The same clock carries into
   //   live play when finishCalibrationIntro fires, so the pulse never restarts.
@@ -81,6 +82,68 @@ export const updateGame = (game: Game, dt: number) => {
   routeStateUpdate(game, dt);
   if (game.shake > 0) game.shake = Math.max(0, game.shake - dt * 3);
   game.input.endFrame();
+};
+
+// Pull the next recorded frame and advance the sim one step. Returns false
+//   when the stream is exhausted (the caller decides whether that ends the
+//   replay or just stops a seek at the last frame).
+const stepReplayFrame = (game: Game): boolean => {
+  const replayDt = game.replayPlayer!.nextFrame();
+  if (replayDt === null) return false;
+  advanceFrame(game, replayDt);
+  return true;
+};
+
+// Replay dispatch for one render tick. Handles seeking to a target frame
+//   (rewind = rebuild the world at frame 0, then fast-forward; both seek
+//   directions step with audio muted), then normal speed-scaled playback.
+const runReplay = (game: Game) => {
+  if (game.replaySeekTarget !== null) {
+    seekReplayToTarget(game);
+    return;
+  }
+  // Paused: hold the frame, but keep emitting position so a drag that ends on
+  //   the same frame still re-renders. Nothing to step.
+  if (game.replaySpeed <= 0) {
+    emitReplayProgress(game);
+    return;
+  }
+  // 2x/4x run multiple recorded frames per render tick; fractional speeds
+  //   (0.5x) carry the remainder so they don't lose frames over time.
+  game.replayStepAccumulator += game.replaySpeed;
+  let steps = Math.floor(game.replayStepAccumulator);
+  game.replayStepAccumulator -= steps;
+  while (steps-- > 0) {
+    if (!stepReplayFrame(game)) { finishReplay(game); return; }
+  }
+  emitReplayProgress(game);
+};
+
+// Jump the sim to game.replaySeekTarget. Backward seeks rebuild the world at
+//   frame 0 (no state snapshots exist — replay is a pure input re-sim), then
+//   both directions fast-step to the target with sound muted so the catch-up
+//   doesn't fire a burst of replayed audio.
+const seekReplayToTarget = (game: Game) => {
+  const target = Math.max(0, Math.min(game.replaySeekTarget!, game.replayPlayer!.total()));
+  game.replaySeekTarget = null;
+  const muted = game.sound.beginSeekMute();
+  if (target < game.replayPlayer!.position()) restartReplayWorld(game);
+  while (game.replayPlayer!.position() < target) {
+    if (!stepReplayFrame(game)) break;
+  }
+  game.sound.endSeekMute(muted);
+  emitReplayProgress(game);
+};
+
+const emitReplayProgress = (game: Game) => {
+  if (!game.replayPlayer) return;
+  window.dispatchEvent(new CustomEvent("replay:progress", {
+    detail: {
+      position: game.replayPlayer.position(),
+      total: game.replayPlayer.total(),
+      speed: game.replaySpeed,
+    },
+  }));
 };
 
 const finishReplay = (game: Game) => {
@@ -630,7 +693,7 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   for (const b of game.bullets) b.update(musicDt, game.w, game.h);
   tickBulletReticuleCrossings(game);
   compactInPlace(game.bullets, (b) => b.life > 0);
-  for (const l of game.lasers) l.update(musicDt);
+  for (const l of game.lasers) l.update(musicDt, game);
   compactInPlace(game.lasers, (l) => l.alive);
   if (game.laserFireFlash > 0) {
     game.laserFireFlash = Math.max(0, game.laserFireFlash - musicDt / FIRE_FLASH_DECAY);

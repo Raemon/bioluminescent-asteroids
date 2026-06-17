@@ -9,11 +9,13 @@ import { SettingsDialog } from "./SettingsDialog";
 import { PauseButton } from "./PauseButton";
 import { DevLogPopup } from "./DevLogPopup";
 import { TouchControls } from "./TouchControls";
+import { ReplayScrubber } from "./ReplayScrubber";
 
 export const App = () => (
   <>
     <Hud />
     <Overlay />
+    <ReplayScrubber />
     <FirstWaveHint />
     <TutorialControlsHint />
     <RhythmLossHint />

@@ -7,7 +7,7 @@ import { Vec, v, fromAngle, add, mul } from "../vec";
 import { Bullet } from "../Bullet";
 import { BEAT_GRID } from "./rhythmConstants";
 import { isDown } from "./controlBindings";
-import { isInBeatWindow } from "./rhythmGate";
+import { isInBeatWindow, loseCombo } from "./rhythmGate";
 import { buildJaggedBolt, strokePolyline } from "./bassLightning";
 import { drawGlow } from "../glow";
 import { rng } from "./rng";
@@ -20,18 +20,32 @@ import {
 } from "./killEffects";
 import { syncHud } from "./hud";
 
-// Max charge dots (one per beat held). Damage doubles per dot from a base of 2,
-// so dots 0..3 deal 2, 4, 8, 16 — a full charge melts large rocks and bites
-// deep into a boss core.
-export const LASER_MAX_DOTS = 3;
+// Absolute charge-dot ceiling (one per beat held). Damage doubles per dot from
+// a base of 2, so dots 0..4 deal 2, 4, 8, 16, 32 — a full charge melts large
+// rocks and bites deep into a boss core. The dots a player can actually REACH
+// is gated by rhythm via maxLaserDots().
+export const LASER_MAX_DOTS = 4;
+
+// The rhythm-gated cap on reachable charge dots. Higher combo unlocks deeper
+// charge tiers, so a long beam is something rhythm earns.
+export const maxLaserDots = (game: Game): number => {
+  if (game.beatCombo >= 24) return 4;
+  if (game.beatCombo >= 12) return 3;
+  if (game.beatCombo >= 4) return 2;
+  return 1;
+};
 // Visible beam stays painted for this many seconds after fire — long enough
 // to read as a flash, short enough that another shot a beat later doesn't
 // overlap the previous trail.
 const LASER_BEAM_LIFE = 0.22;
 // The laser deliberately overshoots the reticule slot: bulletSpeed *
 // effectiveBulletLife * LASER_BASE_RANGE_MULT, then the pierce/longshot/
-// superBoosted multipliers shipWeapons uses stack on top.
+// superBoosted multipliers shipWeapons uses stack on top. The base mult is
+// further scaled by a per-dot range factor so an uncharged shot is short.
 const LASER_BASE_RANGE_MULT = 2;
+// Range factor by dot count: a 0-dot shot reaches half the old length, a
+// full charge overshoots it.
+const LASER_RANGE_BY_DOTS = [0.5, 0.7, 0.85, 1.0, 1.2];
 const PIERCE_RANGE_MULT = 2;
 const LONGSHOT_RANGE_MULT = 1.5;
 const SUPERBOOSTED_RANGE_MULT = 1.5;
@@ -42,28 +56,37 @@ export const FIRE_FLASH_DECAY = 0.18;
 // Perpendicular jag amplitude (px) for the crackle arcs.
 const LASER_JAG_AMPLITUDE = 7;
 
-// A laser beam is a static segment from `origin` extending `length` along
-// `heading`. It lives for LASER_BEAM_LIFE seconds purely as a visual; the
-// damage pass that spawned it already resolved all hits in one frame.
+// Half-width (px) of the beam's hit swath by dot count — a charged beam sweeps
+// wider so it catches targets the centre line would miss. The renderer's
+// visible core/glow is sized to roughly match this.
+const beamHalfWidth = (dots: number): number => dots * 6;
+
+// A laser beam anchored to the firing ship: its origin (muzzle) and heading
+// track the ship each frame while it lives, so as the ship turns or drifts the
+// beam sweeps and damages anything it crosses. Each target is hit at most once
+// per beam, tracked in `alreadyHit`. Lives LASER_BEAM_LIFE seconds.
 export class LaserBeam {
+  ship: Ship;
   origin: Vec;
   heading: number;
   length: number;
   life: number;
   maxLife: number;
-  // Damage that *was* dealt by this beam.
   damage: number;
   // Charge dots 0..LASER_MAX_DOTS — drives the visual tier ramp (thickness,
-  // crackle, aura) so the four damage tiers read distinctly.
+  // crackle, aura) so the damage tiers read distinctly.
   dots: number;
   // Stable per-sample perpendicular jag for the crackle arc; wobble animates
   // on top. Empty until dots warrant an arc.
   jags: number[];
   seed: number;
+  // Targets already damaged so a sweeping beam doesn't re-hit them each frame.
+  alreadyHit: Set<Asteroid | Alien | Comet>;
 
-  constructor(origin: Vec, heading: number, length: number, damage: number, dots: number) {
-    this.origin = { ...origin };
-    this.heading = heading;
+  constructor(ship: Ship, length: number, damage: number, dots: number) {
+    this.ship = ship;
+    this.heading = ship.heading;
+    this.origin = muzzleOf(ship);
     this.length = length;
     this.life = LASER_BEAM_LIFE;
     this.maxLife = LASER_BEAM_LIFE;
@@ -71,13 +94,19 @@ export class LaserBeam {
     this.dots = dots;
     this.seed = rng() * Math.PI * 2;
     this.jags = [];
+    this.alreadyHit = new Set();
     if (dots >= 2) {
       const n = 14;
       for (let i = 0; i < n; i++) this.jags.push((rng() * 2 - 1) * LASER_JAG_AMPLITUDE);
     }
   }
 
-  update(dt: number) {
+  // Re-anchor to the ship, sweep-damage anything newly crossed, then age out.
+  update(dt: number, game: Game) {
+    this.heading = this.ship.heading;
+    this.origin = muzzleOf(this.ship);
+    const dir = fromAngle(this.heading, 1);
+    applyBeamDamage(game, this, dir);
     this.life -= dt;
   }
 
@@ -86,12 +115,19 @@ export class LaserBeam {
   }
 }
 
-// Number of dots currently charged (0..LASER_MAX_DOTS). One dot ticks in per
-// beat held. Public so the renderer can paint the dots in front of the ship.
-export const laserDotCount = (ship: Ship, beatTime: number): number => {
+// Beam origin: the ship's muzzle, a touch ahead of the hull.
+const muzzleOf = (ship: Ship): Vec => {
+  const dir = fromAngle(ship.heading, 1);
+  return add(ship.pos, mul(dir, ship.radius + 4));
+};
+
+// Number of dots currently charged (0..maxDots). One dot ticks in per beat
+// held; maxDots is the rhythm-gated cap (see maxLaserDots). Public so the
+// renderer can paint the dots in front of the ship.
+export const laserDotCount = (ship: Ship, beatTime: number, maxDots: number): number => {
   if (!ship.laserChargeActive) return 0;
   const elapsed = Math.max(0, beatTime - ship.laserChargeStartBeatTime);
-  return Math.min(LASER_MAX_DOTS, Math.floor(elapsed / BEAT_GRID));
+  return Math.min(maxDots, Math.floor(elapsed / BEAT_GRID));
 };
 
 export const resetLaserCharge = (ship: Ship) => {
@@ -111,8 +147,9 @@ const effectiveBulletLife = (ship: Ship, superBoosted: boolean): number => {
   return life;
 };
 
-const computeBeamLength = (ship: Ship, superBoosted: boolean): number => {
-  return ship.bulletSpeed * effectiveBulletLife(ship, superBoosted) * LASER_BASE_RANGE_MULT;
+const computeBeamLength = (ship: Ship, superBoosted: boolean, dots: number): number => {
+  const dotMult = LASER_RANGE_BY_DOTS[Math.min(dots, LASER_MAX_DOTS)];
+  return ship.bulletSpeed * effectiveBulletLife(ship, superBoosted) * LASER_BASE_RANGE_MULT * dotMult;
 };
 
 // Eases laserChargeGlow toward target with frame-rate-independent decay.
@@ -157,7 +194,7 @@ export const tickLaserShot = (game: Game, dt: number) => {
     }
     // Per-dot charge tick — discrete C-chord pluck accent on each new dot, plus
     // a step-up of the sustained crackle/chord bed so the build is felt.
-    const dots = laserDotCount(ship, game.beatTime);
+    const dots = laserDotCount(ship, game.beatTime, maxLaserDots(game));
     if (dots > ship.laserLastDotIndexFired && dots > 0) {
       ship.laserLastDotIndexFired = dots;
       game.sound.playLaserCharge(dots);
@@ -171,7 +208,7 @@ export const tickLaserShot = (game: Game, dt: number) => {
 
   // Fire-released: if we were charging, fire the beam.
   if (ship.laserChargeActive) {
-    const dots = laserDotCount(ship, game.beatTime);
+    const dots = laserDotCount(ship, game.beatTime, maxLaserDots(game));
     fireLaser(game, ship, dots);
   } else {
     game.laserChargeGlow = approachGlow(game.laserChargeGlow, 0, dt);
@@ -184,27 +221,34 @@ export const tickLaserShot = (game: Game, dt: number) => {
 const fireLaser = (game: Game, ship: Ship, dots: number) => {
   const damage = 2 << dots;
   const superBoosted = game.beatCombo >= 12;
-  const length = computeBeamLength(ship, superBoosted);
-  const dir = fromAngle(ship.heading, 1);
-  const origin = add(ship.pos, mul(dir, ship.radius + 4));
-  const beam = new LaserBeam(origin, ship.heading, length, damage, dots);
+  const length = computeBeamLength(ship, superBoosted, dots);
+  // A clean on-beat release earns rhythm; an off-beat release spends it. The
+  // beam's sweep damage is owned by its per-frame update, not this fire event.
+  if (isInBeatWindow(game, game.perceivedBeatTime)) {
+    game.beatCombo += 1;
+    if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
+    if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
+    syncHud(game);
+  } else {
+    loseCombo(game, ship.pos);
+  }
+  const beam = new LaserBeam(ship, length, damage, dots);
   game.lasers.push(beam);
   game.sound.playLaserShot(damage, dots);
   game.shake = Math.min(game.shake + 0.12 + dots * 0.12, 1.4);
   // Big white pop on release, scaled by charge; the buildup glow ends here.
   game.laserFireFlash = Math.min(1, 0.4 + dots * 0.2);
   game.laserChargeGlow = 0;
-  applyBeamDamage(game, origin, dir, length, damage);
 };
 
-// Walks every target whose centre falls within `length` of the beam segment.
-// Each target is hit at most once per beam. Asteroids/aliens use the same
-// kill-effect helpers a real bullet would, with a synthetic Bullet feeding
-// the impact position into the existing pipeline.
-const applyBeamDamage = (game: Game, origin: Vec, dir: Vec, length: number, damage: number) => {
-  applyBeamToAsteroids(game, origin, dir, length, damage);
-  applyBeamToAliens(game, origin, dir, length, damage);
-  applyBeamToComets(game, origin, dir, length, damage);
+// Sweep-damages every target the beam segment crosses this frame, skipping any
+// already hit by this beam. The swath widens with charge (beamHalfWidth).
+// Asteroids/aliens use the same kill-effect helpers a real bullet would, with a
+// synthetic Bullet feeding the impact position into the existing pipeline.
+const applyBeamDamage = (game: Game, beam: LaserBeam, dir: Vec) => {
+  applyBeamToAsteroids(game, beam, dir);
+  applyBeamToAliens(game, beam, dir);
+  applyBeamToComets(game, beam, dir);
   syncHud(game);
 };
 
@@ -223,11 +267,14 @@ const distanceToBeam = (
   return { distance: Math.hypot(pos.x - px, pos.y - py), t };
 };
 
-const applyBeamToAsteroids = (game: Game, origin: Vec, dir: Vec, length: number, damage: number) => {
+const applyBeamToAsteroids = (game: Game, beam: LaserBeam, dir: Vec) => {
+  const { origin, length, damage } = beam;
+  const halfW = beamHalfWidth(beam.dots);
   const surviving: Asteroid[] = [];
   for (const a of game.asteroids) {
     const { distance, t } = distanceToBeam(origin, dir, length, a.pos);
-    if (distance > a.radius) { surviving.push(a); continue; }
+    if (distance > a.radius + halfW || beam.alreadyHit.has(a)) { surviving.push(a); continue; }
+    beam.alreadyHit.add(a);
     const hitPos = v(origin.x + dir.x * t, origin.y + dir.y * t);
     const fakeBullet = makeFakeBullet(hitPos, dir);
     // The laser is a charged shot — give the boss family the meaty armored
@@ -248,11 +295,14 @@ const applyBeamToAsteroids = (game: Game, origin: Vec, dir: Vec, length: number,
   game.asteroids = surviving;
 };
 
-const applyBeamToAliens = (game: Game, origin: Vec, dir: Vec, length: number, damage: number) => {
+const applyBeamToAliens = (game: Game, beam: LaserBeam, dir: Vec) => {
+  const { origin, length, damage } = beam;
+  const halfW = beamHalfWidth(beam.dots);
   const surviving: Alien[] = [];
   for (const al of game.aliens) {
     const { distance, t } = distanceToBeam(origin, dir, length, al.pos);
-    if (distance > al.radius) { surviving.push(al); continue; }
+    if (distance > al.radius + halfW || beam.alreadyHit.has(al)) { surviving.push(al); continue; }
+    beam.alreadyHit.add(al);
     const hitPos = v(origin.x + dir.x * t, origin.y + dir.y * t);
     const fakeBullet = makeFakeBullet(hitPos, dir);
     // Aliens take 1 hp per applyDamage; loop so charge tiers chew through HP
@@ -273,16 +323,17 @@ const applyBeamToAliens = (game: Game, origin: Vec, dir: Vec, length: number, da
   game.aliens = surviving;
 };
 
-const applyBeamToComets = (game: Game, origin: Vec, dir: Vec, length: number, damage: number) => {
+const applyBeamToComets = (game: Game, beam: LaserBeam, dir: Vec) => {
+  const { origin, length } = beam;
+  const halfW = beamHalfWidth(beam.dots);
   const surviving: Comet[] = [];
   for (const c of game.comets) {
     const { distance, t } = distanceToBeam(origin, dir, length, c.pos);
-    if (distance > c.radius) { surviving.push(c); continue; }
+    if (distance > c.radius + halfW || beam.alreadyHit.has(c)) { surviving.push(c); continue; }
+    beam.alreadyHit.add(c);
     const hitPos = v(origin.x + dir.x * t, origin.y + dir.y * t);
     const fakeBullet = makeFakeBullet(hitPos, dir);
     onCometKilled(game, c, fakeBullet, false);
-    // Comet is single-hit — drop it regardless of `damage`.
-    void damage;
   }
   game.comets = surviving;
 };
@@ -319,11 +370,12 @@ const chargeArcJags = (index: number, beatTime: number): number[] => {
 // Higher-tier dots get extra orbiting sparks + an energy thread connecting
 // back to the ship so a full charge reads as visibly "loaded up".
 export const renderLaserChargeDots = (
-  ctx: CanvasRenderingContext2D, ship: Ship, beatTime: number,
+  ctx: CanvasRenderingContext2D, game: Game, beatTime: number,
 ) => {
+  const ship = game.ship;
   if (!ship.lasershotActive) return;
   if (!ship.laserChargeActive) return;
-  const dots = laserDotCount(ship, beatTime);
+  const dots = laserDotCount(ship, beatTime, maxLaserDots(game));
   if (dots <= 0) return;
   const dir = fromAngle(ship.heading, 1);
   const perp = { x: -dir.y, y: dir.x };
@@ -450,54 +502,43 @@ export const renderLasers = (ctx: CanvasRenderingContext2D, lasers: LaserBeam[])
     const sinH = Math.sin(beam.heading);
     const ex = beam.origin.x + cosH * beam.length;
     const ey = beam.origin.y + sinH * beam.length;
-    // Charge tier as a 0..1 ramp off the dot count — the four damage tiers
-    // (2/4/8/16) map to evenly-spaced thickness/effect steps rather than the
-    // raw damage, which would saturate and render 4/8/16 identically.
+    // Charge tier as a 0..1 ramp off the dot count — the damage tiers map to
+    // evenly-spaced thickness/effect steps rather than the raw damage, which
+    // would saturate and render the top tiers identically.
     const tier = beam.dots / LASER_MAX_DOTS;
-    // Width driver: 1 at zero dots, growing by tier — keeps the old 1→4 feel.
-    const w = 1 + beam.dots;
+    // Width driver scaled so the visible beam roughly fills its hit swath: the
+    // gameplay half-width sets the floor, charge thickens it further.
+    const w = 1 + beam.dots + beamHalfWidth(beam.dots) * 0.4;
+
+    // A stroke that tapers to nothing over the far end of the beam, so the tip
+    // dissolves instead of stopping flat.
+    const fadingStroke = (rgb: string, peak: number, width: number) => {
+      const grad = ctx.createLinearGradient(beam.origin.x, beam.origin.y, ex, ey);
+      grad.addColorStop(0, `rgba(${rgb}, ${peak.toFixed(3)})`);
+      grad.addColorStop(0.6, `rgba(${rgb}, ${(peak * 0.7).toFixed(3)})`);
+      grad.addColorStop(1, `rgba(${rgb}, 0)`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(beam.origin.x, beam.origin.y);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+    };
 
     // Outermost diffuse aura — very wide, very soft. Only meaningful at higher
     // tiers; gives a charged shot a "this beam is bending the air" presence.
     if (beam.dots >= 1) {
-      const auraW = 22 + w * 7;
-      ctx.strokeStyle = `rgba(140, 200, 255, ${(0.12 * alpha * tier).toFixed(3)})`;
-      ctx.lineWidth = auraW;
-      ctx.beginPath();
-      ctx.moveTo(beam.origin.x, beam.origin.y);
-      ctx.lineTo(ex, ey);
-      ctx.stroke();
+      fadingStroke("140, 200, 255", 0.12 * alpha * tier, 22 + w * 7);
     }
     // Outer glow — wide, soft, cyan-tinged. Wider at higher tiers.
-    const glowW = 12 + w * 4;
-    ctx.strokeStyle = `rgba(120, 220, 255, ${(0.28 * alpha).toFixed(3)})`;
-    ctx.lineWidth = glowW;
-    ctx.beginPath();
-    ctx.moveTo(beam.origin.x, beam.origin.y);
-    ctx.lineTo(ex, ey);
-    ctx.stroke();
+    fadingStroke("120, 220, 255", 0.28 * alpha, 12 + w * 4);
     // Mid layer — brighter, narrower.
-    ctx.strokeStyle = `rgba(180, 240, 255, ${(0.55 * alpha).toFixed(3)})`;
-    ctx.lineWidth = 5 + w * 1.8;
-    ctx.beginPath();
-    ctx.moveTo(beam.origin.x, beam.origin.y);
-    ctx.lineTo(ex, ey);
-    ctx.stroke();
+    fadingStroke("180, 240, 255", 0.55 * alpha, 5 + w * 1.8);
     // Core — near-white, hot.
-    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
-    ctx.lineWidth = 2.2 + w * 0.7;
-    ctx.beginPath();
-    ctx.moveTo(beam.origin.x, beam.origin.y);
-    ctx.lineTo(ex, ey);
-    ctx.stroke();
+    fadingStroke("255, 255, 255", alpha, 2.2 + w * 0.7);
     // Hot white-blue inner sliver — only on high-charge shots, sells the heat.
     if (beam.dots >= 2) {
-      ctx.strokeStyle = `rgba(255, 255, 255, ${(alpha * 0.85).toFixed(3)})`;
-      ctx.lineWidth = 1 + tier * 1.2;
-      ctx.beginPath();
-      ctx.moveTo(beam.origin.x, beam.origin.y);
-      ctx.lineTo(ex, ey);
-      ctx.stroke();
+      fadingStroke("255, 255, 255", alpha * 0.85, 1 + tier * 1.2);
     }
 
     // Crackle arcs — jagged offshoots branching off the core, in the same
@@ -551,11 +592,12 @@ export const renderLasers = (ctx: CanvasRenderingContext2D, lasers: LaserBeam[])
       }
     }
 
-    // Endpoint flash — far tip of the beam blooms outward, strongest on big shots.
+    // Endpoint glow — far tip dissolves rather than blooming, so the faded
+    // beam end doesn't pick up a hard bright cap.
     if (beam.dots >= 1) {
       const tipR = (6 + w * 4) * (0.6 + (1 - ageFrac) * 0.7);
       const tipGrad = ctx.createRadialGradient(ex, ey, 0, ex, ey, tipR);
-      tipGrad.addColorStop(0, `rgba(255, 255, 255, ${(0.6 * alpha * tier).toFixed(3)})`);
+      tipGrad.addColorStop(0, `rgba(200, 240, 255, ${(0.22 * alpha * tier).toFixed(3)})`);
       tipGrad.addColorStop(1, "rgba(140, 220, 255, 0)");
       ctx.fillStyle = tipGrad;
       ctx.beginPath();

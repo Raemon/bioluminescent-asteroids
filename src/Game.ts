@@ -238,6 +238,13 @@ export class Game implements HudElements {
   // Set during replay to force resize() to use recorded sim dims instead of
   //   the live window; canvas is CSS-scaled to fit. Cleared when replay ends.
   replayLockedDims: { w: number; h: number; dpr: number } | null = null;
+  // Scrubber state. replaySpeed: 0 = paused, else recorded-frames-per-render
+  //   (0.5/1/2/4). replaySeekTarget: a frame index to jump to next tick (set by
+  //   the timeline drag / arrow keys); consumed and cleared by the seek step.
+  //   replayStepAccumulator carries fractional-speed remainders between ticks.
+  replaySpeed = 1;
+  replaySeekTarget: number | null = null;
+  replayStepAccumulator = 0;
   // localInput is the real keyboard-bound Input; the replay path swaps `input`
   //   to point at the player's ReplayInput while a replay is running, and we
   //   restore localInput when returning to title.
@@ -433,6 +440,23 @@ export class Game implements HudElements {
     window.addEventListener("intro-sequence:unfreeze", () => unfreezeIntroWorld(this));
     window.addEventListener("intro-sequence:done", () => advanceIntroOverlay(this));
     window.addEventListener("game:togglePause", () => togglePause(this));
+    // Replay scrubber (React <ReplayScrubber>) → game. Speed 0 pauses playback;
+    //   seek sets a target frame consumed on the next replay tick.
+    window.addEventListener("replay:setSpeed", (e) => {
+      if (!this.replayPlayer) return;
+      this.replaySpeed = (e as CustomEvent).detail.speed as number;
+    });
+    window.addEventListener("replay:seek", (e) => {
+      if (!this.replayPlayer) return;
+      this.replaySeekTarget = (e as CustomEvent).detail.frame as number;
+    });
+    window.addEventListener("replay:togglePlay", () => {
+      if (!this.replayPlayer) return;
+      this.replaySpeed = this.replaySpeed > 0 ? 0 : 1;
+      window.dispatchEvent(new CustomEvent("replay:progress", {
+        detail: { position: this.replayPlayer.position(), total: this.replayPlayer.total(), speed: this.replaySpeed },
+      }));
+    });
     // <FirstWaveHint> owns its own stage-3 auto-dismiss timer; when it fades
     //   out it asks the game to clear the stage.
     window.addEventListener("first-wave-hint:dismiss", () => {
@@ -445,6 +469,20 @@ export class Game implements HudElements {
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();
       if (k === "m" && this.state !== "title") toggleMute(this);
+      // Replay scrubbing: arrows jump ~2s, space toggles play. Handled here
+      //   (not via game.input) because input is the recorded ReplayInput.
+      if (this.replayPlayer) {
+        const SEEK_FRAMES = 120;
+        if (k === "arrowleft" || k === "arrowright") {
+          e.preventDefault();
+          const dir = k === "arrowright" ? 1 : -1;
+          const from = this.replaySeekTarget ?? this.replayPlayer.position();
+          this.replaySeekTarget = from + dir * SEEK_FRAMES;
+        } else if (k === " " || k === "spacebar") {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent("replay:togglePlay"));
+        }
+      }
       if (k === "`") {
         this.debugMode = !this.debugMode;
         this.debugOverlayEl.classList.toggle("hidden", !this.debugMode);
