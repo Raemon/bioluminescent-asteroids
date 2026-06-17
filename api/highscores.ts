@@ -4,10 +4,15 @@ import { prisma } from "./_lib/prisma.js";
 const MAX_NAME_LEN = 16;
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 10;
-const TOP_PILOTS_LIMIT = 20;
-// Pull a generous window so 20 unique pilots are reachable even when a few
-//   pilots occupy many of the top slots.
-const TOP_PILOTS_SCAN = 300;
+// The initial title-screen view scans down the board until the deduped-by-pilot
+//   result spans this many distinct score values. Counting deduped survivors
+//   (each pilot contributes one row per category) keeps the board full even
+//   when one pilot stacks the very top with many distinct-scoring runs.
+const TOP_PILOTS_DISTINCT_SCORES = 20;
+// Rows pulled per scan batch while accumulating toward the distinct-score
+//   target. Capped passes bound the work if scores are extremely sparse.
+const TOP_PILOTS_BATCH = 100;
+const TOP_PILOTS_MAX_BATCHES = 5;
 const TOP_ROWS_CACHE_LIMIT = 100;
 
 type KillSummary = Record<string, number>;
@@ -87,16 +92,15 @@ const toRowOut = (r: {
 
 // Mirrors src/game/scoreEntry.ts dedupeByName: for each pilot, keep best-by-
 //   score, best-by-wave, best-by-rhythm; collapse to a single row when one run
-//   holds multiple PBs. Returns rows for the first `pilotLimit` unique pilots
-//   encountered in `rows` (which the caller has already sorted by score desc).
-const dedupeByPilot = (rows: RowOut[], pilotLimit: number): RowOut[] => {
+//   holds multiple PBs. Dedupes every pilot present in `rows` (the caller bounds
+//   the window before calling), which is already sorted by score desc.
+const dedupeByPilot = (rows: RowOut[]): RowOut[] => {
   const byPilot = new Map<string, RowOut[]>();
   const pilotOrder: string[] = [];
   for (const row of rows) {
     const key = row.name.toLowerCase();
     let list = byPilot.get(key);
     if (!list) {
-      if (pilotOrder.length >= pilotLimit) continue;
       list = [];
       byPilot.set(key, list);
       pilotOrder.push(key);
@@ -196,15 +200,30 @@ const fetchHasReplayIds = async (ids: number[]): Promise<Set<number>> => {
 const fetchTopPilots = async (): Promise<RowOut[]> => {
   const cached = readCache(topPilotsCache);
   if (cached) return cached;
-  const rows = await prisma.highscore.findMany({
-    orderBy: [{ score: "desc" }, { createdAt: "desc" }],
-    take: TOP_PILOTS_SCAN,
-    select: LEADERBOARD_COLUMNS,
-  });
-  const hasReplayIds = await fetchHasReplayIds(rows.map((r) => r.id));
-  const deduped = dedupeByPilot(withHasReplay(rows, hasReplayIds), TOP_PILOTS_LIMIT);
-  topPilotsCache = { value: deduped, expires: Date.now() + CACHE_TTL_MS };
-  return deduped;
+  // Scan down the board in batches and dedupe-by-pilot the accumulated window
+  //   each pass. We stop once the *deduped* rows span enough distinct scores —
+  //   counting survivors, not raw rows, so a single pilot stacking the top of
+  //   the board (every run a distinct score) doesn't satisfy the target alone.
+  const collected: RawRow[] = [];
+  let deduped: RowOut[] = [];
+  for (let batch = 0; batch < TOP_PILOTS_MAX_BATCHES; batch++) {
+    const rows = await prisma.highscore.findMany({
+      orderBy: [{ score: "desc" }, { createdAt: "desc" }],
+      take: TOP_PILOTS_BATCH,
+      skip: batch * TOP_PILOTS_BATCH,
+      select: LEADERBOARD_COLUMNS,
+    });
+    collected.push(...rows);
+    // has_replay doesn't affect dedupe; fill it for real only on the final set.
+    deduped = dedupeByPilot(withHasReplay(collected, new Set()));
+    const distinctScores = new Set(deduped.map((r) => r.score));
+    if (rows.length < TOP_PILOTS_BATCH) break;
+    if (distinctScores.size >= TOP_PILOTS_DISTINCT_SCORES) break;
+  }
+  const hasReplayIds = await fetchHasReplayIds(deduped.map((r) => r.id));
+  const withReplay = deduped.map((r) => ({ ...r, has_replay: hasReplayIds.has(r.id) }));
+  topPilotsCache = { value: withReplay, expires: Date.now() + CACHE_TTL_MS };
+  return withReplay;
 };
 
 const fetchTopRows = async (): Promise<RowOut[]> => {

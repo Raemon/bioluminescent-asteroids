@@ -190,9 +190,15 @@ export const showWaveSummary = (
   setRow(root, "bonus", formatScore(bonus));
   setRow(root, "score", formatScore(game.score));
 
-  // Reset visual state and force reflow so the entrance animation re-plays.
-  root.classList.remove("fade-out");
+  // Reset visual state. Order matters: strip `in` from every row *before*
+  //   removing `fade-out`, and reflow in between. Otherwise removing
+  //   `fade-out` first un-hides the panel for a frame while the previous
+  //   wave's rows still carry `in` (a flash of all data) and then their
+  //   opacity transitions out — instead of the rows being at 0 the instant
+  //   the panel reappears, ready for the staggered entrance.
   for (const row of rows) row.classList.remove("in");
+  void root.offsetWidth;
+  root.classList.remove("fade-out");
   void root.offsetWidth;
 
   // One row per beat, each with a paired sound.

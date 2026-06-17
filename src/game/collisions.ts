@@ -16,7 +16,7 @@ import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebas
 import { BEAT_GRID } from "./rhythmConstants";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
-import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup, emitBounceSparks } from "./particleBursts";
+import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup, emitBounceSparks, emitAlienBulletPop } from "./particleBursts";
 import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage } from "./popups";
 import { checkBonusLife } from "./bonusLife";
 import {
@@ -230,6 +230,7 @@ export const handleAlienBulletHits = (game: Game) => {
   let shipHit = false;
   const shipVulnerable = game.ship.alive && game.ship.invuln <= 0;
   for (const ab of game.alienBullets) {
+    if (playerBulletShootsDownAlienBullet(game, ab)) continue;
     if (alienBulletDamagesAsteroid(game, ab)) continue;
     if (shipVulnerable && !shipHit && alienBulletHitsShip(game, ab)) {
       shipHit = true;
@@ -239,6 +240,24 @@ export const handleAlienBulletHits = (game: Game) => {
     remaining.push(ab);
   }
   game.alienBullets = remaining;
+};
+
+// A player shot meeting an alien bullet cancels it: the alien bullet pops in a
+// hue-tinted spray and the player bullet is consumed (unless it pierces). Boss
+// plasma/laser bolts are exempt — they're meant to be dodged, not shot down.
+const playerBulletShootsDownAlienBullet = (game: Game, ab: AlienBullet): boolean => {
+  if (ab.isBoss) return false;
+  for (const b of game.bullets) {
+    if (b.life <= 0) continue;
+    const reach = b.hitRadius() + ab.radius;
+    if (Math.hypot(b.pos.x - ab.pos.x, b.pos.y - ab.pos.y) > reach) continue;
+    consumeBullet(b);
+    game.sound.play("explosionSmall", 0.7, ab.pos);
+    game.shake = Math.min(game.shake + 0.12, 1.2);
+    emitAlienBulletPop(game.particles, ab.pos, ab.hue);
+    return true;
+  }
+  return false;
 };
 
 // returns true if the bullet hit (and was consumed by) an asteroid this frame.

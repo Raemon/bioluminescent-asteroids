@@ -286,9 +286,13 @@ export class Game implements HudElements {
   //   slot of the 11-row window first; once centred, further presses scroll the
   //   underlying list. See game/scoreEntry.ts.
   leaderboardRows: HighscoreRow[] = [];
-  // Unfiltered top-50 from the server; leaderboardRows is the rendered view
-  //   after applying the top-entries-only filter and current sort.
+  // Unfiltered top-100 from the server; drives the rendered view when
+  //   "top entries only" is OFF, and is the base for "show more" paging.
   leaderboardAllRows: HighscoreRow[] = [];
+  // Deep server-deduped "top pilots" set — scanned far enough to surface ~20
+  //   distinct scores' worth of pilots. Drives the rendered view when "top
+  //   entries only" is ON, since the raw top-100 can be dominated by one pilot.
+  leaderboardTopPilots: HighscoreRow[] = [];
   leaderboardSelection = 0;
   leaderboardActive = false;
   // When true the rendered list dedupes by name, keeping each pilot's best

@@ -393,11 +393,15 @@ export const showLeaderboard = (game: Game) => {
   //   the in-flight fetch will swap them out with fresh data when it lands.
   const cached = getCachedHighscores();
   if (cached.length > 0) {
+    // The cache holds the deep top-pilots payload; seed both sources from it so
+    //   the toggle works before the live top-100 lands.
+    game.leaderboardTopPilots = cached;
     game.leaderboardAllRows = cached;
-    applySort(game, cached, game.lastRunScoreId);
+    applySort(game, game.lastRunScoreId);
   } else {
     game.leaderboardListEl.innerHTML =
       `<li class="leaderboard-status">${showNeighborhood ? "Loading your standing…" : "Loading top pilots…"}</li>`;
+    game.leaderboardTopPilots = [];
     game.leaderboardAllRows = [];
     game.leaderboardRows = [];
     game.leaderboardSelection = 0;
@@ -408,30 +412,33 @@ export const showLeaderboard = (game: Game) => {
 
 export const refreshLeaderboard = async (game: Game) => {
   const selfId = game.lastRunScoreId;
-  // Two-phase: paint the deduped 20-pilots view first (small, cached server-
-  //   side, lands fast) so the title screen has rich rows immediately. Then
-  //   pull the full top-100 in the background and swap them in once available.
+  // Two-phase. Phase 1: the deep top-pilots set (server-deduped, scanned far
+  //   enough for ~20 distinct scores) — this is what the default "top entries
+  //   only" view renders. Phase 2: the raw top-100, which powers the view once
+  //   the toggle is turned OFF and is the base for "show more" paging. Phase 2
+  //   must NOT clobber the phase-1 view — the raw top-100 can be one pilot deep.
   let paintedInitial = false;
   try {
     const initial = await fetchTopPilots();
     paintedInitial = true;
     saveCachedHighscores(initial);
-    game.leaderboardAllRows = initial;
+    game.leaderboardTopPilots = initial;
     game.leaderboardHasMore = true;
-    applySort(game, initial, selfId);
+    applySort(game, selfId);
     syncShowMoreVisibility(game);
   } catch {
     // fall through to the full fetch — it can still recover the view.
   }
   try {
     const rows = await fetchHighscores(LEADERBOARD_FETCH_LIMIT);
-    saveCachedHighscores(rows);
     game.leaderboardAllRows = rows;
     game.leaderboardHasMore = rows.length >= LEADERBOARD_FETCH_LIMIT;
-    applySort(game, rows, selfId);
+    // Re-render only matters when the toggle is off (the on-view reads the
+    //   phase-1 set); applySort handles both and is cheap.
+    applySort(game, selfId);
     syncShowMoreVisibility(game);
   } catch {
-    if (!paintedInitial && game.leaderboardAllRows.length === 0) {
+    if (!paintedInitial && game.leaderboardTopPilots.length === 0) {
       game.leaderboardListEl.innerHTML =
         '<li class="leaderboard-status">Leaderboard unavailable.</li>';
       game.leaderboardActive = false;
@@ -453,7 +460,7 @@ const loadMoreLeaderboard = async (game: Game) => {
     const fresh = rows.filter((r) => !existingIds.has(r.id));
     game.leaderboardAllRows = [...game.leaderboardAllRows, ...fresh];
     game.leaderboardHasMore = rows.length >= LEADERBOARD_FETCH_LIMIT;
-    applySort(game, game.leaderboardAllRows, game.lastRunScoreId);
+    applySort(game, game.lastRunScoreId);
   } catch {
     // leave the existing list intact; user can retry by clicking again.
   } finally {
@@ -462,8 +469,13 @@ const loadMoreLeaderboard = async (game: Game) => {
   }
 };
 
-const applySort = (game: Game, rows: HighscoreRow[], selfId: number | null) => {
-  const filtered = game.leaderboardTopOnly ? dedupeByName(rows) : rows;
+// Renders from the deep top-pilots set when "top entries only" is on, else
+//   from the full top-100. The deep set still gets a client dedupe pass so a
+//   stale or over-broad payload can't leak duplicate pilot rows.
+const applySort = (game: Game, selfId: number | null) => {
+  const filtered = game.leaderboardTopOnly
+    ? dedupeByName(game.leaderboardTopPilots)
+    : game.leaderboardAllRows;
   const sorted = sortRows(filtered, game.leaderboardSort);
   game.leaderboardRows = sorted;
   if (selfId !== null) {
@@ -498,7 +510,7 @@ const bindLeaderboardFooter = (game: Game) => {
   checkbox.addEventListener("change", () => {
     game.leaderboardTopOnly = checkbox.checked;
     saveTopEntriesOnly(checkbox.checked);
-    applySort(game, game.leaderboardAllRows, game.lastRunScoreId);
+    applySort(game, game.lastRunScoreId);
   });
   showMore.addEventListener("click", () => {
     if (game.leaderboardLoadingMore) return;
@@ -513,7 +525,7 @@ const bindLeaderboardFooter = (game: Game) => {
     if (justExpanded) {
       game.leaderboardExpanded = true;
       syncOverlayExpansion(true);
-      applySort(game, game.leaderboardAllRows, game.lastRunScoreId);
+      applySort(game, game.lastRunScoreId);
       syncShowMoreVisibility(game);
       return;
     }
@@ -557,7 +569,7 @@ const bindLeaderboardClicks = (game: Game) => {
     const key = sortEl.dataset.sort as Game["leaderboardSort"] | undefined;
     if (!key || key === game.leaderboardSort) return;
     game.leaderboardSort = key;
-    applySort(game, game.leaderboardRows, game.lastRunScoreId);
+    applySort(game, game.lastRunScoreId);
   });
 };
 

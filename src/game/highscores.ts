@@ -67,9 +67,12 @@ export const submitHighscore = async (
   return body.score;
 };
 
+// no-store so a plain reload always reflects fresh server data — the API sends
+//   a `public` Cache-Control for the edge, which the browser would otherwise
+//   honour and replay a stale leaderboard on the next visit.
 export const fetchHighscores = async (limit = 10, offset = 0): Promise<HighscoreRow[]> => {
   const url = `/api/highscores?limit=${limit}&offset=${offset}`;
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, { method: "GET", cache: "no-store" });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
   const body = (await res.json()) as { scores: HighscoreRow[] };
   return body.scores;
@@ -79,7 +82,7 @@ export const fetchHighscores = async (limit = 10, offset = 0): Promise<Highscore
 //   The server runs the same per-pilot best-of-category logic the client used
 //   to apply locally, so this returns far fewer rows than the raw top-100.
 export const fetchTopPilots = async (): Promise<HighscoreRow[]> => {
-  const res = await fetch("/api/highscores?mode=top-pilots", { method: "GET" });
+  const res = await fetch("/api/highscores?mode=top-pilots", { method: "GET", cache: "no-store" });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
   const body = (await res.json()) as { scores: HighscoreRow[] };
   return body.scores;

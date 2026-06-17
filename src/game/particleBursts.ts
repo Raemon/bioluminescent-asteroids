@@ -183,6 +183,20 @@ export const emitCanisterPop = (particles: ParticleSystem, c: { pos: Vec }) => {
   });
 };
 
+// Shot-down alien bullet pops in its own hue — fast hot spray so the player
+// reads "I cancelled that shot" rather than a generic white puff.
+export const emitAlienBulletPop = (particles: ParticleSystem, pos: Vec, hue: number) => {
+  emitBurst(particles, {
+    pos, count: 18,
+    speedRange: [140, 360],
+    lifeRange: [0.25, 0.6], maxLife: 0.6,
+    sizeRange: [1.2, 2.6],
+    hue, hueSpread: [-12, 24],
+    drag: 2.2,
+    angleMode: "random", angleJitter: 0,
+  });
+};
+
 // canister-hue tint makes each pickup kind read visually distinct (vs. white "wasted" burst).
 export const emitCanisterPickup = (particles: ParticleSystem, c: Canister) => {
   emitBurst(particles, {
