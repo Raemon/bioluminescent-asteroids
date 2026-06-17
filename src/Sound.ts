@@ -34,6 +34,21 @@ type AlienDroneNode = {
   spatial?: SpatialNodes;
 };
 
+// Per-warble continuous voice. A soft sustained hum while the rock is phased
+// in (solid), morphing toward a deeper, wider, faster vibrato — "warblier" —
+// as it phases out (intangible). setWarbleDronePhase rides the morph each
+// frame from the rock's ghost amount. Held for the lifetime of the piece.
+type WarbleDroneNode = {
+  oscA: OscillatorNode;
+  oscB: OscillatorNode;
+  baseFreq: number;
+  vibratoLfo: OscillatorNode;
+  vibratoDepth: GainNode;
+  filter: BiquadFilterNode;
+  mainGain: GainNode;
+  spatial?: SpatialNodes;
+};
+
 // Soft "mmmm" hum that sustains while the reticule hovers a first-beat dot.
 // Pitched at C4 — a perfect fifth below the fireBeat pluck (G4) and one
 // octave above the fireBeat body (C3), so when the player executes the
@@ -346,6 +361,9 @@ export class Sound {
   // populated for medium/small bass pieces (a large piece is "sealed" — it
   // hasn't been broken open yet).
   bassDrones: Map<object, BassDroneNode> = new Map();
+  // Per-warble continuous hum, keyed by the Asteroid instance. Morphs between
+  // a smooth phased-in hum and a warblier phased-out voice each frame.
+  warbleDrones: Map<object, WarbleDroneNode> = new Map();
   // Per-comet shimmer pad, keyed by the Comet instance.
   cometShimmers: Map<object, CometShimmerNode> = new Map();
   // Single combo-halo ambient pad. Null when combo < 4 (no yellow halo yet).
@@ -1401,6 +1419,100 @@ export class Sound {
 
   stopAllAlienDrones() {
     for (const key of Array.from(this.alienDrones.keys())) this.stopAlienDrone(key);
+  }
+
+  // Open a warble's sustained voice. Two near-unison sines through a lowpass,
+  // pitched to G3 so a field of warbles layers consonantly over the C-rooted
+  // bass bed. The vibrato LFO is the morph axis: setWarbleDronePhase widens its
+  // depth and speeds it up as the rock phases out, turning a smooth hum into a
+  // seasick "warble". Held until stopWarbleDrone.
+  startWarbleDrone(key: object, pos?: Pos) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    if (this.warbleDrones.has(key)) return;
+    const t = this.ctx.currentTime;
+    const spatial = pos ? this.makeSpatial(pos, this.master) : null;
+    const sink: AudioNode = spatial ? spatial.panner : this.master;
+
+    const baseFreq = 196; // G3 — sits a fifth above C, consonant with the bass bed
+    const oscA = this.ctx.createOscillator();
+    const oscB = this.ctx.createOscillator();
+    oscA.type = "sine";
+    oscB.type = "sine";
+    oscA.frequency.value = baseFreq;
+    oscB.frequency.value = baseFreq * 1.004;
+
+    // Vibrato — shallow + slow when phased in, set live by setWarbleDronePhase.
+    const vibratoLfo = this.ctx.createOscillator();
+    vibratoLfo.type = "sine";
+    vibratoLfo.frequency.value = 4;
+    const vibratoDepth = this.ctx.createGain();
+    vibratoDepth.gain.value = baseFreq * 0.004;
+    vibratoLfo.connect(vibratoDepth);
+    vibratoDepth.connect(oscA.frequency);
+    vibratoDepth.connect(oscB.frequency);
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = 4;
+    filter.frequency.value = 700;
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.setValueAtTime(0.0001, t);
+    mainGain.gain.exponentialRampToValueAtTime(0.06, t + 0.6);
+
+    oscA.connect(filter);
+    oscB.connect(filter);
+    filter.connect(mainGain);
+    mainGain.connect(sink);
+
+    oscA.start(t);
+    oscB.start(t);
+    vibratoLfo.start(t);
+
+    this.warbleDrones.set(key, { oscA, oscB, baseFreq, vibratoLfo, vibratoDepth, filter, mainGain, spatial: spatial ?? undefined });
+  }
+
+  // Morph a warble's voice each frame. ghost01: 0 = fully phased in (smooth
+  // hum), 1 = fully phased out (deep, wide, fast warble). Pitch dips a tone,
+  // vibrato widens and quickens, and the lowpass opens so the wobble reads.
+  setWarbleDronePhase(key: object, ghost01: number) {
+    const node = this.warbleDrones.get(key);
+    if (!node || !this.ctx) return;
+    const g = Math.max(0, Math.min(1, ghost01));
+    const t = this.ctx.currentTime;
+    const tc = 0.05;
+    const freq = node.baseFreq * (1 - 0.12 * g); // dip ~a tone as it ghosts out
+    node.oscA.frequency.setTargetAtTime(freq, t, tc);
+    node.oscB.frequency.setTargetAtTime(freq * 1.004, t, tc);
+    node.vibratoLfo.frequency.setTargetAtTime(4 + 7 * g, t, tc);
+    node.vibratoDepth.gain.setTargetAtTime(node.baseFreq * (0.004 + 0.05 * g), t, tc);
+    node.filter.frequency.setTargetAtTime(700 + 700 * g, t, tc);
+  }
+
+  updateWarbleDrone(key: object, pos: Pos) {
+    const node = this.warbleDrones.get(key);
+    if (!node || !node.spatial) return;
+    this.updateSpatial(node.spatial, pos);
+  }
+
+  stopWarbleDrone(key: object) {
+    if (!this.ctx) return;
+    const node = this.warbleDrones.get(key);
+    if (!node) return;
+    const t = this.ctx.currentTime;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    node.oscA.stop(t + 0.22);
+    node.oscB.stop(t + 0.22);
+    node.vibratoLfo.stop(t + 0.22);
+    this.warbleDrones.delete(key);
+  }
+
+  stopAllWarbleDrones() {
+    for (const key of Array.from(this.warbleDrones.keys())) this.stopWarbleDrone(key);
   }
 
   // C4 hum that sustains while the reticule hovers the first-beat dot.

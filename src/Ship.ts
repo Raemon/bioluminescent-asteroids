@@ -62,7 +62,9 @@ export class Ship {
   bulletSpeed = 620;
   bulletLife = 0.85;
   // prong/rapid/pierce/radar/longshot persist for the run; shield is one-shot.
-  prongActive = false;
+  // prongCount stacks: each upgrade adds one more prong (and one more bullet).
+  prongCount = 0;
+  get prongActive() { return this.prongCount > 0; }
   rapidActive = false;
   pierceActive = false;
   shieldActive = false;

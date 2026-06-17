@@ -4,8 +4,17 @@ import { Bullet } from "../Bullet";
 import { PowerupKind } from "../Canister";
 import { BEAT_GRID } from "../game/rhythmConstants";
 
-// prong sprays a symmetric pair per shot at a fixed spread; centred single shot otherwise.
-export const PRONG_SPREAD = 0.21;
+// each prong upgrade adds one more bullet, every prong 45° from its neighbour, wrapping
+// into a full ring at 8 shots (8 × 45° = 360°) and continuing to overlap beyond that.
+const PRONG_ANGLE_STEP = Math.PI / 4;
+
+// prongCount n yields n+1 shots fanned symmetrically about the heading (centred on the front).
+// count 0 → [0]; 1 → ±22.5°; 2 → -45,0,+45; 3 → ±22.5,±67.5; 7 → full ring every 45°.
+export const prongOffsets = (prongCount: number): number[] => {
+  const shots = prongCount + 1;
+  const start = -((shots - 1) / 2) * PRONG_ANGLE_STEP;
+  return Array.from({ length: shots }, (_, i) => start + i * PRONG_ANGLE_STEP);
+};
 
 // pierce extends bullet lifetime so the punch-through shot also reaches farther,
 // making the powerup feel like a true "penetrating" upgrade and not just multi-hit.
@@ -30,15 +39,16 @@ const launchBullet = (ship: Ship, headingOffset: number, pierce: boolean, longsh
   return bullet;
 };
 
-// single fire event yields 1 or 2 bullets; prong must share its on-beat flag across both.
+// single fire event yields prongCount+1 bullets; prong must share its on-beat flag across all.
 export const fireBullets = (ship: Ship, bullets: Bullet[]) => {
-  const offsets = ship.prongActive ? [-PRONG_SPREAD, PRONG_SPREAD] : [0];
-  for (const offset of offsets) bullets.push(launchBullet(ship, offset, ship.pierceActive, ship.longshotActive));
+  for (const offset of prongOffsets(ship.prongCount)) {
+    bullets.push(launchBullet(ship, offset, ship.pierceActive, ship.longshotActive));
+  }
 };
 
 // powerup flags are simple bool latches; shield is one-shot, the rest persist for the run.
 export const applyPowerup = (ship: Ship, kind: PowerupKind) => {
-  if (kind === "prong") ship.prongActive = true;
+  if (kind === "prong") ship.prongCount += 1;
   else if (kind === "rapid") ship.rapidActive = true;
   else if (kind === "pierce") ship.pierceActive = true;
   else if (kind === "shield") ship.shieldActive = true;

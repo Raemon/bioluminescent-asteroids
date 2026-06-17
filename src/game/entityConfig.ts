@@ -39,12 +39,15 @@ export const ENTITY_CONFIG = {
   // Bassteroids share asteroid radius/score but are 4× tougher so the rhythm
   // system has real teeth — a rhythm-bullet (4 damage) needs four hits to
   // crack a large bassteroid, matching the "armoured" silhouette.
-  // maxLevel is the last *internal* wave on which bassteroids may appear
-  // (display-level = wave - 1); they vanish after that so the post-boss arc
-  // can introduce a new ambient texture.
+  // maxLevel is the last *internal* wave on which bassteroids spawn every
+  // bass slot (display-level = wave - 1); past it the post-boss arc gives a
+  // new ambient texture room, but they still surface at rareChanceAfterMax.
   bassteroid: {
     hpMultiplier: 2,
     maxLevel: 10,
+    // past maxLevel bassteroids still surface, but each candidate slot only
+    // rolls one in this often, so they stay an occasional accent.
+    rareChanceAfterMax: 0.25,
   },
 
   // Decorator asteroid kinds (chime/bell/warble) share asteroid stats — they
@@ -54,6 +57,22 @@ export const ENTITY_CONFIG = {
   // while bell holds back until the post-boss arc (display-level 11+).
   bell: {
     firstWave: 12,
+  },
+
+  // Warble — a "phased" asteroid that appears in the post-boss arc (display-
+  // level 11+, internal wave 12). Over each 4-beat measure it fades from a
+  // solid body down to `lowOpacity` and back; while it's below the
+  // `solidThreshold` fraction of that fade it goes intangible and bullets
+  // pass straight through. The trick is to time a shot for when it's solid.
+  warble: {
+    firstWave: 12,
+    perSpawnChance: 0.18,
+    // Dimmest the body gets at the bottom of the fade (full = 1).
+    lowOpacity: 0.35,
+    // Opacity above which the rock is still solid/hittable; at or below it
+    // the rock is phased out. Sits a little above lowOpacity so the
+    // intangible window is the genuinely-faint trough, not the whole dim half.
+    solidThreshold: 0.5,
   },
 
   canister: {
@@ -71,7 +90,7 @@ export const ENTITY_CONFIG = {
     firstWave: 4,
     chancePerWave: 1 / 3,
     spawnWindow: [5, 22] as [number, number],
-    radius: { big: 38, medium: 24, small: 16 } as Record<AlienSize, number>,
+    radius: { big: 76, medium: 48, small: 32 } as Record<AlienSize, number>,
     hp: { big: 4, medium: 2, small: 1 } as Record<AlienSize, number>,
     score: { big: 400, medium: 220, small: 130 } as Record<AlienSize, number>,
     speed: {
@@ -185,6 +204,49 @@ export const ENTITY_CONFIG = {
       firstWave: 4,
       chancePerWave: 1 / 3,
     },
+  },
+
+  // Gold gem — a big, heavy, chunky solid-gold diamond. Tougher than a solid
+  // crystal in HP terms (8 HP) and almost inert in motion (heavy → drifts in
+  // slowly). The killing hit doesn't drop a pickup itself; instead it bursts
+  // into 4 fast goldDiamond shards fired in a 90° cross, rotated off the
+  // killing-shot axis so none flies straight back at the shooter. Each shard,
+  // when killed, pays out the normal gem-drop (same as a goldCrystal rock).
+  // Shards despawn when they leave the screen rather than wrapping, so a missed
+  // burst clears itself.
+  goldGem: {
+    // Rare guest across the early/mid arc (internal waves 3-10 → display 2-9),
+    // then a recurring threat from the post-boss arc onward.
+    firstWave: 3,
+    lastEarlyWave: 10,
+    perSpawnChance: 0.05,
+    // From this internal wave (display 11) the gem shows up much more often.
+    frequentWave: 12,
+    frequentChance: 0.18,
+    radius: 56,
+    hp: 8,
+    score: 800,
+    // Heavy: drifts in noticeably slower than its size band, like a solid
+    // crystal large, so the player can read the tough target and line up.
+    spawnSpeedMul: 0.45,
+    // Number of shards fired on death.
+    shardCount: 4,
+    // Shard launch speed (px/s). Fast — they read as flung-apart blades, not
+    // drifting rubble.
+    shardSpeed: 360,
+  },
+
+  // Gold diamond — the fast shard a goldGem bursts into. No standalone spawn.
+  // Terminal (no further split). Hazardous on contact but on death pays the
+  // usual gem-drop, same as a goldCrystal rock. Despawns offscreen.
+  goldDiamond: {
+    radius: 15,
+    hp: 1,
+    score: 100,
+    // Same gem-drop odds as a goldCrystal rock, reused so the shard reads as
+    // "another cracked gem" rather than a new economy.
+    upgradeChance: 0.4,
+    revealScore: 250,
   },
 
   // Glass prison — appears from display-level 11 onward (internal wave 12+,

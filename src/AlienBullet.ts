@@ -9,9 +9,9 @@ import { BEAT_GRID } from "./game/rhythmConstants";
 // Per-size visible radius. All three are tight stingers — the big one only
 // reads as larger because its dart is longer, not because the head balloons.
 const SIZE_BULLET_RADIUS: Record<AlienSize, number> = {
-  big: 3.6,
-  medium: 3.0,
-  small: 2.4,
+  big: 7.2,
+  medium: 6.0,
+  small: 4.8,
 };
 
 // Beats of flight time before the bullet expires. Small fires only once every

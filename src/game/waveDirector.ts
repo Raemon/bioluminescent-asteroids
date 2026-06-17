@@ -35,6 +35,10 @@ const spawnSpeedRange = (a: Asteroid): [number, number] => {
     const m = CFG.glassPrison.spawnSpeedMul;
     return [lo * m, hi * m];
   }
+  if (a.kind === "goldGem") {
+    const m = CFG.goldGem.spawnSpeedMul;
+    return [lo * m, hi * m];
+  }
   return [lo, hi];
 };
 
@@ -159,20 +163,24 @@ const seedBeatFragmentSlot = (game: Game, a: Asteroid) => {
 };
 
 // paired-wave intro (one bass, then both) trains the player gradually.
-// Bass kinds drop out entirely once the wave passes CFG.bassteroid.maxLevel —
-// the post-boss arc retires the rhythm-armour pieces so a new texture
-// (glass prisons, the bell-toll cathedral fragment) can take centre stage.
+// Past CFG.bassteroid.maxLevel the post-boss arc retires the every-wave bass
+// pieces so a new texture (glass prisons, the bell-toll cathedral fragment)
+// can take centre stage — but each bass slot still rolls rareChanceAfterMax
+// to keep them an occasional accent rather than vanishing outright.
 // Each bass slot rolls a fresh kind from the full BASS_KINDS pool, so any of
 // the four colours can show up on any bass wave (re-rolled per wave spawn).
 // The chime/bell/warble sound-decorator asteroids are no longer spawned here.
 export const activeSpecialsForWave = (_game: Game, wave: number): AsteroidKind[] => {
   if (wave < 3) return [];
-  const bassAllowed = wave <= CFG.bassteroid.maxLevel;
   const randomBass = (): AsteroidKind => BASS_KINDS[Math.floor(rng() * BASS_KINDS.length)];
-  if (wave === 3) return bassAllowed ? [randomBass()] : [];
-  if (wave === 4) return bassAllowed ? [randomBass()] : [];
-  const specials: AsteroidKind[] = bassAllowed ? [randomBass(), randomBass()] : [];
-  return specials;
+  // each slot decides independently whether a bass piece fills it
+  const bassSlot = (): AsteroidKind[] =>
+    wave <= CFG.bassteroid.maxLevel || rng() < CFG.bassteroid.rareChanceAfterMax
+      ? [randomBass()]
+      : [];
+  if (wave === 3) return bassSlot();
+  if (wave === 4) return bassSlot();
+  return [...bassSlot(), ...bassSlot()];
 };
 
 // boost velocity in place by the current rhythm-speed multiplier; called
@@ -209,6 +217,10 @@ const spawnAsteroidAway = (
   if (a.kind === "glassPrison") {
     a.vel.x *= CFG.glassPrison.spawnSpeedMul;
     a.vel.y *= CFG.glassPrison.spawnSpeedMul;
+  }
+  if (a.kind === "goldGem") {
+    a.vel.x *= CFG.goldGem.spawnSpeedMul;
+    a.vel.y *= CFG.goldGem.spawnSpeedMul;
   }
   alignIncomingToRhythm(game, a, claimed);
   applyRhythmSpeed(game, a.vel, waveStartSpeedMul(game));
@@ -623,6 +635,18 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
     // prison slot can't also pick up a gem or be downgraded to a solid crystal.
     const isPrison = game.wave >= CFG.glassPrison.firstWave && rng() < CFG.glassPrison.perSpawnChance;
     if (isPrison) { slotKinds.push("glassPrison"); continue; }
+    // Phased warble — post-boss arc (display-level 11+). Rolled before solid/gem
+    // so a warble slot keeps its phasing identity rather than being downgraded.
+    const isWarble = game.wave >= CFG.warble.firstWave && rng() < CFG.warble.perSpawnChance;
+    if (isWarble) { slotKinds.push("warble"); continue; }
+    // Gold gem: rare in the early arc, frequent once frequentWave hits. Rolled
+    // before solid/gem so a gem slot can't also become a solid crystal or gem rock.
+    const goldGemChance =
+      game.wave >= CFG.goldGem.frequentWave ? CFG.goldGem.frequentChance
+      : game.wave >= CFG.goldGem.firstWave && game.wave <= CFG.goldGem.lastEarlyWave ? CFG.goldGem.perSpawnChance
+      : 0;
+    const isGoldGem = goldGemChance > 0 && rng() < goldGemChance;
+    if (isGoldGem) { slotKinds.push("goldGem"); continue; }
     const isSolid = game.wave > CFG.solidCrystal.firstWave && rng() < CFG.solidCrystal.perSpawnChance;
     if (isSolid) { slotKinds.push("solidCrystal"); continue; }
     const isGem = game.wave > CFG.goldCrystal.firstWave && rng() < CFG.goldCrystal.perSpawnChance;
@@ -631,6 +655,9 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
   if (game.wave === CFG.goldCrystal.firstWave && normalCount > 0 && !slotKinds.includes("goldCrystal")) {
     slotKinds[Math.floor(rng() * normalCount)] = "goldCrystal";
   }
+  if (game.wave === CFG.goldGem.firstWave && normalCount > 0 && !slotKinds.includes("goldGem")) {
+    slotKinds[Math.floor(rng() * normalCount)] = "goldGem";
+  }
   if (game.wave === CFG.solidCrystal.firstWave && normalCount > 0 && !slotKinds.includes("solidCrystal")) {
     slotKinds[Math.floor(rng() * normalCount)] = "solidCrystal";
   }
@@ -638,6 +665,11 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
   // the new mechanic right away rather than rolling for it.
   if (game.wave === CFG.glassPrison.firstWave && normalCount > 0 && !slotKinds.includes("glassPrison")) {
     slotKinds[Math.floor(rng() * normalCount)] = "glassPrison";
+  }
+  // Introductory warble wave gets one guaranteed phased rock so the player
+  // meets the pass-through-during-fade mechanic right away.
+  if (game.wave === CFG.warble.firstWave && normalCount > 0 && !slotKinds.includes("warble")) {
+    slotKinds[Math.floor(rng() * normalCount)] = "warble";
   }
 
   // Build the concrete spawn descriptors. Special slots (gem / solid / prison)

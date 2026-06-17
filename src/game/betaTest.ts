@@ -42,7 +42,7 @@ const spawnAsteroid = (game: Game, kind: AsteroidKind = "normal") => {
 };
 
 const applyPowerup = (game: Game, kind: PowerupKind) => {
-  if (kind === "prong") game.ship.prongActive = true;
+  if (kind === "prong") game.ship.prongCount += 1;
   else if (kind === "rapid") game.ship.rapidActive = true;
   else if (kind === "pierce") game.ship.pierceActive = true;
   else if (kind === "shield") game.ship.shieldActive = true;
@@ -258,6 +258,7 @@ const startBetaWave = (game: Game) => {
   game.killedRowEl.classList.add("hidden");
   game.sound.stopAllAlienDrones();
   game.sound.stopAllBassteroidDrones();
+  game.sound.stopAllWarbleDrones();
   game.sound.stopAllCometShimmers();
   game.sound.stopHaloAmbient();
   game.comets = [];

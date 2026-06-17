@@ -60,6 +60,8 @@ const asteroidBucket = (a: Asteroid): KillBucket => {
   if (a.isBass()) return "bassteroid";
   if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble") return a.kind;
   if (a.kind === "goldCrystal") return "goldCrystal";
+  if (a.kind === "goldGem") return "goldGem";
+  if (a.kind === "goldDiamond") return "goldCrystal";
   if (a.kind === "solidCrystal" || a.kind === "solidCrystalSmall") return "solidCrystal";
   if (a.kind === "glassPrison") return "glassPrison";
   if (a.kind === "wraith") return "wraith";
@@ -78,6 +80,9 @@ export const hitSoundFor = (
   // each get their own size-scaled shatter.
   if (a.kind === "solidCrystal") return "crystalShatterLarge";
   if (a.kind === "solidCrystalSmall") return "crystalShatterSmall";
+  // gold gem is a big cut-crystal body; its shards shatter small.
+  if (a.kind === "goldGem") return "crystalShatterLarge";
+  if (a.kind === "goldDiamond") return "crystalShatterSmall";
   // A cathedral glass shard is still lit stained glass — it rings/shatters
   // like cut glass rather than going off with a stone-rubble thud.
   if (a.kind === "glassShard") return "crystalShatterSmall";
@@ -220,6 +225,7 @@ const finishAsteroidKillCore = (
     emitExplosion(game.particles, game.shards, a, isOnBeatHit);
   }
   if (a.isBass()) game.sound.stopBassteroidDrone(a);
+  if (a.kind === "warble") game.sound.stopWarbleDrone(a);
   const asteroidHit = hitSoundFor(a);
   // parade replays the bassteroid's *beat* voice (kick/pluck/boom/snap) rather than the
   //   death-only bassEcho, so the trophy row plays "the sound this rock made", not how it died.
@@ -237,10 +243,11 @@ const finishAsteroidKillCore = (
     game.killedSnapshots.push(snap);
   }
   bumpKill(game, asteroidBucket(a));
-  if (a.kind === "goldCrystal") {
+  if (a.kind === "goldCrystal" || a.kind === "goldDiamond") {
     // Eject the embedded crystal at the dead rock's position; the fragment
     // recipe (handled inside split() below) takes care of the rubble cloud
-    // flying in other directions.
+    // flying in other directions. The gold-diamond shard pays out the same
+    // gem-drop as a goldCrystal rock.
     game.goldCrystals.push(spawnGoldCrystalAt(a.pos, a.vel));
   }
   if (a.kind === "solidCrystal" && a.embeddedGemCount > 0) {

@@ -124,6 +124,7 @@ const spawnTitleDecorativeAsteroids = (game: Game) => {
 const stopAllPersistentAudio = (game: Game) => {
   game.sound.stopAllAlienDrones();
   game.sound.stopAllBassteroidDrones();
+  game.sound.stopAllWarbleDrones();
   game.sound.stopAllCometShimmers();
   game.sound.stopHaloAmbient();
   game.comets = [];
@@ -165,7 +166,7 @@ export const showTitle = (game: Game) => {
   game.sound.bgBeatIntensity = 0;
   game.pulsar.setBossPlanetState("idle");
   spawnTitleDecorativeAsteroids(game);
-  game.ship.prongActive = false;
+  game.ship.prongCount = 0;
   game.ship.rapidActive = false;
   game.ship.pierceActive = false;
   game.ship.shieldActive = false;

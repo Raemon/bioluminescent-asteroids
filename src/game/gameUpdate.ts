@@ -185,6 +185,7 @@ const transitionToGameOver = (game: Game) => {
   finalizeRecorder(game);
   game.sound.stopAllAlienDrones();
   game.sound.stopAllBassteroidDrones();
+  game.sound.stopAllWarbleDrones();
   game.sound.stopAllCometShimmers();
   game.sound.stopHaloAmbient();
   game.comets = [];
@@ -495,7 +496,7 @@ const tickSlowMoTimer = (game: Game, dt: number): number => {
   return musicDtForFrame(dt, game.slowMoTimer);
 };
 
-// ≤1 fire event per frame, but prong emits 2 bullets — they all share one beat flag.
+// ≤1 fire event per frame, but prong emits multiple bullets — they all share one beat flag.
 const classifyNewBullets = (game: Game, firstNewIndex: number) => {
   // perceivedBeatTime = beatTime shifted by the player's calibrated latency, so a
   //   press timed to the heard beat scores even when output latency makes it land
@@ -619,6 +620,8 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   for (const c of game.comets) c.update(musicDt, game.w, game.h);
   pruneDeadComets(game);
   for (const a of game.asteroids) a.update(musicDt, game.w, game.h);
+  // prune goldDiamonds that flew fully offscreen; no other kind clears alive.
+  compactInPlace(game.asteroids, (a) => a.alive);
   for (const al of game.aliens) al.update(musicDt, game.w, game.h);
   pruneOffscreenAliens(game);
   tickAlienFire(game);
@@ -663,6 +666,13 @@ const updatePositionalAudio = (game: Game) => {
   for (const a of game.asteroids) {
     if (a.isBass() && (a.size === "medium" || a.size === "small")) {
       game.sound.updateBassteroidDrone(a, a.pos);
+    }
+    if (a.kind === "warble") {
+      // Lazily open the voice (guards against dupes) and ride the phase morph:
+      // ghost = 1 - opacity, so the hum warbles harder as the rock fades out.
+      game.sound.startWarbleDrone(a, a.pos);
+      game.sound.updateWarbleDrone(a, a.pos);
+      game.sound.setWarbleDronePhase(a, 1 - a.warbleOpacity);
     }
   }
   for (const al of game.aliens) game.sound.updateAlienDrone(al, al.pos);

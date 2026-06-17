@@ -91,7 +91,9 @@ const paintEntityLayers = (
 // The dormant boss is excluded too — during its approach it's meant to read as part of the
 // background planet, so the reticule must not light it up or treat it as a lockable target.
 export const targetsForReticule = (game: Game) => [
-  ...game.asteroids.filter((a) => !(a.isBoss() && a.bossPhase === "dormant")),
+  // Skip intangible rocks — a dormant boss and a phased-out warble both pass
+  // bullets through, so the reticule shouldn't promise a hit on them.
+  ...game.asteroids.filter((a) => !(a.isBoss() && a.bossPhase === "dormant") && !a.isPhasedOut()),
   ...game.comets,
   ...game.aliens,
   ...game.canisters,

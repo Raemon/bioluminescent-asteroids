@@ -1,6 +1,10 @@
 import type { Game } from "../Game";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
 import { BEAT_GRID } from "./rhythmConstants";
+import { ENTITY_CONFIG } from "./entityConfig";
+import { TAU } from "../vec";
+
+const WARBLE = ENTITY_CONFIG.warble;
 
 // kick (C2), pluck (G2), boom (F2), snap (C3) — I-IV-V-percussion worst case stays musical.
 export const BASS_KIND_SOUND: Record<"bassA" | "bassB" | "bassC" | "bassD", "bassKick" | "bassPluck" | "bassBoom" | "bassSnap"> = {
@@ -95,6 +99,23 @@ const tickBassAsteroids = (game: Game) => {
   }
 };
 
+// Warble phasing — every measure (4 beats) each warble fades from solid down
+// to CFG.warble.lowOpacity and back on a cosine, and goes intangible while its
+// opacity sits at/below CFG.warble.solidThreshold. Driven off game.beatTime so
+// the ghost-window stays locked to the music even under slow-mo. A per-rock
+// warblePhaseOffset spreads a field out of unison.
+const tickWarbles = (game: Game) => {
+  for (const a of game.asteroids) {
+    if (a.kind !== "warble") continue;
+    // 0→1 progress through the rock's own measure; 0/1 = solid peak, 0.5 = trough.
+    const phase = ((game.beatTime + a.warblePhaseOffset) % BASS_MEASURE_LENGTH) / BASS_MEASURE_LENGTH;
+    // cosine: 1 at the ends, 0 at the middle of the measure.
+    const present = 0.5 + 0.5 * Math.cos(phase * TAU);
+    a.warbleOpacity = WARBLE.lowOpacity + (1 - WARBLE.lowOpacity) * present;
+    a.warbleSolid = a.warbleOpacity > WARBLE.solidThreshold;
+  }
+};
+
 // comet pulse matches the halo ambient melody step so the two lines hocket cleanly
 const COMET_STEP = BEAT_GRID * 2;
 const tickCometMelodies = (game: Game) => {
@@ -114,6 +135,7 @@ export const tickBassBeats = (game: Game, musicDt: number, playbackRate = 1) => 
   game.beatTime += musicDt;
   tickBgBeats(game, playbackRate);
   tickBassAsteroids(game);
+  tickWarbles(game);
   tickCometMelodies(game);
 };
 

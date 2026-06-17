@@ -71,6 +71,18 @@ export type AsteroidSize = "huge" | "large" | "medium" | "small";
 // "solidCrystalSmall" also spawns standalone as a rare "treat" — a tough
 // 4 HP shard that pays out solidCrystal.smallScore on the killing hit. Same
 // sprite + shatter sound as a parent-spawned fragment, no further split.
+//
+// "goldGem" is a big, heavy, chunky solid-gold diamond — the whole rock IS a
+// cut gold gem (8 HP, no embedded tease). On death it bursts into 4 fast
+// "goldDiamond" shards fired in a 90° cross, rotated off the killing-shot axis
+// so none flies straight back at the shooter. The gem itself drops no pickup;
+// the shards carry the reward.
+//
+// "goldDiamond" is the fast shard a goldGem bursts into — a small cut gold
+// diamond, no standalone spawn, terminal (no further split). Hazardous on
+// contact, but on death it pays the usual gem-drop (a collectible GoldCrystal),
+// same as a goldCrystal rock. Unlike every other asteroid it despawns when it
+// leaves the screen rather than wrapping, so a missed burst clears itself.
 // Boss fragment kinds (level 10 culmination). The "boss" kind is the
 // whole-body planetoid; it splits into two `bossHemisphere` halves + one
 // `bossEye` core. Hemispheres further split into `bossPlate` shards (the
@@ -85,7 +97,7 @@ export type AsteroidSize = "huge" | "large" | "medium" | "small";
 // "wraith" is what crawls out. It has no baked sprite (drawn live every
 // frame from drifting noise layers and writhing tendrils), pursues the ship
 // in a slow slither, and occasionally lunges. Eats a few bullets to finish.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "goldCrystal" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock";
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "goldCrystal" | "goldGem" | "goldDiamond" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock";
 
 // The cathedral ("bell") asteroid rolls one of these archetypes at spawn. Each
 // reads as a different fragment of a civilization's basilica carved out of the
@@ -133,6 +145,9 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   warble: 130,
   solidCrystal: 232,
   solidCrystalSmall: 232,
+  // Solid gold — the gem and its shards are the same cut-gold material.
+  goldGem: 46,
+  goldDiamond: 46,
   glassPrison: 258,
   wraith: 286,
   // Cathedral debris inherits the parent bell's hue at spawn, so these are
@@ -202,6 +217,13 @@ export const BASS_HP: Record<AsteroidSize, number> = {
 export const SOLID_CRYSTAL_HP_LARGE = ENTITY_CONFIG.solidCrystal.largeHp;
 export const SOLID_CRYSTAL_HP_SMALL = ENTITY_CONFIG.solidCrystal.smallHp;
 export const SOLID_CRYSTAL_DAMAGE_REDUCTION = ENTITY_CONFIG.solidCrystal.damageReduction;
+
+// Gold gem — big chunky solid-gold diamond, and the fast goldDiamond shards it
+// bursts into on death.
+export const GOLD_GEM_HP = ENTITY_CONFIG.goldGem.hp;
+export const GOLD_GEM_RADIUS = ENTITY_CONFIG.goldGem.radius;
+export const GOLD_DIAMOND_HP = ENTITY_CONFIG.goldDiamond.hp;
+export const GOLD_DIAMOND_RADIUS = ENTITY_CONFIG.goldDiamond.radius;
 
 // Glass prison — the shell that locks a brood of wraiths in stasis. Fragile:
 // a single hit cracks it open. On death the prison spawns 2-4 wraiths at its
@@ -855,6 +877,10 @@ export class Asteroid {
   // True once a bullet has glanced off this rock's armour and we've shown the
   // "Insufficient damage" tip for it — so the hint fires at most once per rock.
   glanceTipShown = false;
+  // Almost everything wraps at the screen edge forever; goldDiamond shards
+  // instead despawn once fully offscreen (update() flips this false and the
+  // game-loop prune drops them). Defaults true for every other kind.
+  alive = true;
   cracks: AsteroidCrack[] = [];
   bassShip: BassShip | null = null;
   // Combo-halo outline: each module polygon offset outward by a fixed pixel
@@ -884,6 +910,17 @@ export class Asteroid {
   // at construction so they sit at the same spots in the pre-baked sprite
   // and the death payout.
   embeddedGemSpots: { x: number; y: number; r: number; tilt: number }[] = [];
+
+  // Warble phasing. A warble is a "phased" asteroid: every measure (4 beats)
+  // it dims from full body to `warbleOpacity` low and back. While it is in the
+  // dim window it goes intangible — bullets pass clean through (see
+  // `isPhasedOut` / collidesWith). Both fields are driven each tick from
+  // game.beatTime in bassClock.tickWarbles so the cadence locks to the music;
+  // 1 = fully present/solid, low = ghosted/intangible. A per-rock phase offset
+  // keeps a field of warbles from blinking in unison.
+  warbleOpacity = 1;
+  warbleSolid = true;
+  warblePhaseOffset = 0;
 
   // Which cathedral archetype this "bell" asteroid wears (lancet wall, rose
   // facade, spire tower, arcade, buttress ruin). Rolled at construction; picks
@@ -1027,6 +1064,18 @@ export class Asteroid {
       this.radius = SOLID_CRYSTAL_LARGE_RADIUS;
       this.damageReduction = SOLID_CRYSTAL_DAMAGE_REDUCTION;
     }
+    if (kind === "goldGem") {
+      // Big chunky gem — clearly larger than a stock large so it reads as a
+      // heavy, valuable target worth lining up.
+      this.radius = GOLD_GEM_RADIUS;
+      // Heavy mass → barely tumbles; the slow drift is set in waveDirector.
+      this.rotSpeed = rand(-0.22, 0.22);
+    }
+    if (kind === "goldDiamond") {
+      this.radius = GOLD_DIAMOND_RADIUS;
+      // Flung shards spin fast.
+      this.rotSpeed = rand(1.4, 2.8) * (rng() < 0.5 ? -1 : 1);
+    }
     if (kind === "glassPrison") {
       // Slightly taller/thinner-feeling than a normal large; the elongated
       // facet polygon (kiki harmonics + low sample count) does the work.
@@ -1111,6 +1160,10 @@ export class Asteroid {
                 ? SOLID_CRYSTAL_HP_LARGE
                 : kind === "solidCrystalSmall"
                   ? SOLID_CRYSTAL_HP_SMALL
+                : kind === "goldGem"
+                  ? GOLD_GEM_HP
+                : kind === "goldDiamond"
+                  ? GOLD_DIAMOND_HP
                   : kind === "glassPrison"
                     ? GLASS_PRISON_HP
                     : kind === "wraith"
@@ -1139,6 +1192,10 @@ export class Asteroid {
     // resampled Fourier curve. Kiki, not bouba.
     if (kind === "solidCrystal") this.outlineSamples = 7;
     else if (kind === "solidCrystalSmall") this.outlineSamples = 6;
+    // Gold gem reads as a chunky cut brilliant — few hard facets (kiki, not
+    // bouba). The shard is an even sharper, smaller cut.
+    else if (kind === "goldGem") this.outlineSamples = 8;
+    else if (kind === "goldDiamond") this.outlineSamples = 6;
     // Prison silhouette is a tall narrow polygon — 8 vertices read as a
     // hand-cut sarcophagus rather than a generic rock.
     else if (kind === "glassPrison") this.outlineSamples = 8;
@@ -1183,6 +1240,8 @@ export class Asteroid {
         });
       }
     }
+    // Stagger each warble's phase so a field of them doesn't blink in lockstep.
+    if (kind === "warble") this.warblePhaseOffset = rand(0, BASS_MEASURE_LENGTH);
     this.sprite = this.buildSprite();
     // Bassteroid wake. Gen-0 (large) wears no drone yet — it gets the slow
     // glow Trail as a "pristine charged thing drifting in space" wake.
@@ -1284,6 +1343,13 @@ export class Asteroid {
       // self-intersecting polygon when harmonics happen to align in phase.
       freqs = [1, 2, 4, 5];
       ampScale = 1.8;
+    } else if (kind === "goldGem" || kind === "goldDiamond") {
+      // Chunky cut gold. Modest amplitude on low harmonics keeps the polygon
+      // recognisably gem-like (a fat brilliant, not a jagged splinter) while
+      // a couple of higher modes break perfect symmetry so each gem differs.
+      // Avoid freqs dividing the sample count (8 for gem, 6 for shard).
+      freqs = kind === "goldGem" ? [1, 3, 5] : [1, 5];
+      ampScale = 1.1;
     } else {
       // Default — classic asteroid lumpiness.
       freqs = [2, 3, 5, 7];
@@ -1330,6 +1396,11 @@ export class Asteroid {
     const sLo = isPlain ? 5 : 70;
     const sFaint = isPlain ? 4 : 60;
 
+    // Cathedral pieces are dead derelict stone — the architecture painters lay
+    // down their own opaque body + rim, so skip the biolum halo / interior glow
+    // / filament veins / nuclei cores that would otherwise make them "alive".
+    const isArchitectural = this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
+    if (!isArchitectural) {
     const halo = ctx.createRadialGradient(0, 0, this.radius * 0.7, 0, 0, haloRadius);
     halo.addColorStop(0, `hsla(${baseHue}, ${sHi}%, 60%, 0.12)`);
     halo.addColorStop(0.5, `hsla(${baseHue + 10}, ${sHi}%, 55%, 0.048)`);
@@ -1395,9 +1466,12 @@ export class Asteroid {
       ctx.arc(nx, ny, nucleusRadius, 0, TAU);
       ctx.fill();
     }
+    }
 
+    if (this.kind === "warble") this.paintWarbleBody(ctx);
     if (this.kind === "goldCrystal") this.paintEmbeddedGoldCrystal(ctx);
     if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall") this.paintSolidCrystalBody(ctx);
+    if (this.kind === "goldGem" || this.kind === "goldDiamond") this.paintGoldGemBody(ctx);
     if (this.kind === "glassPrison") this.paintGlassPrisonBody(ctx);
     if (this.kind === "bell") this.paintCathedralFragmentBody(ctx);
     if (this.kind === "cathedralKeystone") this.paintKeystoneBody(ctx);
@@ -1406,6 +1480,51 @@ export class Asteroid {
     if (this.kind === "rubbleBlock") this.paintRubbleBlockBody(ctx);
 
     return canvas;
+  }
+
+  // Warble interior — clipped concentric "phase contour" rings + a bright
+  // core, so even at solid peak the rock reads as an unstable membrane / a
+  // thing slipping between planes rather than a green asteroid. The live
+  // phase-ring overlay in renderWarblePhase rides on top of this baked base.
+  private paintWarbleBody(ctx: CanvasRenderingContext2D) {
+    const H = this.hue;
+    const R = this.radius;
+    ctx.save();
+    // Clip to the silhouette so the rings hug the wobbly outline.
+    ctx.beginPath();
+    for (let i = 0; i < this.outlineSamples; i++) {
+      const angle = (i / this.outlineSamples) * TAU;
+      const r = this.outline[i];
+      const x = Math.cos(angle) * r;
+      const y = Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.clip();
+    ctx.globalCompositeOperation = "lighter";
+    // Concentric contour rings, slightly off-centre so they read as a ripple
+    // through the body rather than a bullseye.
+    const cx = R * 0.06, cy = -R * 0.04;
+    const ringCount = 4;
+    for (let i = 1; i <= ringCount; i++) {
+      const rr = (i / (ringCount + 0.5)) * R;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr, 0, TAU);
+      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = `hsla(${H + 30}, 90%, 72%, ${0.32 - i * 0.045})`;
+      ctx.stroke();
+    }
+    // Bright unstable core.
+    const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.5);
+    core.addColorStop(0, `hsla(${H + 45}, 95%, 88%, 0.6)`);
+    core.addColorStop(0.5, `hsla(${H + 20}, 90%, 65%, 0.22)`);
+    core.addColorStop(1, `hsla(${H}, 80%, 55%, 0)`);
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 0.5, 0, TAU);
+    ctx.fill();
+    ctx.restore();
   }
 
   // The glass prison is faceted indigo crystal containing a captive wraith.
@@ -1696,25 +1815,27 @@ export class Asteroid {
     ctx.restore();
   }
 
-  // Fill an opening with lit stained glass + leaded seams + a warm interior
-  // bleed. `pathFn(inset)` traces the opening; `cx,cy` is the glow centre and
-  // `top,bot` the vertical span for the lighting gradient; `seams` draws the
-  // leading inside a clip.
+  // Fill an opening with dead, unlit stained glass + leaded seams. `pathFn(inset)`
+  // traces the opening; `top,bot` the vertical span for the tint gradient; `seams`
+  // draws the leading inside a clip. (`_cx,_cy,_glowR` are vestigial from the lit
+  // version's interior bleed, now removed.)
   private paintStainedGlass(
     ctx: CanvasRenderingContext2D,
     H: number,
     pathFn: (inset: number) => void,
     top: number,
     bot: number,
-    cx: number,
-    cy: number,
-    glowR: number,
+    _cx: number,
+    _cy: number,
+    _glowR: number,
     seams: () => void,
   ) {
+    // Dead glass — the lights went out long ago. Only a faint cold tint
+    // survives so you can still tell it WAS stained glass; no warmth, no glow.
     const glassGrad = ctx.createLinearGradient(0, top, 0, bot);
-    glassGrad.addColorStop(0, `hsla(${H + 14}, 88%, 72%, 1)`);
-    glassGrad.addColorStop(0.5, `hsla(${H}, 82%, 50%, 1)`);
-    glassGrad.addColorStop(1, `hsla(${H - 16}, 76%, 28%, 1)`);
+    glassGrad.addColorStop(0, `hsla(${H + 8}, 22%, 26%, 1)`);
+    glassGrad.addColorStop(0.5, `hsla(${H}, 26%, 16%, 1)`);
+    glassGrad.addColorStop(1, `hsla(${H - 12}, 24%, 9%, 1)`);
     ctx.fillStyle = glassGrad;
     pathFn(0);
     ctx.fill();
@@ -1735,16 +1856,6 @@ export class Asteroid {
     ctx.lineWidth = 0.9;
     pathFn(1.5);
     ctx.stroke();
-
-    ctx.globalCompositeOperation = "lighter";
-    const bleed = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
-    bleed.addColorStop(0, `hsla(${H + 8}, 82%, 62%, 0.26)`);
-    bleed.addColorStop(1, `hsla(${H}, 70%, 40%, 0)`);
-    ctx.fillStyle = bleed;
-    ctx.beginPath();
-    ctx.arc(cx, cy, glowR, 0, TAU);
-    ctx.fill();
-    ctx.globalCompositeOperation = "source-over";
   }
 
   // Lay a band of dressed masonry courses behind an archetype's feature so the
@@ -1797,14 +1908,15 @@ export class Asteroid {
     ctx.closePath();
   }
 
-  // A round rose / wheel window of stained-glass petals carved at (cx, cy).
+  // A round rose / wheel window carved at (cx, cy) — dark and dead, its glass
+  // gone out, only the leaded tracery and a faint cold tint remaining.
   private paintRoseWindow(ctx: CanvasRenderingContext2D, H: number, cx: number, cy: number, rr: number, petals: number) {
     const ringPath = (inset: number) => {
       ctx.beginPath();
       ctx.arc(cx, cy, rr - inset, 0, TAU);
     };
     this.paintCarvedRecess(ctx, H, ringPath);
-    ctx.fillStyle = `hsla(${H + 6}, 82%, 52%, 1)`;
+    ctx.fillStyle = `hsla(${H + 4}, 24%, 14%, 1)`;
     ctx.beginPath();
     ctx.arc(cx, cy, rr - 1.2, 0, TAU);
     ctx.fill();
@@ -1825,19 +1937,10 @@ export class Asteroid {
     ctx.beginPath();
     ctx.arc(cx, cy, rr, 0, TAU);
     ctx.stroke();
-    ctx.fillStyle = `hsla(${H + 16}, 92%, 82%, 0.95)`;
+    ctx.fillStyle = `hsla(${H}, 14%, 34%, 0.9)`;
     ctx.beginPath();
     ctx.arc(cx, cy, rr * 0.16, 0, TAU);
     ctx.fill();
-    ctx.globalCompositeOperation = "lighter";
-    const bleed = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr * 2.0);
-    bleed.addColorStop(0, `hsla(${H + 14}, 86%, 70%, 0.30)`);
-    bleed.addColorStop(1, `hsla(${H}, 70%, 40%, 0)`);
-    ctx.fillStyle = bleed;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rr * 2.0, 0, TAU);
-    ctx.fill();
-    ctx.globalCompositeOperation = "source-over";
   }
 
   // ----- Archetype: lancet wall (the classic — one tall pointed window) -----
@@ -2006,8 +2109,8 @@ export class Asteroid {
     ctx.restore();
   }
 
-  // A sharp sliver of stained glass — still lit, still ringing. The most
-  // colourful debris: a translucent jewel splinter with a glowing leaded edge.
+  // A sharp sliver of dead stained glass — the light long gone out. A dark
+  // splinter with a cold residual tint and a faint stone-grey edge catch.
   private paintGlassShardBody(ctx: CanvasRenderingContext2D) {
     const H = this.hue, R = this.radius;
     ctx.save();
@@ -2015,9 +2118,9 @@ export class Asteroid {
     ctx.clip();
     ctx.globalCompositeOperation = "source-over";
     const glass = ctx.createLinearGradient(-R, -R, R, R);
-    glass.addColorStop(0, `hsla(${H + 16}, 90%, 76%, 1)`);
-    glass.addColorStop(0.5, `hsla(${H}, 84%, 52%, 1)`);
-    glass.addColorStop(1, `hsla(${H - 18}, 78%, 30%, 1)`);
+    glass.addColorStop(0, `hsla(${H + 8}, 24%, 30%, 1)`);
+    glass.addColorStop(0.5, `hsla(${H}, 26%, 17%, 1)`);
+    glass.addColorStop(1, `hsla(${H - 14}, 24%, 9%, 1)`);
     ctx.fillStyle = glass;
     ctx.beginPath();
     ctx.arc(0, 0, R * 1.2, 0, TAU);
@@ -2031,7 +2134,7 @@ export class Asteroid {
       ctx.lineTo(Math.cos(a) * R * 1.1 - R * 0.2, Math.sin(a) * R * 1.1 - R * 0.15);
     }
     ctx.stroke();
-    ctx.fillStyle = `hsla(${H + 20}, 95%, 92%, 0.85)`;
+    ctx.fillStyle = `hsla(${H + 6}, 16%, 56%, 0.5)`;
     ctx.beginPath();
     ctx.ellipse(-R * 0.32, -R * 0.34, R * 0.18, R * 0.08, -0.7, 0, TAU);
     ctx.fill();
@@ -2039,18 +2142,10 @@ export class Asteroid {
     ctx.lineWidth = 2.2;
     this.traceOutline(ctx);
     ctx.stroke();
-    ctx.strokeStyle = `hsla(${H + 16}, 95%, 82%, 0.7)`;
+    ctx.strokeStyle = `hsla(${H + 6}, 16%, 60%, 0.5)`;
     ctx.lineWidth = 0.9;
     this.traceOutline(ctx, 0.94);
     ctx.stroke();
-    ctx.globalCompositeOperation = "lighter";
-    const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 1.6);
-    bloom.addColorStop(0, `hsla(${H + 10}, 90%, 64%, 0.30)`);
-    bloom.addColorStop(1, `hsla(${H}, 80%, 50%, 0)`);
-    ctx.fillStyle = bloom;
-    ctx.beginPath();
-    ctx.arc(0, 0, R * 1.6, 0, TAU);
-    ctx.fill();
     ctx.restore();
   }
 
@@ -2391,6 +2486,162 @@ export class Asteroid {
     ctx.restore();
   }
 
+  // Big chunky solid-gold diamond (and the small goldDiamond shard, same
+  // recipe scaled by radius). Same fan-triangulation skeleton as the solid
+  // crystal, retuned for cut metal: high-saturation gold facets with a hard
+  // lit/shadow contrast, a brilliant-cut "table" inset so the gem reads as
+  // faceted rather than a flat coin, a warm-dark depth rim + bright gold catch,
+  // and a single white specular spark on the lit shoulder. No frost veil — gold
+  // is reflective, not scattering — and the core glows warm instead of milky.
+  private paintGoldGemBody(ctx: CanvasRenderingContext2D) {
+    const H = this.hue;
+    const R = this.radius;
+    const isShard = this.kind === "goldDiamond";
+    const verts: Vec[] = [];
+    for (let i = 0; i < this.outlineSamples; i++) {
+      const angle = (i / this.outlineSamples) * TAU;
+      const r = this.outline[i];
+      verts.push(v(Math.cos(angle) * r, Math.sin(angle) * r));
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i < verts.length; i++) {
+      if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
+      else ctx.lineTo(verts[i].x, verts[i].y);
+    }
+    ctx.closePath();
+    ctx.clip();
+
+    // One light, upper-left. Each crown facet shades by its centroid's distance
+    // to the light; the contrast is harder than ice so the gold reads metallic.
+    const lightX = -R * 0.55;
+    const lightY = -R * 0.6;
+    const maxLightDist = R * 2.0;
+    const coreX = -R * 0.06;
+    const coreY = -R * 0.06;
+
+    // The brilliant-cut "table" — a shrunken copy of the outer polygon. Crown
+    // facets are the quads between the outer and table rings; the table itself
+    // is the flat top plane catching the most light. tableScale tuned so the
+    // table dominates (chunky brilliant) without swallowing the crown.
+    const tableScale = 0.5;
+    const table = verts.map((p) => v(p.x * tableScale, p.y * tableScale));
+
+    ctx.globalCompositeOperation = "source-over";
+
+    const goldFacet = (cx: number, cy: number, lift: number) => {
+      const d = Math.hypot(cx - lightX, cy - lightY);
+      const lit = Math.pow(Math.max(0, 1 - d / maxLightDist), 1.5);
+      // Hard ramp: deep amber in shadow → near-white gold under the light.
+      const lightness = 22 + lift + lit * 58;
+      // Hue drifts warm-orange in shadow, pale-yellow in the light.
+      const hue = H - 8 + lit * 10;
+      const sat = 95 - lit * 22;
+      return `hsl(${hue}, ${sat}%, ${Math.min(96, lightness)}%)`;
+    };
+
+    // Crown facets — the bevelled ring between the outer edge and the table.
+    // Each is a quad (outer edge → table edge) shaded as its own plane.
+    for (let i = 0; i < verts.length; i++) {
+      const a = verts[i];
+      const b = verts[(i + 1) % verts.length];
+      const ta = table[i];
+      const tb = table[(i + 1) % verts.length];
+      const cx = (a.x + b.x + ta.x + tb.x) / 4;
+      const cy = (a.y + b.y + ta.y + tb.y) / 4;
+      ctx.fillStyle = goldFacet(cx, cy, 0);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(tb.x, tb.y);
+      ctx.lineTo(ta.x, ta.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // The table plane — brightest, fanned into its own facets from the core so
+    // the flat top still catches a graded sheen rather than a single flat fill.
+    for (let i = 0; i < table.length; i++) {
+      const a = table[i];
+      const b = table[(i + 1) % table.length];
+      const cx = (coreX + a.x + b.x) / 3;
+      const cy = (coreY + a.y + b.y) / 3;
+      ctx.fillStyle = goldFacet(cx, cy, 14);
+      ctx.beginPath();
+      ctx.moveTo(coreX, coreY);
+      ctx.lineTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Facet seams — bright hairlines along the crown bevels + the table girdle.
+    // Additive so the cut edges glint rather than darkening the metal.
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = `hsla(${H + 12}, 100%, 82%, 0.3)`;
+    ctx.lineWidth = isShard ? 0.5 : 0.8;
+    ctx.beginPath();
+    for (let i = 0; i < verts.length; i++) {
+      ctx.moveTo(verts[i].x, verts[i].y);
+      ctx.lineTo(table[i].x, table[i].y);
+    }
+    // table girdle
+    for (let i = 0; i < table.length; i++) {
+      const a = table[i];
+      const b = table[(i + 1) % table.length];
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+    ctx.stroke();
+
+    // Warm inner glow — gold has depth, not a milky frost. Biased toward the
+    // light so the brightest pool sits on the lit shoulder of the table.
+    const coreGrad = ctx.createRadialGradient(coreX, coreY, 0, coreX, coreY, R * 0.5);
+    coreGrad.addColorStop(0, `hsla(${H + 10}, 100%, 88%, 0.5)`);
+    coreGrad.addColorStop(0.5, `hsla(${H}, 95%, 65%, 0.18)`);
+    coreGrad.addColorStop(1, `hsla(${H - 6}, 90%, 50%, 0)`);
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(coreX, coreY, R * 0.5, 0, TAU);
+    ctx.fill();
+
+    // Single crisp specular spark on the lit shoulder — the cheapest "it's a
+    // hard reflective solid" cue.
+    const sparkR = R * (isShard ? 0.16 : 0.12);
+    const spark = ctx.createRadialGradient(lightX * 0.5, lightY * 0.5, 0, lightX * 0.5, lightY * 0.5, sparkR);
+    spark.addColorStop(0, "hsla(48, 100%, 98%, 0.9)");
+    spark.addColorStop(1, "hsla(48, 100%, 90%, 0)");
+    ctx.fillStyle = spark;
+    ctx.beginPath();
+    ctx.arc(lightX * 0.5, lightY * 0.5, sparkR, 0, TAU);
+    ctx.fill();
+
+    // Thick shell rim — warm-dark outer for occlusion depth + a bright gold
+    // catch on top. Mitred so the cut corners stay sharp.
+    ctx.globalCompositeOperation = "source-over";
+    ctx.lineJoin = "miter";
+    ctx.miterLimit = 4;
+    const rimPath = () => {
+      ctx.beginPath();
+      for (let i = 0; i < verts.length; i++) {
+        if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
+        else ctx.lineTo(verts[i].x, verts[i].y);
+      }
+      ctx.closePath();
+    };
+    ctx.strokeStyle = `hsla(${H - 16}, 85%, 18%, 0.9)`;
+    ctx.lineWidth = isShard ? 1.8 : 4.0;
+    rimPath();
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${H + 6}, 95%, 72%, 0.85)`;
+    ctx.lineWidth = isShard ? 1.0 : 2.2;
+    rimPath();
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
   // Heavily blurred gold gem hints visible through the crystal — same hue as
   // the GoldCrystal collectible they'll drop on death so the player can read
   // the loot in advance. Painted while the surrounding paintSolidCrystalBody
@@ -2612,7 +2863,7 @@ export class Asteroid {
   }
 
   computeOutline(): number[] {
-    const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
+    const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || this.kind === "goldGem" || this.kind === "goldDiamond" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
     const samples: number[] = [];
     for (let i = 0; i < this.outlineSamples; i++) {
       const angle = (i / this.outlineSamples) * TAU;
@@ -2636,10 +2887,17 @@ export class Asteroid {
     }
     // Mirror the clamp in computeOutline so the collision surface matches
     // the visible silhouette for the high-amp crystal / cathedral harmonics.
-    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell") {
+    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || this.kind === "goldGem" || this.kind === "goldDiamond") {
       r = Math.max(0.45, Math.min(1.55, r));
     }
     return r * this.radius;
+  }
+
+  // A warble in its dim half of the measure is phased out: intangible to both
+  // bullets and the ship, just like a dormant boss. Driven by bassClock from
+  // the music clock so the ghost-window lines up with the visible fade.
+  isPhasedOut(): boolean {
+    return this.kind === "warble" && !this.warbleSolid;
   }
 
   collidesWith(point: Vec, pointRadius: number): boolean {
@@ -2648,6 +2906,9 @@ export class Asteroid {
     // transition to "live" enables both at once on the same frame as the
     // eye opens.
     if (this.isBoss() && this.bossPhase === "dormant") return false;
+    // Phased-out warble: bullets and the ship pass clean through during the
+    // dim window.
+    if (this.isPhasedOut()) return false;
     const dx = point.x - this.pos.x;
     const dy = point.y - this.pos.y;
     const distance = Math.hypot(dx, dy);
@@ -2702,7 +2963,18 @@ export class Asteroid {
     this.rotation += this.rotSpeed * dt;
     this.membranePhase += dt * 0.8;
     addScaledMut(this.pos, this.vel, dt);
-    wrapMut(this.pos, w, h);
+    // Gold-diamond shards are the one kind that doesn't wrap: a missed burst
+    // should leave the field rather than circle back forever, so once the
+    // shard is fully past an edge it marks itself for the game-loop prune.
+    if (this.kind === "goldDiamond") {
+      const m = this.radius;
+      if (this.pos.x < -m || this.pos.x > w + m || this.pos.y < -m || this.pos.y > h + m) {
+        this.alive = false;
+        return;
+      }
+    } else {
+      wrapMut(this.pos, w, h);
+    }
     // Stamp/age the drone trail (gen-0 large) or radiator (fragments). Done
     // after the wrap so a screen-wrap teleport is caught by Trail's own
     // jump detector and the trail restarts cleanly on the new side. The
@@ -3080,6 +3352,8 @@ export class Asteroid {
     // Solid crystal pays out for the bullet budget it absorbs (16 HP / 4 HP).
     if (this.kind === "solidCrystal") return ENTITY_CONFIG.solidCrystal.largeScore;
     if (this.kind === "solidCrystalSmall") return ENTITY_CONFIG.solidCrystal.smallScore;
+    if (this.kind === "goldGem") return ENTITY_CONFIG.goldGem.score;
+    if (this.kind === "goldDiamond") return ENTITY_CONFIG.goldDiamond.score;
     if (this.kind === "glassPrison") return ENTITY_CONFIG.glassPrison.score;
     if (this.kind === "wraith") return ENTITY_CONFIG.wraith.score;
     return SIZE_SCORE[this.size];
@@ -3413,6 +3687,37 @@ export class Asteroid {
       return fragmentList;
     }
     if (this.kind === "solidCrystalSmall") return [];
+    // Gold gem: bursts into 4 fast diamond shards on a 90°-spaced cross. The
+    // cross is rotated so its arms straddle the killing shot's direction at
+    // ±45° / ±135° — the bullet came IN along impactDir, so the back arm of an
+    // unrotated cross would fly straight back at the shooter; offsetting by 45°
+    // guarantees no shard heads down the bullet's return line. Shards inherit
+    // the gem's drift and don't split further; they despawn offscreen.
+    if (this.kind === "goldGem") {
+      const baseAngle = impactDir
+        ? Math.atan2(impactDir.y, impactDir.x)
+        : Math.atan2(this.vel.y, this.vel.x);
+      const count = ENTITY_CONFIG.goldGem.shardCount;
+      const speed = ENTITY_CONFIG.goldGem.shardSpeed;
+      const ejectDist = this.radius * 0.55;
+      const fragmentList: Asteroid[] = [];
+      for (let i = 0; i < count; i++) {
+        const childAngle = baseAngle + Math.PI / 4 + (i / count) * TAU;
+        const childPos = {
+          x: this.pos.x + Math.cos(childAngle) * ejectDist,
+          y: this.pos.y + Math.sin(childAngle) * ejectDist,
+        };
+        // Inherit a touch of the gem's drift so the cross travels with it
+        // instead of expanding from a dead-still centre.
+        const vel = {
+          x: this.vel.x * 0.3 + Math.cos(childAngle) * speed,
+          y: this.vel.y * 0.3 + Math.sin(childAngle) * speed,
+        };
+        fragmentList.push(new Asteroid(childPos, vel, "small", this.hue, "goldDiamond"));
+      }
+      return fragmentList;
+    }
+    if (this.kind === "goldDiamond") return [];
     // Cathedral ("bell"): doesn't crumble into smaller cathedrals — it breaks
     // into recognisable carved building pieces, the way a bassteroid breaks
     // into ship chunks. A keystone (the wedge that locked an arch), a glowing
@@ -3711,11 +4016,28 @@ export class Asteroid {
     const time = t * 0.001;
     const membraneSwell = 1 + 0.025 * Math.sin(this.membranePhase * 0.5);
     ctx.scale(membraneSwell, membraneSwell);
-    ctx.globalCompositeOperation = "lighter";
+
+    // Cathedral pieces are dead derelict stone — blit opaque like a solid plate
+    // so the rock sits against the starfield instead of glowing through it.
+    const isArchitectural = this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
+    ctx.globalCompositeOperation = isArchitectural ? "source-over" : "lighter";
+
+    // A warble dims its whole body toward the void as it phases out. Under the
+    // additive blend, a low globalAlpha reads as "fading into nothing" rather
+    // than going grey — which is exactly the ghosting we want.
+    const isWarble = this.kind === "warble";
+    if (isWarble) ctx.globalAlpha = this.warbleOpacity;
 
     if (this.sprite) {
       ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
     }
+    ctx.globalCompositeOperation = "lighter";
+
+    // Phase-ring overlay: concentric rings that bloom outward as the warble
+    // ghosts away, so the player reads "it's leaving this plane" — and a sharp
+    // intangible cue when it crosses fully out. Drawn on top of the dimmed body;
+    // manages its own alpha, then restores the body alpha for the overlays below.
+    if (isWarble) this.renderWarblePhase(ctx, time);
 
     // Glass prison: live eye-glow pulse over the baked silhouette. Two faint
     // red pinpricks where the captive's eyes sit, breathing in and out so the
@@ -3745,7 +4067,6 @@ export class Asteroid {
     // Bell asteroid + its carved debris are baked architectural sprites —
     // drifting bioluminescent nuclei would read as bright pinpricks floating
     // on a stone wall.
-    const isArchitectural = this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
     if (!isArchitectural) {
       const nucleusList = this.nuclei;
       for (const n of nucleusList) {
@@ -3770,6 +4091,44 @@ export class Asteroid {
     this.renderCracks(ctx);
 
     ctx.restore();
+  }
+
+  // Warble phase overlay. Concentric rings ripple outward from the body and
+  // intensify as the rock ghosts out, so "this thing is phasing between planes"
+  // reads at a glance. When it's actually intangible (warbleSolid === false) a
+  // brighter rim flickers so the player can see the window where shots pass
+  // through. Sets its own additive alpha and restores warbleOpacity on exit so
+  // the body overlays drawn after this stay dimmed in step with the body.
+  private renderWarblePhase(ctx: CanvasRenderingContext2D, time: number) {
+    // 0 at solid peak → 1 at the dim trough. Drives ring bloom + brightness.
+    const ghost = 1 - this.warbleOpacity;
+    const hue = this.hue;
+    ctx.globalCompositeOperation = "lighter";
+    // Two outward-rippling rings, phase-staggered, that swell with `ghost`.
+    const ringCount = 2;
+    for (let i = 0; i < ringCount; i++) {
+      const ripple = (time * 0.6 + i / ringCount) % 1;
+      const r = this.radius * (0.7 + ripple * (0.9 + ghost * 0.8));
+      const alpha = ghost * 0.5 * (1 - ripple);
+      if (alpha <= 0.001) continue;
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = `hsl(${hue + 40}, 90%, 70%)`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TAU);
+      ctx.stroke();
+    }
+    // Intangible cue: a brighter shivering rim while bullets pass through.
+    if (!this.warbleSolid) {
+      const flicker = 0.5 + 0.5 * Math.sin(time * 22);
+      ctx.globalAlpha = 0.35 + 0.25 * flicker;
+      ctx.strokeStyle = `hsl(${hue + 60}, 95%, 78%)`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.radius * 1.05, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = this.warbleOpacity;
   }
 
   // Wraith renderer — fully live-painted. The whole point of this entity is

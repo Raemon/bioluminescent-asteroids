@@ -8,7 +8,7 @@ import {
   reticuleOverlapsAnyTarget,
   paintAimDiscs,
 } from "./aimDisc";
-import { PRONG_SPREAD } from "../shipWeapons";
+import { prongOffsets } from "../shipWeapons";
 import { BULLET_HIT_RADIUS_ON_BEAT } from "./trajectoryPreview";
 import { toroidalDelta } from "./coneGeometry";
 
@@ -206,17 +206,17 @@ const effectiveBulletLife = (ship: Ship, superBoosted: boolean): number => {
   return life;
 };
 
-// prong fans the aim into two angles (no centred shot); doubletime adds a half-beat preview at
+// prong fans the aim into prongCount+1 angles; doubletime adds a half-beat preview at
 // half distance; integer-k reticules mark every beat-slot the bullet actually crosses
 // (t = beatGrid*k < life), so the count adapts to longshot/pierce/superBoosted range and to
 // the rhythm-gate tempo (eighth-grid at combo ≥ 12 or under rapid). slotPositionIndices[k-1]
-// lists every position index that anchors the k-beat slot — one entry for the centred shot,
-// two for prong. The slot's hover ring locks the moment the trajectory dot grazes ANY of them.
+// lists every position index that anchors the k-beat slot — one entry per prong angle.
+// The slot's hover ring locks the moment the trajectory dot grazes ANY of them.
 type ReticulePositions = { positions: Vec[]; primaryIndex: number; slotPositionIndices: number[][] };
 const computeReticulePositions = (
   ship: Ship, beatGrid: number, w: number, h: number, doubletime: boolean, superBoosted: boolean,
 ): ReticulePositions => {
-  const angleOffsets = ship.prongActive ? [-PRONG_SPREAD, PRONG_SPREAD] : [0];
+  const angleOffsets = prongOffsets(ship.prongCount);
   const primaryOffset = angleOffsets[0];
   const bulletLife = effectiveBulletLife(ship, superBoosted);
   const slotCount = Math.max(1, Math.floor(bulletLife / beatGrid));

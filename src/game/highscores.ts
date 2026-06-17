@@ -14,6 +14,7 @@ const BUCKET_LABELS: Record<KillBucket, string> = {
   bell: "bell",
   warble: "warble",
   goldCrystal: "gem",
+  goldGem: "gold gem",
   solidCrystal: "crystal",
   alien_big: "alien-L",
   alien_medium: "alien-M",
