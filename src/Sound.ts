@@ -520,6 +520,7 @@ export class Sound {
     // be created before the context exists, so this is the earliest we can do
     // it — runs once, on first user interaction.
     this.prewarmNoiseBuffers();
+    this.prerenderLaserShots();
     this.loadGuitarSample();
     // Kick off the baked-mp3 fetch + decode for every voice that has a baked
     // recipe. The title screen awaits bakedCacheReady() before letting the
@@ -5340,171 +5341,262 @@ export class Sound {
     }
   }
 
-  // Laser-shot weapon (the "lasershot" upgrade). Anchored on C so it stays in key
-  // with the bass field. Three voices stacked at C3 / C4 / C5 with a fast attack
-  // and a longer exponential tail — gives the "laser beam" read (rising/falling
-  // tonal sweep with a bright top) without sounding like a B-movie pew-pew. A
-  // touch of high-passed noise on the very front sells the muzzle ignition.
-  //   `dots` (0..4) is the main driver: deeper fundamental, longer tail, and a
-  //   bigger sub-thump/rumble per charge so a full 4-dot release booms; `damage`
-  //   only trims overall gain so it can't saturate at the new max.
+  // Length (s) of the rendered thunderclap buffer for a given charge tier.
+  // Must comfortably contain the longest layer (the last rolling echo at the
+  // top tier) plus its decay so nothing gets clipped off the tail.
+  private laserShotBufferLen(tier: number): number {
+    const chg = tier / 4;
+    // Longest tail: the final echo. Mirror the echo schedule below — the last
+    // of (2 + tier) rolls starts latest and is the longest.
+    const echoes = 2 + tier;
+    const lastDelay = (echoes - 1) * (0.13 + chg * 0.05);
+    const lastLen = (0.7 + chg * 1.1) * (1 + (echoes - 1) * 0.12);
+    const chordLen = 0.7 + chg * 1.3;
+    return Math.max(lastDelay + lastLen, chordLen) + 0.2;
+  }
+
+  // Builds the THUNDERCLAP synth graph for one charge tier into `ctx`, summed
+  // into `dest`, all scheduled relative to offline time 0. Shared by the
+  // pre-render pass (rendered into an OfflineAudioContext per tier and cached);
+  // nothing here reads live state, so it renders identically every time.
+  //
+  // The shot is both MELODIC and THUNDEROUS: a saturated, pitch-collapsing
+  // C-major chord (the "voice of god" tone, in key with the C-rooted bass
+  // field) booms out over a deep sub detonation, a bright crack on the leading
+  // edge, and a stack of staggered lowpassed rolls that read as thunder rolling
+  // off into the distance. Charge is the whole point — every layer deepens,
+  // lengthens, and the chord gains voices (the major third + upper octave) so a
+  // 0-dot tap is a sharp tonal clap and a 4-dot release is a sustained,
+  // triumphant roll of thunder. Peak gain is left near full here; per-shot
+  // trim/jitter happen at play time so a single buffer covers all damage values.
+  private buildLaserShotGraph(ctx: BaseAudioContext, dest: AudioNode, tier: number) {
+    const chg = tier / 4; // 0..1 charge ramp — the master expressiveness knob
+    const noiseFor = (dur: number): AudioBuffer => {
+      const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      return buf;
+    };
+
+    // Soft saturation curve — adds harmonics + glue so the chord/sub read as
+    // POWERFUL rather than clean. Mild tanh-ish shaper; charge pushes harder.
+    const drive = 2.2 + chg * 2.5;
+    const shaper = ctx.createWaveShaper();
+    {
+      const n = 1024;
+      const curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * 2 - 1;
+        curve[i] = Math.tanh(x * drive) / Math.tanh(drive);
+      }
+      shaper.curve = curve;
+      shaper.oversample = "2x";
+    }
+    // Everything tonal (chord + sub) routes through the saturator, then a gentle
+    // lowpass to tame fizz the shaper adds up top, then into dest.
+    const satOut = ctx.createBiquadFilter();
+    satOut.type = "lowpass";
+    satOut.frequency.value = 3200 + chg * 1800;
+    satOut.Q.value = 0.5;
+    shaper.connect(satOut);
+    satOut.connect(dest);
+
+    // --- Melodic chord: a low C-major voicing that swoops downward (the thunder
+    // pitch-bend) as it booms. Lower voices always present; the major third and
+    // bright upper octave fade in with charge so a full charge is a fuller, more
+    // resolved chord. All slightly detuned for width/power.
+    const chordLen = 0.7 + chg * 1.3;
+    // C2, G2, C3, E3, G3, C4 — root-heavy at the bottom, brightening up top.
+    const voices: Array<{ hz: number; type: OscillatorType; peak: number; bend: number }> = [
+      { hz: 65.41,  type: "sawtooth", peak: 0.26,                  bend: 0.84 }, // C2
+      { hz: 98.00,  type: "sawtooth", peak: 0.18,                  bend: 0.86 }, // G2
+      { hz: 130.81, type: "triangle", peak: 0.20,                  bend: 0.88 }, // C3
+      { hz: 164.81, type: "triangle", peak: 0.10 + chg * 0.10,     bend: 0.90 }, // E3 (major 3rd — grows w/ charge)
+      { hz: 196.00, type: "triangle", peak: 0.06 + chg * 0.06,     bend: 0.90 }, // G3
+      { hz: 261.63, type: "sine",     peak: chg * 0.10,            bend: 0.92 }, // C4 (top sparkle — charge only)
+    ];
+    for (const vc of voices) {
+      if (vc.peak <= 0.0001) continue;
+      // Two detuned oscillators per voice for a thick, "stacked" power-chord feel.
+      for (const det of [-6, 6]) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = vc.type;
+        // Start a touch sharp and sag down — the swoop. Deeper bend at higher charge.
+        const endHz = vc.hz * (vc.bend - chg * 0.06);
+        osc.frequency.setValueAtTime(vc.hz * 1.06, 0);
+        osc.frequency.exponentialRampToValueAtTime(endHz, chordLen * 0.8);
+        osc.detune.value = det;
+        gain.gain.setValueAtTime(0.0001, 0);
+        gain.gain.exponentialRampToValueAtTime(vc.peak * 0.5, 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.0001, chordLen);
+        osc.connect(gain);
+        gain.connect(shaper);
+        osc.start(0);
+        osc.stop(chordLen + 0.05);
+      }
+    }
+
+    // --- Sub detonation: a sine whose pitch collapses into infrasonic territory
+    // — the gut-punch under the clap. Deeper and longer with charge. Routes
+    // through the saturator too so it stays glued to the chord.
+    const subStart = 120 - chg * 35;
+    const subEnd = 33 - chg * 5;
+    const subLen = 0.45 + chg * 0.7;
+    {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(subStart, 0);
+      osc.frequency.exponentialRampToValueAtTime(subEnd, subLen * 0.7);
+      gain.gain.setValueAtTime(0.0001, 0);
+      gain.gain.exponentialRampToValueAtTime(0.6 + chg * 0.3, 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, subLen);
+      osc.connect(gain);
+      gain.connect(shaper);
+      osc.start(0);
+      osc.stop(subLen + 0.05);
+    }
+
+    // --- Thunder crack: the bright transient that gives the clap its "snap".
+    // Bandpassed noise slammed in at t=0; the band drops with charge so a full
+    // charge cracks lower and heavier while a tap cracks tight and high.
+    {
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseFor(0.14);
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.setValueAtTime(2600 - chg * 900, 0);
+      bp.frequency.exponentialRampToValueAtTime(800 - chg * 300, 0.1);
+      bp.Q.value = 0.6;
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 450;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.6 + chg * 0.25, 0);
+      gain.gain.exponentialRampToValueAtTime(0.0001, 0.1 + chg * 0.06);
+      noise.connect(bp);
+      bp.connect(hp);
+      hp.connect(gain);
+      gain.connect(dest);
+      noise.start(0);
+      noise.stop(0.18);
+    }
+
+    // --- Air/ozone hiss: a thin highpassed crackle on the very front, selling
+    // the "ionised air" sizzle of a discharge.
+    {
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseFor(0.08);
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 5000 + chg * 1500;
+      hp.Q.value = 0.5;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.16 + chg * 0.06, 0);
+      gain.gain.exponentialRampToValueAtTime(0.0001, 0.06);
+      noise.connect(hp);
+      hp.connect(gain);
+      gain.connect(dest);
+      noise.start(0);
+      noise.stop(0.1);
+    }
+
+    // --- Rolling thunder: a STACK of staggered lowpassed noise rolls, each
+    // later, lower, and longer than the last, so the energy tumbles away into
+    // the low end like real thunder rolling across the sky. Two rolls at a tap,
+    // up to six at full charge — this is what makes a big shot genuinely
+    // thunderous rather than a single hit.
+    const echoes = 2 + tier;
+    for (let e = 0; e < echoes; e++) {
+      const delay = e * (0.13 + chg * 0.05);
+      const rollLen = (0.7 + chg * 1.1) * (1 + e * 0.12);
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseFor(rollLen + 0.1);
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      // Each successive roll opens lower — energy sinking into the sub.
+      const cutStart = (560 + chg * 240) * Math.pow(0.78, e);
+      lp.frequency.setValueAtTime(cutStart, delay);
+      lp.frequency.exponentialRampToValueAtTime(55, delay + rollLen);
+      lp.Q.value = 1.0;
+      const gain = ctx.createGain();
+      // First roll is the loudest body; later rolls taper as they recede.
+      const peak = (0.34 + chg * 0.22) * Math.pow(0.72, e);
+      gain.gain.setValueAtTime(0.0001, delay);
+      gain.gain.exponentialRampToValueAtTime(peak, delay + 0.05 + e * 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, delay + rollLen);
+      noise.connect(lp);
+      lp.connect(gain);
+      gain.connect(dest);
+      noise.start(delay);
+      noise.stop(delay + rollLen + 0.08);
+    }
+  }
+
+  // Renders the thunderclap once per charge tier (0..4) into an AudioBuffer via
+  // OfflineAudioContext and caches it, so playLaserShot is a cheap buffer
+  // playback instead of allocating ~10 nodes per shot. Fire-and-forget; until a
+  // tier's render lands playLaserShot silent-misses that one shot (rare — the
+  // upgrade isn't active at context start). Re-runnable: skips tiers already
+  // cached or in flight.
+  private prerenderLaserShots() {
+    if (!this.ctx) return;
+    const OAC = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
+    if (!OAC) return;
+    const sr = this.ctx.sampleRate;
+    for (let tier = 0; tier <= 4; tier++) {
+      if (this.laserShotBuffers[tier] || this.laserShotRendering[tier]) continue;
+      this.laserShotRendering[tier] = true;
+      const length = Math.ceil(sr * this.laserShotBufferLen(tier));
+      const offline = new OAC(1, length, sr);
+      this.buildLaserShotGraph(offline, offline.destination, tier);
+      offline.startRendering().then((buf) => {
+        this.laserShotBuffers[tier] = buf;
+        this.laserShotRendering[tier] = false;
+      }).catch(() => { this.laserShotRendering[tier] = false; });
+    }
+  }
+
+  // One pre-rendered thunderclap buffer per charge tier (index 0..4). Filled
+  // lazily by prerenderLaserShots; null until that tier's render resolves.
+  private laserShotBuffers: (AudioBuffer | null)[] = [null, null, null, null, null];
+  private laserShotRendering: boolean[] = [false, false, false, false, false];
+
+  // Laser-shot weapon (the "lasershot" upgrade). A pre-rendered THUNDERCLAP —
+  // see buildLaserShotGraph for the synth and prerenderLaserShots for the
+  // bake. This path just plays the cached per-tier buffer with a per-shot
+  // playbackRate wobble (so a burst never sounds machine-stamped) and a small
+  // `damage` gain trim so the top tiers can't clip. `dots` (0..4) selects the
+  // tier; bigger charge = deeper, longer, more thunderous.
   playLaserShot(damage: number = 2, dots: number = 0) {
     if (!this.enabled) return;
     this.ensureContext();
-    if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    if (!this.ctx || !this.bakedOut) return;
     const tier = Math.max(0, Math.min(4, Math.floor(dots)));
-    // Drive scaling off the clamped tier (0..4); damage now reaches 32 and would
-    // saturate, so clamp it to a gentle gain trim rather than the main driver.
-    const intensity = Math.max(0.6, Math.min(1, 0.6 + tier * 0.1));
-    const damageTrim = Math.min(1, 0.85 + damage * 0.02);
-    // Deepen the fundamental and lengthen the tail as the shot charges so a
-    // 4-dot release reads as a chest-caving boom rather than a chirp.
-    const tail = 0.5 + tier * 0.16;
-    const detuneDrop = Math.pow(2, -tier / 12); // pull body pitch down per tier
-    // Four partials anchored on C, dropped an octave from the original mix so the
-    // shot reads as a chest-thump rather than a chirp. Sub (C2) + fundamental (C3)
-    // carry the body; C4 triangle is the recognisable beam-pitch; C5 sine adds air.
-    // Each gets a downward pitch slide (a fifth down over the tail) so the beam
-    // reads as "fired and travelling" rather than a static tone.
-    const partials: Array<{ hz: number; peak: number; type: OscillatorType; slide: number }> = [
-      { hz: 65.41 * detuneDrop,  peak: 0.34 * intensity * damageTrim, type: "sine",     slide: 0.55 }, // C2 sub
-      { hz: 130.81 * detuneDrop, peak: 0.30 * intensity * damageTrim, type: "triangle", slide: 0.6 }, // C3
-      { hz: 261.63 * detuneDrop, peak: 0.16 * intensity * damageTrim, type: "triangle", slide: 0.66 }, // C4
-      { hz: 523.25 * detuneDrop, peak: 0.08 * intensity * damageTrim, type: "sine",     slide: 0.74 }, // C5
-    ];
-    for (const p of partials) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = p.type;
-      osc.frequency.setValueAtTime(p.hz * 1.12, t);
-      osc.frequency.exponentialRampToValueAtTime(p.hz * p.slide, t + tail);
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(p.peak, t + 0.008);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
-      osc.connect(gain);
-      gain.connect(this.master);
-      osc.start(t);
-      osc.stop(t + tail + 0.05);
+    const buf = this.laserShotBuffers[tier];
+    if (!buf) {
+      // Render hasn't landed yet (or failed) — kick it for next time and bail.
+      this.prerenderLaserShots();
+      return;
     }
-    // Sub-thump impact: detuned saw pair through a lowpass for the gut-punch
-    // front edge — the dominant character of the shot. Deepens, lengthens and
-    // swells with charge so a full hold lands like a mortar.
-    const thumpLen = 0.28 + tier * 0.12;
-    const thumpFilter = this.ctx.createBiquadFilter();
-    thumpFilter.type = "lowpass";
-    thumpFilter.frequency.setValueAtTime(420, t);
-    thumpFilter.frequency.exponentialRampToValueAtTime(110, t + thumpLen);
-    thumpFilter.Q.value = 7;
-    const thumpGain = this.ctx.createGain();
-    const thumpPeak = (0.3 + tier * 0.045) * intensity;
-    thumpGain.gain.setValueAtTime(0.0001, t);
-    thumpGain.gain.exponentialRampToValueAtTime(thumpPeak, t + 0.005);
-    thumpGain.gain.exponentialRampToValueAtTime(0.0001, t + thumpLen);
-    thumpFilter.connect(thumpGain);
-    thumpGain.connect(this.master);
-    const thumpHz = 98 * detuneDrop; // G2-ish — fifth under the C body
-    for (const detune of [-7, 7]) {
-      const osc = this.ctx.createOscillator();
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(thumpHz, t);
-      osc.frequency.exponentialRampToValueAtTime(thumpHz * 0.5, t + thumpLen);
-      osc.detune.value = detune;
-      osc.connect(thumpFilter);
-      osc.start(t);
-      osc.stop(t + thumpLen + 0.06);
-    }
-    // Charge-tier shimmer: a C6 sine + G6 partial layered on top, scaling with tier.
-    if (tier >= 1) {
-      const shimmers: Array<{ hz: number; peakMult: number; tailMult: number }> = [
-        { hz: 1046.50, peakMult: 0.09, tailMult: 0.75 },
-        { hz: 1567.98, peakMult: 0.045, tailMult: 0.55 }, // G6 fifth — sparkle
-      ];
-      for (const s of shimmers) {
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(s.hz, t);
-        osc.frequency.exponentialRampToValueAtTime(s.hz * 0.84, t + tail * s.tailMult);
-        const peak = s.peakMult * tier * 0.6;
-        gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t + tail * s.tailMult);
-        osc.connect(gain);
-        gain.connect(this.master);
-        osc.start(t);
-        osc.stop(t + tail * s.tailMult + 0.05);
-      }
-    }
-    // Muzzle ignition: a brief high-passed noise crack at t=0 gives the front
-    // of the beam an attack edge — without it the sines feel airy and timid.
-    const noiseBuf = this.makeNoiseBuffer(0.05);
-    if (noiseBuf) {
-      const noise = this.ctx.createBufferSource();
-      noise.buffer = noiseBuf;
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = "highpass";
-      filter.frequency.value = 1800;
-      filter.Q.value = 0.7;
-      const gain = this.ctx.createGain();
-      const noisePeak = 0.16 * intensity;
-      gain.gain.setValueAtTime(noisePeak, t);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
-      noise.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.master);
-      noise.start(t);
-      noise.stop(t + 0.06);
-    }
-    // Whip-crack snap: a razor-thin high-passed noise transient slammed in and
-    // out at t=0 so the very leading edge cracks like a lightning snap. Brighter
-    // and a touch hotter with charge, but clearly present even at zero dots.
-    const snapBuf = this.makeNoiseBuffer(0.02);
-    if (snapBuf) {
-      const snap = this.ctx.createBufferSource();
-      snap.buffer = snapBuf;
-      const hp = this.ctx.createBiquadFilter();
-      hp.type = "highpass";
-      hp.frequency.value = 4200 + tier * 600;
-      hp.Q.value = 0.5;
-      const peaker = this.ctx.createBiquadFilter();
-      peaker.type = "peaking";
-      peaker.frequency.value = 6500 + tier * 500;
-      peaker.Q.value = 1.4;
-      peaker.gain.value = 6;
-      const gain = this.ctx.createGain();
-      const snapPeak = (0.22 + tier * 0.03) * damageTrim;
-      gain.gain.setValueAtTime(snapPeak, t);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.012);
-      snap.connect(hp);
-      hp.connect(peaker);
-      peaker.connect(gain);
-      gain.connect(this.master);
-      snap.start(t);
-      snap.stop(t + 0.03);
-    }
-    // Low-band ignition rumble — lowpassed noise burst that supports the
-    // sub-thump; swells in length and weight with charge for the thunder.
-    const rumbleLen = 0.24 + tier * 0.14;
-    const rumbleBuf = this.makeNoiseBuffer(rumbleLen + 0.05);
-    if (rumbleBuf) {
-      const noise = this.ctx.createBufferSource();
-      noise.buffer = rumbleBuf;
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(260, t);
-      filter.frequency.exponentialRampToValueAtTime(75, t + rumbleLen);
-      filter.Q.value = 0.9;
-      const gain = this.ctx.createGain();
-      const peak = (0.18 + tier * 0.035) * intensity;
-      gain.gain.setValueAtTime(peak, t);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + rumbleLen);
-      noise.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.master);
-      noise.start(t);
-      noise.stop(t + rumbleLen + 0.04);
-    }
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    // ±~0.35 semitone wobble per shot, derived from play time (no shared
+    // Math.random determinism concerns on the live path).
+    const wob = ((t * 53.7) % 1) * 2 - 1;
+    src.playbackRate.value = Math.pow(2, (wob * 0.35) / 12);
+    const gain = ctx.createGain();
+    // The render sums many hot layers (saturated chord + sub + crack + rolls),
+    // so trim the playback so it sits in the mix without slamming the bus.
+    // `damage` rides a small bump on top so a 32-damage shot lands a touch hotter.
+    gain.gain.value = Math.min(0.72, 0.6 + damage * 0.004);
+    src.connect(gain);
+    gain.connect(this.bakedOut);
+    src.start(t);
   }
 
   // Per-dot charge tick — fires when a new charge dot appears in front of the

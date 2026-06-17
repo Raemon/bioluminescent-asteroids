@@ -82,8 +82,12 @@ export class LaserBeam {
   seed: number;
   // Targets already damaged so a sweeping beam doesn't re-hit them each frame.
   alreadyHit: Set<Asteroid | Alien | Comet>;
+  // Targets that existed when the beam first fired. The sweep only ever damages
+  // these, so things spawned mid-beam (kill-spawned children, freshly-warped
+  // enemies) can't be hit as the beam ages — only what was there at fire time.
+  eligible: Set<Asteroid | Alien | Comet>;
 
-  constructor(ship: Ship, length: number, damage: number, dots: number) {
+  constructor(ship: Ship, length: number, damage: number, dots: number, game: Game) {
     this.ship = ship;
     this.heading = ship.heading;
     this.origin = muzzleOf(ship);
@@ -95,6 +99,7 @@ export class LaserBeam {
     this.seed = rng() * Math.PI * 2;
     this.jags = [];
     this.alreadyHit = new Set();
+    this.eligible = new Set([...game.asteroids, ...game.aliens, ...game.comets]);
     if (dots >= 2) {
       const n = 14;
       for (let i = 0; i < n; i++) this.jags.push((rng() * 2 - 1) * LASER_JAG_AMPLITUDE);
@@ -232,7 +237,7 @@ const fireLaser = (game: Game, ship: Ship, dots: number) => {
   } else {
     loseCombo(game, ship.pos);
   }
-  const beam = new LaserBeam(ship, length, damage, dots);
+  const beam = new LaserBeam(ship, length, damage, dots, game);
   game.lasers.push(beam);
   game.sound.playLaserShot(damage, dots);
   game.shake = Math.min(game.shake + 0.12 + dots * 0.12, 1.4);
@@ -273,7 +278,9 @@ const applyBeamToAsteroids = (game: Game, beam: LaserBeam, dir: Vec) => {
   const surviving: Asteroid[] = [];
   for (const a of game.asteroids) {
     const { distance, t } = distanceToBeam(origin, dir, length, a.pos);
-    if (distance > a.radius + halfW || beam.alreadyHit.has(a)) { surviving.push(a); continue; }
+    if (distance > a.radius + halfW || beam.alreadyHit.has(a) || !beam.eligible.has(a)) {
+      surviving.push(a); continue;
+    }
     beam.alreadyHit.add(a);
     const hitPos = v(origin.x + dir.x * t, origin.y + dir.y * t);
     const fakeBullet = makeFakeBullet(hitPos, dir);
@@ -301,7 +308,9 @@ const applyBeamToAliens = (game: Game, beam: LaserBeam, dir: Vec) => {
   const surviving: Alien[] = [];
   for (const al of game.aliens) {
     const { distance, t } = distanceToBeam(origin, dir, length, al.pos);
-    if (distance > al.radius + halfW || beam.alreadyHit.has(al)) { surviving.push(al); continue; }
+    if (distance > al.radius + halfW || beam.alreadyHit.has(al) || !beam.eligible.has(al)) {
+      surviving.push(al); continue;
+    }
     beam.alreadyHit.add(al);
     const hitPos = v(origin.x + dir.x * t, origin.y + dir.y * t);
     const fakeBullet = makeFakeBullet(hitPos, dir);
@@ -329,7 +338,9 @@ const applyBeamToComets = (game: Game, beam: LaserBeam, dir: Vec) => {
   const surviving: Comet[] = [];
   for (const c of game.comets) {
     const { distance, t } = distanceToBeam(origin, dir, length, c.pos);
-    if (distance > c.radius + halfW || beam.alreadyHit.has(c)) { surviving.push(c); continue; }
+    if (distance > c.radius + halfW || beam.alreadyHit.has(c) || !beam.eligible.has(c)) {
+      surviving.push(c); continue;
+    }
     beam.alreadyHit.add(c);
     const hitPos = v(origin.x + dir.x * t, origin.y + dir.y * t);
     const fakeBullet = makeFakeBullet(hitPos, dir);
