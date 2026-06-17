@@ -13,7 +13,7 @@ export const ENTITY_CONFIG = {
 
   rhythm: {
     chancePerCombo: 0.01,
-    speedPerCombo: 0.05,
+    speedPerCombo: 0.0375,
   },
 
   // dampens remaining headline rolls once one fires, so they rarely stack.
@@ -22,10 +22,14 @@ export const ENTITY_CONFIG = {
   },
 
   asteroid: {
-    radius: { large: 50, medium: 28, small: 16 } as Record<AsteroidSize, number>,
-    hp: { large: 4, medium: 2, small: 1 } as Record<AsteroidSize, number>,
-    score: { large: 20, medium: 50, small: 100 } as Record<AsteroidSize, number>,
+    // "huge" is the twice-as-big tier: 2× a large rock's radius, 8 HP, and it
+    // cleaves into a mass-conserving combo of large/medium/small (the 2-2-2-2
+    // ladder: 1 huge = 2 large = 4 medium = 8 small). See Asteroid.splitRegular.
+    radius: { huge: 100, large: 50, medium: 28, small: 16 } as Record<AsteroidSize, number>,
+    hp: { huge: 8, large: 4, medium: 2, small: 1 } as Record<AsteroidSize, number>,
+    score: { huge: 10, large: 20, medium: 50, small: 100 } as Record<AsteroidSize, number>,
     spawnSpeed: {
+      huge: [28, 70],
       large: [40, 90],
       medium: [55, 105],
       small: [60, 110],
@@ -99,6 +103,14 @@ export const ENTITY_CONFIG = {
     // shorter than a comet — fast movers clear the field quickly.
     lifetime: [10, 14] as [number, number],
     baseScore: 500,
+    // One wave runs a guaranteed oversized swarm a few seconds in, with its
+    // own thinned-out asteroid field so the swarm is the headline threat.
+    swarmWave: {
+      wave: 11,
+      count: [6, 16] as [number, number],
+      delay: [3, 5] as [number, number],
+      asteroidCountMul: 0.5,
+    },
   },
 
   shockwave: {
@@ -130,6 +142,18 @@ export const ENTITY_CONFIG = {
     // player reads it as a "consolation jackpot" rather than a miss.
     upgradeChance: 0.4,
     revealScore: 250,
+  },
+
+  // Gem swarm — the gold-diamond cousin of the meteor shower. A flock of
+  // goldCrystal rocks sweeps across the field; each kill rolls the normal
+  // gem-drop, so it's a brief dense window of "kill them for upgrades".
+  // Rarer than the meteor shower and held back until the player knows the
+  // gem-drop dynamic cold.
+  gemSwarm: {
+    firstWave: 6,
+    chancePerWave: 1 / 14,
+    spawnWindow: [6, 22] as [number, number],
+    count: [5, 10] as [number, number],
   },
 
   // Solid crystal: tougher than a regular gem rock (16 HP + 4× small fragments).
@@ -164,15 +188,18 @@ export const ENTITY_CONFIG = {
   },
 
   // Glass prison — appears from display-level 11 onward (internal wave 12+,
-  // immediately after the boss fight). Sixteen-HP indigo crystal shell with
-  // a wraith locked inside; the killing hit shatters the shell and frees
-  // the wraith.
+  // immediately after the boss fight). Fragile indigo crystal shell with
+  // wraiths locked inside; the single killing hit shatters the shell and
+  // frees a brood of wraiths.
   glassPrison: {
     firstWave: 12,
     perSpawnChance: 0.33,
     radius: 46,
-    hp: 16,
+    hp: 1,
     score: 600,
+    // Wraiths released when the shell shatters (inclusive range).
+    minWraiths: 2,
+    maxWraiths: 4,
     // Heavy — drifts in slower than its size band suggests so the player has
     // time to read "do I want to crack this thing open?" before committing.
     spawnSpeedMul: 0.55,
@@ -208,9 +235,11 @@ export const ENTITY_CONFIG = {
     // are the hemispheres — kept close to the full-body radius so the halves
     // read as genuine cleaved chunks of the planet, not shrunken mediums.
     // Smalls are the plate fragments that come off them.
-    radius: { large: 132, medium: 104, small: 30 } as Record<AsteroidSize, number>,
-    hp: { large: 60, medium: 18, small: 6 } as Record<AsteroidSize, number>,
-    score: { large: 2500, medium: 800, small: 300 } as Record<AsteroidSize, number>,
+    // The boss has no "huge" tier; the huge entries mirror large purely to
+    // satisfy the Record<AsteroidSize> shape and are never read.
+    radius: { huge: 132, large: 132, medium: 104, small: 30 } as Record<AsteroidSize, number>,
+    hp: { huge: 60, large: 60, medium: 18, small: 6 } as Record<AsteroidSize, number>,
+    score: { huge: 2500, large: 2500, medium: 800, small: 300 } as Record<AsteroidSize, number>,
     // The eye-core is a third gen-1 fragment alongside the two hemispheres:
     // smaller, slightly less HP, keeps shooting until destroyed. On death it
     // breaks into 2 iris shards + 1 inert pupil ember (all small-size).

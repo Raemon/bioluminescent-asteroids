@@ -35,7 +35,7 @@ type Nucleus = {
   pulseSpeed: number;
 };
 
-export type AsteroidSize = "large" | "medium" | "small";
+export type AsteroidSize = "huge" | "large" | "medium" | "small";
 
 // "bassA" / "bassB" / "bassC" / "bassD" are the four layered bassteroid
 // kinds — one per beat slot in a 4-beat measure (4 beats × 0.5s = 2s at
@@ -188,6 +188,9 @@ const BASS_HALO_GAP_PX = 8;
 // four hits to crack a large bassteroid, matching the "armoured" silhouette.
 export const BASS_HP_MULTIPLIER = ENTITY_CONFIG.bassteroid.hpMultiplier;
 export const BASS_HP: Record<AsteroidSize, number> = {
+  // Bassteroids never spawn at "huge"; the entry mirrors the scaled large so
+  // the Record shape is satisfied and is never read.
+  huge: ASTEROID_HP.huge * BASS_HP_MULTIPLIER,
   large: ASTEROID_HP.large * BASS_HP_MULTIPLIER,
   medium: ASTEROID_HP.medium * BASS_HP_MULTIPLIER,
   small: ASTEROID_HP.small * BASS_HP_MULTIPLIER,
@@ -200,9 +203,9 @@ export const SOLID_CRYSTAL_HP_LARGE = ENTITY_CONFIG.solidCrystal.largeHp;
 export const SOLID_CRYSTAL_HP_SMALL = ENTITY_CONFIG.solidCrystal.smallHp;
 export const SOLID_CRYSTAL_DAMAGE_REDUCTION = ENTITY_CONFIG.solidCrystal.damageReduction;
 
-// Glass prison — the shell that locks a wraith in stasis. Tougher than a
-// solid crystal so even a rhythm-saturated player has to commit to breaking
-// one open. On death the prison spawns a single wraith at its position.
+// Glass prison — the shell that locks a brood of wraiths in stasis. Fragile:
+// a single hit cracks it open. On death the prison spawns 2-4 wraiths at its
+// position.
 export const GLASS_PRISON_HP = ENTITY_CONFIG.glassPrison.hp;
 export const GLASS_PRISON_RADIUS = ENTITY_CONFIG.glassPrison.radius;
 // Wraith — the freed captive. HP is low (it's a wisp, not armoured), but
@@ -1150,13 +1153,13 @@ export class Asteroid {
     else if (kind === "columnDrum" || kind === "rubbleBlock") this.outlineSamples = 16;
     this.outline = this.computeOutline();
     this.nuclei = [];
-    const nucleusCount = size === "large" ? 5 : size === "medium" ? 3 : 2;
+    const nucleusCount = size === "huge" ? 7 : size === "large" ? 5 : size === "medium" ? 3 : 2;
     const nucleusIndices = Array.from({ length: nucleusCount }, (_, i) => i);
     for (const i of nucleusIndices) {
       this.nuclei.push({
         angle: (i / nucleusCount) * TAU + rand(-0.3, 0.3),
         dist: rand(0.15, 0.55) * this.radius,
-        size: rand(2, 4) * (size === "large" ? 1.3 : 1),
+        size: rand(2, 4) * (size === "huge" ? 1.6 : size === "large" ? 1.3 : 1),
         pulsePhase: rand(0, TAU),
         pulseSpeed: rand(1.2, 2.4),
       });
@@ -1361,7 +1364,7 @@ export class Asteroid {
 
     ctx.save();
     ctx.clip();
-    const filamentCount = this.size === "large" ? 6 : this.size === "medium" ? 4 : 3;
+    const filamentCount = this.size === "huge" ? 8 : this.size === "large" ? 6 : this.size === "medium" ? 4 : 3;
     ctx.strokeStyle = `hsla(${baseHue + 5}, ${isPlain ? 6 : 90}%, 70%, 0.18)`;
     ctx.lineWidth = 0.6;
     const filamentIndexList = Array.from({ length: filamentCount }, (_, i) => i);
@@ -3335,18 +3338,31 @@ export class Asteroid {
       }
       return fragmentList;
     }
-    // Glass prison: shatters into a single wraith born at the prison's
+    // Glass prison: shatters into a brood of wraiths born at the prison's
     // centre + a few inert crystal fragments fanning out from the impact.
-    // The wraith starts stationary (its tickWraith emerge phase handles the
+    // The wraiths start stationary (their tickWraith emerge phase handles the
     // fade-in); the shards fly outward fast so the visual reads as "the
-    // prison just broke open and something stepped out".
+    // prison just broke open and several things stepped out".
     if (this.kind === "glassPrison") {
       const baseAngle = impactDir
         ? Math.atan2(impactDir.y, impactDir.x)
         : Math.atan2(this.vel.y, this.vel.x);
       const fragmentList: Asteroid[] = [];
-      const wraith = new Asteroid({ x: this.pos.x, y: this.pos.y }, v(0, 0), "medium", undefined, "wraith");
-      fragmentList.push(wraith);
+      const { minWraiths, maxWraiths } = ENTITY_CONFIG.glassPrison;
+      const wraithCount = Math.round(rand(minWraiths, maxWraiths));
+      // Spread the brood around the prison centre so they don't stack into one
+      // sprite; each gets a small positional offset and the same stationary
+      // emerge contract as the original lone wraith.
+      for (let i = 0; i < wraithCount; i++) {
+        const spreadAngle = baseAngle + (i - (wraithCount - 1) / 2) * 0.8;
+        const spreadDist = wraithCount > 1 ? this.radius * 0.35 : 0;
+        const wraithPos = {
+          x: this.pos.x + Math.cos(spreadAngle) * spreadDist,
+          y: this.pos.y + Math.sin(spreadAngle) * spreadDist,
+        };
+        const wraith = new Asteroid(wraithPos, v(0, 0), "medium", undefined, "wraith");
+        fragmentList.push(wraith);
+      }
       // Three small crystal shards as the prison's broken pieces. Reuse the
       // solidCrystalSmall kind so they look like cut glass and ring on hit;
       // they hand the player a small extra payout for cracking the prison.
@@ -3498,9 +3514,11 @@ export class Asteroid {
     // When the pulverise fires, pick line vs cross 50/50.
     const pulveriseCross = pulverise && rng() < 0.5;
 
-    // Mass units (small = 1, medium = 8, large = 64). Used only for the
-    // momentum-balance arithmetic below, not for any other game system.
-    const massOf = (s: AsteroidSize): number => (s === "small" ? 1 : s === "medium" ? 8 : 64);
+    // Mass units (small = 1, medium = 8, large = 64, huge = 128). Used only for
+    // the momentum-balance arithmetic below, not for any other game system.
+    // Huge follows the gameplay ladder (1 huge = 2 large) rather than the
+    // geometric 8× so the break math matches the 2-2-2-2 fragment recipes.
+    const massOf = (s: AsteroidSize): number => (s === "small" ? 1 : s === "medium" ? 8 : s === "large" ? 64 : 128);
 
     // Each fragment carries a perpendicular kick (signed, in px/s along n̂)
     // and a forward bullet-kick (in px/s along d̂). The fragment's final
@@ -3518,8 +3536,46 @@ export class Asteroid {
     // cloud's centre-of-mass picks up a touch of the bullet's momentum.
     const BULLET_PUSH = 50;
 
+    // Build a momentum-conserving fan from a fixed list of child sizes: fan
+    // them across the perpendicular axis, then null out net perpendicular
+    // momentum by subtracting the mass-weighted mean perp kick. The forward
+    // bullet push shifts the whole rubble cloud slightly along the bullet line.
+    const fanSpecs = (sizes: AsteroidSize[]): FragSpec[] => {
+      const n = sizes.length;
+      const raw = sizes.map((size, i) => {
+        // Spread evenly across [-1, 1] of the perp axis; a lone fragment goes
+        // straight forward (perp 0). Heavier pieces ride nearer the centre.
+        const t = n === 1 ? 0 : (i / (n - 1)) * 2 - 1;
+        return { size, perp: t * PERP_BURST * 1.25 };
+      });
+      const totalMass = raw.reduce((s, f) => s + massOf(f.size), 0);
+      const meanPerp = raw.reduce((s, f) => s + massOf(f.size) * f.perp, 0) / totalMass;
+      return raw.map((f) => ({
+        size: f.size,
+        perpKick: f.perp - meanPerp,
+        bulletKick: BULLET_PUSH,
+      }));
+    };
+
     let specs: FragSpec[];
-    if (this.size === "large" && this.kind === "goldCrystal") {
+    if (this.size === "huge") {
+      // Twice-as-big rock: cleaves into a mass-conserving combo along the
+      // 2-2-2-2 ladder (1 huge = 2 large = 4 medium = 8 small). Roll one of a
+      // few mixed recipes — pure 2-large, blends, and the full pulverise — so
+      // the same monster reads differently each kill. Every recipe sums to the
+      // same large-equivalent mass (2.0 large-units).
+      const HUGE_RECIPES: AsteroidSize[][] = [
+        ["large", "large"],
+        ["large", "medium", "medium"],
+        ["large", "medium", "small", "small"],
+        ["medium", "medium", "medium", "medium"],
+        ["large", "medium", "medium"],
+        ["medium", "medium", "small", "small", "small", "small"],
+        ["small", "small", "small", "small", "small", "small", "small", "small"],
+      ];
+      const recipe = HUGE_RECIPES[Math.floor(rng() * HUGE_RECIPES.length)];
+      specs = fanSpecs(recipe);
+    } else if (this.size === "large" && this.kind === "goldCrystal") {
       // Gold-crystal large drops the embedded crystal pickup as its primary
       // payload (handled by killEffects), and only spits out a small handful
       // of fragments instead of the usual 2-medium / 4-small patterns. The
@@ -5628,4 +5684,47 @@ export const spawnAsteroidAtEdge = (
   const [speedMin, speedMax] = SIZE_SPAWN_SPEED[size];
   const speed = rand(speedMin, speedMax);
   return new Asteroid(pos, v(dirX * speed, dirY * speed), size, hue, kind);
+};
+
+// A gem swarm: a flock of gold-crystal rocks streaking across the field the
+// same way a meteor shower does — shared heading, spread across the entry
+// edge, staggered diagonally so they trail rather than arrive as a wall.
+// Unlike the meteor shower these are real goldCrystal asteroids, so each kill
+// runs the normal embedded-gem drop (upgradeChance) — a brief, dense window
+// of "kill them for upgrades". They cross at a brisk single-screen-width clip
+// so the player has to comb through them before they drift off.
+const GEM_SWARM_SPEED_MULT = 1.5;
+export const spawnGemSwarm = (w: number, h: number, count: number): Asteroid[] => {
+  const edge = Math.floor(rng() * 4);
+  const offset = 120;
+  let origin: Vec;
+  if (edge === 0) origin = v(-offset, rand(h * 0.15, h * 0.85));
+  else if (edge === 1) origin = v(w + offset, rand(h * 0.15, h * 0.85));
+  else if (edge === 2) origin = v(rand(w * 0.15, w * 0.85), -offset);
+  else origin = v(rand(w * 0.15, w * 0.85), h + offset);
+
+  const target = v(rand(w * 0.3, w * 0.7), rand(h * 0.3, h * 0.7));
+  const angle = Math.atan2(target.y - origin.y, target.x - origin.x);
+
+  // Unit vectors along + perpendicular to the heading, to lay the flock out.
+  const along = fromAngle(angle, 1);
+  const perp = v(-along.y, along.x);
+
+  const gems: Asteroid[] = [];
+  for (let i = 0; i < count; i++) {
+    // Spread across the perpendicular (centred on origin) and stagger back
+    // along the heading so later gems trail the leaders.
+    const spread = (i - (count - 1) / 2) * rand(48, 78);
+    const lag = i * rand(50, 110);
+    const pos = v(
+      origin.x + perp.x * spread - along.x * lag,
+      origin.y + perp.y * spread - along.y * lag,
+    );
+    // Small gems read as "many diamonds" and die in one clean hit; the brisk
+    // shared speed keeps the flock crossing as one diagonal sweep.
+    const [speedMin, speedMax] = SIZE_SPAWN_SPEED.small;
+    const speed = rand(speedMin, speedMax) * GEM_SWARM_SPEED_MULT;
+    gems.push(new Asteroid(pos, fromAngle(angle, speed), "small", undefined, "goldCrystal"));
+  }
+  return gems;
 };

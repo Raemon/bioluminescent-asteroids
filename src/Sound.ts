@@ -219,6 +219,7 @@ export type SoundName =
   | "cometDestroyed"
   | "cometDestroyedSad"
   | "meteorShower"
+  | "gemSwarm"
   | "canisterAppear"
   | "canisterDestroyed"
   | "comboLost"
@@ -505,7 +506,7 @@ export class Sound {
   // missing entries still work (lazy alloc on first call), they just pay
   // the spawn-time stutter you're avoiding here.
   private prewarmNoiseBuffers() {
-    const durations = [0.018, 0.025, 0.08, 0.18, 0.3, 0.34, 0.4, 0.55, 2.5, 3, 4, 6, 8];
+    const durations = [0.018, 0.025, 0.08, 0.18, 0.3, 0.34, 0.4, 0.55, 1.3, 2.5, 3, 4, 6, 8];
     for (const d of durations) this.makeNoiseBuffer(d);
   }
 
@@ -2464,6 +2465,86 @@ export class Sound {
     }
   }
 
+  // The gem swarm's entrance — the sparkling-treasure cousin of the meteor
+  // shower's falling shriek. Where the shower descends and snarls, this one
+  // *rises and glitters*: a quick ascending C-major-pentatonic arpeggio of
+  // glassy bell tones, each one blooming with a bright sine harmonic and a
+  // little detuned shimmer partner, capped by a high sparkle wash. The
+  // pentatonic on C stays consonant with the C-rooted bass field so the
+  // flourish lands as "ooh, gold" rather than a clash.
+  playGemSwarm() {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const master = this.master;
+    const t = ctx.currentTime;
+
+    // C-major pentatonic climbing C5 → E5 → G5 → A5 → C6 → D6, the last two
+    // notes ringing into the octave so the gesture feels like it lifts off.
+    const notes = [523.25, 659.25, 783.99, 880.0, 1046.5, 1174.66];
+    const step = 0.075;
+    notes.forEach((freq, i) => {
+      const nt = t + i * step;
+      // Slight upward velocity arc — later (higher) notes a touch brighter,
+      // so the run sparkles harder as it climbs.
+      const vel = 0.16 + 0.03 * i;
+
+      // Glassy body: a triangle for the fundamental plus a quiet sine two
+      // octaves up for the "struck crystal" ping. Each rings ~0.5s with a
+      // fast attack and a long bell-like tail.
+      const ring = 0.55;
+      for (const [type, mult, lvl] of [["triangle", 1, vel], ["sine", 2, vel * 0.5], ["sine", 4.01, vel * 0.18]] as const) {
+        const osc = ctx.createOscillator();
+        osc.type = type;
+        // Tiny detune on the partners gives a shimmering chorus beat.
+        osc.frequency.setValueAtTime(freq * mult * (mult === 1 ? 1 : 1.004), nt);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, nt);
+        g.gain.exponentialRampToValueAtTime(lvl, nt + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.0001, nt + ring);
+        osc.connect(g);
+        g.connect(master);
+        osc.start(nt);
+        osc.stop(nt + ring + 0.05);
+      }
+    });
+
+    // High sparkle wash: filtered noise through a high bandpass, gated with a
+    // shimmering tremolo so it reads as a fine spray of glints behind the
+    // arpeggio rather than a flat hiss. Rises in with the run, fades after.
+    const dur = notes.length * step + 0.6;
+    const sparkleBuf = this.makeNoiseBuffer(1.3);
+    if (sparkleBuf) {
+      const sparkle = ctx.createBufferSource();
+      sparkle.buffer = sparkleBuf;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.Q.value = 2.5;
+      bp.frequency.setValueAtTime(4000, t);
+      bp.frequency.exponentialRampToValueAtTime(9000, t + dur);
+      const sg = ctx.createGain();
+      sg.gain.setValueAtTime(0.0001, t);
+      sg.gain.exponentialRampToValueAtTime(0.12, t + 0.08);
+      sg.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      // Tremolo to break the wash into glints.
+      const trem = ctx.createOscillator();
+      trem.type = "sine";
+      trem.frequency.setValueAtTime(18, t);
+      const tremGain = ctx.createGain();
+      tremGain.gain.value = 0.6;
+      trem.connect(tremGain);
+      tremGain.connect(sg.gain);
+      trem.start(t);
+      trem.stop(t + dur + 0.2);
+      sparkle.connect(bp);
+      bp.connect(sg);
+      sg.connect(master);
+      sparkle.start(t);
+      sparkle.stop(t + dur + 0.2);
+    }
+  }
+
   stopAllCometShimmers() {
     for (const key of Array.from(this.cometShimmers.keys())) this.stopCometShimmer(key);
   }
@@ -3494,6 +3575,7 @@ export class Sound {
       case "cometDestroyed": this.playCometDestroyed(); break;
       case "cometDestroyedSad": this.playCometDestroyedSad(); break;
       case "meteorShower": this.playMeteorShower(); break;
+      case "gemSwarm": this.playGemSwarm(); break;
       case "canisterAppear": this.playCanisterAppear(); break;
       case "canisterDestroyed": this.playCanisterDestroyed(); break;
       case "comboLost": this.playComboLost(); break;
@@ -5730,162 +5812,167 @@ export class Sound {
     }
   }
 
-  // Haunting wraith scream — the sound the captive makes the moment the
-  // glass prison shatters. Tuned to C-minor so it reads as a sung cry, not
-  // a siren. Built from layered voices:
-  //   (1) An initial "crack" noise burst — the shell breaking.
-  //   (2) A detuned-sawtooth cry pinned to scale degrees: snaps UP from G4
-  //       to the C5 peak (the moment of pain) before sagging down and
-  //       settling on Eb3, the haunting minor third.
-  //   (2b) Sub-octave sine doubling — gives the cry weight.
-  //   (2c) A piercing high overtone at a dissonant interval (a minor 9th
-  //        above the fundamental) — the "fingernails on the throat" layer
-  //        that makes the scream physically uncomfortable.
-  //   (2d) A mid-scream "sob break" — a brief duck and re-attack, like the
-  //        cry catches in the throat and starts again.
-  //   (3) A bandpass-swept noise voice tracking the fundamental — adds the
-  //       breath/throat texture so the cry doesn't read as a pure synth tone.
-  //   (4) A slow sub thrum that swells in late — the dread/presence sub-bass.
-  //   (5) A reverb-style ringing tail.
+  // One sustained choral "voice" for the wraith sounds — a small section of
+  // singers on a single pitch (or glide). Several lightly-detuned oscillators
+  // give the airy beating shimmer of many voices on one note; a slow vibrato
+  // and a breathy formant lowpass make it read as sung "aah" rather than a
+  // synth tone. Returns nothing; wires itself to master. `freqAt` lets the
+  // caller schedule a pitch glide; pass a single number for a held note.
+  private wraithChoirVoice(opts: {
+    t: number;
+    dur: number;
+    startHz: number;
+    endHz?: number;
+    glideT?: number;
+    peak: number;
+    attack?: number;
+    release?: number;
+    vibratoHz?: number;
+    vibratoCents?: number;
+    type?: OscillatorType;
+    brightness?: number;
+  }) {
+    if (!this.ctx || !this.master) return;
+    const t = opts.t;
+    const dur = opts.dur;
+    const endHz = opts.endHz ?? opts.startHz;
+    const glideT = opts.glideT ?? dur * 0.5;
+    const attack = opts.attack ?? 0.12;
+    const release = opts.release ?? dur * 0.4;
+    const type: OscillatorType = opts.type ?? "sine";
+    const brightness = opts.brightness ?? 2.0; // formant cutoff = endHz * brightness, floored
+
+    // Breathy formant lowpass — keeps a vocal "aah" warmth, no harsh edge.
+    const formant = this.ctx.createBiquadFilter();
+    formant.type = "lowpass";
+    formant.Q.value = 1.2;
+    formant.frequency.setValueAtTime(Math.max(900, opts.startHz * brightness), t);
+    formant.frequency.exponentialRampToValueAtTime(Math.max(700, endHz * brightness), t + dur);
+
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(opts.peak, t + attack);
+    env.gain.setValueAtTime(opts.peak, t + Math.max(attack, dur - release));
+    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    formant.connect(env);
+    env.connect(this.master);
+
+    // Shared gentle vibrato — the human "almost in tune" wobble of a choir.
+    const vibrato = this.ctx.createOscillator();
+    vibrato.type = "sine";
+    vibrato.frequency.value = opts.vibratoHz ?? 4.6;
+    const vibratoGain = this.ctx.createGain();
+    vibratoGain.gain.value = opts.vibratoCents ?? 9;
+    vibrato.connect(vibratoGain);
+    vibrato.start(t);
+    vibrato.stop(t + dur + 0.05);
+
+    // A small section of detuned singers on the one part. Sine/triangle only —
+    // no sawtooth — so there's no buzzy edge to read as a scream.
+    for (const detune of [-11, -4, 4, 11]) {
+      const o = this.ctx.createOscillator();
+      o.type = type;
+      o.detune.value = detune;
+      o.frequency.setValueAtTime(opts.startHz, t);
+      o.frequency.exponentialRampToValueAtTime(endHz, t + glideT);
+      vibratoGain.connect(o.frequency);
+      o.connect(formant);
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    }
+  }
+
+  // Haunting wraith spawn — the choir the captives make the moment the glass
+  // prison shatters. Reworked from a lone scream into a small angelic choir
+  // so it reads as part of the musical soundscape rather than a weird shriek,
+  // while keeping a breathy, slightly-screamlike edge. Tuned to C-minor.
+  // Built from layered voices:
+  //   (1) A soft airy intake — the shell parting, NOT a harsh crack.
+  //   (2) A C-minor choir chord (C5 / Eb5 / G5) that swells up to a peak,
+  //       then the top voice sags to the minor-third Eb — the "still here"
+  //       descent, but sung in harmony rather than screamed solo.
+  //   (3) A quiet breath/throat noise layer tracking the chord — the only
+  //       remaining screamlike texture, kept low so it's an edge, not the
+  //       whole sound.
+  //   (4) A slow consonant sub thrum that swells in late — the dread/presence
+  //       sub-bass, kept on the C root so it grounds the chord.
+  //   (5) A reverb-style ringing tail, voiced inside the C-minor chord.
   private playWraithScream() {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     const totalDur = 2.5;
 
-    // (1) Shell-cracking noise burst — sharper and louder so the scream
-    // feels torn out of the wraith, not eased out.
-    const crackDur = 0.14;
-    const crackBuf = this.makeNoiseBuffer(crackDur);
-    if (crackBuf) {
+    // (1) Airy intake — a soft highpassed-noise swell as the shell parts.
+    // Gentle attack (not a sharp crack) so the choir eases out, not torn out.
+    const intakeDur = 0.32;
+    const intakeBuf = this.makeNoiseBuffer(intakeDur);
+    if (intakeBuf) {
       const src = this.ctx.createBufferSource();
-      src.buffer = crackBuf;
+      src.buffer = intakeBuf;
       const hp = this.ctx.createBiquadFilter();
       hp.type = "highpass";
-      hp.frequency.value = 2200;
+      hp.frequency.setValueAtTime(1600, t);
+      hp.frequency.exponentialRampToValueAtTime(3600, t + intakeDur);
       hp.Q.value = 0.7;
       const g = this.ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.58, t + 0.003);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + crackDur);
+      g.gain.exponentialRampToValueAtTime(0.16, t + 0.06);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + intakeDur);
       src.connect(hp);
       hp.connect(g);
       g.connect(this.master);
       src.start(t);
-      src.stop(t + crackDur + 0.02);
+      src.stop(t + intakeDur + 0.02);
     }
 
-    // (2) Detuned saw cry with an anguished contour, now pinned to C-minor
-    // scale degrees so the cry reads as a sung note rather than a siren.
-    // Snaps up from G4 to the C5 peak (the moment of pain), then sags down
-    // and settles on Eb3 — the minor third, the haunting "still here" tone.
-    // Lowpass opens during the peak so upper harmonics cut through, then
-    // closes as the cry sinks. Detuning eased to 16c: present but more vocal.
-    const cryDur = 1.8;
-    const cryStartHz = 392.0;  // G4
-    const cryPeakHz = 523.25;  // C5
-    const cryEndHz = 155.56;   // Eb3
-    const peakT = 0.18;
-    const cryFilter = this.ctx.createBiquadFilter();
-    cryFilter.type = "lowpass";
-    cryFilter.Q.value = 8.5;
-    cryFilter.frequency.setValueAtTime(2200, t);
-    cryFilter.frequency.exponentialRampToValueAtTime(4400, t + peakT);
-    cryFilter.frequency.exponentialRampToValueAtTime(220, t + cryDur);
-    const cryGain = this.ctx.createGain();
-    // (2d) Sob-break envelope: snap on, brief duck around 0.55s, re-attack, decay.
-    cryGain.gain.setValueAtTime(0.0001, t);
-    cryGain.gain.exponentialRampToValueAtTime(0.36, t + 0.04);
-    cryGain.gain.setValueAtTime(0.36, t + 0.50);
-    cryGain.gain.exponentialRampToValueAtTime(0.09, t + 0.58);
-    cryGain.gain.exponentialRampToValueAtTime(0.32, t + 0.66);
-    cryGain.gain.setValueAtTime(0.32, t + 0.95);
-    cryGain.gain.exponentialRampToValueAtTime(0.0001, t + cryDur);
-    cryFilter.connect(cryGain);
-    cryGain.connect(this.master);
-    // Vibrato — faster and wider. Reads as a trembling cry on the edge.
-    const vibrato = this.ctx.createOscillator();
-    vibrato.type = "sine";
-    vibrato.frequency.value = 7.5;
-    const vibratoGain = this.ctx.createGain();
-    vibratoGain.gain.value = 38;
-    vibrato.connect(vibratoGain);
-    vibrato.start(t);
-    vibrato.stop(t + cryDur + 0.05);
-    for (const detune of [-16, 16]) {
-      const saw = this.ctx.createOscillator();
-      saw.type = "sawtooth";
-      saw.detune.value = detune;
-      saw.frequency.setValueAtTime(cryStartHz, t);
-      saw.frequency.exponentialRampToValueAtTime(cryPeakHz, t + peakT);
-      saw.frequency.exponentialRampToValueAtTime(cryEndHz, t + cryDur * 0.94);
-      vibratoGain.connect(saw.frequency);
-      saw.connect(cryFilter);
-      saw.start(t);
-      saw.stop(t + cryDur + 0.05);
-    }
-    // (2b) Sub-octave sine doubling — gives the cry weight without losing
-    // the airy saw character on top. Same anguished contour.
-    const subCry = this.ctx.createOscillator();
-    const subCryGain = this.ctx.createGain();
-    subCry.type = "sine";
-    subCry.frequency.setValueAtTime(cryStartHz * 0.5, t);
-    subCry.frequency.exponentialRampToValueAtTime(cryPeakHz * 0.5, t + peakT);
-    subCry.frequency.exponentialRampToValueAtTime(cryEndHz * 0.5, t + cryDur * 0.94);
-    subCryGain.gain.setValueAtTime(0.0001, t);
-    subCryGain.gain.exponentialRampToValueAtTime(0.14, t + 0.08);
-    subCryGain.gain.exponentialRampToValueAtTime(0.0001, t + cryDur);
-    subCry.connect(subCryGain);
-    subCryGain.connect(this.master);
-    subCry.start(t);
-    subCry.stop(t + cryDur + 0.05);
-    // (2c) Piercing dissonant overtone — a square wave a TRITONE (×1.4142,
-    // the "diabolus in musica") above the fundamental through a high-Q
-    // bandpass so it reads as a shrill, ominous formant. A real interval
-    // rather than a raw beat, so it's unsettling-on-purpose rather than just
-    // out of tune. Loudest during the peak, ducks with the sob.
-    const TRITONE = 1.41421;
-    const overtone = this.ctx.createOscillator();
-    overtone.type = "square";
-    overtone.frequency.setValueAtTime(cryStartHz * TRITONE, t);
-    overtone.frequency.exponentialRampToValueAtTime(cryPeakHz * TRITONE, t + peakT);
-    overtone.frequency.exponentialRampToValueAtTime(cryEndHz * TRITONE, t + cryDur * 0.94);
-    const overtoneBp = this.ctx.createBiquadFilter();
-    overtoneBp.type = "bandpass";
-    overtoneBp.Q.value = 14;
-    overtoneBp.frequency.setValueAtTime(cryStartHz * TRITONE, t);
-    overtoneBp.frequency.exponentialRampToValueAtTime(cryPeakHz * TRITONE, t + peakT);
-    overtoneBp.frequency.exponentialRampToValueAtTime(cryEndHz * TRITONE, t + cryDur * 0.94);
-    const overtoneGain = this.ctx.createGain();
-    overtoneGain.gain.setValueAtTime(0.0001, t);
-    overtoneGain.gain.exponentialRampToValueAtTime(0.16, t + peakT);
-    overtoneGain.gain.setValueAtTime(0.16, t + 0.50);
-    overtoneGain.gain.exponentialRampToValueAtTime(0.03, t + 0.58);
-    overtoneGain.gain.exponentialRampToValueAtTime(0.10, t + 0.68);
-    overtoneGain.gain.exponentialRampToValueAtTime(0.0001, t + cryDur * 0.85);
-    overtone.connect(overtoneBp);
-    overtoneBp.connect(overtoneGain);
-    overtoneGain.connect(this.master);
-    overtone.start(t);
-    overtone.stop(t + cryDur + 0.05);
+    // (2) C-minor choir chord. Three sung parts (G4 → C5 top, plus a held Eb5
+    // and G5) swell up to a peak; the top voice then sags to the minor-third
+    // Eb5, the haunting "still here" descent — but sung in harmony, not
+    // screamed solo. Each part is a small detuned section via wraithChoirVoice.
+    const cryDur = 1.9;
+    // Top voice: rises G4 → C5 (the cry's peak) then sags to Eb5 (minor third).
+    this.wraithChoirVoice({
+      t, dur: cryDur, startHz: 392.0, endHz: 523.25, glideT: 0.22,
+      peak: 0.26, attack: 0.06, release: cryDur * 0.5, vibratoHz: 6.5, vibratoCents: 18,
+    });
+    // After the peak the top part eases down to the minor third — a second
+    // voice entering on Eb5 carries that resolution so the chord stays full.
+    this.wraithChoirVoice({
+      t: t + 0.5, dur: cryDur - 0.5, startHz: 622.25, endHz: 622.25,
+      peak: 0.18, attack: 0.2, release: (cryDur - 0.5) * 0.5, vibratoHz: 5.0, vibratoCents: 12,
+    });
+    // Lower chord members held under the cry — G4 fifth + Eb4 + C4 root, so
+    // the spawn lands as a Cm chord rather than a lone line.
+    this.wraithChoirVoice({
+      t, dur: cryDur, startHz: 392.0, endHz: 392.0,
+      peak: 0.16, attack: 0.18, release: cryDur * 0.5, vibratoHz: 4.4, vibratoCents: 9,
+    });
+    this.wraithChoirVoice({
+      t, dur: cryDur, startHz: 311.13, endHz: 311.13,
+      peak: 0.15, attack: 0.2, release: cryDur * 0.5, vibratoHz: 4.0, vibratoCents: 8,
+    });
+    this.wraithChoirVoice({
+      t, dur: cryDur, startHz: 261.63, endHz: 261.63,
+      peak: 0.14, attack: 0.22, release: cryDur * 0.5, vibratoHz: 3.6, vibratoCents: 7,
+    });
 
-    // (3) Breathy noise voice — bandpass-swept along the cry's pitch slide.
-    // Reads as "throat noise" on top of the synth tone so the cry has a body.
+    // (3) Breath/throat noise — the only remaining screamlike texture, kept
+    // quiet so it's an edge on the choir rather than the body of the sound.
+    // Bandpass tracks the top voice's rise-and-sag contour.
     const breathBuf = this.makeNoiseBuffer(cryDur);
     if (breathBuf) {
       const breath = this.ctx.createBufferSource();
       breath.buffer = breathBuf;
       const bp = this.ctx.createBiquadFilter();
       bp.type = "bandpass";
-      bp.Q.value = 6;
-      bp.frequency.setValueAtTime(cryStartHz * 1.4, t);
-      bp.frequency.exponentialRampToValueAtTime(cryPeakHz * 1.4, t + peakT);
-      bp.frequency.exponentialRampToValueAtTime(cryEndHz * 1.4, t + cryDur);
+      bp.Q.value = 4;
+      bp.frequency.setValueAtTime(392.0 * 1.4, t);
+      bp.frequency.exponentialRampToValueAtTime(523.25 * 1.4, t + 0.22);
+      bp.frequency.exponentialRampToValueAtTime(622.25 * 1.4, t + cryDur);
       const bg = this.ctx.createGain();
       bg.gain.setValueAtTime(0.0001, t);
-      bg.gain.exponentialRampToValueAtTime(0.28, t + 0.04);
-      bg.gain.setValueAtTime(0.28, t + 0.50);
-      bg.gain.exponentialRampToValueAtTime(0.08, t + 0.58);
-      bg.gain.exponentialRampToValueAtTime(0.24, t + 0.68);
+      bg.gain.exponentialRampToValueAtTime(0.10, t + 0.08);
+      bg.gain.setValueAtTime(0.10, t + cryDur * 0.5);
       bg.gain.exponentialRampToValueAtTime(0.0001, t + cryDur);
       breath.connect(bp);
       bp.connect(bg);
@@ -5981,11 +6068,11 @@ export class Sound {
     }
   }
 
-  // Soft creepy-but-musical lunge — a sighing exhale on a falling minor
-  // third (Bb4 → G4), the wraith "breathing toward you". A muted breathy
-  // whoosh gives the air-movement texture; a pair of soft triangles carries
-  // the pitched sigh through a closing lowpass so it reads as a hushed voice
-  // rather than a stab. Sits quiet under the scream/hit. ~0.32s total.
+  // Soft creepy-but-musical lunge — a hushed choral sigh on a falling minor
+  // third (Bb4 → G4) over a held Eb4, the wraith "breathing toward you" in
+  // harmony. A muted breathy whoosh gives the air-movement texture; two
+  // wraithChoirVoice parts carry the pitched sigh so it reads as a sung
+  // exhale rather than a stab. Sits quiet under the scream/hit. ~0.3s total.
   private playWraithLunge() {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
@@ -6013,30 +6100,17 @@ export class Sound {
       src.start(t);
       src.stop(t + sighDur + 0.02);
     }
-    // Pitched sigh — two softly-detuned triangles on the falling third,
-    // through a closing lowpass so the breath swallows the tone as it lands.
-    const sighFilter = this.ctx.createBiquadFilter();
-    sighFilter.type = "lowpass";
-    sighFilter.Q.value = 2;
-    sighFilter.frequency.setValueAtTime(2400, t);
-    sighFilter.frequency.exponentialRampToValueAtTime(700, t + sighDur);
-    const sighGain = this.ctx.createGain();
-    sighGain.gain.setValueAtTime(0.0001, t);
-    sighGain.gain.exponentialRampToValueAtTime(0.05, t + 0.04);
-    sighGain.gain.setValueAtTime(0.05, t + 0.14);
-    sighGain.gain.exponentialRampToValueAtTime(0.0001, t + sighDur);
-    sighFilter.connect(sighGain);
-    sighGain.connect(this.master);
-    for (const detune of [-9, 9]) {
-      const o = this.ctx.createOscillator();
-      o.type = "triangle";
-      o.detune.value = detune;
-      o.frequency.setValueAtTime(sighStartHz, t);
-      o.frequency.exponentialRampToValueAtTime(sighEndHz, t + sighDur * 0.85);
-      o.connect(sighFilter);
-      o.start(t);
-      o.stop(t + sighDur + 0.05);
-    }
+    // Pitched sigh — a small choir section gliding down the falling third,
+    // plus a quiet held Eb4 harmony so the breath lands as a soft Cm colour
+    // rather than a lone tone. Short attack/release so it stays a sigh.
+    this.wraithChoirVoice({
+      t, dur: sighDur, startHz: sighStartHz, endHz: sighEndHz, glideT: sighDur * 0.85,
+      peak: 0.06, attack: 0.04, release: sighDur * 0.55, vibratoHz: 5.0, vibratoCents: 7, brightness: 5,
+    });
+    this.wraithChoirVoice({
+      t, dur: sighDur, startHz: 311.13, endHz: 311.13,
+      peak: 0.035, attack: 0.05, release: sighDur * 0.55, vibratoHz: 4.0, vibratoCents: 6, brightness: 6,
+    });
     // Sub-octave shadow — a quiet sine an octave below the sigh, the
     // "weight shifting" under the breath.
     const sub = this.ctx.createOscillator();
@@ -6054,17 +6128,16 @@ export class Sound {
   }
 
   // Wraith death — the captive's release. Deliberately reminiscent of the
-  // birth scream (same detuned-saw cry voice, breath texture, and a soft
-  // reverb tail) but the emotional arc is INVERTED: instead of snapping up
-  // in pain then sagging to a haunting minor third, the cry RISES and
-  // resolves, and an Eb-major arpeggio (Eb–G–Bb, the relative major of the
-  // scream's C-minor) blooms underneath — the soul let go, ascending into
-  // the light. Built from:
+  // spawn choir (same wraithChoirVoice, breath texture, and a soft reverb
+  // tail) but the emotional arc is INVERTED: instead of swelling up then
+  // sagging to a haunting minor third, the choir RISES and resolves, and an
+  // Eb-major arpeggio (Eb–G–Bb, the relative major of the spawn's C-minor)
+  // blooms underneath — the soul let go, ascending into the light. Built from:
   //   (1) A soft inhale-shimmer noise swell (the gasp before release) —
-  //       the gentle counterpart to the scream's sharp shell-crack.
-  //   (2) A detuned-saw cry on the SAME voice as the scream, now sliding
-  //       UP from Eb4 and easing to a held Bb4, opening (not closing) its
-  //       lowpass — the cry resolving rather than breaking.
+  //       the gentle counterpart to the spawn's airy intake.
+  //   (2) A resolving choir on the SAME voice as the spawn, now sliding
+  //       UP from Eb4 into a held Bb4 over a G4 third — an Eb-major rise,
+  //       the choir resolving rather than breaking.
   //   (3) An Eb-major arpeggio of soft triangle "bells" that bloom in
   //       sequence (Eb4, G4, Bb4, Eb5) — the satisfying musical payoff.
   //   (4) A warm sub root on Eb2 that swells and lingers — the dread sub's
@@ -6098,48 +6171,19 @@ export class Sound {
       src.stop(t + gaspDur + 0.02);
     }
 
-    // (2) Resolving cry — same detuned-saw voice as the scream, sliding UP
-    // from Eb4 and easing to a held Bb4 (an ascending perfect-ish rise into
-    // the chord's fifth). Lowpass OPENS as it rises — the voice clearing,
-    // not breaking. Gentle vibrato, narrower detuning than the scream so it
-    // reads as settled rather than torn.
+    // (2) Resolving choir — the same choir voice as the spawn, but ascending
+    // and consonant. A top part slides UP from Eb4 into a held Bb4 (the rise
+    // into the chord's fifth) over a held G4 third, so the release sings an
+    // Eb-major harmony instead of a lone line — settled, not torn.
     const cryDur = 1.5;
-    const cryStartHz = 311.13; // Eb4
-    const cryEndHz = 466.16;   // Bb4
-    const riseT = 0.6;
-    const cryFilter = this.ctx.createBiquadFilter();
-    cryFilter.type = "lowpass";
-    cryFilter.Q.value = 4;
-    cryFilter.frequency.setValueAtTime(900, t);
-    cryFilter.frequency.exponentialRampToValueAtTime(3600, t + riseT);
-    cryFilter.frequency.setValueAtTime(3600, t + cryDur * 0.7);
-    cryFilter.frequency.exponentialRampToValueAtTime(1200, t + cryDur);
-    const cryGain = this.ctx.createGain();
-    cryGain.gain.setValueAtTime(0.0001, t);
-    cryGain.gain.exponentialRampToValueAtTime(0.20, t + 0.10);
-    cryGain.gain.setValueAtTime(0.20, t + cryDur * 0.6);
-    cryGain.gain.exponentialRampToValueAtTime(0.0001, t + cryDur);
-    cryFilter.connect(cryGain);
-    cryGain.connect(this.master);
-    const vibrato = this.ctx.createOscillator();
-    vibrato.type = "sine";
-    vibrato.frequency.value = 5.2;
-    const vibratoGain = this.ctx.createGain();
-    vibratoGain.gain.value = 14;
-    vibrato.connect(vibratoGain);
-    vibrato.start(t);
-    vibrato.stop(t + cryDur + 0.05);
-    for (const detune of [-10, 10]) {
-      const saw = this.ctx.createOscillator();
-      saw.type = "sawtooth";
-      saw.detune.value = detune;
-      saw.frequency.setValueAtTime(cryStartHz, t);
-      saw.frequency.exponentialRampToValueAtTime(cryEndHz, t + riseT);
-      vibratoGain.connect(saw.frequency);
-      saw.connect(cryFilter);
-      saw.start(t);
-      saw.stop(t + cryDur + 0.05);
-    }
+    this.wraithChoirVoice({
+      t, dur: cryDur, startHz: 311.13, endHz: 466.16, glideT: 0.6,
+      peak: 0.18, attack: 0.1, release: cryDur * 0.4, vibratoHz: 5.2, vibratoCents: 11,
+    });
+    this.wraithChoirVoice({
+      t, dur: cryDur, startHz: 392.0, endHz: 392.0,
+      peak: 0.12, attack: 0.16, release: cryDur * 0.4, vibratoHz: 4.4, vibratoCents: 8,
+    });
 
     // (3) Eb-major bloom — soft triangle "bells" arpeggiating up the chord
     // (Eb4, G4, Bb4, Eb5), each entering a beat after the last. The musical

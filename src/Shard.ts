@@ -55,7 +55,7 @@ export class Shard {
 }
 
 export const shatterAsteroid = (asteroid: Asteroid): Shard[] => {
-  const shardCount = asteroid.size === "large" ? 10 : asteroid.size === "medium" ? 7 : 5;
+  const shardCount = asteroid.size === "huge" ? 14 : asteroid.size === "large" ? 10 : asteroid.size === "medium" ? 7 : 5;
   const shards: Shard[] = [];
   const samples = asteroid.outline.length;
   const indexBucketsBySharedShard = Array.from({ length: shardCount }, (_, i) => i);

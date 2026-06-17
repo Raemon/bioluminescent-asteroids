@@ -40,7 +40,7 @@ import { musicDtForFrame } from "./slowMo";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderboardKeyRepeat } from "./scoreEntry";
 import { showGameOverIntro } from "./gameOverIntro";
 import { isDown, wasPressed } from "./controlBindings";
-import { tickLaserShot } from "./laserShot";
+import { tickLaserShot, FIRE_FLASH_DECAY } from "./laserShot";
 import { fireBossSweepBeam, tickBossBeams } from "./bossBeam";
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
@@ -433,7 +433,7 @@ const updatePlaying = (game: Game, dt: number) => {
   //   Replay-side compares to the same snapshot and logs the first divergence.
   game.recorder?.captureShip(game.ship, game.input);
   game.replayPlayer?.checkShipAgainstRecording(game.ship);
-  tickLaserShot(game);
+  tickLaserShot(game, dt);
   const rawMusicDt = tickSlowMoTimer(game, dt);
   // music slows with gameplay so beat+music stay locked through slow-mo.
   if (dt > 0) {
@@ -629,6 +629,9 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   compactInPlace(game.bullets, (b) => b.life > 0);
   for (const l of game.lasers) l.update(musicDt);
   compactInPlace(game.lasers, (l) => l.alive);
+  if (game.laserFireFlash > 0) {
+    game.laserFireFlash = Math.max(0, game.laserFireFlash - musicDt / FIRE_FLASH_DECAY);
+  }
   for (const ab of game.alienBullets) ab.update(musicDt, game.w, game.h);
   compactInPlace(game.alienBullets, (ab) => ab.life > 0);
   tickBossBeams(game, musicDt);
@@ -841,6 +844,9 @@ const advanceWave = (game: Game) => {
   game.waveTransitioning = true;
   showWaveSummary(game, displayWave(completedWave), maxRhythm, finalRhythm, driftBonuses, () => {
     game.wave = nextWave;
+    // opening rocks' speed keys off the peak combo of the wave just cleared, not
+    //   the live combo at spawn (which a death or whiff may have already reset).
+    game.waveStartRhythm = game.maxComboThisWave;
     game.maxComboThisWave = game.beatCombo;
     game.driftBonusesThisWave = 0;
     game.pulsar.setWaveLevel(game.wave);

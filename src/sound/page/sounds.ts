@@ -271,6 +271,7 @@ export const OBJECTS: GameObject[] = [
       { verb: "killed on-beat (triumph)", sound: "cometDestroyed", trigger: beat(8) },
       { verb: "killed off-beat (sad)", sound: "cometDestroyedSad", trigger: beat(8) },
       { verb: "meteor shower arrives (flock)", sound: "meteorShower", trigger: beat(8) },
+      { verb: "gem swarm arrives (sparkle)", sound: "gemSwarm", trigger: beat(8) },
     ],
   },
 
@@ -376,7 +377,7 @@ const MENTIONED_SOUNDS = [
   // aliens
   "alienFireBig", "alienFireMedium", "alienFireSmall", "alienHit", "alienExplode",
   // comets
-  "cometNote", "cometDestroyed", "cometDestroyedSad", "meteorShower",
+  "cometNote", "cometDestroyed", "cometDestroyedSad", "meteorShower", "gemSwarm",
   // canisters / pickups
   "canisterAppear", "canisterDestroyed", "powerup",
   // world bed

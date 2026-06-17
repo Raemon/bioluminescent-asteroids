@@ -58,6 +58,12 @@ export class Game implements HudElements {
   // Laser-shot beams from the "lasershot" upgrade — one per release of the
   //   charge. Short-lived visuals (damage resolves on spawn); see game/laserShot.ts.
   lasers: LaserBeam[] = [];
+  // Laser ambient lighting: charge buildup eases up while holding fire; the
+  //   fire flash pops on release and decays fast. Both drive a full-screen
+  //   additive wash in renderLaserAmbientFlash. Kept on Game (not Ship) so the
+  //   fire flash survives the resetLaserCharge that runs right after firing.
+  laserChargeGlow = 0;
+  laserFireFlash = 0;
   // Sustained sweeping beams fired by the boss eye — see game/bossBeam.ts.
   bossBeams: BossBeam[] = [];
   popups: Popup[] = [];
@@ -154,6 +160,9 @@ export class Game implements HudElements {
   // per-wave high-water mark of beatCombo, surfaced in the wave-clear summary panel.
   //   Reset to the current beatCombo at the start of each new wave.
   maxComboThisWave = 0;
+  // the previous wave's peak combo, carried over so the opening rocks' speed is
+  //   set by how well the player just played — not their live combo at spawn time.
+  waveStartRhythm = 0;
   // per-wave count of fired drift bonuses, surfaced in the wave-clear summary as
   //   a separate +100/each line. Reset at the same point as maxComboThisWave.
   driftBonusesThisWave = 0;

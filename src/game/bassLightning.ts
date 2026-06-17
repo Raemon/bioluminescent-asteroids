@@ -119,22 +119,23 @@ export const updateBassLightnings = (bolts: BassLightning[], dt: number): BassLi
   return bolts.filter((l) => l.life > 0);
 };
 
-// Polyline samples for one bolt at one instant: straight chord from the
-// bassteroid's rim to the kill point, displaced perpendicular by the stable
-// jag plus the animated oscilloscope wobble. Ends pin to their anchors.
-const buildBoltPoints = (l: BassLightning, tSec: number): number[] => {
-  const n = l.jags.length;
-  const sx = l.source.pos.x;
-  const sy = l.source.pos.y;
-  let ax = l.target.x - sx;
-  let ay = l.target.y - sy;
+// Anchor-agnostic bolt sampler: a chord from (sx,sy) to (tx,ty), displaced
+// perpendicular by each stable jag plus the animated oscilloscope wobble, both
+// pinned to zero at the ends. `startD` insets the start off the source so the
+// arc leaves a rim rather than the centre. Shared by bass lightning and the
+// laser crackle so both squiggle in the same dialect.
+export const buildJaggedBolt = (
+  sx: number, sy: number, tx: number, ty: number,
+  jags: number[], seed: number, tSec: number, startD: number,
+): number[] => {
+  const n = jags.length;
+  let ax = tx - sx;
+  let ay = ty - sy;
   const d = Math.hypot(ax, ay) || 1;
   ax /= d;
   ay /= d;
   const px = -ay;
   const py = ax;
-  const startD = Math.min(l.source.radius * 0.9, d * 0.4);
-  const seed = l.seed;
   const pts: number[] = [];
   for (let i = 0; i < n; i++) {
     const ti = i / (n - 1);
@@ -143,14 +144,23 @@ const buildBoltPoints = (l: BassLightning, tSec: number): number[] => {
       OSC_AMPS[0] * Math.sin(OSC_FREQS[0] * ti * TAU + tSec * OSC_RATES[0] + seed) +
       OSC_AMPS[1] * Math.sin(OSC_FREQS[1] * ti * TAU + tSec * OSC_RATES[1] + seed * 1.618) +
       OSC_AMPS[2] * Math.sin(OSC_FREQS[2] * ti * TAU + tSec * OSC_RATES[2] + seed * 2.414);
-    const off = (l.jags[i] + w * WOBBLE_AMPLITUDE) * pin;
+    const off = (jags[i] + w * WOBBLE_AMPLITUDE) * pin;
     const along = startD + (d - startD) * ti;
     pts.push(sx + ax * along + px * off, sy + ay * along + py * off);
   }
   return pts;
 };
 
-const strokePolyline = (
+// Polyline samples for one bass bolt: the bassteroid's rim to the kill point.
+const buildBoltPoints = (l: BassLightning, tSec: number): number[] => {
+  const d = Math.hypot(l.target.x - l.source.pos.x, l.target.y - l.source.pos.y) || 1;
+  const startD = Math.min(l.source.radius * 0.9, d * 0.4);
+  return buildJaggedBolt(
+    l.source.pos.x, l.source.pos.y, l.target.x, l.target.y, l.jags, l.seed, tSec, startD,
+  );
+};
+
+export const strokePolyline = (
   ctx: CanvasRenderingContext2D, pts: number[], width: number, style: string,
 ) => {
   ctx.lineWidth = width;

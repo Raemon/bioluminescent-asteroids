@@ -8,6 +8,9 @@ import { Bullet } from "../Bullet";
 import { BEAT_GRID } from "./rhythmConstants";
 import { isDown } from "./controlBindings";
 import { isInBeatWindow } from "./rhythmGate";
+import { buildJaggedBolt, strokePolyline } from "./bassLightning";
+import { drawGlow } from "../glow";
+import { rng } from "./rng";
 import {
   onAsteroidKilledByBullet,
   onAsteroidCrackedByBullet,
@@ -17,18 +20,27 @@ import {
 } from "./killEffects";
 import { syncHud } from "./hud";
 
-// Max charge dots (one per beat held). Damage = 1 + numDots, so 0 dots = 1,
-// 3 dots = 4 — about a kill-shot on a small asteroid at full charge.
+// Max charge dots (one per beat held). Damage doubles per dot from a base of 2,
+// so dots 0..3 deal 2, 4, 8, 16 — a full charge melts large rocks and bites
+// deep into a boss core.
 export const LASER_MAX_DOTS = 3;
 // Visible beam stays painted for this many seconds after fire — long enough
 // to read as a flash, short enough that another shot a beat later doesn't
 // overlap the previous trail.
 const LASER_BEAM_LIFE = 0.22;
-// Beam length matches the farthest reticule slot: bulletSpeed * effectiveBulletLife.
-// Mirror the same multipliers shipWeapons uses (pierce/longshot/superBoosted).
+// The laser deliberately overshoots the reticule slot: bulletSpeed *
+// effectiveBulletLife * LASER_BASE_RANGE_MULT, then the pierce/longshot/
+// superBoosted multipliers shipWeapons uses stack on top.
+const LASER_BASE_RANGE_MULT = 2;
 const PIERCE_RANGE_MULT = 2;
 const LONGSHOT_RANGE_MULT = 1.5;
 const SUPERBOOSTED_RANGE_MULT = 1.5;
+// How fast the ambient charge glow eases toward its per-dot target.
+const CHARGE_GLOW_RATE = 6;
+// Fire flash decays to zero over this many seconds.
+export const FIRE_FLASH_DECAY = 0.18;
+// Perpendicular jag amplitude (px) for the crackle arcs.
+const LASER_JAG_AMPLITUDE = 7;
 
 // A laser beam is a static segment from `origin` extending `length` along
 // `heading`. It lives for LASER_BEAM_LIFE seconds purely as a visual; the
@@ -39,16 +51,30 @@ export class LaserBeam {
   length: number;
   life: number;
   maxLife: number;
-  // Damage that *was* dealt — used for the beam thickness (more dots = thicker).
+  // Damage that *was* dealt by this beam.
   damage: number;
+  // Charge dots 0..LASER_MAX_DOTS — drives the visual tier ramp (thickness,
+  // crackle, aura) so the four damage tiers read distinctly.
+  dots: number;
+  // Stable per-sample perpendicular jag for the crackle arc; wobble animates
+  // on top. Empty until dots warrant an arc.
+  jags: number[];
+  seed: number;
 
-  constructor(origin: Vec, heading: number, length: number, damage: number) {
+  constructor(origin: Vec, heading: number, length: number, damage: number, dots: number) {
     this.origin = { ...origin };
     this.heading = heading;
     this.length = length;
     this.life = LASER_BEAM_LIFE;
     this.maxLife = LASER_BEAM_LIFE;
     this.damage = damage;
+    this.dots = dots;
+    this.seed = rng() * Math.PI * 2;
+    this.jags = [];
+    if (dots >= 2) {
+      const n = 14;
+      for (let i = 0; i < n; i++) this.jags.push((rng() * 2 - 1) * LASER_JAG_AMPLITUDE);
+    }
   }
 
   update(dt: number) {
@@ -86,15 +112,23 @@ const effectiveBulletLife = (ship: Ship, superBoosted: boolean): number => {
 };
 
 const computeBeamLength = (ship: Ship, superBoosted: boolean): number => {
-  return ship.bulletSpeed * effectiveBulletLife(ship, superBoosted);
+  return ship.bulletSpeed * effectiveBulletLife(ship, superBoosted) * LASER_BASE_RANGE_MULT;
+};
+
+// Eases laserChargeGlow toward target with frame-rate-independent decay.
+const approachGlow = (current: number, target: number, dt: number): number => {
+  const k = 1 - Math.exp(-CHARGE_GLOW_RATE * Math.max(0, dt));
+  return current + (target - current) * k;
 };
 
 // Called each frame after Ship.update. The normal fireBullets path is
 // suppressed by lasershotActive inside shipPhysics; this owns fire input
 // while the upgrade is active.
-export const tickLaserShot = (game: Game) => {
+export const tickLaserShot = (game: Game, dt: number) => {
   const ship = game.ship;
   if (!ship.alive) {
+    game.sound.stopLaserCharge();
+    game.laserChargeGlow = approachGlow(game.laserChargeGlow, 0, dt);
     resetLaserCharge(ship);
     return;
   }
@@ -109,20 +143,29 @@ export const tickLaserShot = (game: Game) => {
       if (!isInBeatWindow(game, game.perceivedBeatTime)) {
         ship.laserChargeFailedThisHold = true;
         game.sound.playLaserChargeFail();
+        game.laserChargeGlow = approachGlow(game.laserChargeGlow, 0, dt);
         return;
       }
       ship.laserChargeActive = true;
       ship.laserChargeStartBeatTime = game.beatTime;
       ship.laserLastDotIndexFired = -1;
+      game.sound.startLaserCharge();
     }
-    if (!ship.laserChargeActive) return;
-    // Per-dot charge tick — plays a short C-chord pluck on each new dot so the
-    // player hears the charge building.
+    if (!ship.laserChargeActive) {
+      game.laserChargeGlow = approachGlow(game.laserChargeGlow, 0, dt);
+      return;
+    }
+    // Per-dot charge tick — discrete C-chord pluck accent on each new dot, plus
+    // a step-up of the sustained crackle/chord bed so the build is felt.
     const dots = laserDotCount(ship, game.beatTime);
     if (dots > ship.laserLastDotIndexFired && dots > 0) {
       ship.laserLastDotIndexFired = dots;
       game.sound.playLaserCharge(dots);
+      game.sound.setLaserChargeTier(dots);
     }
+    // Ambient glow ramps toward 1 as more dots arm; faint even at zero dots.
+    const target = (dots + 1) / (LASER_MAX_DOTS + 1);
+    game.laserChargeGlow = approachGlow(game.laserChargeGlow, target, dt);
     return;
   }
 
@@ -130,21 +173,27 @@ export const tickLaserShot = (game: Game) => {
   if (ship.laserChargeActive) {
     const dots = laserDotCount(ship, game.beatTime);
     fireLaser(game, ship, dots);
+  } else {
+    game.laserChargeGlow = approachGlow(game.laserChargeGlow, 0, dt);
   }
   // Always reset on release so a re-press can try the beat window again.
+  game.sound.stopLaserCharge();
   resetLaserCharge(ship);
 };
 
 const fireLaser = (game: Game, ship: Ship, dots: number) => {
-  const damage = 1 + dots;
+  const damage = 2 << dots;
   const superBoosted = game.beatCombo >= 12;
   const length = computeBeamLength(ship, superBoosted);
   const dir = fromAngle(ship.heading, 1);
   const origin = add(ship.pos, mul(dir, ship.radius + 4));
-  const beam = new LaserBeam(origin, ship.heading, length, damage);
+  const beam = new LaserBeam(origin, ship.heading, length, damage, dots);
   game.lasers.push(beam);
-  game.sound.playLaserShot(damage);
-  game.shake = Math.min(game.shake + 0.12 + dots * 0.06, 1.2);
+  game.sound.playLaserShot(damage, dots);
+  game.shake = Math.min(game.shake + 0.12 + dots * 0.12, 1.4);
+  // Big white pop on release, scaled by charge; the buildup glow ends here.
+  game.laserFireFlash = Math.min(1, 0.4 + dots * 0.2);
+  game.laserChargeGlow = 0;
   applyBeamDamage(game, origin, dir, length, damage);
 };
 

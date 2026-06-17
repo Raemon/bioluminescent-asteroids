@@ -88,7 +88,7 @@ export const hitSoundFor = (
   // Wraith hit / death — the killing hit plays wraithScream as a second
   // overlay in finishAsteroidKillCore; this is the per-shot thud.
   if (a.kind === "wraith") return "wraithHit";
-  return a.size === "large" ? "explosionLarge" : a.size === "medium" ? "explosionMedium" : "explosionSmall";
+  return a.size === "huge" || a.size === "large" ? "explosionLarge" : a.size === "medium" ? "explosionMedium" : "explosionSmall";
 };
 
 // same combo-update rule for every kill type — one helper means callers don't reimplement.

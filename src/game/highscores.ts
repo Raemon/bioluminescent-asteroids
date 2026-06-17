@@ -5,6 +5,7 @@ import { displayWave } from "./waveDirector";
 // bucket names are emitted by killEffects.ts; this label map keeps the
 // leaderboard summary readable instead of leaking internal asteroid kinds.
 const BUCKET_LABELS: Record<KillBucket, string> = {
+  asteroid_huge: "2xL",
   asteroid_large: "lg",
   asteroid_medium: "md",
   asteroid_small: "sm",

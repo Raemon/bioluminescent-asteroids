@@ -3,6 +3,7 @@
 //   leaderboard summary. Keeping the union here means a rename only needs to happen
 //   in one place and TS will catch any drift.
 export type KillBucket =
+  | "asteroid_huge"
   | "asteroid_large"
   | "asteroid_medium"
   | "asteroid_small"

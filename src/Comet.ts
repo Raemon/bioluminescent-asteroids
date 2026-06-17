@@ -204,8 +204,8 @@ export const spawnComet = (w: number, h: number): Comet => {
 // nudged back along the heading by a growing amount so the flock trails itself
 // diagonally instead of crossing the screen as a flat wall.
 const MS = ENTITY_CONFIG.meteorShower;
-export const spawnMeteorShower = (w: number, h: number): Comet[] => {
-  const count = randInt(MS.count[0], MS.count[1]);
+export const spawnMeteorShower = (w: number, h: number, countOverride?: number): Comet[] => {
+  const count = countOverride ?? randInt(MS.count[0], MS.count[1]);
 
   // Same edge-to-centre framing as a comet so the flock crosses the play area.
   const edge = Math.floor(rng() * 4);

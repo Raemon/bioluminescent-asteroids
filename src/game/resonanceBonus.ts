@@ -5,6 +5,9 @@ import type { Asteroid, AsteroidSize } from "../Asteroid";
 //   unbroken rock gives no bonus); the medium and small fragments a break leaves
 //   behind are each worth a flat point bounty while they're still on the field.
 export const RESONANCE_VALUE: Record<AsteroidSize, number> = {
+  // Only bassteroids contribute resonance, and bass never spawns "huge"; the
+  // entry exists for the Record shape and is never read.
+  huge: 0,
   large: 0,
   medium: 10,
   small: 25,

@@ -1,13 +1,13 @@
 import type { Game } from "../Game";
-import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
+import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt, spawnGemSwarm } from "../Asteroid";
 import { spawnComet as spawnCometAtEdge, spawnMeteorShower } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
-import { rand, v, TAU } from "../vec";
+import { rand, randInt, v, TAU } from "../vec";
 import { rng } from "./rng";
 import { BEAT_GRID } from "./rhythmConstants";
 import { spawnAwayFromShip } from "./spawnAwayFromShip";
-import { newWaveEventSchedule, maybeSchedule } from "./waveEvents";
+import { newWaveEventSchedule, maybeSchedule, scheduleAt } from "./waveEvents";
 import { startShockwave } from "./shockwave";
 import { emitCrackParticles } from "./particleBursts";
 import { alignVelocityToRhythm, BeatClaimSet, newBeatClaimSet } from "./rhythmTrajectory";
@@ -96,6 +96,10 @@ export { newBeatClaimSet };
 export type { BeatClaimSet };
 
 export const rhythmSpeedMul = (game: Game): number => 1 + game.beatCombo * CFG.rhythm.speedPerCombo;
+
+// wave-opening rocks read the previous wave's peak combo instead of the live one,
+//   so a strong run makes the *next* wave fast even before the player rebuilds combo.
+const waveStartSpeedMul = (game: Game): number => 1 + game.waveStartRhythm * CFG.rhythm.speedPerCombo;
 const rhythmChanceBonus = (game: Game): number => game.beatCombo * CFG.rhythm.chancePerCombo;
 
 // predicates let the wave director read declaratively, not as inline boolean expressions.
@@ -180,8 +184,7 @@ export const activeSpecialsForWave = (_game: Game, wave: number): AsteroidKind[]
 //   *after* rhythm alignment so the alignment math (which works in the
 //   unscaled SIZE_SPAWN_SPEED band) stays valid — the speedup just makes the
 //   target arrive a touch earlier than its assigned beat slot.
-const applyRhythmSpeed = (game: Game, vel: { x: number; y: number }) => {
-  const k = rhythmSpeedMul(game);
+const applyRhythmSpeed = (game: Game, vel: { x: number; y: number }, k = rhythmSpeedMul(game)) => {
   if (k === 1) return;
   vel.x *= k;
   vel.y *= k;
@@ -196,7 +199,7 @@ const spawnAsteroidAway = (
   game: Game,
   minDist: number,
   kind?: AsteroidKind,
-  size?: "large" | "medium" | "small",
+  size?: AsteroidSize,
   claimed?: BeatClaimSet,
 ) => {
   const a = spawnAwayFromShip(() => spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size), game.ship.pos, minDist);
@@ -213,7 +216,7 @@ const spawnAsteroidAway = (
     a.vel.y *= CFG.glassPrison.spawnSpeedMul;
   }
   alignIncomingToRhythm(game, a, claimed);
-  applyRhythmSpeed(game, a.vel);
+  applyRhythmSpeed(game, a.vel, waveStartSpeedMul(game));
   return a;
 };
 
@@ -278,13 +281,32 @@ export const spawnComet = (game: Game) => {
 // array (and its rendering/collision/scoring) but skip the per-comet melody and
 // shimmer — instead one dramatic entrance sweep announces the whole flock,
 // played at the lead meteor's position.
-export const spawnMeteorShowerEvent = (game: Game) => {
-  const meteors = spawnMeteorShower(game.w, game.h);
+export const spawnMeteorShowerEvent = (game: Game, countOverride?: number) => {
+  const meteors = spawnMeteorShower(game.w, game.h, countOverride);
   for (const m of meteors) {
     applyRhythmSpeed(game, m.vel);
     game.comets.push(m);
   }
   if (meteors.length > 0) game.sound.play("meteorShower", 1, meteors[0].pos);
+}
+
+// The gem swarm: a flock of goldCrystal rocks sweeping across the field, the
+// gold-diamond cousin of the meteor shower. They're real asteroids, so each
+// kill runs the normal embedded-gem drop — a brief, dense "kill them for
+// upgrades" window. Each gem is beat-aligned (anchored at screen centre) so
+// its kill-range crossing lands on the grid, same as any incoming rock; one
+// entrance sweep announces the whole flock at the lead gem's position.
+export const spawnGemSwarmEvent = (game: Game, countOverride?: number) => {
+  const cfg = CFG.gemSwarm;
+  const count = countOverride ?? randInt(cfg.count[0], cfg.count[1]);
+  const gems = spawnGemSwarm(game.w, game.h, count);
+  const claimed = newBeatClaimSet();
+  for (const g of gems) {
+    alignIncomingToRhythm(game, g, claimed);
+    applyRhythmSpeed(game, g.vel);
+    game.asteroids.push(g);
+  }
+  if (gems.length > 0) game.sound.play("gemSwarm", 1, gems[0].pos);
 };
 
 // one entry replaces the previous if/else maze covering boss/foreshadow/normal wave dispatch.
@@ -374,6 +396,17 @@ const rollWaveEvents = (game: Game) => {
     });
   }
   rollHeadlineEvents(game);
+  rollSwarmWave(game);
+};
+
+// One designated wave always launches an oversized meteor swarm a few seconds
+// in, on top of (and independent of) the random headline roll.
+const rollSwarmWave = (game: Game) => {
+  const swarm = CFG.meteorShower.swarmWave;
+  if (game.wave !== swarm.wave) return;
+  scheduleAt(game.waveEvents, rand(swarm.delay[0], swarm.delay[1]), () =>
+    spawnMeteorShowerEvent(game, randInt(swarm.count[0], swarm.count[1])),
+  );
 };
 
 type HeadlineRoll = { gate: boolean; baseChance: number; fire: () => boolean };
@@ -414,6 +447,14 @@ const rollHeadlineEvents = (game: Game) => {
       baseChance: CFG.meteorShower.chancePerWave,
       fire: () => {
         maybeSchedule(game.waveEvents, 1, CFG.meteorShower.spawnWindow, () => spawnMeteorShowerEvent(game));
+        return true;
+      },
+    },
+    {
+      gate: game.wave >= CFG.gemSwarm.firstWave,
+      baseChance: CFG.gemSwarm.chancePerWave,
+      fire: () => {
+        maybeSchedule(game.waveEvents, 1, CFG.gemSwarm.spawnWindow, () => spawnGemSwarmEvent(game));
         return true;
       },
     },
@@ -528,6 +569,40 @@ const spawnFirstLevelDrifter = (
   return a;
 };
 
+// Redistribute a budget of `largeCount` plain large rocks across the size
+//   ladder (1 huge = 2 large = 4 medium = 8 small) while preserving total mass.
+//   Tuned so that on average ~half the wave mass stays plain large — the
+//   classic big rock — and the other half spreads across huge / medium / small
+//   for variety. Each unit of budget carries one large-equivalent of mass into
+//   whichever bucket it lands in, so the "stays large" probability below is
+//   directly the expected large mass fraction. Always returns a list whose
+//   summed mass equals `largeCount`.
+const redistributeNormalMass = (largeCount: number): AsteroidSize[] => {
+  const UPGRADE_CHANCE = 0.2;
+  const DOWNGRADE_MEDIUM_CHANCE = 0.18;
+  const DOWNGRADE_SMALL_CHANCE = 0.12;
+  const out: AsteroidSize[] = [];
+  let remaining = largeCount;
+  while (remaining >= 1) {
+    // Upgrade only when a second whole large remains to pair into the huge.
+    if (remaining >= 2 && rng() < UPGRADE_CHANCE) {
+      out.push("huge");
+      remaining -= 2;
+      continue;
+    }
+    const roll = rng();
+    if (roll < DOWNGRADE_SMALL_CHANCE) {
+      out.push("small", "small", "small", "small");
+    } else if (roll < DOWNGRADE_SMALL_CHANCE + DOWNGRADE_MEDIUM_CHANCE) {
+      out.push("medium", "medium");
+    } else {
+      out.push("large");
+    }
+    remaining -= 1;
+  }
+  return out;
+};
+
 // Wave 0 (internal wave 1): a single large rock — a gentle warm-up before density ramps.
 // Wave 1+ (internal wave 2+): 3, 3, 4, 4, 5, 5... per-wave count gives the player a wave to consolidate before density bumps.
 //   A single `claimed` set is shared across the wave's spawns (including the
@@ -535,7 +610,10 @@ const spawnFirstLevelDrifter = (
 //   targets a distinct beat slot, giving the player a sustainable
 //   beat-by-beat target procession.
 const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boolean) => {
-  const totalCount = game.wave === 1 ? 1 : 3 + Math.floor((game.wave - 2) / 2);
+  const baseCount = game.wave === 1 ? 1 : 3 + Math.floor((game.wave - 2) / 2);
+  const swarm = CFG.meteorShower.swarmWave;
+  // The swarm wave thins its asteroid field so the meteor flock is the headline.
+  const totalCount = game.wave === swarm.wave ? Math.max(1, Math.round(baseCount * swarm.asteroidCountMul)) : baseCount;
   const activeSpecials = activeSpecialsForWave(game, game.wave);
   const normalCount = Math.max(0, totalCount - activeSpecials.length);
 
@@ -567,13 +645,27 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
     slotKinds[Math.floor(rng() * normalCount)] = "glassPrison";
   }
 
+  // Build the concrete spawn descriptors. Special slots (gem / solid / prison)
+  // keep their authored size. The plain "normal" rocks instead pool their total
+  // large-equivalent mass and get redistributed across the size ladder
+  // (huge / large / medium / small) — same total mass per wave, just a varied
+  // mix. See redistributeNormalMass; it's biased so most mass stays plain large.
+  const specialSpawns: { kind: AsteroidKind | undefined; size: AsteroidSize }[] = [];
+  let normalLargeCount = 0;
+  for (const kind of slotKinds) {
+    if (kind === "normal") { normalLargeCount++; continue; }
+    // Solid crystal is a medium-sized gem; the other specials spawn large.
+    specialSpawns.push({ kind, size: kind === "solidCrystal" ? "medium" : "large" });
+  }
+  const normalSpawns = redistributeNormalMass(normalLargeCount).map(
+    (size): { kind: AsteroidKind | undefined; size: AsteroidSize } => ({ kind: undefined, size }),
+  );
+  const spawns = [...normalSpawns, ...specialSpawns];
+
   const firstLevelPlacements = isFirstLevel
-    ? sampleFirstLevelPlacements(slotKinds.length, CFG.engageRadius.incoming)
+    ? sampleFirstLevelPlacements(spawns.length, CFG.engageRadius.incoming)
     : null;
-  slotKinds.forEach((kind, slotIndex) => {
-    const k = kind === "normal" ? undefined : kind;
-    // Solid crystal is a medium-sized gem; everything else from this loop spawns large.
-    const size: AsteroidSize = kind === "solidCrystal" ? "medium" : "large";
+  spawns.forEach(({ kind: k, size }, slotIndex) => {
     const rock = isFirstLevel && firstLevelPlacements
       ? spawnFirstLevelDrifter(game, firstLevelPlacements[slotIndex].angle, firstLevelPlacements[slotIndex].dist, k, size, claimed)
       : spawnAsteroidAway(game, 200, k, size, claimed);

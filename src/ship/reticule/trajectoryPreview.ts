@@ -588,6 +588,7 @@ const drawBeatDotsAlongRay = (
   entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
   w: number, h: number, doubletime: boolean, tutorialHighlight: boolean, focused: boolean,
   beatTime: number, beatGrid: number, hoverZoneEnterBySlot: Array<number | null>,
+  firstDotOverride: [number, number] | null,
 ): DotWalkResult => {
   let overlapsReticule = false;
   const slotCount = reticulesBySlot.length;
@@ -620,10 +621,14 @@ const drawBeatDotsAlongRay = (
     if (sK > sMax && k > maxSlotK) break;
     if (sK > sMax && !isFirstBeatDot) continue;
     if (sK < sMin && !isFirstBeatDot) continue;
-    const px = rawStartX + ux * sK;
-    const py = rawStartY + uy * sK;
-    const [drawX, drawY] = wrapToCanvas(px, py, w, h);
     const halfBeat = isHalfBeatK(k);
+    // the first on-beat dot is relocated to the on-beat hit surface (option #2) so the player
+    // aims where a bullet lands ON the beat, not the future center (which hits early). All other
+    // dots stay on the velocity trail as an honest path preview.
+    const useOverride = firstDotOverride !== null && !halfBeat && drawnOnBeatDots === 0;
+    const px = useOverride ? firstDotOverride[0] : rawStartX + ux * sK;
+    const py = useOverride ? firstDotOverride[1] : rawStartY + uy * sK;
+    const [drawX, drawY] = wrapToCanvas(px, py, w, h);
     if (halfBeat) {
       if (drawnHalfBeatDots === 0) {
         // dimmed first-dot glow — no proximity check against the on-beat reticule, since
@@ -741,6 +746,25 @@ const paintOnRhythmSpot = (
 // When reachable, the aim point is C_future - r·D̂ (near surface). When NOT reachable, we still
 // place the spot at the target's predicted center so the player sees where the lead would be,
 // but `reachable` is false so the renderer can tint the target red.
+// the on-beat hit surface for the FIRST beat dot: the point on the target's predicted body
+// surface that faces the player (C_future - r·D̂, D̂ = aimCenter→C_future). Unlike the velocity
+// trail this depends on the player's position, so the first dot can sit off the straight trail —
+// but it marks the spot a bullet must reach to hit ON the beat rather than early. Returns null on
+// degenerate geometry (no separation between aim center and future center) so the caller falls
+// back to the trail position.
+const computeFirstDotSurface = (
+  cx: number, cy: number, velX: number, velY: number, radius: number,
+  aimCenterX: number, aimCenterY: number, beatGrid: number,
+): [number, number] | null => {
+  const futureX = cx + velX * beatGrid;
+  const futureY = cy + velY * beatGrid;
+  const dx = futureX - aimCenterX;
+  const dy = futureY - aimCenterY;
+  const dist = Math.hypot(dx, dy);
+  if (dist <= 1e-6) return null;
+  return [futureX - (dx / dist) * radius, futureY - (dy / dist) * radius];
+};
+
 type OnBeatAim = { x: number; y: number; reachable: boolean; willHitOnBeat: boolean };
 const computeOnBeatAim = (
   cx: number, cy: number, velX: number, velY: number, radius: number,
@@ -825,6 +849,14 @@ const paintTrajectoryFromSnapshot = (
   const [aimCenterX, aimCenterY] = remapReticuleToTarget(ctx.apex, ctx.aimCircleCenter, ctx.w, ctx.h);
   const dotStep = speed * ctx.beatGrid;
   const dotOffset = -(r + edgePad);
+  // option #2: the first on-beat dot is relocated from the future CENTER to the on-beat hit
+  // SURFACE — the point C_future - r·D̂ a bullet must actually reach to land ON the beat (aiming
+  // at the center makes the bullet pass through the near edge early → an off-beat hit). Computed
+  // along the player→target line, so it can leave the straight velocity trail. null when no aim
+  // circle / degenerate geometry, in which case the dot stays on the trail.
+  const firstDotOverride = computeFirstDotSurface(
+    cx, cy, snap.velX, snap.velY, r, aimCenterX, aimCenterY, ctx.beatGrid,
+  );
   ctx.ctx.save();
   ctx.ctx.setLineDash([]);
   if (SHOW_AIM_INTERSECTION_X) {
@@ -837,7 +869,7 @@ const paintTrajectoryFromSnapshot = (
     ctx.ctx, rawStartX, rawStartY, ux, uy, reticulesBySlot,
     sMin, sMax, dotStep, dotOffset, entryFlashBoost, beatPulseBoost, focusBoost,
     ctx.w, ctx.h, ctx.doubletime, ctx.tutorialHighlight, showOnRhythmSpot,
-    ctx.beatTime, ctx.beatGrid, ctx.hoverZoneEnterBySlot,
+    ctx.beatTime, ctx.beatGrid, ctx.hoverZoneEnterBySlot, firstDotOverride,
   );
   if (SHOW_ON_RHYTHM_RETICULE && showOnRhythmSpot) {
     const aim = computeOnBeatAim(

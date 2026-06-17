@@ -59,7 +59,7 @@ const emitOnBeatSparkleRing = (particles: ParticleSystem, pos: Vec, count: numbe
 // shards carry "rock physically breaks"; particles + sparkle reinforce on-beat rhythm credit.
 export const emitExplosion = (particles: ParticleSystem, shards: Shard[], a: Asteroid, onBeat: boolean) => {
   for (const s of shatterAsteroid(a)) shards.push(s);
-  const baseCount = a.size === "large" ? 60 : a.size === "medium" ? 40 : 24;
+  const baseCount = a.size === "huge" ? 90 : a.size === "large" ? 60 : a.size === "medium" ? 40 : 24;
   emitBurst(particles, {
     pos: a.pos,
     count: onBeat ? Math.round(baseCount * 1.6) : baseCount,
