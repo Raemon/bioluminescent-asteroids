@@ -158,14 +158,13 @@ const seedBeatFragmentSlot = (game: Game, a: Asteroid) => {
   a.nextBeatAt = Math.round(raw / BEAT_GRID) * BEAT_GRID;
 };
 
-// paired-wave intro (one bass, then both, then decorators) trains the player gradually.
+// paired-wave intro (one bass, then both) trains the player gradually.
 // Bass kinds drop out entirely once the wave passes CFG.bassteroid.maxLevel —
 // the post-boss arc retires the rhythm-armour pieces so a new texture
 // (glass prisons, the bell-toll cathedral fragment) can take centre stage.
-// The bell decorator is held back to CFG.bell.firstWave for the same reason,
-// so it lands as a post-boss reveal rather than a mid-rhythm colour.
 // Each bass slot rolls a fresh kind from the full BASS_KINDS pool, so any of
 // the four colours can show up on any bass wave (re-rolled per wave spawn).
+// The chime/bell/warble sound-decorator asteroids are no longer spawned here.
 export const activeSpecialsForWave = (_game: Game, wave: number): AsteroidKind[] => {
   if (wave < 3) return [];
   const bassAllowed = wave <= CFG.bassteroid.maxLevel;
@@ -173,10 +172,6 @@ export const activeSpecialsForWave = (_game: Game, wave: number): AsteroidKind[]
   if (wave === 3) return bassAllowed ? [randomBass()] : [];
   if (wave === 4) return bassAllowed ? [randomBass()] : [];
   const specials: AsteroidKind[] = bassAllowed ? [randomBass(), randomBass()] : [];
-  const lateUnlockOrder: AsteroidKind[] = ["chime", "warble"];
-  const lateCount = Math.max(0, Math.min(lateUnlockOrder.length, Math.floor((wave - 5) / 2)));
-  for (let i = 0; i < lateCount; i++) specials.push(lateUnlockOrder[i]);
-  if (wave >= CFG.bell.firstWave) specials.push("bell");
   return specials;
 };
 

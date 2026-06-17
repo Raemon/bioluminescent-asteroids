@@ -272,6 +272,16 @@ export class Sound {
     tremoloGain: GainNode;
     mainGain: GainNode;
   } | null = null;
+  // Sustained hold-to-charge bed: a C-rooted chord whose notes unmute per
+  // tier plus a crackling noise layer that intensifies as the charge builds.
+  laserChargeNode: {
+    chordOscs: OscillatorNode[];
+    chordGains: GainNode[];
+    noise: AudioBufferSourceNode;
+    noiseFilter: BiquadFilterNode;
+    noiseGain: GainNode;
+    mainGain: GainNode;
+  } | null = null;
   // Side engines (Z/X) — third engine voice; pitch sits between forward thrust
   // and retro so the player hears it as a distinct vector.
   sideThrustNode: {
@@ -4529,6 +4539,108 @@ export class Sound {
     this.thrustNode = null;
   }
 
+  // Hold-to-charge bed. Four chord voices on a C-rooted stack (C3, G3, C4, E4)
+  // all start silent except the root; setLaserChargeTier unmutes the rest as
+  // dots land. A looping noise source through a swept bandpass gives the
+  // "power building" crackle. Idempotent; the caller pairs it with stop.
+  startLaserCharge() {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    if (this.laserChargeNode) return;
+    const t = this.ctx.currentTime;
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.setValueAtTime(0.0001, t);
+    mainGain.gain.exponentialRampToValueAtTime(0.5, t + 0.08);
+    mainGain.connect(this.master);
+
+    // Tier 0 starts with only the root audible; higher voices ramp in later.
+    const voices: Array<{ hz: number; type: OscillatorType; tierPeak: number }> = [
+      { hz: 130.81, type: "triangle", tierPeak: 0.12 }, // C3 root (tier 0)
+      { hz: 196.00, type: "sine",     tierPeak: 0.09 }, // G3 fifth (tier 1)
+      { hz: 261.63, type: "triangle", tierPeak: 0.08 }, // C4 octave (tier 2)
+      { hz: 329.63, type: "sine",     tierPeak: 0.06 }, // E4 third (tier 3)
+    ];
+    const chordOscs: OscillatorNode[] = [];
+    const chordGains: GainNode[] = [];
+    for (let i = 0; i < voices.length; i++) {
+      const v = voices[i];
+      const osc = this.ctx.createOscillator();
+      osc.type = v.type;
+      osc.frequency.value = v.hz;
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(i === 0 ? v.tierPeak : 0.0001, t);
+      osc.connect(gain);
+      gain.connect(mainGain);
+      osc.start(t);
+      chordOscs.push(osc);
+      chordGains.push(gain);
+    }
+
+    // Crackling electric layer — looping noise through a bandpass, quiet at
+    // tier 0; tier changes open the cutoff and raise its gain.
+    const noise = this.ctx.createBufferSource();
+    const noiseBuf = this.makeNoiseBuffer(2);
+    if (noiseBuf) noise.buffer = noiseBuf;
+    noise.loop = true;
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = "bandpass";
+    noiseFilter.Q.value = 4;
+    noiseFilter.frequency.value = 900;
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.02, t);
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(mainGain);
+    noise.start(t);
+
+    this.laserChargeNode = {
+      chordOscs, chordGains, noise, noiseFilter, noiseGain, mainGain,
+    };
+  }
+
+  // Glide the bed up to charge tier `dots` (0..3): unmute chord voices up to
+  // that index and push the crackle layer brighter/louder. Short ramps so
+  // each new dot intensifies audibly without clicking.
+  setLaserChargeTier(dots: number) {
+    if (!this.ctx || !this.laserChargeNode) return;
+    const t = this.ctx.currentTime;
+    const tier = Math.max(0, Math.min(3, Math.floor(dots)));
+    const { chordGains, noiseFilter, noiseGain } = this.laserChargeNode;
+
+    const tierPeaks = [0.12, 0.09, 0.08, 0.06];
+    for (let i = 0; i < chordGains.length; i++) {
+      const target = i <= tier ? tierPeaks[i] : 0.0001;
+      const g = chordGains[i].gain;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.linearRampToValueAtTime(target, t + 0.09);
+    }
+
+    const crackleGain = 0.02 + tier * 0.05;
+    const crackleCutoff = 900 + tier * 700;
+    noiseGain.gain.cancelScheduledValues(t);
+    noiseGain.gain.setValueAtTime(noiseGain.gain.value, t);
+    noiseGain.gain.linearRampToValueAtTime(crackleGain, t + 0.1);
+    noiseFilter.frequency.cancelScheduledValues(t);
+    noiseFilter.frequency.setValueAtTime(noiseFilter.frequency.value, t);
+    noiseFilter.frequency.linearRampToValueAtTime(crackleCutoff, t + 0.12);
+  }
+
+  // Tear down the charge bed. Safe to call repeatedly and when never started.
+  stopLaserCharge() {
+    if (!this.ctx || !this.laserChargeNode) return;
+    const t = this.ctx.currentTime;
+    const { chordOscs, noise, mainGain } = this.laserChargeNode;
+    mainGain.gain.cancelScheduledValues(t);
+    mainGain.gain.setValueAtTime(mainGain.gain.value, t);
+    mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+    for (const osc of chordOscs) osc.stop(t + 0.1);
+    noise.stop(t + 0.1);
+    this.laserChargeNode = null;
+  }
+
   // Deeper sibling of startThrust — same architecture, lower oscillator
   // frequencies and a darker filter cutoff so the retro-jets read as a
   // heavier, lower-pitched rumble than the forward thrusters.
@@ -5105,13 +5217,16 @@ export class Sound {
   // touch of high-passed noise on the very front sells the muzzle ignition.
   //   `damage` (1..4) scales overall gain + adds a brighter octave-up shimmer at
   //   higher charges so a full 3-dot release sounds visibly more powerful.
-  playLaserShot(damage: number = 1) {
+  playLaserShot(damage: number = 2, dots: number = 0) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
+    const tier = Math.max(0, Math.min(3, Math.floor(dots)));
     const intensity = Math.max(0.4, Math.min(1, 0.55 + damage * 0.18));
-    const tail = 0.42 + damage * 0.06;
+    // Length ramps across the 4 charge tiers instead of off raw damage, which
+    // now reaches 16 and would ring the shot into the next beat.
+    const tail = 0.42 + tier * 0.13;
     // Four partials anchored on C, dropped an octave from the original mix so the
     // shot reads as a chest-thump rather than a chirp. Sub (C2) + fundamental (C3)
     // carry the body; C4 triangle is the recognisable beam-pitch; C5 sine adds air.
@@ -5161,8 +5276,8 @@ export class Sound {
       osc.start(t);
       osc.stop(t + 0.24);
     }
-    // Charge-tier shimmer: a C6 sine + C7 partial layered on top, scaling with damage.
-    if (damage >= 2) {
+    // Charge-tier shimmer: a C6 sine + G6 partial layered on top, scaling with tier.
+    if (tier >= 1) {
       const shimmers: Array<{ hz: number; peakMult: number; tailMult: number }> = [
         { hz: 1046.50, peakMult: 0.09, tailMult: 0.75 },
         { hz: 1567.98, peakMult: 0.045, tailMult: 0.55 }, // G6 fifth — sparkle
@@ -5173,7 +5288,7 @@ export class Sound {
         osc.type = "sine";
         osc.frequency.setValueAtTime(s.hz, t);
         osc.frequency.exponentialRampToValueAtTime(s.hz * 0.84, t + tail * s.tailMult);
-        const peak = s.peakMult * (damage - 1) * 0.6;
+        const peak = s.peakMult * tier * 0.6;
         gain.gain.setValueAtTime(0.0001, t);
         gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
         gain.gain.exponentialRampToValueAtTime(0.0001, t + tail * s.tailMult);

@@ -7,7 +7,7 @@ import { renderBassLightnings } from "./bassLightning";
 import { computeConeFrame } from "../ship/reticule/coneGeometry";
 import { pickCenterMostTargetForFocus, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
 import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
-import { renderLasers, renderLaserChargeDots } from "./laserShot";
+import { renderLasers, renderLaserChargeDots, renderLaserAmbientFlash } from "./laserShot";
 import { renderBossBeams } from "./bossBeam";
 import { rng } from "./rng";
 
@@ -141,7 +141,9 @@ export const renderGame = (game: Game) => {
   );
   paintEntityLayers(game, focusedTarget);
   paintForeground(game, targets);
-  // bass-drop white flash has to sit above every other layer to actually wash the screen.
+  // laser ambient wash sits above entities; the bass-drop white flash sits above
+  // even that so a bass drop still wins.
+  renderLaserAmbientFlash(ctx, game);
   game.pulsar.renderShockwaveOverlay(ctx);
   ctx.restore();
 };
