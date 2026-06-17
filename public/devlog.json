@@ -1,5 +1,49 @@
 [
   {
+    "id": "2026-06-17-2cb7f08",
+    "date": "2026-06-17",
+    "title": "Huge asteroids, gold gems, warbles, laser charge & replays",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Huge asteroids now appear — larger and tougher than large, they shatter into varied fragment combinations.",
+          "Gold gem asteroids (medium and big tiers) spawn as chunky cut diamonds; destroying one bursts it into a fan of fast gold diamond shards.",
+          "Gem swarm events send a flock of gold-crystal rocks streaking across the field, rewarding quick shooting with upgrade drops.",
+          "Warble asteroids now phase in and out on the beat — they turn intangible while dimmed, letting bullets pass clean through.",
+          "Laser charging now builds through multiple tiers with sustained sound effects and visual crackle; releasing a charged shot triggers a full-screen flash.",
+          "Replays can now be scrubbed with a timeline control — pause, change playback speed, or seek to any moment with arrow keys or the on-screen bar.",
+          "Glass prisons now release a brood of 2–4 wraiths instead of a single one when broken."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Cathedral debris (bell, glass shards, keystones) now appears dark and unlit — the stained glass has gone cold.",
+          "Leaderboard top-pilots view now scans deeper to ensure a diverse spread of pilots is shown even when one pilot dominates the top scores."
+        ]
+      },
+      {
+        "heading": "Tuning",
+        "items": [
+          "Alien bullets are now significantly larger, improving visibility during combat.",
+          "Prong upgrade now stacks — each pickup adds an additional prong bullet rather than simply toggling the effect."
+        ]
+      }
+    ],
+    "commits": [
+      "2cb7f08",
+      "c828170",
+      "283651b",
+      "76ce907",
+      "d32fe46",
+      "9fcbc11",
+      "c6d3aed",
+      "74386cd",
+      "62b768b"
+    ]
+  },
+  {
     "id": "2026-06-16-4aa5ead",
     "date": "2026-06-16",
     "title": "Improved beat timing feel and title update",
