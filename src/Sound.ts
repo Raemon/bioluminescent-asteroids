@@ -287,14 +287,12 @@ export class Sound {
     tremoloGain: GainNode;
     mainGain: GainNode;
   } | null = null;
-  // Sustained hold-to-charge bed: a C-rooted chord whose notes unmute per
-  // tier plus a crackling noise layer that intensifies as the charge builds.
+  // Sustained hold-to-charge bed: five pre-baked tier loops (chord + crackle +
+  // rolling-thunder rumble baked in), each on its own crossfade gain. Only the
+  // active tier is audible; holding crossfades up the tiers as dots land.
   laserChargeNode: {
-    chordOscs: OscillatorNode[];
-    chordGains: GainNode[];
-    noise: AudioBufferSourceNode;
-    noiseFilter: BiquadFilterNode;
-    noiseGain: GainNode;
+    sources: AudioBufferSourceNode[];
+    tierGains: GainNode[];
     mainGain: GainNode;
   } | null = null;
   // Side engines (Z/X) — third engine voice; pitch sits between forward thrust
@@ -521,6 +519,7 @@ export class Sound {
     // it — runs once, on first user interaction.
     this.prewarmNoiseBuffers();
     this.prerenderLaserShots();
+    this.prerenderChargeBeds();
     this.loadGuitarSample();
     // Kick off the baked-mp3 fetch + decode for every voice that has a baked
     // recipe. The title screen awaits bakedCacheReady() before letting the
@@ -4667,15 +4666,156 @@ export class Sound {
     this.thrustNode = null;
   }
 
-  // Hold-to-charge bed. Four chord voices on a C-rooted stack (C3, G3, C4, E4)
-  // all start silent except the root; setLaserChargeTier unmutes the rest as
-  // dots land. A looping noise source through a swept bandpass gives the
-  // "power building" crackle. Idempotent; the caller pairs it with stop.
+  // Seamless-loop length (s) for the pre-baked charge-bed tiers. Every tonal
+  // and LFO frequency baked into the loop is an integer Hz, so each completes a
+  // whole number of cycles in exactly this many seconds and the buffer meets
+  // itself cleanly at the loop point. Keep frequencies integer if you edit them.
+  private static CHARGE_LOOP_LEN = 1.0;
+
+  // Renders one seamless charge-bed loop for tier `tier` (0..4) into `ctx`.
+  // Bakes the whole bed at that tier's intensity: the C-rooted chord stack
+  // (more voices + hotter as charge climbs), a bandpassed crackle, and the
+  // rolling-thunder rumble (lowpassed noise churned by a slow LFO, with a sub
+  // sine under it). All frequencies are integers so the loop is seamless.
+  // Nothing reads live state, so it renders identically every time.
+  private buildChargeBedGraph(ctx: BaseAudioContext, dest: AudioNode, tier: number) {
+    const len = Sound.CHARGE_LOOP_LEN;
+    const topBoost = tier >= 4 ? 1.35 : 1;
+
+    // Chord stack — integer-Hz approximations of C3/G3/C4/E4 so each loops
+    // cleanly in 1s. Voice i is audible once tier >= i; tier 4 swells all four.
+    const voices: Array<{ hz: number; type: OscillatorType; peak: number }> = [
+      { hz: 131, type: "triangle", peak: 0.12 }, // C3 root (tier 0)
+      { hz: 196, type: "sine",     peak: 0.09 }, // G3 fifth (tier 1)
+      { hz: 262, type: "triangle", peak: 0.08 }, // C4 octave (tier 2)
+      { hz: 330, type: "sine",     peak: 0.06 }, // E4 third (tier 3)
+    ];
+    for (let i = 0; i < voices.length; i++) {
+      if (i > tier) continue;
+      const v = voices[i];
+      const osc = ctx.createOscillator();
+      osc.type = v.type;
+      osc.frequency.value = v.hz;
+      const gain = ctx.createGain();
+      gain.gain.value = v.peak * topBoost;
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start(0);
+      osc.stop(len + 0.05);
+    }
+
+    const noiseFor = (dur: number): AudioBuffer => {
+      const n = Math.max(1, Math.floor(ctx.sampleRate * dur));
+      const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) data[i] = Math.random() * 2 - 1;
+      return buf;
+    };
+
+    // Crackling electric layer — bandpassed looping noise. Louder/brighter with
+    // charge. (Noise is stationary so it loops seamlessly at any length.)
+    {
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseFor(len + 0.1);
+      noise.loop = true;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.Q.value = 4;
+      bp.frequency.value = 900 + tier * 800;
+      const gain = ctx.createGain();
+      gain.gain.value = 0.02 + tier * 0.055;
+      noise.connect(bp);
+      bp.connect(gain);
+      gain.connect(dest);
+      noise.start(0);
+      noise.stop(len + 0.05);
+    }
+
+    // Rolling-thunder rumble — lowpassed noise whose cutoff is churned by a slow
+    // LFO (integer Hz, whole periods per loop) so it surges and recedes like
+    // thunder. The roll quickens and deepens, and the band opens, with charge.
+    {
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseFor(len + 0.1);
+      noise.loop = true;
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.Q.value = 1.2;
+      lp.frequency.value = 150 + tier * 130;
+      const lfo = ctx.createOscillator();
+      lfo.type = "sine";
+      lfo.frequency.value = 2 + tier; // integer Hz → seamless; quickens w/ charge
+      const lfoDepth = ctx.createGain();
+      lfoDepth.gain.value = 40 + tier * 35;
+      lfo.connect(lfoDepth);
+      lfoDepth.connect(lp.frequency);
+      const gain = ctx.createGain();
+      gain.gain.value = 0.04 + tier * 0.085;
+      noise.connect(lp);
+      lp.connect(gain);
+      gain.connect(dest);
+      noise.start(0);
+      noise.stop(len + 0.05);
+      lfo.start(0);
+      lfo.stop(len + 0.05);
+    }
+
+    // Deep sub sine — the body of the building storm. Silent at tier 0, swells
+    // per tier. 44 Hz is integer so it loops cleanly.
+    if (tier >= 1) {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = 44; // ~F1, under the chord stack
+      const gain = ctx.createGain();
+      gain.gain.value = 0.05 + tier * 0.05;
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start(0);
+      osc.stop(len + 0.05);
+    }
+  }
+
+  // Renders the seamless charge-bed loop once per tier (0..4) into an
+  // AudioBuffer via OfflineAudioContext and caches it, so the hold-to-charge
+  // bed is buffer playback + crossfades instead of a live oscillator/LFO stack.
+  // Fire-and-forget; re-runnable (skips tiers already cached or in flight).
+  private prerenderChargeBeds() {
+    if (!this.ctx) return;
+    const OAC = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
+    if (!OAC) return;
+    const sr = this.ctx.sampleRate;
+    const length = Math.ceil(sr * (Sound.CHARGE_LOOP_LEN + 0.05));
+    for (let tier = 0; tier <= 4; tier++) {
+      if (this.chargeBedBuffers[tier] || this.chargeBedRendering[tier]) continue;
+      this.chargeBedRendering[tier] = true;
+      const offline = new OAC(1, length, sr);
+      this.buildChargeBedGraph(offline, offline.destination, tier);
+      offline.startRendering().then((buf) => {
+        this.chargeBedBuffers[tier] = buf;
+        this.chargeBedRendering[tier] = false;
+      }).catch(() => { this.chargeBedRendering[tier] = false; });
+    }
+  }
+
+  // One pre-rendered seamless charge-bed loop per tier (index 0..4). Filled
+  // lazily by prerenderChargeBeds; null until that tier's render resolves.
+  private chargeBedBuffers: (AudioBuffer | null)[] = [null, null, null, null, null];
+  private chargeBedRendering: boolean[] = [false, false, false, false, false];
+
+  // Hold-to-charge bed. Plays all five pre-baked tier loops at once, each
+  // through its own crossfade gain; only the active tier is audible. Holding
+  // (setLaserChargeTier) crossfades between tiers as dots land, so the bed
+  // intensifies seamlessly without any live synthesis. Idempotent; paired with
+  // stopLaserCharge by the caller.
   startLaserCharge() {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     if (this.laserChargeNode) return;
+    // If the bake hasn't landed yet, kick it and bail — the upgrade hold is rare
+    // at context start, so silent-missing the very first hold is acceptable.
+    this.prerenderChargeBeds();
+    if (this.chargeBedBuffers.some((b) => !b)) return;
     const t = this.ctx.currentTime;
 
     const mainGain = this.ctx.createGain();
@@ -4683,92 +4823,52 @@ export class Sound {
     mainGain.gain.exponentialRampToValueAtTime(0.5, t + 0.08);
     mainGain.connect(this.master);
 
-    // Tier 0 starts with only the root audible; higher voices ramp in later.
-    const voices: Array<{ hz: number; type: OscillatorType; tierPeak: number }> = [
-      { hz: 130.81, type: "triangle", tierPeak: 0.12 }, // C3 root (tier 0)
-      { hz: 196.00, type: "sine",     tierPeak: 0.09 }, // G3 fifth (tier 1)
-      { hz: 261.63, type: "triangle", tierPeak: 0.08 }, // C4 octave (tier 2)
-      { hz: 329.63, type: "sine",     tierPeak: 0.06 }, // E4 third (tier 3)
-    ];
-    const chordOscs: OscillatorNode[] = [];
-    const chordGains: GainNode[] = [];
-    for (let i = 0; i < voices.length; i++) {
-      const v = voices[i];
-      const osc = this.ctx.createOscillator();
-      osc.type = v.type;
-      osc.frequency.value = v.hz;
+    const sources: AudioBufferSourceNode[] = [];
+    const tierGains: GainNode[] = [];
+    for (let tier = 0; tier <= 4; tier++) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.chargeBedBuffers[tier];
+      src.loop = true;
       const gain = this.ctx.createGain();
-      gain.gain.setValueAtTime(i === 0 ? v.tierPeak : 0.0001, t);
-      osc.connect(gain);
+      // Only tier 0 audible at the start of a hold; others crossfade in.
+      gain.gain.setValueAtTime(tier === 0 ? 1 : 0.0001, t);
+      src.connect(gain);
       gain.connect(mainGain);
-      osc.start(t);
-      chordOscs.push(osc);
-      chordGains.push(gain);
+      src.start(t);
+      sources.push(src);
+      tierGains.push(gain);
     }
 
-    // Crackling electric layer — looping noise through a bandpass, quiet at
-    // tier 0; tier changes open the cutoff and raise its gain.
-    const noise = this.ctx.createBufferSource();
-    const noiseBuf = this.makeNoiseBuffer(2);
-    if (noiseBuf) noise.buffer = noiseBuf;
-    noise.loop = true;
-    const noiseFilter = this.ctx.createBiquadFilter();
-    noiseFilter.type = "bandpass";
-    noiseFilter.Q.value = 4;
-    noiseFilter.frequency.value = 900;
-    const noiseGain = this.ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.02, t);
-    noise.connect(noiseFilter);
-    noiseFilter.connect(noiseGain);
-    noiseGain.connect(mainGain);
-    noise.start(t);
-
-    this.laserChargeNode = {
-      chordOscs, chordGains, noise, noiseFilter, noiseGain, mainGain,
-    };
+    this.laserChargeNode = { sources, tierGains, mainGain };
   }
 
-  // Glide the bed up to charge tier `dots` (0..4): unmute chord voices up to
-  // that index and push the crackle layer brighter/louder. Short ramps so
-  // each new dot intensifies audibly without clicking. Tier 4 has no 5th voice,
-  // so it drives the whole bed and crackle hotter instead.
+  // Crossfade the bed to charge tier `dots` (0..4): the active tier's loop fades
+  // to full, all others to silence. Short ramps so each new dot intensifies
+  // audibly without clicking — the per-tier loudness/voicing differences are
+  // already baked into each loop.
   setLaserChargeTier(dots: number) {
     if (!this.ctx || !this.laserChargeNode) return;
     const t = this.ctx.currentTime;
     const tier = Math.max(0, Math.min(4, Math.floor(dots)));
-    const { chordGains, noiseFilter, noiseGain } = this.laserChargeNode;
-    // Tier 4 reuses the 4-voice stack but swells every voice for the top step.
-    const topBoost = tier >= 4 ? 1.35 : 1;
-
-    const tierPeaks = [0.12, 0.09, 0.08, 0.06];
-    for (let i = 0; i < chordGains.length; i++) {
-      const target = i <= tier ? tierPeaks[i] * topBoost : 0.0001;
-      const g = chordGains[i].gain;
+    const { tierGains } = this.laserChargeNode;
+    for (let i = 0; i < tierGains.length; i++) {
+      const target = i === tier ? 1 : 0.0001;
+      const g = tierGains[i].gain;
       g.cancelScheduledValues(t);
       g.setValueAtTime(g.value, t);
-      g.linearRampToValueAtTime(target, t + 0.09);
+      g.linearRampToValueAtTime(target, t + 0.12);
     }
-
-    const crackleGain = 0.02 + tier * 0.055;
-    const crackleCutoff = 900 + tier * 800;
-    noiseGain.gain.cancelScheduledValues(t);
-    noiseGain.gain.setValueAtTime(noiseGain.gain.value, t);
-    noiseGain.gain.linearRampToValueAtTime(crackleGain, t + 0.1);
-    noiseFilter.frequency.cancelScheduledValues(t);
-    noiseFilter.frequency.setValueAtTime(noiseFilter.frequency.value, t);
-    noiseFilter.frequency.linearRampToValueAtTime(crackleCutoff, t + 0.12);
   }
 
   // Tear down the charge bed. Safe to call repeatedly and when never started.
   stopLaserCharge() {
     if (!this.ctx || !this.laserChargeNode) return;
     const t = this.ctx.currentTime;
-    const { chordOscs, noise, mainGain } = this.laserChargeNode;
+    const { sources, mainGain } = this.laserChargeNode;
     mainGain.gain.cancelScheduledValues(t);
     mainGain.gain.setValueAtTime(mainGain.gain.value, t);
     mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
-    for (const osc of chordOscs) osc.stop(t + 0.1);
-    noise.stop(t + 0.1);
+    for (const src of sources) src.stop(t + 0.1);
     this.laserChargeNode = null;
   }
 

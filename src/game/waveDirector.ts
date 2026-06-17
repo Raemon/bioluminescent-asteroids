@@ -589,7 +589,7 @@ const spawnFirstLevelDrifter = (
 //   whichever bucket it lands in, so the "stays large" probability below is
 //   directly the expected large mass fraction. Always returns a list whose
 //   summed mass equals `largeCount`.
-const redistributeNormalMass = (largeCount: number): AsteroidSize[] => {
+const redistributeNormalMass = (largeCount: number, allowHuge: boolean): AsteroidSize[] => {
   const UPGRADE_CHANCE = 0.2;
   const DOWNGRADE_MEDIUM_CHANCE = 0.18;
   const DOWNGRADE_SMALL_CHANCE = 0.12;
@@ -597,7 +597,7 @@ const redistributeNormalMass = (largeCount: number): AsteroidSize[] => {
   let remaining = largeCount;
   while (remaining >= 1) {
     // Upgrade only when a second whole large remains to pair into the huge.
-    if (remaining >= 2 && rng() < UPGRADE_CHANCE) {
+    if (allowHuge && remaining >= 2 && rng() < UPGRADE_CHANCE) {
       out.push("huge");
       remaining -= 2;
       continue;
@@ -689,7 +689,9 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
     // Solid crystal is a medium-sized gem; the other specials spawn large.
     specialSpawns.push({ kind, size: kind === "solidCrystal" ? "medium" : "large" });
   }
-  const normalSpawns = redistributeNormalMass(normalLargeCount).map(
+  // Huge rocks only start appearing at display wave 3 (internal wave 4).
+  const allowHuge = displayWave(game.wave) >= 3;
+  const normalSpawns = redistributeNormalMass(normalLargeCount, allowHuge).map(
     (size): { kind: AsteroidKind | undefined; size: AsteroidSize } => ({ kind: undefined, size }),
   );
   const spawns = [...normalSpawns, ...specialSpawns];

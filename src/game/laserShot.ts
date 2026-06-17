@@ -37,7 +37,7 @@ export const maxLaserDots = (game: Game): number => {
 // Visible beam stays painted for this many seconds after fire — long enough
 // to read as a flash, short enough that another shot a beat later doesn't
 // overlap the previous trail.
-const LASER_BEAM_LIFE = 0.22;
+const LASER_BEAM_LIFE = 0.1;
 // The laser deliberately overshoots the reticule slot: bulletSpeed *
 // effectiveBulletLife * LASER_BASE_RANGE_MULT, then the pierce/longshot/
 // superBoosted multipliers shipWeapons uses stack on top. The base mult is
@@ -60,6 +60,12 @@ const LASER_JAG_AMPLITUDE = 7;
 // wider so it catches targets the centre line would miss. The renderer's
 // visible core/glow is sized to roughly match this.
 const beamHalfWidth = (dots: number): number => dots * 6;
+
+// Flat hit allowance on top of the target surface, mirroring the generosity a
+// bullet's hitRadius() gives its collision test. Without it the beam's centre
+// line has to thread within a target's nominal radius — small fast shards (a
+// 15px goldDiamond at 360px/s) slip clean through the 0-dot beam every time.
+const LASER_HIT_PAD = 8;
 
 // A laser beam anchored to the firing ship: its origin (muzzle) and heading
 // track the ship each frame while it lives, so as the ship turns or drifts the
@@ -278,7 +284,12 @@ const applyBeamToAsteroids = (game: Game, beam: LaserBeam, dir: Vec) => {
   const surviving: Asteroid[] = [];
   for (const a of game.asteroids) {
     const { distance, t } = distanceToBeam(origin, dir, length, a.pos);
-    if (distance > a.radius + halfW || beam.alreadyHit.has(a) || !beam.eligible.has(a)) {
+    // Shape-aware reach: sample the faceted surface toward the beam's closest
+    // approach so the test matches what a bullet would hit, not a loose circle.
+    const closest = v(origin.x + dir.x * t, origin.y + dir.y * t);
+    const surfAngle = Math.atan2(closest.y - a.pos.y, closest.x - a.pos.x) - a.rotation;
+    const reach = a.radiusAtAngle(surfAngle) + halfW + LASER_HIT_PAD;
+    if (distance > reach || beam.alreadyHit.has(a) || !beam.eligible.has(a)) {
       surviving.push(a); continue;
     }
     beam.alreadyHit.add(a);
@@ -308,7 +319,7 @@ const applyBeamToAliens = (game: Game, beam: LaserBeam, dir: Vec) => {
   const surviving: Alien[] = [];
   for (const al of game.aliens) {
     const { distance, t } = distanceToBeam(origin, dir, length, al.pos);
-    if (distance > al.radius + halfW || beam.alreadyHit.has(al) || !beam.eligible.has(al)) {
+    if (distance > al.radius + halfW + LASER_HIT_PAD || beam.alreadyHit.has(al) || !beam.eligible.has(al)) {
       surviving.push(al); continue;
     }
     beam.alreadyHit.add(al);
@@ -338,7 +349,7 @@ const applyBeamToComets = (game: Game, beam: LaserBeam, dir: Vec) => {
   const surviving: Comet[] = [];
   for (const c of game.comets) {
     const { distance, t } = distanceToBeam(origin, dir, length, c.pos);
-    if (distance > c.radius + halfW || beam.alreadyHit.has(c) || !beam.eligible.has(c)) {
+    if (distance > c.radius + halfW + LASER_HIT_PAD || beam.alreadyHit.has(c) || !beam.eligible.has(c)) {
       surviving.push(c); continue;
     }
     beam.alreadyHit.add(c);
