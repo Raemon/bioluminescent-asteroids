@@ -237,10 +237,14 @@ export type ReticuleTarget = { pos: Vec; vel: Vec; radius?: number };
 type TrajectorySnapshot = { posX: number; posY: number; velX: number; velY: number; radius: number };
 
 // per-target tracking for entry flash phase and post-exit fade lingering.
+// firstDotHeld caches the on-beat-surface facing direction so the first dot doesn't glide
+// around the target's rim as the ship moves: the facing angle is re-sampled only when the
+// odd-beat window advances, and held steady in between (window = floor((beatIndex-1)/2)).
 export type TrajectoryTrack = {
   firstSeen: number;
   lastInConeAt: number;
   snapshot: TrajectorySnapshot;
+  firstDotHeld?: { window: number; angle: number };
 };
 
 // strong Map (not WeakMap) is required because we need to keep rendering a target's fade-out
@@ -748,22 +752,35 @@ const paintOnRhythmSpot = (
 // but `reachable` is false so the renderer can tint the target red.
 // the on-beat hit surface for the FIRST beat dot: the point on the target's predicted body
 // surface that faces the player (C_future - r·D̂, D̂ = aimCenter→C_future). Unlike the velocity
-// trail this depends on the player's position, so the first dot can sit off the straight trail —
-// but it marks the spot a bullet must reach to hit ON the beat rather than early. Returns null on
-// degenerate geometry (no separation between aim center and future center) so the caller falls
-// back to the trail position.
+// trail this depends on the player's position. To stop the dot from gliding around the rim as the
+// ship moves, the facing angle is sampled only on odd beats and held between (see TrajectoryTrack.
+// firstDotHeld); we recompute the surface point from C_future + that held angle every frame so the
+// dot stays anchored to the (moving) target while its rim placement only re-snaps on the odd beat.
+// Returns null on degenerate geometry (no separation) so the caller falls back to the trail.
+const firstDotFacingAngle = (
+  cx: number, cy: number, velX: number, velY: number, beatGrid: number,
+  aimCenterX: number, aimCenterY: number,
+): number | null => {
+  const dx = cx + velX * beatGrid - aimCenterX;
+  const dy = cy + velY * beatGrid - aimCenterY;
+  if (dx * dx + dy * dy <= 1e-12) return null;
+  return Math.atan2(dy, dx);
+};
+
 const computeFirstDotSurface = (
   cx: number, cy: number, velX: number, velY: number, radius: number,
-  aimCenterX: number, aimCenterY: number, beatGrid: number,
-): [number, number] | null => {
+  beatGrid: number, heldAngle: number,
+): [number, number] => {
   const futureX = cx + velX * beatGrid;
   const futureY = cy + velY * beatGrid;
-  const dx = futureX - aimCenterX;
-  const dy = futureY - aimCenterY;
-  const dist = Math.hypot(dx, dy);
-  if (dist <= 1e-6) return null;
-  return [futureX - (dx / dist) * radius, futureY - (dy / dist) * radius];
+  return [futureX - Math.cos(heldAngle) * radius, futureY - Math.sin(heldAngle) * radius];
 };
+
+// odd-beat window index: increments when crossing from an even beat into the next odd beat, so
+// floor((n-1)/2) is constant across each [odd, even] beat pair and the facing angle re-samples
+// once per pair on the odd beat.
+const oddBeatWindow = (beatTime: number, beatGrid: number): number =>
+  beatGrid > 0 ? Math.floor((Math.round(beatTime / beatGrid) - 1) / 2) : 0;
 
 type OnBeatAim = { x: number; y: number; reachable: boolean; willHitOnBeat: boolean };
 const computeOnBeatAim = (
@@ -802,10 +819,12 @@ const computeOnBeatAim = (
 const EMPTY_DOT_WALK_RESULT: DotWalkResult = { overlapsReticule: false, slotProximities: [], slotWinnerReticuleIdx: [], slotWithin75: [] };
 
 const paintTrajectoryFromSnapshot = (
-  ctx: TrajectoryContext, snap: TrajectorySnapshot, firstSeen: number,
+  ctx: TrajectoryContext, track: TrajectoryTrack,
   alphaMultiplier: number, clipToCone: boolean,
   showOnRhythmSpot: boolean,
 ): DotWalkResult => {
+  const snap = track.snapshot;
+  const firstSeen = track.firstSeen;
   const speed = Math.hypot(snap.velX, snap.velY);
   if (speed < 1) return EMPTY_DOT_WALK_RESULT;
   const [dx, dy] = toroidalDelta(snap.posX - ctx.apex.x, snap.posY - ctx.apex.y, ctx.w, ctx.h);
@@ -854,9 +873,17 @@ const paintTrajectoryFromSnapshot = (
   // at the center makes the bullet pass through the near edge early → an off-beat hit). Computed
   // along the player→target line, so it can leave the straight velocity trail. null when no aim
   // circle / degenerate geometry, in which case the dot stays on the trail.
-  const firstDotOverride = computeFirstDotSurface(
-    cx, cy, snap.velX, snap.velY, r, aimCenterX, aimCenterY, ctx.beatGrid,
-  );
+  // sample the facing angle only when the odd-beat window advances; otherwise reuse the held
+  // angle so the dot re-snaps to the rim on the odd beat instead of gliding with the ship.
+  const liveAngle = firstDotFacingAngle(cx, cy, snap.velX, snap.velY, ctx.beatGrid, aimCenterX, aimCenterY);
+  const window = oddBeatWindow(ctx.beatTime, ctx.beatGrid);
+  if (liveAngle !== null && (!track.firstDotHeld || track.firstDotHeld.window !== window)) {
+    track.firstDotHeld = { window, angle: liveAngle };
+  }
+  const heldAngle = track.firstDotHeld?.angle ?? liveAngle;
+  const firstDotOverride = heldAngle === null
+    ? null
+    : computeFirstDotSurface(cx, cy, snap.velX, snap.velY, r, ctx.beatGrid, heldAngle);
   ctx.ctx.save();
   ctx.ctx.setLineDash([]);
   if (SHOW_AIM_INTERSECTION_X) {
@@ -939,7 +966,7 @@ const previewLiveTarget = (
   // when only the ray (not the target itself) is in the cone, disable cone clipping so the
   // visible dots span the full forward path — clipping would chop the line back inside the wedge
   // and could omit the section the radar is actually overlapping.
-  return paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, 1, targetInCone, showSpot);
+  return paintTrajectoryFromSnapshot(ctx, track, 1, targetInCone, showSpot);
 };
 
 // drain expired fade entries and render fading-out trajectories for targets that left the cone or
@@ -964,7 +991,7 @@ const renderFadingTrajectories = (
         radius: live.radius ?? track.snapshot.radius,
       };
     }
-    paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, fade, false, false);
+    paintTrajectoryFromSnapshot(ctx, track, fade, false, false);
   }
 };
 
