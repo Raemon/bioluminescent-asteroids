@@ -165,6 +165,30 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   rubbleBlock: 285,
 };
 
+// Outline vertex count per kind; kinds not listed keep the default (60), a
+// smoothly resampled Fourier curve. Low counts read as hard-edged cut
+// polygons (kiki, not bouba):
+//   solid crystals — cut glass with sharp corners.
+//   gold gems / goldDiamond — chunky cut brilliant; 8 lands vertices on the
+//     cardinals so computeOutline gives crisp top/bottom points + wide girdle.
+//   glassPrison — tall hand-cut sarcophagus.
+//   bell — chunk of cathedral wall, chipped-masonry edge.
+//   cathedral debris — glass shard is a sliver; keystone a chunky wedge;
+//     column drum + rubble keep more vertices for a chipped-stone edge.
+const OUTLINE_SAMPLES: Partial<Record<AsteroidKind, number>> = {
+  solidCrystal: 7,
+  solidCrystalSmall: 6,
+  goldGemMedium: 8,
+  goldGemBig: 8,
+  goldDiamond: 8,
+  glassPrison: 8,
+  bell: 22,
+  glassShard: 6,
+  cathedralKeystone: 8,
+  columnDrum: 16,
+  rubbleBlock: 16,
+};
+
 // Solid crystal large asteroids render slightly bigger than a stock large so
 // they read as a more dangerous, more robust target. Smalls keep stock size.
 const SOLID_CRYSTAL_LARGE_RADIUS = ENTITY_CONFIG.solidCrystal.largeRadius;
@@ -248,6 +272,38 @@ export const WRAITH_RADIUS = ENTITY_CONFIG.wraith.radius;
 // than a stock small so clearing the rubble still asks for a couple of clean
 // shots — same intent as solidCrystalSmall — and terminal (no further split).
 export const CATHEDRAL_DEBRIS_HP = 2;
+
+// Flat per-kind HP. Kinds whose HP scales with size (boss family, bassteroids)
+// or stock asteroids aren't listed — getMaxHp handles those.
+const KIND_HP: Partial<Record<AsteroidKind, number>> = {
+  solidCrystal: SOLID_CRYSTAL_HP_LARGE,
+  solidCrystalSmall: SOLID_CRYSTAL_HP_SMALL,
+  goldGemMedium: GOLD_GEM_HP,
+  goldGemBig: GOLD_GEM_HP,
+  goldDiamond: GOLD_DIAMOND_HP,
+  glassPrison: GLASS_PRISON_HP,
+  wraith: WRAITH_HP,
+  cathedralKeystone: CATHEDRAL_DEBRIS_HP,
+  glassShard: CATHEDRAL_DEBRIS_HP,
+  columnDrum: CATHEDRAL_DEBRIS_HP,
+  rubbleBlock: CATHEDRAL_DEBRIS_HP,
+};
+
+function getMaxHp(kind: AsteroidKind, size: AsteroidSize): number {
+  switch (kind) {
+    case "boss": return BOSS_HP[size];
+    case "bossHemisphere": return BOSS_HP.medium;
+    case "bossEye": return ENTITY_CONFIG.boss.eyeHp;
+    case "bossPlate":
+    case "bossIrisShard":
+    case "bossEmber": return BOSS_HP.small;
+    case "bassA":
+    case "bassB":
+    case "bassC":
+    case "bassD": return BASS_HP[size];
+  }
+  return KIND_HP[kind] ?? ASTEROID_HP[size];
+}
 
 // Vertex list (local-space, normalised to radius=1) for one armoured panel
 // of a bassteroid. Each kind is a fixed cluster of these panels — drawn with
@@ -1159,31 +1215,7 @@ export class Asteroid {
       this.radius = BOSS_RADIUS.small * 0.55;
       this.rotSpeed = rand(-1.0, 1.0);
     }
-    this.maxHp = isBoss
-      ? BOSS_HP[size]
-      : isBossHemisphere
-        ? BOSS_HP.medium
-        : isBossEye
-          ? ENTITY_CONFIG.boss.eyeHp
-          : isBossPlate || isBossIrisShard || isBossEmber
-            ? BOSS_HP.small
-            : isBass
-              ? BASS_HP[size]
-              : kind === "solidCrystal"
-                ? SOLID_CRYSTAL_HP_LARGE
-                : kind === "solidCrystalSmall"
-                  ? SOLID_CRYSTAL_HP_SMALL
-                : isGoldGem(kind)
-                  ? GOLD_GEM_HP
-                : kind === "goldDiamond"
-                  ? GOLD_DIAMOND_HP
-                  : kind === "glassPrison"
-                    ? GLASS_PRISON_HP
-                    : kind === "wraith"
-                      ? WRAITH_HP
-                      : CATHEDRAL_DEBRIS_KINDS.includes(kind)
-                        ? CATHEDRAL_DEBRIS_HP
-                        : ASTEROID_HP[size];
+    this.maxHp = getMaxHp(kind, size);
     this.hp = this.maxHp;
     // For most asteroids each HP gets its own pre-rolled crack so the
     // damage state escalates predictably. The boss has a much higher HP
@@ -1199,30 +1231,7 @@ export class Asteroid {
     const kindHue = KIND_HUE[kind];
     this.hue = hue ?? ((isBoss || isBossFragment) ? BOSS_HUE : kindHue !== undefined ? kindHue : nextWaveHue());
     this.harmonics = this.buildHarmonicsForKind(kind);
-    // Solid crystal reads as cut glass — drop the outline sample count to a
-    // small number (7 for large, 6 for small fragments) so the silhouette
-    // is a hard-edged polygon with sharp corners rather than a smoothly
-    // resampled Fourier curve. Kiki, not bouba.
-    if (kind === "solidCrystal") this.outlineSamples = 7;
-    else if (kind === "solidCrystalSmall") this.outlineSamples = 6;
-    // Gold gem reads as a chunky cut brilliant — few hard facets (kiki, not
-    // bouba). 8 samples land vertices on the cardinals so the diamond profile
-    // (computeOutline) gives crisp top/bottom points and a wide girdle. The
-    // shard is an even sharper, smaller cut of the same diamond.
-    else if (isGoldGem(kind)) this.outlineSamples = 8;
-    else if (kind === "goldDiamond") this.outlineSamples = 8;
-    // Prison silhouette is a tall narrow polygon — 8 vertices read as a
-    // hand-cut sarcophagus rather than a generic rock.
-    else if (kind === "glassPrison") this.outlineSamples = 8;
-    // Bell asteroid is a chunk of cathedral wall — moderate-count polygon
-    // (chipped masonry edge) rather than a smooth organic curve.
-    else if (kind === "bell") this.outlineSamples = 22;
-    // Cathedral debris: glass shard is a hard-edged sliver (few vertices, kiki);
-    // keystone is a chunky wedge; column drum + rubble keep more vertices for a
-    // chipped-stone edge.
-    else if (kind === "glassShard") this.outlineSamples = 6;
-    else if (kind === "cathedralKeystone") this.outlineSamples = 8;
-    else if (kind === "columnDrum" || kind === "rubbleBlock") this.outlineSamples = 16;
+    this.outlineSamples = OUTLINE_SAMPLES[kind] ?? this.outlineSamples;
     this.outline = this.computeOutline();
     this.nuclei = [];
     const nucleusCount = size === "huge" ? 7 : size === "large" ? 5 : size === "medium" ? 3 : 2;

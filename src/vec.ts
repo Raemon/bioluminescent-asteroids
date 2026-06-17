@@ -19,6 +19,12 @@ export const wrap = (a: Vec, w: number, h: number): Vec => ({
 
 export const dist = (a: Vec, b: Vec): number => Math.hypot(a.x - b.x, a.y - b.y);
 
+// Circle-vs-circle overlap test for round-hitbox entities (pickups, comets,
+// aliens). Entities with an angle-aware silhouette (Asteroid) sample their
+// own surface instead.
+export const circleHit = (center: Vec, radius: number, point: Vec, pointRadius: number): boolean =>
+  dist(center, point) < radius + pointRadius;
+
 // Mutating variants — for per-frame hot paths (entity update loops, particles)
 // where the functional helpers' fresh {x,y} object per call dominates GC.
 // `addScaledMut(a, b, s)` does `a += b * s`. `addMut(a, b)` does `a += b`.

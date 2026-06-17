@@ -27,20 +27,19 @@ const cleanUrls = () => {
   };
 };
 
-// Dev-only writer for /sounds/config.json — the /sound page PUTs new tuning
-// values back to disk on every knob change so commits can capture them. Only
-// active under `vite dev`; the production build never receives these writes
-// (the page still works in prod-preview, but changes only live in
-// localStorage if you ever expose it there).
-const soundConfigWriter = () => {
-  const target = resolve(__dirname, "public/sounds/config.json");
+// Dev-only writer that POSTs a JSON config blob back to disk so commits can
+// capture tuning changes (the /sound and /music pages do this on every knob
+// change). Only active under `vite dev`; the production build never receives
+// these writes — the pages still work in prod-preview, the POST just no-ops.
+const makeConfigWriter = (opts: { name: string; route: string; targetPath: string }) => {
+  const target = resolve(__dirname, opts.targetPath);
   return {
-    name: "sound-config-writer",
+    name: opts.name,
     configureServer(server: {
       middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void };
     }) {
       server.middlewares.use((req, res, next) => {
-        if (req.url !== "/__sound-config__" || req.method !== "POST") {
+        if (req.url !== opts.route || req.method !== "POST") {
           next();
           return;
         }
@@ -70,50 +69,10 @@ const soundConfigWriter = () => {
   };
 };
 
-// Dev-only writer for /sounds/music-config.json — the /music page POSTs the
-// full config blob back to disk on every per-layer slider change so commits
-// can capture them. Same shape as soundConfigWriter. The page also still
-// works in prod-preview; the POST just no-ops there.
-const musicConfigWriter = () => {
-  const target = resolve(__dirname, "public/sounds/music-config.json");
-  return {
-    name: "music-config-writer",
-    configureServer(server: {
-      middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void };
-    }) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url !== "/__music-config__" || req.method !== "POST") {
-          next();
-          return;
-        }
-        const chunks: Buffer[] = [];
-        req.on("data", (c: Buffer) => chunks.push(c));
-        req.on("end", async () => {
-          const body = Buffer.concat(chunks).toString("utf8");
-          try {
-            JSON.parse(body);
-            await writeFile(target, body, "utf8");
-            res.statusCode = 200;
-            res.setHeader("content-type", "application/json");
-            res.end(JSON.stringify({ ok: true }));
-          } catch (err) {
-            res.statusCode = 400;
-            res.end(String(err));
-          }
-        });
-        req.on("error", () => {
-          res.statusCode = 500;
-          res.end("read error");
-        });
-      });
-    },
-  };
-};
-
 // Dev-only writer for offline-rendered Tone.js bake buffers. The browser POSTs
 // a WAV blob via POST /__bake-dump__?key=<name>__<pitchKey>; this plugin pipes
 // it through ffmpeg into an MP3 at public/sounds/baked/<key>.mp3. Same idea
-// as soundConfigWriter — playing the game in dev produces the static files
+// as makeConfigWriter — playing the game in dev produces the static files
 // you then commit, and prod fetches them with no Tone.js bake at all.
 //
 // "Existing file wins": we skip the write if the file is already on disk so
@@ -303,7 +262,15 @@ export default defineConfig({
   server: {
     host: true,
   },
-  plugins: [react(), tailwindcss(), cleanUrls(), soundConfigWriter(), musicConfigWriter(), bakeDumpWriter(), devApi()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    cleanUrls(),
+    makeConfigWriter({ name: "sound-config-writer", route: "/__sound-config__", targetPath: "public/sounds/config.json" }),
+    makeConfigWriter({ name: "music-config-writer", route: "/__music-config__", targetPath: "public/sounds/music-config.json" }),
+    bakeDumpWriter(),
+    devApi(),
+  ],
   build: {
     rollupOptions: {
       input: {

@@ -1,5 +1,6 @@
-import { Vec, v, mul, sub, len, rand, pick, TAU, addScaledMut } from "./vec";
+import { Vec, v, mul, sub, len, rand, pick, TAU, addScaledMut, circleHit } from "./vec";
 import { ENTITY_CONFIG } from "./game/entityConfig";
+import { OCTAHEDRON_EDGES, projectOctahedron } from "./octahedron";
 
 // Five powerup kinds, each with its own glyph so the player can read the
 // canister at a glance from across the screen. Keeping the list short
@@ -110,9 +111,7 @@ export class Canister {
     // warp-out is a commit — pickups and bullet hits stop registering once
     //   the vortex kicks off so the player can't "save" a pod by clipping it mid-warp.
     if (this.warping) return false;
-    const dx = point.x - this.pos.x;
-    const dy = point.y - this.pos.y;
-    return Math.hypot(dx, dy) < this.radius + pointRadius;
+    return circleHit(this.pos, this.radius, point, pointRadius);
   }
 
   render(ctx: CanvasRenderingContext2D, t: number) {
@@ -134,46 +133,14 @@ export class Canister {
     ctx.arc(this.pos.x, this.pos.y, this.radius * 3.2, 0, TAU);
     ctx.fill();
 
-    // 3D tumble: define an octahedron's six vertices, rotate them through
-    // three axes, then project orthographically. The crossing edges make
-    // the tumble legible even when only a few pixels move per frame.
+    // 3D tumble: a wireframe octahedron whose crossing edges stay legible
+    // even when only a few pixels move per frame.
     const r = this.radius * 1.05;
-    const verts: [number, number, number][] = [
-      [r, 0, 0],
-      [-r, 0, 0],
-      [0, r, 0],
-      [0, -r, 0],
-      [0, 0, r],
-      [0, 0, -r],
-    ];
-    const cx = Math.cos(this.rotX), sx = Math.sin(this.rotX);
-    const cy = Math.cos(this.rotY), sy = Math.sin(this.rotY);
-    const cz = Math.cos(this.rotZ), sz = Math.sin(this.rotZ);
-    const projected = verts.map(([x, y, z]) => {
-      // Rotate around X
-      let y1 = y * cx - z * sx;
-      let z1 = y * sx + z * cx;
-      // Rotate around Y
-      let x2 = x * cy + z1 * sy;
-      let z2 = -x * sy + z1 * cy;
-      // Rotate around Z
-      let x3 = x2 * cz - y1 * sz;
-      let y3 = x2 * sz + y1 * cz;
-      return { x: x3, y: y3, z: z2 };
-    });
-
-    // Edges of the octahedron: each "equator" vertex (±x, ±y) connects to
-    // both "poles" (±z) — gives 12 edges total, enough wireframe to read
-    // as a solid tumbling shape without becoming visual noise.
-    const edges: [number, number][] = [
-      [0, 2], [0, 3], [0, 4], [0, 5],
-      [1, 2], [1, 3], [1, 4], [1, 5],
-      [2, 4], [2, 5], [3, 4], [3, 5],
-    ];
+    const projected = projectOctahedron(this.rotX, this.rotY, this.rotZ, r);
 
     ctx.translate(this.pos.x, this.pos.y);
     ctx.lineWidth = 1.4;
-    for (const [a, b] of edges) {
+    for (const [a, b] of OCTAHEDRON_EDGES) {
       const va = projected[a];
       const vb = projected[b];
       // Depth fade: edges with a vertex behind the "camera" plane dim a

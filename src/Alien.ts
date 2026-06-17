@@ -1,4 +1,4 @@
-import { Vec, v, add, mul, fromAngle, rand, TAU } from "./vec";
+import { Vec, v, add, mul, fromAngle, rand, TAU, circleHit } from "./vec";
 import { AlienBullet } from "./AlienBullet";
 import { Trail } from "./Trail";
 import { rng } from "./game/rng";
@@ -429,9 +429,8 @@ export class Alien {
   }
 
   collidesWith(point: Vec, pointRadius: number): boolean {
-    const dx = point.x - this.pos.x;
-    const dy = point.y - this.pos.y;
-    return Math.hypot(dx, dy) < this.radius * 0.9 + pointRadius;
+    // 0.9 — tight circle so glancing shots miss the spindly limbs.
+    return circleHit(this.pos, this.radius * 0.9, point, pointRadius);
   }
 
   // Traces the closed body outline (the curved manta silhouette) onto whatever

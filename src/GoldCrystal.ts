@@ -1,6 +1,7 @@
-import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut, sub, mul, len, fromAngle } from "./vec";
+import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut, sub, mul, len, fromAngle, circleHit } from "./vec";
 import { Canister, POWERUP_KINDS } from "./Canister";
 import { ENTITY_CONFIG } from "./game/entityConfig";
+import { OCTAHEDRON_EDGES, projectOctahedron } from "./octahedron";
 
 // Re-exports so existing imports (collisions.ts, etc.) keep working — the
 // authoritative numbers live in entityConfig.
@@ -88,9 +89,7 @@ export class GoldCrystal {
   }
 
   collidesWith(point: Vec, pointRadius: number): boolean {
-    const dx = point.x - this.pos.x;
-    const dy = point.y - this.pos.y;
-    return Math.hypot(dx, dy) < this.radius + pointRadius;
+    return circleHit(this.pos, this.radius, point, pointRadius);
   }
 
   // Tail-end fade + quickening flicker warning the gem is about to warp out.
@@ -128,26 +127,7 @@ export class GoldCrystal {
     // structure for the player's eye) but tinted gold and slightly larger
     // so the gem reads as "more important than a pod".
     const r = this.radius * 1.15;
-    const verts: [number, number, number][] = [
-      [r, 0, 0],
-      [-r, 0, 0],
-      [0, r, 0],
-      [0, -r, 0],
-      [0, 0, r],
-      [0, 0, -r],
-    ];
-    const cx = Math.cos(this.rotX), sx = Math.sin(this.rotX);
-    const cy = Math.cos(this.rotY), sy = Math.sin(this.rotY);
-    const cz = Math.cos(this.rotZ), sz = Math.sin(this.rotZ);
-    const projected = verts.map(([x, y, z]) => {
-      let y1 = y * cx - z * sx;
-      let z1 = y * sx + z * cx;
-      let x2 = x * cy + z1 * sy;
-      let z2 = -x * sy + z1 * cy;
-      let x3 = x2 * cz - y1 * sz;
-      let y3 = x2 * sz + y1 * cz;
-      return { x: x3, y: y3, z: z2 };
-    });
+    const projected = projectOctahedron(this.rotX, this.rotY, this.rotZ, r);
 
     ctx.translate(this.pos.x, this.pos.y);
 
@@ -178,15 +158,10 @@ export class GoldCrystal {
       }
     }
 
-    // Wireframe edges — same 12 edges as the canister so the tumble reads
-    // consistently across both kinds of pickup.
-    const edges: [number, number][] = [
-      [0, 2], [0, 3], [0, 4], [0, 5],
-      [1, 2], [1, 3], [1, 4], [1, 5],
-      [2, 4], [2, 5], [3, 4], [3, 5],
-    ];
+    // Wireframe edges over the facets — same octahedron as the canister so
+    // the tumble reads consistently across both kinds of pickup.
     ctx.lineWidth = 1.5;
-    for (const [a, b] of edges) {
+    for (const [a, b] of OCTAHEDRON_EDGES) {
       const va = projected[a];
       const vb = projected[b];
       const depth = (va.z + vb.z) * 0.5;

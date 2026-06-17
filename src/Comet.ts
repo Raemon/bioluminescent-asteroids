@@ -1,4 +1,4 @@
-import { Vec, v, fromAngle, rand, randInt, TAU, addScaledMut } from "./vec";
+import { Vec, v, fromAngle, rand, randInt, TAU, addScaledMut, circleHit } from "./vec";
 import { Trail } from "./Trail";
 import { rng } from "./game/rng";
 import { ENTITY_CONFIG } from "./game/entityConfig";
@@ -73,9 +73,7 @@ export class Comet {
   }
 
   collidesWith(p: Vec, r: number): boolean {
-    const dx = this.pos.x - p.x;
-    const dy = this.pos.y - p.y;
-    return dx * dx + dy * dy <= (this.radius + r) * (this.radius + r);
+    return circleHit(this.pos, this.radius, p, r);
   }
 
   // Brightness envelope: rises during FADE_IN, holds at 1, eases out during
