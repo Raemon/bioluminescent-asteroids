@@ -156,7 +156,7 @@ export const showTitle = (game: Game) => {
   clearComboSilently(game);
   game.asteroids = [];
   game.canisters = [];
-  game.goldCrystals = [];
+  game.gems = [];
   stopAllPersistentAudio(game);
   game.aliens = [];
   game.alienBullets = [];
@@ -506,7 +506,7 @@ const resetRunCollections = (game: Game) => {
   game.bassLightnings = [];
   game.shards = [];
   game.canisters = [];
-  game.goldCrystals = [];
+  game.gems = [];
   game.killedSnapshots = [];
   game.killTally = {};
   stopParade(game);

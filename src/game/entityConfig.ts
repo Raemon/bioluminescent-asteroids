@@ -147,7 +147,7 @@ export const ENTITY_CONFIG = {
   },
 
   // firstWave guarantees one gem; later waves roll per spawn.
-  goldCrystal: {
+  asteroidWithGem: {
     firstWave: 1,
     perSpawnChance: 0.25,
     radius: 14,
@@ -164,7 +164,7 @@ export const ENTITY_CONFIG = {
   },
 
   // Gem swarm — the gold-diamond cousin of the meteor shower. A flock of
-  // goldCrystal rocks sweeps across the field; each kill rolls the normal
+  // asteroidWithGem rocks sweeps across the field; each kill rolls the normal
   // gem-drop, so it's a brief dense window of "kill them for upgrades".
   // Rarer than the meteor shower and held back until the player knows the
   // gem-drop dynamic cold.
@@ -206,16 +206,16 @@ export const ENTITY_CONFIG = {
     },
   },
 
-  // Gold gem — a heavy, chunky solid-gold diamond. Tough in HP terms and almost
+  // Burst gem — a heavy, chunky solid-gold diamond. Tough in HP terms and almost
   // inert in motion (heavy → drifts in slowly). The killing hit doesn't drop a
-  // pickup itself; instead it bursts into fast goldDiamond shards fired in an
-  // evenly-spaced fan, rotated off the killing-shot axis so none flies straight
-  // back at the shooter. Each shard, when killed, pays out the normal gem-drop
-  // (same as a goldCrystal rock). Two tiers share this block: a medium (4
-  // shards) and a big (8 shards) variant.
-  goldGem: {
-    // Rare guest across the early/mid arc (internal waves 3-10 → display 2-9),
-    // then a recurring threat from the post-boss arc onward.
+  // pickup itself; instead it bursts into a fan of fast-flying collectible Gems,
+  // rotated off the killing-shot axis so none flies straight back at the shooter.
+  // Each flung Gem is a live rhythm target (fly in → die; shoot on-beat → points
+  // or an upgrade). Two tiers share this block: a medium and a big variant.
+  burstGem: {
+    // Truly rare across the early/mid arc (display 2-9): no guaranteed intro
+    // spawn, just a low per-rock roll. From the post-boss arc it's a recurring
+    // threat.
     firstWave: 3,
     lastEarlyWave: 10,
     perSpawnChance: 0.05,
@@ -227,35 +227,19 @@ export const ENTITY_CONFIG = {
     // Heavy: drifts in noticeably slower than its size band, like a solid
     // crystal large, so the player can read the tough target and line up.
     spawnSpeedMul: 0.45,
-    // When a gem slot fires, the chance it's the big 8-shard tier; otherwise medium.
+    // When a gem slot fires, the chance it's the big 8-fan tier; otherwise medium.
     bigChance: 0.25,
-    // Shard launch speed (px/s). Fast — they read as flung-apart blades, not
-    // drifting rubble.
+    // Flung-Gem launch speed (px/s). Fast — they read as flung-apart blades,
+    // not drifting rubble.
     shardSpeed: 360,
     medium: {
-      radius: 48,
+      radius: 34,
       shardCount: 4,
     },
     big: {
       radius: 64,
       shardCount: 8,
     },
-  },
-
-  // Gold diamond — the fast shard a goldGem bursts into. No standalone spawn.
-  // Terminal (no further split). Hazardous on contact but on death pays the
-  // usual gem-drop, same as a goldCrystal rock. Lives a fixed lifetime then
-  // fades out (rather than only clearing when it flies offscreen).
-  goldDiamond: {
-    radius: 15,
-    hp: 1,
-    score: 100,
-    // Seconds a flung shard survives before it fades and despawns.
-    lifetime: 12,
-    // Same gem-drop odds as a goldCrystal rock, reused so the shard reads as
-    // "another cracked gem" rather than a new economy.
-    upgradeChance: 0.4,
-    revealScore: 250,
   },
 
   // Glass prison — appears from display-level 11 onward (internal wave 12+,

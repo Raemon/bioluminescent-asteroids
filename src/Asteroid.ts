@@ -57,33 +57,29 @@ export type AsteroidSize = "huge" | "large" | "medium" | "small";
 // "chime", "bell", "warble" are sound-decorator asteroids that behave exactly
 // like normal ones but trigger a distinctive musical hit sound.
 //
-// "goldCrystal" looks like a normal large asteroid except a faintly visible
+// "asteroidWithGem" looks like a normal large asteroid except a faintly visible
 // gold crystal is embedded inside it (blurred, low-contrast — the player has
-// to *notice* it). Killing it drops a collectible GoldCrystal where the rock
+// to *notice* it). Killing it drops a collectible Gem where the rock
 // was, plus an off-balanced fragment recipe (3 small OR 1 small + 1 medium).
 // Always spawned at large size; doesn't survive past a single kill.
 //
 // "solidCrystal" is a tough, fully-faceted ice-blue crystal asteroid — 16 HP
 // (4× a normal large), no embedded gold tease, the whole rock IS the crystal.
-// On death it drops 1–3 collectible GoldCrystals AND splits into 4 fast-moving
+// On death it drops 1–3 collectible Gems AND splits into 4 fast-moving
 // "solidCrystalSmall" fragments (4 HP each, no further split).
 //
 // "solidCrystalSmall" also spawns standalone as a rare "treat" — a tough
 // 4 HP shard that pays out solidCrystal.smallScore on the killing hit. Same
 // sprite + shatter sound as a parent-spawned fragment, no further split.
 //
-// "goldGemMedium" / "goldGemBig" are heavy, chunky solid-gold diamonds — the
+// "burstGemMedium" / "burstGemBig" are heavy, chunky solid-gold diamonds — the
 // whole rock IS a cut gold gem (8 HP, no embedded tease). On death the gem
-// bursts into fast "goldDiamond" shards (4 for medium, 8 for big) fired in an
-// evenly-spaced fan, rotated off the killing-shot axis so none flies straight
-// back at the shooter. The gem itself drops no pickup; the shards carry the
-// reward. See isGoldGem() — most call sites test the family, not the tier.
+// bursts into a fan of fast-flying collectible Gems (4 for medium, 8 for big)
+// thrown out from the kill, rotated off the killing-shot axis so none flies
+// straight back at the shooter. The burst gem itself drops nothing; each flung
+// Gem is the reward (fly into one and you die; shoot it on-beat for points or
+// an upgrade). See isBurstGem() — most call sites test the family, not the tier.
 //
-// "goldDiamond" is the fast shard a goldGem bursts into — a small cut gold
-// diamond, no standalone spawn, terminal (no further split). Hazardous on
-// contact, but on death it pays the usual gem-drop (a collectible GoldCrystal),
-// same as a goldCrystal rock. It wraps like every other rock but lives only a
-// fixed lifetime then fades out, so a missed burst clears itself.
 // Boss fragment kinds (level 10 culmination). The "boss" kind is the
 // whole-body planetoid; it splits into two `bossHemisphere` halves + one
 // `bossEye` core. Hemispheres further split into `bossPlate` shards (the
@@ -98,12 +94,12 @@ export type AsteroidSize = "huge" | "large" | "medium" | "small";
 // "wraith" is what crawls out. It has no baked sprite (drawn live every
 // frame from drifting noise layers and writhing tendrils), pursues the ship
 // in a slow slither, and occasionally lunges. Eats a few bullets to finish.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "goldCrystal" | "goldGemMedium" | "goldGemBig" | "goldDiamond" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock";
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "asteroidWithGem" | "burstGemMedium" | "burstGemBig" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock";
 
 // The two gold-gem tiers share nearly all behaviour (painting, HP, kill bucket,
 // clamp); they differ only in radius and shard count. Most call sites test the
 // family rather than the exact tier.
-export const isGoldGem = (kind: AsteroidKind): boolean => kind === "goldGemMedium" || kind === "goldGemBig";
+export const isBurstGem = (kind: AsteroidKind): boolean => kind === "burstGemMedium" || kind === "burstGemBig";
 
 // The cathedral ("bell") asteroid rolls one of these archetypes at spawn. Each
 // reads as a different fragment of a civilization's basilica carved out of the
@@ -152,9 +148,8 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   solidCrystal: 232,
   solidCrystalSmall: 232,
   // Solid gold — the gem and its shards are the same cut-gold material.
-  goldGemMedium: 46,
-  goldGemBig: 46,
-  goldDiamond: 46,
+  burstGemMedium: 46,
+  burstGemBig: 46,
   glassPrison: 258,
   wraith: 286,
   // Cathedral debris inherits the parent bell's hue at spawn, so these are
@@ -169,7 +164,7 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
 // smoothly resampled Fourier curve. Low counts read as hard-edged cut
 // polygons (kiki, not bouba):
 //   solid crystals — cut glass with sharp corners.
-//   gold gems / goldDiamond — chunky cut brilliant; 8 lands vertices on the
+//   burst gems — chunky cut brilliant; 8 lands vertices on the
 //     cardinals so computeOutline gives crisp top/bottom points + wide girdle.
 //   glassPrison — tall hand-cut sarcophagus.
 //   bell — chunk of cathedral wall, chipped-masonry edge.
@@ -178,9 +173,8 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
 const OUTLINE_SAMPLES: Partial<Record<AsteroidKind, number>> = {
   solidCrystal: 7,
   solidCrystalSmall: 6,
-  goldGemMedium: 8,
-  goldGemBig: 8,
-  goldDiamond: 8,
+  burstGemMedium: 8,
+  burstGemBig: 8,
   glassPrison: 8,
   bell: 22,
   glassShard: 6,
@@ -249,14 +243,12 @@ export const SOLID_CRYSTAL_HP_LARGE = ENTITY_CONFIG.solidCrystal.largeHp;
 export const SOLID_CRYSTAL_HP_SMALL = ENTITY_CONFIG.solidCrystal.smallHp;
 export const SOLID_CRYSTAL_DAMAGE_REDUCTION = ENTITY_CONFIG.solidCrystal.damageReduction;
 
-// Gold gem — chunky solid-gold diamond, and the fast goldDiamond shards it
-// bursts into on death. Two tiers (medium / big) share HP; radius + shard count
-// differ per tier.
-export const GOLD_GEM_HP = ENTITY_CONFIG.goldGem.hp;
-export const GOLD_GEM_MEDIUM_RADIUS = ENTITY_CONFIG.goldGem.medium.radius;
-export const GOLD_GEM_BIG_RADIUS = ENTITY_CONFIG.goldGem.big.radius;
-export const GOLD_DIAMOND_HP = ENTITY_CONFIG.goldDiamond.hp;
-export const GOLD_DIAMOND_RADIUS = ENTITY_CONFIG.goldDiamond.radius;
+// Burst gem — chunky solid-gold diamond that bursts into a fan of fast-flying
+// collectible Gems on death. Two tiers (medium / big) share HP; radius + fan
+// size differ per tier.
+export const BURST_GEM_HP = ENTITY_CONFIG.burstGem.hp;
+export const BURST_GEM_MEDIUM_RADIUS = ENTITY_CONFIG.burstGem.medium.radius;
+export const BURST_GEM_BIG_RADIUS = ENTITY_CONFIG.burstGem.big.radius;
 
 // Glass prison — the shell that locks a brood of wraiths in stasis. Fragile:
 // a single hit cracks it open. On death the prison spawns 2-4 wraiths at its
@@ -278,9 +270,8 @@ export const CATHEDRAL_DEBRIS_HP = 2;
 const KIND_HP: Partial<Record<AsteroidKind, number>> = {
   solidCrystal: SOLID_CRYSTAL_HP_LARGE,
   solidCrystalSmall: SOLID_CRYSTAL_HP_SMALL,
-  goldGemMedium: GOLD_GEM_HP,
-  goldGemBig: GOLD_GEM_HP,
-  goldDiamond: GOLD_DIAMOND_HP,
+  burstGemMedium: BURST_GEM_HP,
+  burstGemBig: BURST_GEM_HP,
   glassPrison: GLASS_PRISON_HP,
   wraith: WRAITH_HP,
   cathedralKeystone: CATHEDRAL_DEBRIS_HP,
@@ -942,13 +933,9 @@ export class Asteroid {
   // True once a bullet has glanced off this rock's armour and we've shown the
   // "Insufficient damage" tip for it — so the hint fires at most once per rock.
   glanceTipShown = false;
-  // Almost everything wraps at the screen edge forever; goldDiamond shards
-  // instead wrap like normal but die after a fixed lifetime (update() flips this
-  // false and the game-loop prune drops them). Defaults true for every other kind.
+  // Asteroids wrap at the screen edge forever, so this stays true for their
+  // whole life; the game-loop prune still honours it as a defensive guard.
   alive = true;
-  // goldDiamond shards count this down from goldDiamond.lifetime; at 0 the shard
-  // fades over its last second and despawns. -1 for every non-shard kind.
-  shardLife = -1;
   cracks: AsteroidCrack[] = [];
   bassShip: BassShip | null = null;
   // Combo-halo outline: each module polygon offset outward by a fixed pixel
@@ -1132,18 +1119,12 @@ export class Asteroid {
       this.radius = SOLID_CRYSTAL_LARGE_RADIUS;
       this.damageReduction = SOLID_CRYSTAL_DAMAGE_REDUCTION;
     }
-    if (isGoldGem(kind)) {
+    if (isBurstGem(kind)) {
       // Chunky gem — reads as a heavy, valuable target worth lining up. Big tier
       // is clearly larger than a stock large; medium sits a touch above it.
-      this.radius = kind === "goldGemBig" ? GOLD_GEM_BIG_RADIUS : GOLD_GEM_MEDIUM_RADIUS;
+      this.radius = kind === "burstGemBig" ? BURST_GEM_BIG_RADIUS : BURST_GEM_MEDIUM_RADIUS;
       // Heavy mass → barely tumbles; the slow drift is set in waveDirector.
       this.rotSpeed = rand(-0.22, 0.22);
-    }
-    if (kind === "goldDiamond") {
-      this.radius = GOLD_DIAMOND_RADIUS;
-      // Flung shards spin fast.
-      this.rotSpeed = rand(1.4, 2.8) * (rng() < 0.5 ? -1 : 1);
-      this.shardLife = ENTITY_CONFIG.goldDiamond.lifetime;
     }
     if (kind === "glassPrison") {
       // Slightly taller/thinner-feeling than a normal large; the elongated
@@ -1367,7 +1348,7 @@ export class Asteroid {
       // self-intersecting polygon when harmonics happen to align in phase.
       freqs = [1, 2, 4, 5];
       ampScale = 1.8;
-    } else if (isGoldGem(kind) || kind === "goldDiamond") {
+    } else if (isBurstGem(kind)) {
       // Cut gold. The diamond profile (computeOutline) carries the silhouette;
       // these harmonics only add a small per-gem wobble so no two are identical.
       // Kept low-amp so the crisp diamond points survive. Avoid freqs dividing
@@ -1412,9 +1393,9 @@ export class Asteroid {
     const baseHue = this.hue;
     // Normal asteroids are essentially monochrome rock — drop saturation
     // hard so the special kinds (chime/bell/warble/bass) are the only
-    // things drawing the eye with colour. goldCrystal mimics a normal rock
+    // things drawing the eye with colour. asteroidWithGem mimics a normal rock
     // (the crystal hint is painted in separately below) so it stays plain.
-    const isPlain = this.kind === "normal" || this.kind === "goldCrystal";
+    const isPlain = this.kind === "normal" || this.kind === "asteroidWithGem";
     const sHi = isPlain ? 8 : 100;
     const sMid = isPlain ? 6 : 80;
     const sLo = isPlain ? 5 : 70;
@@ -1493,9 +1474,9 @@ export class Asteroid {
     }
 
     if (this.kind === "warble") this.paintWarbleBody(ctx);
-    if (this.kind === "goldCrystal") this.paintEmbeddedGoldCrystal(ctx);
+    if (this.kind === "asteroidWithGem") this.paintEmbeddedGem(ctx);
     if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall") this.paintSolidCrystalBody(ctx);
-    if (isGoldGem(this.kind) || this.kind === "goldDiamond") this.paintGoldGemBody(ctx);
+    if (isBurstGem(this.kind)) this.paintBurstGemBody(ctx);
     if (this.kind === "glassPrison") this.paintGlassPrisonBody(ctx);
     if (this.kind === "bell") this.paintCathedralFragmentBody(ctx);
     if (this.kind === "cathedralKeystone") this.paintKeystoneBody(ctx);
@@ -2270,7 +2251,7 @@ export class Asteroid {
   // the glow can't bleed past the silhouette and give away the secret. Note
   // the ctx.filter blur is applied inside a save/restore so it doesn't leak
   // to other passes.
-  private paintEmbeddedGoldCrystal(ctx: CanvasRenderingContext2D) {
+  private paintEmbeddedGem(ctx: CanvasRenderingContext2D) {
     const GOLD_HUE = 46;
     ctx.save();
     // Clip to the asteroid silhouette so any blurred bleed stays inside.
@@ -2510,17 +2491,16 @@ export class Asteroid {
     ctx.restore();
   }
 
-  // Big chunky solid-gold diamond (and the small goldDiamond shard, same
-  // recipe scaled by radius). Same fan-triangulation skeleton as the solid
+  // Big chunky solid-gold diamond. Same fan-triangulation skeleton as the solid
   // crystal, retuned for cut metal: high-saturation gold facets with a hard
   // lit/shadow contrast, a brilliant-cut "table" inset so the gem reads as
   // faceted rather than a flat coin, a warm-dark depth rim + bright gold catch,
   // and a single white specular spark on the lit shoulder. No frost veil — gold
   // is reflective, not scattering — and the core glows warm instead of milky.
-  private paintGoldGemBody(ctx: CanvasRenderingContext2D) {
+  private paintBurstGemBody(ctx: CanvasRenderingContext2D) {
     const H = this.hue;
     const R = this.radius;
-    const isShard = this.kind === "goldDiamond";
+    const isShard = false;
     const verts: Vec[] = [];
     for (let i = 0; i < this.outlineSamples; i++) {
       const angle = (i / this.outlineSamples) * TAU;
@@ -2667,7 +2647,7 @@ export class Asteroid {
   }
 
   // Heavily blurred gold gem hints visible through the crystal — same hue as
-  // the GoldCrystal collectible they'll drop on death so the player can read
+  // the Gem collectible they'll drop on death so the player can read
   // the loot in advance. Painted while the surrounding paintSolidCrystalBody
   // clip is still active, so any blurred bleed stays inside the silhouette.
   private paintFrostedEmbeddedGems(ctx: CanvasRenderingContext2D) {
@@ -2886,24 +2866,27 @@ export class Asteroid {
     return canvas;
   }
 
-  // Gold gems + their shards are cut as a true brilliant diamond: a tapered
-  // rhombus, widest at the horizontal girdle and pointed at top/bottom. This
-  // multiplier reshapes the base unit circle into that profile (vertical points
-  // pushed out, the upper crown a touch fuller than the lower pavilion so it
-  // reads as a faceted gem rather than a plain rhombus).
+  // Burst gems are cut as a crisp d8 (octahedron) silhouette: a true rhombus
+  // with STRAIGHT edges and sharp points, taller than wide. The rhombus support
+  // function r(θ) = a·b / (b·|cosθ| + a·|sinθ|) gives dead-straight edges
+  // between the four vertices (a = half-width, b = half-height), which reads as
+  // a faceted die rather than the soft cosine-rounded gem we had before. The
+  // upper crown is nudged a touch fuller than the lower pavilion so the top
+  // point sits slightly proud, the way a real brilliant's crown does.
   private diamondProfile(angle: number): number {
+    const a = 0.72; // half-width at the girdle (pulled in for a tall diamond)
+    const b = 1.18; // half-height at the points (pushed out → sharp top/bottom)
+    const c = Math.abs(Math.cos(angle));
+    const s = Math.abs(Math.sin(angle));
+    const rhombus = (a * b) / (b * c + a * s);
     const up = -Math.sin(angle); // +1 at top point, -1 at bottom point
-    const side = Math.abs(Math.cos(angle)); // 1 at the girdle, 0 at the points
-    const point = 1 - side; // sharpens toward top/bottom
-    const crown = up > 0 ? 0.1 * up : 0; // crown slightly taller than pavilion
-    // Pull the girdle in and push the points out around 1.0 so `radius` still
-    // sets the overall footprint while the silhouette reads as a tapered gem.
-    return 0.82 + 0.28 * point + crown;
+    const crown = up > 0 ? 0.06 * up : 0; // crown slightly taller than pavilion
+    return rhombus + crown;
   }
 
   computeOutline(): number[] {
-    const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isGoldGem(this.kind) || this.kind === "goldDiamond" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
-    const isDiamond = isGoldGem(this.kind) || this.kind === "goldDiamond";
+    const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isBurstGem(this.kind) || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
+    const isDiamond = isBurstGem(this.kind);
     const samples: number[] = [];
     for (let i = 0; i < this.outlineSamples; i++) {
       const angle = (i / this.outlineSamples) * TAU;
@@ -2928,10 +2911,10 @@ export class Asteroid {
     }
     // Mirror the clamp in computeOutline so the collision surface matches
     // the visible silhouette for the high-amp crystal / cathedral harmonics.
-    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isGoldGem(this.kind) || this.kind === "goldDiamond") {
+    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isBurstGem(this.kind)) {
       r = Math.max(0.45, Math.min(1.55, r));
     }
-    if (isGoldGem(this.kind) || this.kind === "goldDiamond") r *= this.diamondProfile(angle);
+    if (isBurstGem(this.kind)) r *= this.diamondProfile(angle);
     return r * this.radius;
   }
 
@@ -3006,16 +2989,6 @@ export class Asteroid {
     this.membranePhase += dt * 0.8;
     addScaledMut(this.pos, this.vel, dt);
     wrapMut(this.pos, w, h);
-    // Gold-diamond shards live a fixed lifetime then fade out, the way an
-    // uncollected gem pickup warps out — a missed burst clears itself instead
-    // of drifting forever.
-    if (this.kind === "goldDiamond") {
-      this.shardLife -= dt;
-      if (this.shardLife <= 0) {
-        this.alive = false;
-        return;
-      }
-    }
     // Stamp/age the drone trail (gen-0 large) or radiator (fragments). Done
     // after the wrap so a screen-wrap teleport is caught by Trail's own
     // jump detector and the trail restarts cleanly on the new side. The
@@ -3393,8 +3366,7 @@ export class Asteroid {
     // Solid crystal pays out for the bullet budget it absorbs (16 HP / 4 HP).
     if (this.kind === "solidCrystal") return ENTITY_CONFIG.solidCrystal.largeScore;
     if (this.kind === "solidCrystalSmall") return ENTITY_CONFIG.solidCrystal.smallScore;
-    if (isGoldGem(this.kind)) return ENTITY_CONFIG.goldGem.score;
-    if (this.kind === "goldDiamond") return ENTITY_CONFIG.goldDiamond.score;
+    if (isBurstGem(this.kind)) return ENTITY_CONFIG.burstGem.score;
     if (this.kind === "glassPrison") return ENTITY_CONFIG.glassPrison.score;
     if (this.kind === "wraith") return ENTITY_CONFIG.wraith.score;
     return SIZE_SCORE[this.size];
@@ -3728,38 +3700,10 @@ export class Asteroid {
       return fragmentList;
     }
     if (this.kind === "solidCrystalSmall") return [];
-    // Gold gem: bursts into an evenly-spaced fan of fast diamond shards (4 for
-    // medium, 8 for big). The fan is rotated by half its angular step off the
-    // killing-shot axis — the bullet came IN along impactDir, so an unrotated
-    // fan would put a shard straight back down the return line; the half-step
-    // offset guarantees none does, for any shard count. Shards inherit the gem's
-    // drift, don't split further, and fade out after their lifetime.
-    if (isGoldGem(this.kind)) {
-      const baseAngle = impactDir
-        ? Math.atan2(impactDir.y, impactDir.x)
-        : Math.atan2(this.vel.y, this.vel.x);
-      const tier = this.kind === "goldGemBig" ? ENTITY_CONFIG.goldGem.big : ENTITY_CONFIG.goldGem.medium;
-      const count = tier.shardCount;
-      const speed = ENTITY_CONFIG.goldGem.shardSpeed;
-      const ejectDist = this.radius * 0.55;
-      const fragmentList: Asteroid[] = [];
-      for (let i = 0; i < count; i++) {
-        const childAngle = baseAngle + Math.PI / count + (i / count) * TAU;
-        const childPos = {
-          x: this.pos.x + Math.cos(childAngle) * ejectDist,
-          y: this.pos.y + Math.sin(childAngle) * ejectDist,
-        };
-        // Inherit a touch of the gem's drift so the fan travels with it
-        // instead of expanding from a dead-still centre.
-        const vel = {
-          x: this.vel.x * 0.3 + Math.cos(childAngle) * speed,
-          y: this.vel.y * 0.3 + Math.sin(childAngle) * speed,
-        };
-        fragmentList.push(new Asteroid(childPos, vel, "small", this.hue, "goldDiamond"));
-      }
-      return fragmentList;
-    }
-    if (this.kind === "goldDiamond") return [];
+    // Burst gem: emits no asteroid fragments. Its whole payout is a fan of
+    // fast-flying Gem pickups, spawned in killEffects (which has the gem array
+    // and the killing-shot direction).
+    if (isBurstGem(this.kind)) return [];
     // Cathedral ("bell"): doesn't crumble into smaller cathedrals — it breaks
     // into recognisable carved building pieces, the way a bassteroid breaks
     // into ship chunks. A keystone (the wedge that locked an arch), a glowing
@@ -3922,7 +3866,7 @@ export class Asteroid {
       ];
       const recipe = HUGE_RECIPES[Math.floor(rng() * HUGE_RECIPES.length)];
       specs = fanSpecs(recipe);
-    } else if (this.size === "large" && this.kind === "goldCrystal") {
+    } else if (this.size === "large" && this.kind === "asteroidWithGem") {
       // Gold-crystal large drops the embedded crystal pickup as its primary
       // payload (handled by killEffects), and only spits out a small handful
       // of fragments instead of the usual 2-medium / 4-small patterns. The
@@ -4016,8 +3960,8 @@ export class Asteroid {
     const fragmentList: Asteroid[] = [];
     // Gold-crystal fragments are just plain rock chunks — the embedded
     // crystal was the payload, and it's been ejected as a pickup elsewhere.
-    // Don't propagate the "goldCrystal" kind to children or we'd cascade.
-    const childKind: AsteroidKind = this.kind === "goldCrystal" ? "normal" : this.kind;
+    // Don't propagate the "asteroidWithGem" kind to children or we'd cascade.
+    const childKind: AsteroidKind = this.kind === "asteroidWithGem" ? "normal" : this.kind;
     for (const spec of specs) {
       // Apply jitter to perp kick only (forward kick is small enough that
       // jitter on it is just noise). Keep jitter small relative to PERP_BURST
@@ -4069,10 +4013,6 @@ export class Asteroid {
     // than going grey — which is exactly the ghosting we want.
     const isWarble = this.kind === "warble";
     if (isWarble) ctx.globalAlpha = this.warbleOpacity;
-    // Gold-diamond shard fades out over its final second of life so it dissolves
-    // rather than popping when the lifetime expires (additive blend → reads as
-    // "winking out").
-    if (this.kind === "goldDiamond" && this.shardLife < 1) ctx.globalAlpha = Math.max(0, this.shardLife);
 
     if (this.sprite) {
       ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
@@ -4108,7 +4048,7 @@ export class Asteroid {
       ctx.fill();
     }
 
-    const isPlain = this.kind === "normal" || this.kind === "goldCrystal";
+    const isPlain = this.kind === "normal" || this.kind === "asteroidWithGem";
     const nSat = isPlain ? 6 : 100;
     // Bell asteroid + its carved debris are baked architectural sprites —
     // drifting bioluminescent nuclei would read as bright pinpricks floating
@@ -6094,7 +6034,7 @@ export const spawnAsteroidAtEdge = (
 // A gem swarm: a flock of gold-crystal rocks streaking across the field the
 // same way a meteor shower does — shared heading, spread across the entry
 // edge, staggered diagonally so they trail rather than arrive as a wall.
-// Unlike the meteor shower these are real goldCrystal asteroids, so each kill
+// Unlike the meteor shower these are real asteroidWithGem asteroids, so each kill
 // runs the normal embedded-gem drop (upgradeChance) — a brief, dense window
 // of "kill them for upgrades". They cross at a brisk single-screen-width clip
 // so the player has to comb through them before they drift off.
@@ -6129,7 +6069,7 @@ export const spawnGemSwarm = (w: number, h: number, count: number): Asteroid[] =
     // shared speed keeps the flock crossing as one diagonal sweep.
     const [speedMin, speedMax] = SIZE_SPAWN_SPEED.small;
     const speed = rand(speedMin, speedMax) * GEM_SWARM_SPEED_MULT;
-    gems.push(new Asteroid(pos, fromAngle(angle, speed), "small", undefined, "goldCrystal"));
+    gems.push(new Asteroid(pos, fromAngle(angle, speed), "small", undefined, "asteroidWithGem"));
   }
   return gems;
 };

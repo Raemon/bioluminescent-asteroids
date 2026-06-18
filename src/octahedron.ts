@@ -1,5 +1,5 @@
 // Shared 3D-octahedron tumble used by pickup pods (Canister) and gold gems
-// (GoldCrystal). Both project the same six-vertex octahedron through three
+// (Gem). Both project the same six-vertex octahedron through three
 // rotation axes and stroke the same 12 wireframe edges; only the surface
 // styling (tint, facet fills, line width) differs per kind, so this module
 // owns the geometry and each caller owns its own drawing.

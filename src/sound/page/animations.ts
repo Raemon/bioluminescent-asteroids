@@ -384,7 +384,7 @@ export const ANIMATIONS: Record<ObjectId, () => Animator> = {
   "asteroid-chime": () => drawAsteroid("chime", "chip"),
   "asteroid-bell": () => drawAsteroid("bell", "chip"),
   "asteroid-warble": () => drawAsteroid("warble", "chip"),
-  "asteroid-gold": () => drawAsteroid("goldCrystal", "chip"),
+  "asteroid-gold": () => drawAsteroid("asteroidWithGem", "chip"),
   "asteroid-solidCrystal": () => drawAsteroid("solidCrystal", "chip"),
   // No bespoke animator yet for the new kinds — reuse the solid-crystal
   // chip preview for the prison and the generic pulse for the wraith.

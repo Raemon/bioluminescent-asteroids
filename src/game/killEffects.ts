@@ -1,12 +1,12 @@
 import type { Game } from "../Game";
-import { Asteroid, isGoldGem } from "../Asteroid";
+import { Asteroid, isBurstGem } from "../Asteroid";
 import { Alien } from "../Alien";
 import { AlienBullet } from "../AlienBullet";
 import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
 import { Vec } from "../vec";
 import { ENTITY_CONFIG } from "./entityConfig";
-import { spawnGoldCrystalAt, spawnRhythmAlignedGems } from "../GoldCrystal";
+import { spawnGemAt, spawnRhythmAlignedGems, spawnBurstGemFan } from "../Gem";
 import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
 import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
@@ -59,9 +59,8 @@ const asteroidBucket = (a: Asteroid): KillBucket => {
   if (a.kind === "boss" || a.isBossFragment()) return "boss";
   if (a.isBass()) return "bassteroid";
   if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble") return a.kind;
-  if (a.kind === "goldCrystal") return "goldCrystal";
-  if (isGoldGem(a.kind)) return "goldGem";
-  if (a.kind === "goldDiamond") return "goldCrystal";
+  if (a.kind === "asteroidWithGem") return "asteroidWithGem";
+  if (isBurstGem(a.kind)) return "burstGem";
   if (a.kind === "solidCrystal" || a.kind === "solidCrystalSmall") return "solidCrystal";
   if (a.kind === "glassPrison") return "glassPrison";
   if (a.kind === "wraith") return "wraith";
@@ -81,8 +80,7 @@ export const hitSoundFor = (
   if (a.kind === "solidCrystal") return "crystalShatterLarge";
   if (a.kind === "solidCrystalSmall") return "crystalShatterSmall";
   // gold gem is a big cut-crystal body; its shards shatter small.
-  if (isGoldGem(a.kind)) return "crystalShatterLarge";
-  if (a.kind === "goldDiamond") return "crystalShatterSmall";
+  if (isBurstGem(a.kind)) return "crystalShatterLarge";
   // A cathedral glass shard is still lit stained glass — it rings/shatters
   // like cut glass rather than going off with a stone-rubble thud.
   if (a.kind === "glassShard") return "crystalShatterSmall";
@@ -243,12 +241,19 @@ const finishAsteroidKillCore = (
     game.killedSnapshots.push(snap);
   }
   bumpKill(game, asteroidBucket(a));
-  if (a.kind === "goldCrystal" || a.kind === "goldDiamond") {
-    // Eject the embedded crystal at the dead rock's position; the fragment
-    // recipe (handled inside split() below) takes care of the rubble cloud
-    // flying in other directions. The gold-diamond shard pays out the same
-    // gem-drop as a goldCrystal rock.
-    game.goldCrystals.push(spawnGoldCrystalAt(a.pos, a.vel));
+  if (a.kind === "asteroidWithGem") {
+    // Eject the embedded gem at the dead rock's position; the fragment recipe
+    // (handled inside split() below) takes care of the rubble cloud flying in
+    // other directions.
+    game.gems.push(spawnGemAt(a.pos, a.vel));
+  }
+  if (isBurstGem(a.kind)) {
+    // The burst gem doesn't crumble into rubble — its whole payout is a fan of
+    // fast-flying gems thrown out from the kill, each a live rhythm target.
+    const tier = a.kind === "burstGemBig" ? ENTITY_CONFIG.burstGem.big : ENTITY_CONFIG.burstGem.medium;
+    for (const g of spawnBurstGemFan(a.pos, a.vel, killerVel, tier.shardCount, ENTITY_CONFIG.burstGem.shardSpeed, a.radius * 0.55)) {
+      game.gems.push(g);
+    }
   }
   if (a.kind === "solidCrystal" && a.embeddedGemCount > 0) {
     // Pure-crystal rock drops the same number of gems that were visible as
@@ -266,7 +271,7 @@ const finishAsteroidKillCore = (
       BEAT_GRID,
       ship.radius,
     );
-    for (const g of gems) game.goldCrystals.push(g);
+    for (const g of gems) game.gems.push(g);
   }
   // Defiant final shot: a boss eye-core that just took its killing hit
   // fires one last plasma bolt before the shards spawn. Skip if no ship to

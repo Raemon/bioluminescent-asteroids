@@ -25,8 +25,8 @@ import {
   handleCometHits,
   handleCanisterPickups,
   handleCanisterShots,
-  handleGoldCrystalPickups,
-  expireGoldCrystal,
+  handleGems,
+  expireGem,
 } from "./collisions";
 import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState, finalizeRecorder, restartReplayWorld } from "./lifecycle";
 import { syncHud, syncPowerupHud, syncComboHud } from "./hud";
@@ -683,7 +683,7 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   for (const c of game.comets) c.update(musicDt, game.w, game.h);
   pruneDeadComets(game);
   for (const a of game.asteroids) a.update(musicDt, game.w, game.h);
-  // prune goldDiamonds that flew fully offscreen; no other kind clears alive.
+  // defensive prune; no asteroid kind currently clears alive on its own.
   compactInPlace(game.asteroids, (a) => a.alive);
   for (const al of game.aliens) al.update(musicDt, game.w, game.h);
   pruneOffscreenAliens(game);
@@ -709,14 +709,14 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
     if (!wasWarping && c.warping) game.sound.play("canisterAppear", 1, c.pos);
   }
   compactInPlace(game.canisters, (c) => c.alive);
-  for (const g of game.goldCrystals) {
+  for (const g of game.gems) {
     const wasAlive = g.alive;
     g.update(musicDt, game.w, game.h);
-    // collect/waste paths remove gems via handleGoldCrystalPickups without
+    // collect/waste paths remove gems via handleGems without
     // touching alive, so any alive→dead transition here is a lifetime expiry.
-    if (wasAlive && !g.alive) expireGoldCrystal(game, g);
+    if (wasAlive && !g.alive) expireGem(game, g);
   }
-  compactInPlace(game.goldCrystals, (g) => g.alive);
+  compactInPlace(game.gems, (g) => g.alive);
   updatePositionalAudio(game);
 };
 
@@ -876,7 +876,7 @@ const runCollisionPasses = (game: Game) => {
   handleCometHits(game);
   handleCanisterPickups(game);
   handleCanisterShots(game);
-  handleGoldCrystalPickups(game);
+  handleGems(game);
 };
 
 // Fade "Wave N" into the centre of the screen so it picks up directly from

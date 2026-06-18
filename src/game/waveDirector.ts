@@ -1,5 +1,5 @@
 import type { Game } from "../Game";
-import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, isGoldGem, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt, spawnGemSwarm } from "../Asteroid";
+import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, isBurstGem, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt, spawnGemSwarm } from "../Asteroid";
 import { spawnComet as spawnCometAtEdge, spawnMeteorShower } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
@@ -25,10 +25,10 @@ import { ENTITY_CONFIG as CFG } from "./entityConfig";
 // drift in slower than their size band (see CFG.solidCrystal.largeSpawnSpeedMul)
 // — handing the aligner a slowed band keeps them beat-aligned at the lower
 // speed rather than just decelerating a stock rock after the fact.
-// When a gem slot fires, pick its tier: mostly the medium 4-shard gem, with a
-// CFG.goldGem.bigChance roll for the rarer big 8-shard treat.
-const rollGoldGemTier = (): AsteroidKind =>
-  rng() < CFG.goldGem.bigChance ? "goldGemBig" : "goldGemMedium";
+// When a gem slot fires, pick its tier: mostly the medium 4-fan gem, with a
+// CFG.burstGem.bigChance roll for the rarer big 8-fan treat.
+const rollBurstGemTier = (): AsteroidKind =>
+  rng() < CFG.burstGem.bigChance ? "burstGemBig" : "burstGemMedium";
 
 const spawnSpeedRange = (a: Asteroid): [number, number] => {
   const [lo, hi] = SIZE_SPAWN_SPEED[a.size];
@@ -40,8 +40,8 @@ const spawnSpeedRange = (a: Asteroid): [number, number] => {
     const m = CFG.glassPrison.spawnSpeedMul;
     return [lo * m, hi * m];
   }
-  if (isGoldGem(a.kind)) {
-    const m = CFG.goldGem.spawnSpeedMul;
+  if (isBurstGem(a.kind)) {
+    const m = CFG.burstGem.spawnSpeedMul;
     return [lo * m, hi * m];
   }
   return [lo, hi];
@@ -223,9 +223,9 @@ const spawnAsteroidAway = (
     a.vel.x *= CFG.glassPrison.spawnSpeedMul;
     a.vel.y *= CFG.glassPrison.spawnSpeedMul;
   }
-  if (isGoldGem(a.kind)) {
-    a.vel.x *= CFG.goldGem.spawnSpeedMul;
-    a.vel.y *= CFG.goldGem.spawnSpeedMul;
+  if (isBurstGem(a.kind)) {
+    a.vel.x *= CFG.burstGem.spawnSpeedMul;
+    a.vel.y *= CFG.burstGem.spawnSpeedMul;
   }
   alignIncomingToRhythm(game, a, claimed);
   applyRhythmSpeed(game, a.vel, waveStartSpeedMul(game));
@@ -302,7 +302,7 @@ export const spawnMeteorShowerEvent = (game: Game, countOverride?: number) => {
   if (meteors.length > 0) game.sound.play("meteorShower", 1, meteors[0].pos);
 }
 
-// The gem swarm: a flock of goldCrystal rocks sweeping across the field, the
+// The gem swarm: a flock of asteroidWithGem rocks sweeping across the field, the
 // gold-diamond cousin of the meteor shower. They're real asteroids, so each
 // kill runs the normal embedded-gem drop — a brief, dense "kill them for
 // upgrades" window. Each gem is beat-aligned (anchored at screen centre) so
@@ -350,7 +350,7 @@ export const spawnTutorialBig = (game: Game) => {
 export const spawnWave = (game: Game) => {
   game.asteroids = [];
   game.canisters = [];
-  game.goldCrystals = [];
+  game.gems = [];
   game.waveEvents = newWaveEventSchedule();
   game.waveElapsed = 0;
 
@@ -646,23 +646,22 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
     if (isWarble) { slotKinds.push("warble"); continue; }
     // Gold gem: rare in the early arc, frequent once frequentWave hits. Rolled
     // before solid/gem so a gem slot can't also become a solid crystal or gem rock.
-    const goldGemChance =
-      game.wave >= CFG.goldGem.frequentWave ? CFG.goldGem.frequentChance
-      : game.wave >= CFG.goldGem.firstWave && game.wave <= CFG.goldGem.lastEarlyWave ? CFG.goldGem.perSpawnChance
+    const burstGemChance =
+      game.wave >= CFG.burstGem.frequentWave ? CFG.burstGem.frequentChance
+      : game.wave >= CFG.burstGem.firstWave && game.wave <= CFG.burstGem.lastEarlyWave ? CFG.burstGem.perSpawnChance
       : 0;
-    const rollGoldGem = goldGemChance > 0 && rng() < goldGemChance;
-    if (rollGoldGem) { slotKinds.push(rollGoldGemTier()); continue; }
+    const rollBurstGem = burstGemChance > 0 && rng() < burstGemChance;
+    if (rollBurstGem) { slotKinds.push(rollBurstGemTier()); continue; }
     const isSolid = game.wave > CFG.solidCrystal.firstWave && rng() < CFG.solidCrystal.perSpawnChance;
     if (isSolid) { slotKinds.push("solidCrystal"); continue; }
-    const isGem = game.wave > CFG.goldCrystal.firstWave && rng() < CFG.goldCrystal.perSpawnChance;
-    slotKinds.push(isGem ? "goldCrystal" : "normal");
+    const isGem = game.wave > CFG.asteroidWithGem.firstWave && rng() < CFG.asteroidWithGem.perSpawnChance;
+    slotKinds.push(isGem ? "asteroidWithGem" : "normal");
   }
-  if (game.wave === CFG.goldCrystal.firstWave && normalCount > 0 && !slotKinds.includes("goldCrystal")) {
-    slotKinds[Math.floor(rng() * normalCount)] = "goldCrystal";
+  if (game.wave === CFG.asteroidWithGem.firstWave && normalCount > 0 && !slotKinds.includes("asteroidWithGem")) {
+    slotKinds[Math.floor(rng() * normalCount)] = "asteroidWithGem";
   }
-  if (game.wave === CFG.goldGem.firstWave && normalCount > 0 && !slotKinds.some(isGoldGem)) {
-    slotKinds[Math.floor(rng() * normalCount)] = rollGoldGemTier();
-  }
+  // No guaranteed intro spawn for the burst gem — it's meant to be a rare
+  // surprise across display levels 2-9, met only via the low per-rock roll.
   if (game.wave === CFG.solidCrystal.firstWave && normalCount > 0 && !slotKinds.includes("solidCrystal")) {
     slotKinds[Math.floor(rng() * normalCount)] = "solidCrystal";
   }

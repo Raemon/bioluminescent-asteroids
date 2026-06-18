@@ -394,7 +394,7 @@ type MentionedSound = (typeof MENTIONED_SOUNDS)[number];
 
 // Add a sound here only if it's intentionally omitted from the page (e.g.
 // system-only sound that shouldn't appear as a checkbox).
-type IntentionallyOmitted = "bossPulse" | "bossHit" | "bossEyeOpenStinger";
+type IntentionallyOmitted = "bossPulse" | "bossHit" | "bossEyeOpenStinger" | "chargeBed";
 
 // Compile-time check: every SoundName must be in MENTIONED_SOUNDS or
 // IntentionallyOmitted. If you add a new SoundName and forget to wire it

@@ -63,8 +63,8 @@ const beamHalfWidth = (dots: number): number => dots * 6;
 
 // Flat hit allowance on top of the target surface, mirroring the generosity a
 // bullet's hitRadius() gives its collision test. Without it the beam's centre
-// line has to thread within a target's nominal radius — small fast shards (a
-// 15px goldDiamond at 360px/s) slip clean through the 0-dot beam every time.
+// line has to thread within a target's nominal radius — small fast targets
+// slip clean through the 0-dot beam every time.
 const LASER_HIT_PAD = 8;
 
 // A laser beam anchored to the firing ship: its origin (muzzle) and heading

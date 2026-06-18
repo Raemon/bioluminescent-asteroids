@@ -7,16 +7,16 @@ import { Bullet } from "../Bullet";
 import { AlienBullet } from "../AlienBullet";
 import { Canister } from "../Canister";
 import {
-  GoldCrystal,
-  GOLD_CRYSTAL_UPGRADE_CHANCE,
-  GOLD_CRYSTAL_REVEAL_SCORE,
-  spawnCanisterFromGoldCrystal,
-} from "../GoldCrystal";
+  Gem,
+  GEM_UPGRADE_CHANCE,
+  GEM_REVEAL_SCORE,
+  spawnCanisterFromGem,
+} from "../Gem";
 import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebaseBeatEval } from "./rhythmGate";
 import { BEAT_GRID } from "./rhythmConstants";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
-import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGoldCrystalPickup, emitBounceSparks, emitAlienBulletPop } from "./particleBursts";
+import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGemPickup, emitBounceSparks, emitAlienBulletPop } from "./particleBursts";
 import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage } from "./popups";
 import { checkBonusLife } from "./bonusLife";
 import {
@@ -371,7 +371,7 @@ const explodeCanister = (game: Game, c: Canister) => {
 // Two ways to resolve a gold gem on the field:
 //   1) Shoot it. Strictly rhythm-gated: only an on-beat shot dealing ≥ 4
 //      damage cracks it — that path may reveal an upgrade or pay out reveal
-//      score (see crackGoldCrystalForCanister). Any weaker / off-beat shot
+//      score (see crackGemForCanister). Any weaker / off-beat shot
 //      wastes it: no score, no popup, same sad sound + white burst a wasted
 //      canister gets, so the player reads "wrong tool" the same way.
 //   2) Fly through it. The gem shatters on contact and the ship takes the
@@ -379,9 +379,9 @@ const explodeCanister = (game: Game, c: Canister) => {
 //      rhythm target, never a freebie pickup.
 // Shoot pass runs first so a bullet at the gem this frame can't be
 // pre-empted by a same-frame ship overlap.
-export const handleGoldCrystalPickups = (game: Game) => {
-  const remaining: GoldCrystal[] = [];
-  for (const g of game.goldCrystals) {
+export const handleGems = (game: Game) => {
+  const remaining: Gem[] = [];
+  for (const g of game.gems) {
     const b = findFirstHittingBullet(game.bullets, g);
     if (b) {
       consumeBullet(b);
@@ -389,26 +389,26 @@ export const handleGoldCrystalPickups = (game: Game) => {
       const dmg = b.damage();
       applyHitToCombo(game, onBeat, b.pos);
       if (onBeat && dmg >= 4) {
-        crackGoldCrystalForCanister(game, g);
+        crackGemForCanister(game, g);
         if (b.driftEligibleAtHit()) queueDriftBonusForGem(game, g);
-      } else wasteGoldCrystal(game, g);
+      } else wasteGem(game, g);
       continue;
     }
     if (game.ship.alive && game.ship.invuln <= 0 && g.collidesWith(game.ship.pos, game.ship.radius * 0.9)) {
-      shatterGoldCrystalOnShip(game, g);
+      shatterGemOnShip(game, g);
       continue;
     }
     remaining.push(g);
   }
-  game.goldCrystals = remaining;
+  game.gems = remaining;
 };
 
 // Ship touched the gem: same sad crystal-break flavour as a solid-crystal
 // asteroid shatter, and the ship eats the impact (shield first, then kill).
-const shatterGoldCrystalOnShip = (game: Game, g: GoldCrystal) => {
+const shatterGemOnShip = (game: Game, g: Gem) => {
   game.sound.play("crystalShatterSmall", 1, g.pos);
   game.shake = Math.min(game.shake + 0.3, 1.2);
-  emitGoldCrystalPickup(game.particles, g);
+  emitGemPickup(game.particles, g);
   if (game.ship.shieldActive) {
     game.ship.shieldActive = false;
     game.ship.invuln = 0.8;
@@ -419,19 +419,19 @@ const shatterGoldCrystalOnShip = (game: Game, g: GoldCrystal) => {
 };
 
 // Rhythm-cracked: 40% of the time the gem yields its embedded canister, the
-// rest of the time it pays out GOLD_CRYSTAL_REVEAL_SCORE with a comet-style
+// rest of the time it pays out GEM_REVEAL_SCORE with a comet-style
 // score popup so the reveal still feels like a payoff.
-const crackGoldCrystalForCanister = (game: Game, g: GoldCrystal) => {
+const crackGemForCanister = (game: Game, g: Gem) => {
   game.sound.play("tink", 1, g.pos);
   game.shake = Math.min(game.shake + 0.25, 1.2);
-  emitGoldCrystalPickup(game.particles, g);
-  if (rng() < GOLD_CRYSTAL_UPGRADE_CHANCE) {
-    const canister = spawnCanisterFromGoldCrystal(g, game.w, game.h);
+  emitGemPickup(game.particles, g);
+  if (rng() < GEM_UPGRADE_CHANCE) {
+    const canister = spawnCanisterFromGem(g, game.w, game.h);
     game.canisters.push(canister);
     game.sound.play("canisterAppear", 1, g.pos);
   } else {
-    game.score += GOLD_CRYSTAL_REVEAL_SCORE;
-    game.popups.push(popupScore(g.pos, GOLD_CRYSTAL_REVEAL_SCORE));
+    game.score += GEM_REVEAL_SCORE;
+    game.popups.push(popupScore(g.pos, GEM_REVEAL_SCORE));
   }
   syncHud(game);
   checkBonusLife(game);
@@ -440,7 +440,7 @@ const crackGoldCrystalForCanister = (game: Game, g: GoldCrystal) => {
 // Drift-locked on-beat crack: same pending-bonus pattern as asteroid drift shots — queues a
 // +1 combo bump one beat later (cancelled if the streak breaks in the meantime) and plays the
 // drift-shot fanfare immediately so the reward reads at the hit, not just at the popup.
-const queueDriftBonusForGem = (game: Game, g: GoldCrystal) => {
+const queueDriftBonusForGem = (game: Game, g: Gem) => {
   game.pendingDriftBonuses.push({
     fireAt: game.perceivedBeatTime + BEAT_GRID,
     pos: { x: g.pos.x, y: g.pos.y },
@@ -452,7 +452,7 @@ const queueDriftBonusForGem = (game: Game, g: GoldCrystal) => {
 // Lifetime ran out before the player grabbed or shot the gem. Same
 // "lost upgrade" feedback as a wasted shot so an unattended gem doesn't
 // just silently vanish — the bang nudges the player to notice next time.
-export const expireGoldCrystal = (game: Game, g: GoldCrystal) => {
+export const expireGem = (game: Game, g: Gem) => {
   game.sound.play("explosionSmall", 1, g.pos);
   game.sound.play("canisterDestroyed", 1, g.pos);
   game.shake = Math.min(game.shake + 0.25, 1.2);
@@ -461,7 +461,7 @@ export const expireGoldCrystal = (game: Game, g: GoldCrystal) => {
 
 // Shot the gem instead of flying through it — no score, no popup. Same
 // "lost upgrade" feedback; teaches the player the gem is a rhythm target.
-const wasteGoldCrystal = expireGoldCrystal;
+const wasteGem = expireGem;
 
 // deflection burst differs from kill bursts so the player feels the shield saved them.
 export const popShield = (game: Game) => {

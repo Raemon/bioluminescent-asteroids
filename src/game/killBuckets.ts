@@ -11,9 +11,8 @@ export type KillBucket =
   | "chime"
   | "bell"
   | "warble"
-  | "goldCrystal"
-  // goldDiamond shards fold into goldCrystal (same gem-drop payout)
-  | "goldGem"
+  | "asteroidWithGem"
+  | "burstGem"
   | "solidCrystal"
   | "alien_big"
   | "alien_medium"

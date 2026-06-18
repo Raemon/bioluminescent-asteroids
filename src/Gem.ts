@@ -1,35 +1,39 @@
-import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut, sub, mul, len, fromAngle, circleHit } from "./vec";
+import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut, sub, mul, len, fromAngle, circleHit, wrapMut } from "./vec";
 import { Canister, POWERUP_KINDS } from "./Canister";
 import { ENTITY_CONFIG } from "./game/entityConfig";
 import { OCTAHEDRON_EDGES, projectOctahedron } from "./octahedron";
 
 // Re-exports so existing imports (collisions.ts, etc.) keep working — the
 // authoritative numbers live in entityConfig.
-export const GOLD_CRYSTAL_UPGRADE_CHANCE = ENTITY_CONFIG.goldCrystal.upgradeChance;
-export const GOLD_CRYSTAL_REVEAL_SCORE = ENTITY_CONFIG.goldCrystal.revealScore;
+export const GEM_UPGRADE_CHANCE = ENTITY_CONFIG.asteroidWithGem.upgradeChance;
+export const GEM_REVEAL_SCORE = ENTITY_CONFIG.asteroidWithGem.revealScore;
 
-// A standalone collectible left behind by a "goldCrystal" asteroid's death.
+// A standalone collectible left behind by a "asteroidWithGem" asteroid's death.
 // The asteroid's blurred interior was the visual tease — this is the payoff,
 // a sharply-rendered six-sided gold gem that drifts where the rock died until
 // the player flies through it. Slow drift inherits a fraction of the parent
 // asteroid's velocity so the gem reads as "ejected from the explosion", not
 // "teleported in". After a long lifetime it dims and warps out.
 
-export const GOLD_CRYSTAL_SCORE = ENTITY_CONFIG.goldCrystal.pickupScore;
+export const GEM_SCORE = ENTITY_CONFIG.asteroidWithGem.pickupScore;
 
-const LIFETIME = ENTITY_CONFIG.goldCrystal.lifetime;
+const LIFETIME = ENTITY_CONFIG.asteroidWithGem.lifetime;
 // final fraction of life spent fading + flickering as a warp-out warning.
 const FADE_TAIL = LIFETIME * 0.22;
 
-export class GoldCrystal {
+export class Gem {
   pos: Vec;
   vel: Vec;
   hue: number;
   // Pickup radius. A touch larger than the visible gem so the player doesn't
   // feel cheated when the ship clips a corner.
-  radius = ENTITY_CONFIG.goldCrystal.radius;
+  radius = ENTITY_CONFIG.asteroidWithGem.radius;
   age = 0;
   alive = true;
+  // Fast-flung gems (the fan a burstGem bursts into) keep their launch velocity
+  // and wrap at the screen edge instead of decaying to a near-stop, so they read
+  // as blades thrown across the field rather than a quietly settling drop.
+  fast = false;
   // Optional drift-to-park: rhythm-aligned gems fly from the crystal's death
   // site to a solved spot on the player's one-beat aim ring, arriving exactly
   // when `parkAge` is reached, then freeze. `parkTarget` null = free drift.
@@ -66,7 +70,7 @@ export class GoldCrystal {
     this.parkAge = arriveAge;
   }
 
-  update(dt: number, _w: number, _h: number) {
+  update(dt: number, w: number, h: number) {
     this.age += dt;
     this.rotX += this.rotSpeedX * dt;
     this.rotY += this.rotSpeedY * dt;
@@ -78,6 +82,11 @@ export class GoldCrystal {
       const e = t * t * (3 - 2 * t);
       this.pos.x = this.parkOrigin.x + (this.parkTarget.x - this.parkOrigin.x) * e;
       this.pos.y = this.parkOrigin.y + (this.parkTarget.y - this.parkOrigin.y) * e;
+    } else if (this.fast) {
+      // Flung blade: hold velocity and wrap, so the gem keeps crossing the
+      // field as a live rhythm target until its lifetime expires.
+      addScaledMut(this.pos, this.vel, dt);
+      wrapMut(this.pos, w, h);
     } else {
       // Gentle drift; the gem isn't supposed to chase or flee, it just floats
       // where the rock died.
@@ -180,12 +189,43 @@ export class GoldCrystal {
 // Spawn a gold crystal at the dead asteroid's position, inheriting a small
 // fraction of its parent velocity so the gem drifts naturally with the burst
 // rather than freezing in space.
-export const spawnGoldCrystalAt = (pos: Vec, parentVel: Vec): GoldCrystal => {
+export const spawnGemAt = (pos: Vec, parentVel: Vec): Gem => {
   // a fraction of parent velocity + small random jitter reads as "the
   // explosion ejected it" without sending it flying out of reach. Jitter is
   // small so the gem stays predictably near the kill site.
   const drift = v(parentVel.x * 0.25 + rand(-18, 18), parentVel.y * 0.25 + rand(-18, 18));
-  return new GoldCrystal({ ...pos }, drift);
+  return new Gem({ ...pos }, drift);
+};
+
+// A burstGem's death: fan `count` fast-flying gems out in an even ring, rotated
+// half a step off the killing-shot axis so none flies straight back down the
+// return line (the bullet came IN along impactDir). Each is a real Gem — fly
+// into one and you die, shoot it on-beat for points/an upgrade — that simply
+// keeps its launch speed and wraps the field instead of settling in place.
+export const spawnBurstGemFan = (
+  deathPos: Vec,
+  parentVel: Vec,
+  impactDir: Vec | null,
+  count: number,
+  speed: number,
+  ejectDist: number,
+): Gem[] => {
+  const baseAngle = impactDir
+    ? Math.atan2(impactDir.y, impactDir.x)
+    : Math.atan2(parentVel.y, parentVel.x);
+  const fan: Gem[] = [];
+  for (let i = 0; i < count; i++) {
+    const angle = baseAngle + Math.PI / count + (i / count) * TAU;
+    const dir = fromAngle(angle);
+    const pos = v(deathPos.x + dir.x * ejectDist, deathPos.y + dir.y * ejectDist);
+    // Inherit a touch of the gem's drift so the fan travels with it rather than
+    // expanding from a dead-still centre.
+    const vel = v(parentVel.x * 0.3 + dir.x * speed, parentVel.y * 0.3 + dir.y * speed);
+    const gem = new Gem(pos, vel);
+    gem.fast = true;
+    fan.push(gem);
+  }
+  return fan;
 };
 
 // Drop a fan of gems at the crystal's death site, then drift each one out to a
@@ -210,7 +250,7 @@ export const spawnRhythmAlignedGems = (
   bulletSpeed: number,
   beatGrid: number,
   shipRadius: number,
-): GoldCrystal[] => {
+): Gem[] => {
   const center = v(
     shipPos.x + shipVel.x * 1.4 * beatGrid,
     shipPos.y + shipVel.y * 1.4 * beatGrid,
@@ -225,12 +265,12 @@ export const spawnRhythmAlignedGems = (
   // small fan so gems read as distinct targets, not a single column.
   const SPREAD_PER_GEM = 0.11;
   const startOffset = -((count - 1) * SPREAD_PER_GEM) / 2;
-  const gems: GoldCrystal[] = [];
+  const gems: Gem[] = [];
   for (let k = 0; k < count; k++) {
     const angle = baseAngle + startOffset + k * SPREAD_PER_GEM;
     const dir = fromAngle(angle);
     const target = v(center.x + dir.x * aimRadius, center.y + dir.y * aimRadius);
-    const gem = new GoldCrystal({ ...deathPos }, v(0, 0));
+    const gem = new Gem({ ...deathPos }, v(0, 0));
     gem.driftToPark(target, beatGrid);
     gems.push(gem);
   }
@@ -241,7 +281,7 @@ export const spawnRhythmAlignedGems = (
 // the far side of the playfield and uses the standard canister drift speed so
 // the freed canister flies across the screen and eventually warps out just
 // like a normally-spawned canister — the player has to chase it.
-export const spawnCanisterFromGoldCrystal = (g: GoldCrystal, w: number, h: number): Canister => {
+export const spawnCanisterFromGem = (g: Gem, w: number, h: number): Canister => {
   const kind = pick(POWERUP_KINDS);
   const aim = v(rand(80, w - 80), rand(80, h - 80));
   const delta = sub(aim, g.pos);

@@ -15,10 +15,11 @@ const SLOT_1_POOL: readonly string[] = [
 
 const SLOT_2_POOL: readonly string[] = [
   "Aim carefully.",
-  "One shot, one kill.",
+  "One shot. One kill.",
+  "It's okay to wait",
   "Drift gently.",
   "Fire on the beat. Hit on the beat.",
-  "Build rhythm.",
+  "Build rhythm, carefully.",
   "Find the rhythm.",
   "Become stronger.",
   "Drift among the asteroids.",

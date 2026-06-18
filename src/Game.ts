@@ -11,7 +11,7 @@ import type { AudioChannel } from "./game/audioPrefs";
 import type { MusicLayer } from "./musicConfig";
 import type { HaloMusicVariation } from "./Sound";
 import { Canister } from "./Canister";
-import { GoldCrystal } from "./GoldCrystal";
+import { Gem } from "./Gem";
 import { Comet } from "./Comet";
 import { Alien, AlienSize } from "./Alien";
 import { AlienBullet } from "./AlienBullet";
@@ -211,7 +211,7 @@ export class Game implements HudElements {
   firstWaveOnBeatHitCount = 0;
 
   canisters: Canister[] = [];
-  goldCrystals: GoldCrystal[] = [];
+  gems: Gem[] = [];
   comets: Comet[] = [];
   aliens: Alien[] = [];
   alienBullets: AlienBullet[] = [];

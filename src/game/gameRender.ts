@@ -73,7 +73,7 @@ const paintEntityLayers = (
   const comboHalo = { intensity: game.ship.comboHaloIntensity, beatPulse: currentBeatPulse(game) };
   for (const a of game.asteroids) a.render(ctx, game.time, comboHalo);
   for (const c of game.canisters) c.render(ctx, game.time);
-  for (const g of game.goldCrystals) g.render(ctx, game.time);
+  for (const g of game.gems) g.render(ctx, game.time);
   for (const al of game.aliens) al.render(ctx, game.time);
   for (const ab of game.alienBullets) ab.render(ctx);
   renderBossBeams(ctx, game.bossBeams);
@@ -116,7 +116,7 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   const superBoosted = game.beatCombo >= 12;
   // gold crystals are stationary (or near-stationary) "First Dot" probes — they need a direct
   // proximity pass since the trajectory walk skips speed<1 targets.
-  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime, superBoosted, game.goldCrystals);
+  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime, superBoosted, game.gems);
   // ship.lastThrustActiveAt is recorded in game.time/1000 units; pass the same clock so
   // the post-thrust fade doesn't get stuck after intro overlays (which advance beatTime
   // without advancing game.time).

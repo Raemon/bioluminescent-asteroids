@@ -244,7 +244,10 @@ export type SoundName =
   | "wraithDeath"
   | "bossPulse"
   | "bossHit"
-  | "bossEyeOpenStinger";
+  | "bossEyeOpenStinger"
+  // Hold-to-charge laser bed. One committed loop per tier (0..4), keyed by
+  // pitchRatio = tier. Built by buildChargeBedGraph, not the Tone path.
+  | "chargeBed";
 
 // Combo-milestone vocal pools. Each milestone (x6, x12) has its own folder
 // under /sounds/vocals/in-use/. When the player hits the milestone, one file
@@ -614,6 +617,8 @@ export class Sound {
       ["bassPluck", standardPitches],
       ["bassSnap", standardPitches],
       ["cometNote", cometIdxs],
+      // Hold-to-charge laser bed: one committed loop per tier (pitchRatio=tier).
+      ["chargeBed", [0, 1, 2, 3, 4]],
     ];
     for (const [name, pitches] of oneShots) {
       for (const p of pitches) {
@@ -910,8 +915,22 @@ export class Sound {
   private async bakeSound(name: SoundName, pitchRatio: number): Promise<AudioBuffer | null> {
     if (!this.ctx) return null;
     if (!import.meta.env.DEV) return null;
-    const Tone = await loadTone();
     const sr = this.ctx.sampleRate;
+    const OACearly = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
+    if (!OACearly) return null;
+
+    // chargeBed is a pure-WebAudio seamless loop (no Tone, no reverb bus): one
+    // committed mp3 per tier, keyed by pitchRatio = tier. Render it on its own
+    // path and skip the Tone fx-bus setup the one-shot recipes need.
+    if (name === "chargeBed") {
+      const tier = Math.max(0, Math.min(4, Math.round(pitchRatio)));
+      const len = Math.ceil(sr * (Sound.CHARGE_LOOP_LEN + 0.05));
+      const offline = new OACearly(2, len, sr);
+      this.buildChargeBedGraph(offline, offline.destination, tier);
+      return offline.startRendering();
+    }
+
+    const Tone = await loadTone();
     // Total duration to render. Longer than the dry note so the reverb tail
     // (1.5s decay in the bus) lands inside the buffer.
     const durations: Partial<Record<SoundName, number>> = {
@@ -4670,20 +4689,33 @@ export class Sound {
   // and LFO frequency baked into the loop is an integer Hz, so each completes a
   // whole number of cycles in exactly this many seconds and the buffer meets
   // itself cleanly at the loop point. Keep frequencies integer if you edit them.
-  private static CHARGE_LOOP_LEN = 1.0;
+  // 2s gives room for a full 8-step arpeggio phrase per loop. Frequencies are
+  // still integer Hz (whole periods in 2s), and the pulse/arp grid divides 2s
+  // evenly, so the loop stays seamless.
+  private static CHARGE_LOOP_LEN = 2.0;
 
   // Renders one seamless charge-bed loop for tier `tier` (0..4) into `ctx`.
-  // Bakes the whole bed at that tier's intensity: the C-rooted chord stack
-  // (more voices + hotter as charge climbs), a bandpassed crackle, and the
-  // rolling-thunder rumble (lowpassed noise churned by a slow LFO, with a sub
-  // sine under it). All frequencies are integers so the loop is seamless.
-  // Nothing reads live state, so it renders identically every time.
+  // Bakes a musical bed at that tier's intensity: a C-major chord pad pulsed by
+  // a rhythmic tremolo (faster, more on-the-beat with charge), a plucked
+  // arpeggio walking the C-E-G-C triad (more steps as charge climbs), plus the
+  // textural layers — a bandpassed crackle and the rolling-thunder rumble
+  // (lowpassed noise churned by a slow LFO, with a sub sine under it). The
+  // pulse grid divides the loop evenly and all frequencies are integers, so the
+  // loop is seamless. Nothing reads live state, so it renders identically.
   private buildChargeBedGraph(ctx: BaseAudioContext, dest: AudioNode, tier: number) {
     const len = Sound.CHARGE_LOOP_LEN;
     const topBoost = tier >= 4 ? 1.35 : 1;
 
+    // Pulse rhythm: number of even beats across the loop. Quickens with charge
+    // (2 → 8 over the loop), so holding feels like a tightening groove. Always
+    // an integer count → the tremolo's period tiles the loop exactly.
+    const pulses = [2, 3, 4, 6, 8][tier];
+    const beat = len / pulses;
+
     // Chord stack — integer-Hz approximations of C3/G3/C4/E4 so each loops
-    // cleanly in 1s. Voice i is audible once tier >= i; tier 4 swells all four.
+    // cleanly. Voice i is audible once tier >= i; tier 4 swells all four. Each
+    // voice is amplitude-pulsed by a per-beat envelope so the pad has a groove
+    // instead of sitting as a flat drone.
     const voices: Array<{ hz: number; type: OscillatorType; peak: number }> = [
       { hz: 131, type: "triangle", peak: 0.12 }, // C3 root (tier 0)
       { hz: 196, type: "sine",     peak: 0.09 }, // G3 fifth (tier 1)
@@ -4697,11 +4729,53 @@ export class Sound {
       osc.type = v.type;
       osc.frequency.value = v.hz;
       const gain = ctx.createGain();
-      gain.gain.value = v.peak * topBoost;
+      const peak = v.peak * topBoost;
+      // Floor keeps the pad present between hits; the swell on each beat gives
+      // the groove. Sharper (deeper-dipping) pulse as charge climbs.
+      const floor = peak * (0.55 - tier * 0.06);
+      for (let b = 0; b < pulses; b++) {
+        const t0 = b * beat;
+        gain.gain.setValueAtTime(floor, t0);
+        gain.gain.linearRampToValueAtTime(peak, t0 + beat * 0.18);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, floor), t0 + beat * 0.92);
+      }
       osc.connect(gain);
       gain.connect(dest);
       osc.start(0);
       osc.stop(len + 0.05);
+    }
+
+    // Plucked arpeggio — a bright triangle voice stepping up the C-major triad
+    // across the loop. Adds melodic movement over the pad. Step count grows with
+    // charge so higher tiers ripple faster. Each note gets a quick pluck
+    // envelope; the rising line resets every loop so it tiles seamlessly.
+    if (tier >= 1) {
+      const arpNotes = [262, 330, 392, 523, 392, 330]; // C4 E4 G4 C5 G4 E4
+      const steps = [0, 4, 6, 8, 10, 12][tier]; // notes per loop, climbs w/ charge
+      if (steps > 0) {
+        const stepDur = len / steps;
+        const osc = ctx.createOscillator();
+        osc.type = "triangle";
+        const freqParam = osc.frequency;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.0001, 0);
+        const peak = 0.05 + tier * 0.012;
+        for (let s = 0; s < steps; s++) {
+          const t0 = s * stepDur;
+          freqParam.setValueAtTime(arpNotes[s % arpNotes.length], t0);
+          gain.gain.setValueAtTime(0.0001, t0);
+          gain.gain.linearRampToValueAtTime(peak, t0 + stepDur * 0.12);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t0 + stepDur * 0.88);
+        }
+        const lp = ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 2200;
+        osc.connect(lp);
+        lp.connect(gain);
+        gain.connect(dest);
+        osc.start(0);
+        osc.stop(len + 0.05);
+      }
     }
 
     const noiseFor = (dur: number): AudioBuffer => {
@@ -4723,7 +4797,7 @@ export class Sound {
       bp.Q.value = 4;
       bp.frequency.value = 900 + tier * 800;
       const gain = ctx.createGain();
-      gain.gain.value = 0.02 + tier * 0.055;
+      gain.gain.value = 0.015 + tier * 0.04;
       noise.connect(bp);
       bp.connect(gain);
       gain.connect(dest);
@@ -4744,13 +4818,13 @@ export class Sound {
       lp.frequency.value = 150 + tier * 130;
       const lfo = ctx.createOscillator();
       lfo.type = "sine";
-      lfo.frequency.value = 2 + tier; // integer Hz → seamless; quickens w/ charge
+      lfo.frequency.value = pulses; // locks the surge to the pulse grid → seamless
       const lfoDepth = ctx.createGain();
       lfoDepth.gain.value = 40 + tier * 35;
       lfo.connect(lfoDepth);
       lfoDepth.connect(lp.frequency);
       const gain = ctx.createGain();
-      gain.gain.value = 0.04 + tier * 0.085;
+      gain.gain.value = 0.03 + tier * 0.06;
       noise.connect(lp);
       lp.connect(gain);
       gain.connect(dest);
@@ -4775,35 +4849,16 @@ export class Sound {
     }
   }
 
-  // Renders the seamless charge-bed loop once per tier (0..4) into an
-  // AudioBuffer via OfflineAudioContext and caches it, so the hold-to-charge
-  // bed is buffer playback + crossfades instead of a live oscillator/LFO stack.
-  // Fire-and-forget; re-runnable (skips tiers already cached or in flight).
+  // Warm the committed charge-bed loops (one mp3 per tier 0..4, keyed by
+  // pitchRatio = tier). Each goes through queueBake: fetch the committed mp3,
+  // and only in dev fall back to a buildChargeBedGraph offline render that gets
+  // dumped to disk. Fire-and-forget; queueBake de-dupes in-flight/cached.
   private prerenderChargeBeds() {
-    if (!this.ctx) return;
-    const OAC = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
-    if (!OAC) return;
-    const sr = this.ctx.sampleRate;
-    const length = Math.ceil(sr * (Sound.CHARGE_LOOP_LEN + 0.05));
-    for (let tier = 0; tier <= 4; tier++) {
-      if (this.chargeBedBuffers[tier] || this.chargeBedRendering[tier]) continue;
-      this.chargeBedRendering[tier] = true;
-      const offline = new OAC(1, length, sr);
-      this.buildChargeBedGraph(offline, offline.destination, tier);
-      offline.startRendering().then((buf) => {
-        this.chargeBedBuffers[tier] = buf;
-        this.chargeBedRendering[tier] = false;
-      }).catch(() => { this.chargeBedRendering[tier] = false; });
-    }
+    for (let tier = 0; tier <= 4; tier++) void this.queueBake("chargeBed", tier);
   }
 
-  // One pre-rendered seamless charge-bed loop per tier (index 0..4). Filled
-  // lazily by prerenderChargeBeds; null until that tier's render resolves.
-  private chargeBedBuffers: (AudioBuffer | null)[] = [null, null, null, null, null];
-  private chargeBedRendering: boolean[] = [false, false, false, false, false];
-
-  // Hold-to-charge bed. Plays all five pre-baked tier loops at once, each
-  // through its own crossfade gain; only the active tier is audible. Holding
+  // Hold-to-charge bed. Plays all five baked tier loops at once, each through
+  // its own crossfade gain; only the active tier is audible. Holding
   // (setLaserChargeTier) crossfades between tiers as dots land, so the bed
   // intensifies seamlessly without any live synthesis. Idempotent; paired with
   // stopLaserCharge by the caller.
@@ -4812,10 +4867,15 @@ export class Sound {
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     if (this.laserChargeNode) return;
-    // If the bake hasn't landed yet, kick it and bail — the upgrade hold is rare
-    // at context start, so silent-missing the very first hold is acceptable.
+    // If the bakes haven't landed yet, kick them and bail — the upgrade hold is
+    // rare at context start, so silent-missing the very first hold is fine.
     this.prerenderChargeBeds();
-    if (this.chargeBedBuffers.some((b) => !b)) return;
+    const tierBufs: AudioBuffer[] = [];
+    for (let tier = 0; tier <= 4; tier++) {
+      const buf = this.bakedBuffers.get(this.bakedKey("chargeBed", tier));
+      if (!buf) return;
+      tierBufs.push(buf);
+    }
     const t = this.ctx.currentTime;
 
     const mainGain = this.ctx.createGain();
@@ -4827,7 +4887,7 @@ export class Sound {
     const tierGains: GainNode[] = [];
     for (let tier = 0; tier <= 4; tier++) {
       const src = this.ctx.createBufferSource();
-      src.buffer = this.chargeBedBuffers[tier];
+      src.buffer = tierBufs[tier];
       src.loop = true;
       const gain = this.ctx.createGain();
       // Only tier 0 audible at the start of a hold; others crossfade in.
