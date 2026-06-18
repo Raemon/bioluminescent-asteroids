@@ -1,5 +1,6 @@
 import type { Game } from "../Game";
-import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, isBurstGem, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt, spawnGemSwarm } from "../Asteroid";
+import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, isBurstGem, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
+import { spawnGemSwarm } from "../Gem";
 import { spawnComet as spawnCometAtEdge, spawnMeteorShower } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
@@ -302,21 +303,30 @@ export const spawnMeteorShowerEvent = (game: Game, countOverride?: number) => {
   if (meteors.length > 0) game.sound.play("meteorShower", 1, meteors[0].pos);
 }
 
-// The gem swarm: a flock of asteroidWithGem rocks sweeping across the field, the
-// gold-diamond cousin of the meteor shower. They're real asteroids, so each
-// kill runs the normal embedded-gem drop — a brief, dense "kill them for
-// upgrades" window. Each gem is beat-aligned (anchored at screen centre) so
-// its kill-range crossing lands on the grid, same as any incoming rock; one
-// entrance sweep announces the whole flock at the lead gem's position.
+// The gem swarm: a flock of bare gems sweeping across the field, the
+// gold-diamond cousin of the meteor shower. Each gem is a live rhythm target
+// (fly in → die; shoot on-beat → points or an upgrade) — a brief, dense "comb
+// through them for upgrades" window. Each is beat-aligned (anchored at screen
+// centre) so its kill-range crossing lands on the grid, same as any incoming
+// rock; one entrance sweep announces the whole flock at the lead gem's position.
 export const spawnGemSwarmEvent = (game: Game, countOverride?: number) => {
   const cfg = CFG.gemSwarm;
   const count = countOverride ?? randInt(cfg.count[0], cfg.count[1]);
   const gems = spawnGemSwarm(game.w, game.h, count);
   const claimed = newBeatClaimSet();
+  const centre = { x: game.w / 2, y: game.h / 2 };
   for (const g of gems) {
-    alignIncomingToRhythm(game, g, claimed);
+    const speed = Math.hypot(g.vel.x, g.vel.y);
+    alignVelocityToRhythm(g.pos, g.vel, {
+      refPos: centre,
+      beatTime: game.beatTime,
+      speedRange: [speed * 0.85, speed * 1.15],
+      engageRadius: CFG.engageRadius.incoming,
+      maxBeats: 24,
+      claimed,
+    });
     applyRhythmSpeed(game, g.vel);
-    game.asteroids.push(g);
+    game.gems.push(g);
   }
   if (gems.length > 0) game.sound.play("gemSwarm", 1, gems[0].pos);
 };

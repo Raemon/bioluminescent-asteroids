@@ -163,11 +163,10 @@ export const ENTITY_CONFIG = {
     revealScore: 250,
   },
 
-  // Gem swarm — the gold-diamond cousin of the meteor shower. A flock of
-  // asteroidWithGem rocks sweeps across the field; each kill rolls the normal
-  // gem-drop, so it's a brief dense window of "kill them for upgrades".
-  // Rarer than the meteor shower and held back until the player knows the
-  // gem-drop dynamic cold.
+  // Gem swarm — the gold-diamond cousin of the meteor shower. A flock of bare
+  // gems sweeps across the field, each a live rhythm target, so it's a brief
+  // dense window of "comb through them for upgrades". Rarer than the meteor
+  // shower and held back until the player knows the gem-drop dynamic cold.
   gemSwarm: {
     firstWave: 6,
     chancePerWave: 1 / 14,
@@ -224,6 +223,7 @@ export const ENTITY_CONFIG = {
     frequentChance: 0.18,
     hp: 8,
     score: 800,
+    damageReduction: 4,
     // Heavy: drifts in noticeably slower than its size band, like a solid
     // crystal large, so the player can read the tough target and line up.
     spawnSpeedMul: 0.45,

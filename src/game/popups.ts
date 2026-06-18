@@ -100,7 +100,7 @@ export const popupDriftBonus = (pos: Vec, withSubtitle = false): Popup => {
 // shown the first time a shot glances off an armoured crystal — teaches the
 //   player that under-powered hits bounce, and that Rhythm is how you hit harder.
 //   Red label over a cyan "gain more Rhythm" prompt, mirroring DRIFT SHOT's two-line shape.
-const INSUFFICIENT_DAMAGE_POPUP_LIFE = 1.8;
+const INSUFFICIENT_DAMAGE_POPUP_LIFE = 4;
 export const popupInsufficientDamage = (pos: Vec): Popup => {
   const labelFont = "700 17px 'Space Grotesk', system-ui, sans-serif";
   const subFont = "600 13px 'Space Grotesk', system-ui, sans-serif";

@@ -361,7 +361,7 @@ const collectCanister = (game: Game, c: Canister) => {
 };
 
 // shooting wastes the powerup — neutral sound + white burst contrasts the pickup flavour.
-const explodeCanister = (game: Game, c: Canister) => {
+export const explodeCanister = (game: Game, c: Canister) => {
   game.sound.play("explosionSmall", 1, c.pos);
   game.sound.play("canisterDestroyed", 1, c.pos);
   game.shake = Math.min(game.shake + 0.25, 1.2);
@@ -421,7 +421,7 @@ const shatterGemOnShip = (game: Game, g: Gem) => {
 // Rhythm-cracked: 40% of the time the gem yields its embedded canister, the
 // rest of the time it pays out GEM_REVEAL_SCORE with a comet-style
 // score popup so the reveal still feels like a payoff.
-const crackGemForCanister = (game: Game, g: Gem) => {
+export const crackGemForCanister = (game: Game, g: Gem) => {
   game.sound.play("tink", 1, g.pos);
   game.shake = Math.min(game.shake + 0.25, 1.2);
   emitGemPickup(game.particles, g);

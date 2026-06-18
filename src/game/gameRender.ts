@@ -9,6 +9,7 @@ import { pickCenterMostTargetForFocus, ReticuleTarget } from "../ship/reticule/t
 import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
 import { renderLasers, renderLaserChargeDots, renderLaserAmbientFlash } from "./laserShot";
 import { renderBossBeams } from "./bossBeam";
+import { renderSlowMoTimerBar } from "./slowMoTimerBar";
 import { rng } from "./rng";
 
 // shake is purely cosmetic; isolate its math so render() reads top-down.
@@ -143,6 +144,8 @@ export const renderGame = (game: Game) => {
   );
   paintEntityLayers(game, focusedTarget);
   paintForeground(game, targets);
+  // slow-mo countdown rail sits above the field so its beat ticks read clearly.
+  renderSlowMoTimerBar(game);
   // laser ambient wash sits above entities; the bass-drop white flash sits above
   // even that so a bass drop still wins.
   renderLaserAmbientFlash(ctx, game);

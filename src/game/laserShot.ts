@@ -18,6 +18,9 @@ import {
   onAlienCracked,
   onCometKilled,
 } from "./killEffects";
+import { explodeCanister, expireGem, crackGemForCanister } from "./collisions";
+import type { Gem } from "../Gem";
+import type { Canister } from "../Canister";
 import { syncHud } from "./hud";
 
 // Absolute charge-dot ceiling (one per beat held). Damage doubles per dot from
@@ -87,11 +90,12 @@ export class LaserBeam {
   jags: number[];
   seed: number;
   // Targets already damaged so a sweeping beam doesn't re-hit them each frame.
-  alreadyHit: Set<Asteroid | Alien | Comet>;
+  // Any laser-affectable entity (see laserTargetGroups) regardless of type.
+  alreadyHit: Set<object>;
   // Targets that existed when the beam first fired. The sweep only ever damages
   // these, so things spawned mid-beam (kill-spawned children, freshly-warped
   // enemies) can't be hit as the beam ages — only what was there at fire time.
-  eligible: Set<Asteroid | Alien | Comet>;
+  eligible: Set<object>;
 
   constructor(ship: Ship, length: number, damage: number, dots: number, game: Game) {
     this.ship = ship;
@@ -105,7 +109,13 @@ export class LaserBeam {
     this.seed = rng() * Math.PI * 2;
     this.jags = [];
     this.alreadyHit = new Set();
-    this.eligible = new Set([...game.asteroids, ...game.aliens, ...game.comets]);
+    // Eligibility is captured from every laser-affectable group at fire time, so
+    // adding a new damageable entity to laserTargetGroups makes the beam hit it
+    // automatically — no per-type wiring here.
+    this.eligible = new Set();
+    for (const group of laserTargetGroups(game)) {
+      for (const target of group.list()) this.eligible.add(target);
+    }
     if (dots >= 2) {
       const n = 14;
       for (let i = 0; i < n; i++) this.jags.push((rng() * 2 - 1) * LASER_JAG_AMPLITUDE);
@@ -252,112 +262,141 @@ const fireLaser = (game: Game, ship: Ship, dots: number) => {
   game.laserChargeGlow = 0;
 };
 
+// A laser-affectable entity. Every damageable/shootable body in the game already
+// exposes collidesWith(pos, radius) for the bullet path; the beam swath reuses it
+// so the laser hits exactly what a bullet hits, with no per-type collision math.
+type LaserTarget = { pos: Vec; collidesWith: (p: Vec, r: number) => boolean };
+
+// One group per laser-affectable entity array. Each owns: the live array (read +
+// written through get/set so kill-spawned children replace the original), and an
+// onHit that routes a beam strike through the SAME kill-effect pipeline a bullet
+// uses. To make the laser hit a new entity type, add a group here — nothing else
+// in the sweep changes. This is the single source of truth for "what a laser can
+// hit", mirroring how bullets dispatch per-type kill handlers in collisions.ts.
+type LaserTargetGroup = {
+  list: () => LaserTarget[];
+  // Apply one beam strike to `target`. Returns the bodies that should remain in
+  // the array afterwards (the target itself if it survived, kill-spawned
+  // children if it died and split, or nothing).
+  onHit: (game: Game, target: LaserTarget, beam: LaserBeam, dir: Vec, fakeBullet: Bullet) => LaserTarget[];
+  set: (game: Game, surviving: LaserTarget[]) => void;
+};
+
+const laserTargetGroups = (game: Game): LaserTargetGroup[] => [
+  {
+    list: () => game.asteroids,
+    onHit: (game, target, beam, dir, fakeBullet) => {
+      const a = target as Asteroid;
+      // The laser is a charged shot — give the boss family the meaty armored
+      // impact every time it connects (the fake bullet is deliberately flagless,
+      // so the bossHit gate in killEffects won't catch it).
+      if (a.isBossFamily()) game.sound.play("bossHit", 1, a.pos);
+      const { killed } = a.applyDamage(beam.damage);
+      game.shake = Math.min(game.shake + (killed ? 0.3 : 0.15), 1.2);
+      if (!killed) {
+        a.applyKnockback(dir.x, dir.y, beam.damage);
+        onAsteroidCrackedByBullet(game, a, fakeBullet, false);
+        return [a];
+      }
+      return onAsteroidKilledByBullet(game, a, fakeBullet, false);
+    },
+    set: (game, surviving) => { game.asteroids = surviving as Asteroid[]; },
+  },
+  {
+    list: () => game.aliens,
+    onHit: (game, target, beam, dir, fakeBullet) => {
+      const al = target as Alien;
+      // Aliens take 1 hp per applyDamage; loop so charge tiers chew through HP
+      // in a single beam pass instead of needing N separate shots.
+      let killed = false;
+      for (let i = 0; i < beam.damage; i++) {
+        if (al.applyDamage().killed) { killed = true; break; }
+      }
+      if (killed) {
+        onAlienKilled(game, al, fakeBullet, false);
+        return [];
+      }
+      al.applyKnockback(dir.x, dir.y, beam.damage);
+      onAlienCracked(game, false, al.pos);
+      return [al];
+    },
+    set: (game, surviving) => { game.aliens = surviving as Alien[]; },
+  },
+  {
+    list: () => game.comets,
+    onHit: (game, target, _beam, _dir, fakeBullet) => {
+      onCometKilled(game, target as Comet, fakeBullet, false);
+      return [];
+    },
+    set: (game, surviving) => { game.comets = surviving as Comet[]; },
+  },
+  {
+    // Gems crack (yield canister/score) only for a ≥4-damage hit, else they're
+    // wasted — same threshold the bullet path applies. The beam already earned
+    // its rhythm at charge time, so a charged shot (1+ dots = ≥4 dmg) cracks; a
+    // bare 0-dot shot wastes, mirroring an off-beat bullet.
+    list: () => game.gems,
+    onHit: (game, target, beam) => {
+      const g = target as Gem;
+      if (beam.damage >= 4) crackGemForCanister(game, g);
+      else expireGem(game, g); // wasted-gem feedback, same as an off-beat bullet
+      return [];
+    },
+    set: (game, surviving) => { game.gems = surviving as Gem[]; },
+  },
+  {
+    // Shooting a canister wastes the powerup (white pop), same as a bullet.
+    list: () => game.canisters,
+    onHit: (game, target) => {
+      explodeCanister(game, target as Canister);
+      return [];
+    },
+    set: (game, surviving) => { game.canisters = surviving as Canister[]; },
+  },
+];
+
 // Sweep-damages every target the beam segment crosses this frame, skipping any
-// already hit by this beam. The swath widens with charge (beamHalfWidth).
-// Asteroids/aliens use the same kill-effect helpers a real bullet would, with a
+// already hit by this beam. The swath widens with charge (beamHalfWidth). Every
+// group routes through the same kill-effect helpers a real bullet would, with a
 // synthetic Bullet feeding the impact position into the existing pipeline.
 const applyBeamDamage = (game: Game, beam: LaserBeam, dir: Vec) => {
-  applyBeamToAsteroids(game, beam, dir);
-  applyBeamToAliens(game, beam, dir);
-  applyBeamToComets(game, beam, dir);
+  for (const group of laserTargetGroups(game)) applyBeamToGroup(game, beam, dir, group);
   syncHud(game);
 };
 
-// Distance from `pos` to the beam segment [origin, origin + dir*length],
-// plus the t-parameter along the beam (clamped to [0, length]) where the
-// closest approach lands — used as the visual impact position.
-const distanceToBeam = (
-  origin: Vec, dir: Vec, length: number, pos: Vec,
-): { distance: number; t: number } => {
-  const dx = pos.x - origin.x;
-  const dy = pos.y - origin.y;
-  const tRaw = dx * dir.x + dy * dir.y;
-  const t = Math.max(0, Math.min(length, tRaw));
-  const px = origin.x + dir.x * t;
-  const py = origin.y + dir.y * t;
-  return { distance: Math.hypot(pos.x - px, pos.y - py), t };
-};
-
-const applyBeamToAsteroids = (game: Game, beam: LaserBeam, dir: Vec) => {
-  const { origin, length, damage } = beam;
-  const halfW = beamHalfWidth(beam.dots);
-  const surviving: Asteroid[] = [];
-  for (const a of game.asteroids) {
-    const { distance, t } = distanceToBeam(origin, dir, length, a.pos);
-    // Shape-aware reach: sample the faceted surface toward the beam's closest
-    // approach so the test matches what a bullet would hit, not a loose circle.
-    const closest = v(origin.x + dir.x * t, origin.y + dir.y * t);
-    const surfAngle = Math.atan2(closest.y - a.pos.y, closest.x - a.pos.x) - a.rotation;
-    const reach = a.radiusAtAngle(surfAngle) + halfW + LASER_HIT_PAD;
-    if (distance > reach || beam.alreadyHit.has(a) || !beam.eligible.has(a)) {
-      surviving.push(a); continue;
-    }
-    beam.alreadyHit.add(a);
-    const hitPos = v(origin.x + dir.x * t, origin.y + dir.y * t);
-    const fakeBullet = makeFakeBullet(hitPos, dir);
-    // The laser is a charged shot — give the boss family the meaty armored
-    // impact every time it connects (the fake bullet is deliberately flagless,
-    // so the bossHit gate in killEffects won't catch it).
-    if (a.isBossFamily()) game.sound.play("bossHit", 1, a.pos);
-    const { killed } = a.applyDamage(damage);
-    game.shake = Math.min(game.shake + (killed ? 0.3 : 0.15), 1.2);
-    if (!killed) {
-      a.applyKnockback(dir.x, dir.y, damage);
-      onAsteroidCrackedByBullet(game, a, fakeBullet, false);
-      surviving.push(a);
-    } else {
-      const children = onAsteroidKilledByBullet(game, a, fakeBullet, false);
-      for (const c of children) surviving.push(c);
-    }
-  }
-  game.asteroids = surviving;
-};
-
-const applyBeamToAliens = (game: Game, beam: LaserBeam, dir: Vec) => {
-  const { origin, length, damage } = beam;
-  const halfW = beamHalfWidth(beam.dots);
-  const surviving: Alien[] = [];
-  for (const al of game.aliens) {
-    const { distance, t } = distanceToBeam(origin, dir, length, al.pos);
-    if (distance > al.radius + halfW + LASER_HIT_PAD || beam.alreadyHit.has(al) || !beam.eligible.has(al)) {
-      surviving.push(al); continue;
-    }
-    beam.alreadyHit.add(al);
-    const hitPos = v(origin.x + dir.x * t, origin.y + dir.y * t);
-    const fakeBullet = makeFakeBullet(hitPos, dir);
-    // Aliens take 1 hp per applyDamage; loop so charge tiers chew through HP
-    // in a single beam pass instead of needing N separate shots.
-    let killed = false;
-    for (let i = 0; i < damage; i++) {
-      const r = al.applyDamage();
-      if (r.killed) { killed = true; break; }
-    }
-    if (killed) {
-      onAlienKilled(game, al, fakeBullet, false);
-    } else {
-      al.applyKnockback(dir.x, dir.y, damage);
-      onAlienCracked(game, false, al.pos);
-      surviving.push(al);
-    }
-  }
-  game.aliens = surviving;
-};
-
-const applyBeamToComets = (game: Game, beam: LaserBeam, dir: Vec) => {
+// The beam's hit swath: a point is struck if it's within halfWidth + pad of the
+// beam segment. We pose that as a circle of that radius riding the beam's closest
+// approach to the target, then let the target's own collidesWith decide — so the
+// test honours each entity's real hitbox (faceted asteroid surface, tight alien
+// body, gem/comet/canister circles) exactly as the bullet path does.
+const applyBeamToGroup = (game: Game, beam: LaserBeam, dir: Vec, group: LaserTargetGroup) => {
   const { origin, length } = beam;
-  const halfW = beamHalfWidth(beam.dots);
-  const surviving: Comet[] = [];
-  for (const c of game.comets) {
-    const { distance, t } = distanceToBeam(origin, dir, length, c.pos);
-    if (distance > c.radius + halfW + LASER_HIT_PAD || beam.alreadyHit.has(c) || !beam.eligible.has(c)) {
-      surviving.push(c); continue;
+  const swathR = beamHalfWidth(beam.dots) + LASER_HIT_PAD;
+  const surviving: LaserTarget[] = [];
+  for (const target of group.list()) {
+    if (beam.alreadyHit.has(target) || !beam.eligible.has(target)) {
+      surviving.push(target); continue;
     }
-    beam.alreadyHit.add(c);
-    const hitPos = v(origin.x + dir.x * t, origin.y + dir.y * t);
-    const fakeBullet = makeFakeBullet(hitPos, dir);
-    onCometKilled(game, c, fakeBullet, false);
+    const t = closestApproach(origin, dir, length, target.pos);
+    const closest = v(origin.x + dir.x * t, origin.y + dir.y * t);
+    if (!target.collidesWith(closest, swathR)) {
+      surviving.push(target); continue;
+    }
+    beam.alreadyHit.add(target);
+    const fakeBullet = makeFakeBullet(closest, dir);
+    for (const remaining of group.onHit(game, target, beam, dir, fakeBullet)) {
+      surviving.push(remaining);
+    }
   }
-  game.comets = surviving;
+  group.set(game, surviving);
+};
+
+// The t-parameter along the beam (clamped to [0, length]) where the beam passes
+// closest to `pos` — the point we test the swath against and use as the impact
+// position for kill effects.
+const closestApproach = (origin: Vec, dir: Vec, length: number, pos: Vec): number => {
+  const tRaw = (pos.x - origin.x) * dir.x + (pos.y - origin.y) * dir.y;
+  return Math.max(0, Math.min(length, tRaw));
 };
 
 // Synthesises a Bullet just so the existing kill-effect helpers can read

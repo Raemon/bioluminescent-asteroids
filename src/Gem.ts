@@ -228,6 +228,44 @@ export const spawnBurstGemFan = (
   return fan;
 };
 
+// A gem swarm: a flock of bare gems streaking across the field the same way a
+// meteor shower does — shared heading, spread across the entry edge, staggered
+// diagonally so they trail rather than arrive as a wall. Each is a live rhythm
+// target (fly in → die; shoot on-beat → points or an upgrade): a brief, dense
+// "comb through them" window. They fly fast and wrap, so they keep crossing
+// until shot or expired. Velocities are aligned to the beat by the caller.
+const GEM_SWARM_SPEED = 165; // brisk single-screen-width sweep, pre-rhythm-mul
+export const spawnGemSwarm = (w: number, h: number, count: number): Gem[] => {
+  const edge = Math.floor(rand(0, 4));
+  const offset = 120;
+  let origin: Vec;
+  if (edge === 0) origin = v(-offset, rand(h * 0.15, h * 0.85));
+  else if (edge === 1) origin = v(w + offset, rand(h * 0.15, h * 0.85));
+  else if (edge === 2) origin = v(rand(w * 0.15, w * 0.85), -offset);
+  else origin = v(rand(w * 0.15, w * 0.85), h + offset);
+
+  const target = v(rand(w * 0.3, w * 0.7), rand(h * 0.3, h * 0.7));
+  const angle = Math.atan2(target.y - origin.y, target.x - origin.x);
+  const along = fromAngle(angle, 1);
+  const perp = v(-along.y, along.x);
+
+  const gems: Gem[] = [];
+  for (let i = 0; i < count; i++) {
+    // Spread across the perpendicular (centred on origin) and stagger back
+    // along the heading so later gems trail the leaders.
+    const spread = (i - (count - 1) / 2) * rand(48, 78);
+    const lag = i * rand(50, 110);
+    const pos = v(
+      origin.x + perp.x * spread - along.x * lag,
+      origin.y + perp.y * spread - along.y * lag,
+    );
+    const gem = new Gem(pos, fromAngle(angle, GEM_SWARM_SPEED));
+    gem.fast = true;
+    gems.push(gem);
+  }
+  return gems;
+};
+
 // Drop a fan of gems at the crystal's death site, then drift each one out to a
 // solved spot on the player's one-beat aim ring so that — if the pilot keeps
 // coasting and just rotates — the reticule lines up on one of them exactly one
