@@ -450,10 +450,18 @@ html:has(#sound-root), body:has(> #sound-root) {
   text-align: center;
   pointer-events: auto;
   z-index: 10;
-  background: radial-gradient(ellipse at 50% 50%, rgba(0, 8, 24, 0.5) 0%, rgba(0, 0, 5, 0.85) 70%);
-  backdrop-filter: blur(2px);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+#overlay::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(ellipse at 50% 50%, rgba(0, 8, 24, 0.5) 0%, rgba(0, 0, 5, 0.85) 70%);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
 }
 
 #overlay > * { flex-shrink: 0; }
