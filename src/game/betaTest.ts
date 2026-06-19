@@ -2,8 +2,9 @@ import type { Game } from "../Game";
 import { Ship } from "../Ship";
 import { ParticleSystem } from "../Particle";
 import { v } from "../vec";
-import { AsteroidKind, spawnBossAt, BASS_KINDS, spawnAsteroidAtEdge } from "../Asteroid";
-import { PowerupKind, spawnCanister } from "../Canister";
+import { AsteroidKind, AsteroidSize, spawnBossAt, BASS_KINDS, spawnAsteroidAtEdge } from "../Asteroid";
+import { AlienSize } from "../Alien";
+import { PowerupKind, POWERUP_KINDS, spawnCanister } from "../Canister";
 import { syncHud, syncPowerupHud } from "./hud";
 import { stopParade } from "./killedParade";
 import { newWaveEventSchedule } from "./waveEvents";
@@ -27,8 +28,7 @@ type BetaElement = {
   apply: (game: Game) => void;
 };
 
-const spawnAsteroid = (game: Game, kind: AsteroidKind = "normal") => {
-  const size = kind === "solidCrystal" ? "medium" : kind === "solidCrystalSmall" ? "small" : undefined;
+const spawnAsteroid = (game: Game, kind: AsteroidKind = "normal", size?: AsteroidSize) => {
   const a = spawnAwayFromShip(
     () => spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size),
     game.ship.pos,
@@ -53,20 +53,89 @@ const applyPowerup = (game: Game, kind: PowerupKind) => {
   else if (kind === "slow") game.slowMoTimer = SLOW_MO_DURATION;
 };
 
+// Each registry below is keyed by the canonical union type, so adding a new
+//   AsteroidKind / PowerupKind / AlienSize forces a compile error here until it
+//   is classified — that is what keeps the palette exhaustive automatically.
+// A tile can only name a kind that still exists in its union, so a deleted kind
+//   can never linger as a ghost tile. Powerups additionally render only the
+//   POWERUP_KINDS drop pool, dropping retired-but-still-coded kinds.
+
+type AsteroidTile = { label: string; group: "Asteroid" | "Special Rock"; size?: AsteroidSize };
+// null = fragment/child kind (boss parts, bell debris, glassPrison spawn) that
+//   only exists as the byproduct of another kind, so it gets no standalone tile.
+const ASTEROID_TILES: Record<AsteroidKind, AsteroidTile | null> = {
+  normal: { label: "Asteroid", group: "Asteroid" },
+  bassA: { label: "Bass A", group: "Special Rock" },
+  bassB: { label: "Bass B", group: "Special Rock" },
+  bassC: { label: "Bass C", group: "Special Rock" },
+  bassD: { label: "Bass D", group: "Special Rock" },
+  chime: { label: "Chime", group: "Special Rock" },
+  bell: { label: "Bell", group: "Special Rock" },
+  warble: { label: "Warble", group: "Special Rock" },
+  asteroidWithGem: { label: "Gold Rock", group: "Special Rock" },
+  burstGemMedium: { label: "Burst Gem", group: "Special Rock" },
+  burstGemBig: { label: "Burst Gem (big)", group: "Special Rock" },
+  solidCrystal: { label: "Crystal", group: "Special Rock", size: "medium" },
+  solidCrystalSmall: { label: "Crystal (sm)", group: "Special Rock", size: "small" },
+  glassPrison: { label: "Glass Prison", group: "Special Rock" },
+  boss: null,
+  bossHemisphere: null,
+  bossEye: null,
+  bossPlate: null,
+  bossIrisShard: null,
+  bossEmber: null,
+  wraith: null,
+  cathedralKeystone: null,
+  glassShard: null,
+  columnDrum: null,
+  rubbleBlock: null,
+};
+
+// Labels for every powerup the type allows; the palette only renders the ones
+//   in POWERUP_KINDS (the live drop pool), so a retired powerup (rapid/pierce,
+//   kept in the type for their still-wired effects) drops out automatically.
+const POWERUP_LABELS: Record<PowerupKind, string> = {
+  prong: "Prong",
+  rapid: "Rapid Fire",
+  pierce: "Pierce",
+  shield: "Shield",
+  slow: "Slow-Mo",
+  radar: "Radar",
+  longshot: "Longshot",
+  sideEngines: "Side Engines",
+  lasershot: "Laser",
+};
+
+const ALIEN_TILES: Record<AlienSize, string> = {
+  small: "Alien (S)",
+  medium: "Alien (M)",
+  big: "Alien (L)",
+};
+
+const asteroidElements: BetaElement[] = (Object.keys(ASTEROID_TILES) as AsteroidKind[])
+  .map((kind): BetaElement | null => {
+    const tile = ASTEROID_TILES[kind];
+    if (!tile) return null;
+    return { id: kind, label: tile.label, group: tile.group, apply: (g: Game) => spawnAsteroid(g, kind, tile.size) };
+  })
+  .filter((e): e is BetaElement => e !== null);
+
+const powerupElements: BetaElement[] = POWERUP_KINDS.map((kind) => ({
+  id: kind,
+  label: POWERUP_LABELS[kind],
+  group: "Powerup",
+  apply: (g: Game) => applyPowerup(g, kind),
+}));
+
+const alienElements: BetaElement[] = (Object.keys(ALIEN_TILES) as AlienSize[]).map((size) => ({
+  id: "alien" + size[0].toUpperCase() + size.slice(1),
+  label: ALIEN_TILES[size],
+  group: "Enemy",
+  apply: (g: Game) => spawnAlien(g, size),
+}));
+
 const ELEMENTS: BetaElement[] = [
-  { id: "normal", label: "Asteroid", group: "Asteroid", apply: (g) => spawnAsteroid(g, "normal") },
-  { id: "bassA", label: "Bass A", group: "Special Rock", apply: (g) => spawnAsteroid(g, "bassA") },
-  { id: "bassB", label: "Bass B", group: "Special Rock", apply: (g) => spawnAsteroid(g, "bassB") },
-  { id: "bassC", label: "Bass C", group: "Special Rock", apply: (g) => spawnAsteroid(g, "bassC") },
-  { id: "bassD", label: "Bass D", group: "Special Rock", apply: (g) => spawnAsteroid(g, "bassD") },
-  { id: "chime", label: "Chime", group: "Special Rock", apply: (g) => spawnAsteroid(g, "chime") },
-  { id: "bell", label: "Bell", group: "Special Rock", apply: (g) => spawnAsteroid(g, "bell") },
-  { id: "warble", label: "Warble", group: "Special Rock", apply: (g) => spawnAsteroid(g, "warble") },
-  { id: "asteroidWithGem", label: "Gold Rock", group: "Special Rock", apply: (g) => spawnAsteroid(g, "asteroidWithGem") },
-  { id: "burstGemMedium", label: "Burst Gem", group: "Special Rock", apply: (g) => spawnAsteroid(g, "burstGemMedium") },
-  { id: "burstGemBig", label: "Burst Gem (big)", group: "Special Rock", apply: (g) => spawnAsteroid(g, "burstGemBig") },
-  { id: "solidCrystal", label: "Crystal", group: "Special Rock", apply: (g) => spawnAsteroid(g, "solidCrystal") },
-  { id: "solidCrystalSmall", label: "Crystal (sm)", group: "Special Rock", apply: (g) => spawnAsteroid(g, "solidCrystalSmall") },
+  ...asteroidElements,
   {
     id: "boss",
     label: "Boss",
@@ -79,9 +148,7 @@ const ELEMENTS: BetaElement[] = [
   },
   { id: "comet", label: "Comet", group: "Hazard", apply: (g) => spawnComet(g) },
   { id: "shockwave", label: "Shockwave", group: "Hazard", apply: (g) => startShockwave(g) },
-  { id: "alienSmall", label: "Alien (S)", group: "Enemy", apply: (g) => spawnAlien(g, "small") },
-  { id: "alienMedium", label: "Alien (M)", group: "Enemy", apply: (g) => spawnAlien(g, "medium") },
-  { id: "alienBig", label: "Alien (L)", group: "Enemy", apply: (g) => spawnAlien(g, "big") },
+  ...alienElements,
   {
     id: "canister",
     label: "Powerup Pod",
@@ -92,15 +159,7 @@ const ELEMENTS: BetaElement[] = [
       g.sound.play("canisterAppear", 1, c.pos);
     },
   },
-  { id: "prong", label: "Prong", group: "Powerup", apply: (g) => applyPowerup(g, "prong") },
-  { id: "rapid", label: "Rapid Fire", group: "Powerup", apply: (g) => applyPowerup(g, "rapid") },
-  { id: "pierce", label: "Pierce", group: "Powerup", apply: (g) => applyPowerup(g, "pierce") },
-  { id: "shield", label: "Shield", group: "Powerup", apply: (g) => applyPowerup(g, "shield") },
-  { id: "slow", label: "Slow-Mo", group: "Powerup", apply: (g) => applyPowerup(g, "slow") },
-  { id: "radar", label: "Radar", group: "Powerup", apply: (g) => applyPowerup(g, "radar") },
-  { id: "longshot", label: "Longshot", group: "Powerup", apply: (g) => applyPowerup(g, "longshot") },
-  { id: "sideEngines", label: "Side Engines", group: "Powerup", apply: (g) => applyPowerup(g, "sideEngines") },
-  { id: "lasershot", label: "Laser", group: "Powerup", apply: (g) => applyPowerup(g, "lasershot") },
+  ...powerupElements,
 ];
 
 const GROUP_ORDER: BetaElement["group"][] = [
@@ -189,6 +248,7 @@ const iconFor = (id: string): string => {
   if (id === "burstGemMedium" || id === "burstGemBig") return `<svg viewBox="0 0 24 24"><polygon points="12,2 19,9 12,22 5,9" fill="${c}" opacity="0.35" stroke="${c}" stroke-width="1.5"/><path d="M5,9 L19,9 M12,2 L12,22" stroke="${c}" stroke-width="0.8" opacity="0.6"/></svg>`;
   if (id === "solidCrystal") return `<svg viewBox="0 0 24 24"><polygon points="12,3 19,8 17,16 12,21 7,16 5,8" fill="${c}" opacity="0.35" stroke="${c}" stroke-width="1.5"/><path d="M12,3 L12,21 M5,8 L19,8 M7,16 L17,16" stroke="${c}" stroke-width="0.8" opacity="0.5"/></svg>`;
   if (id === "solidCrystalSmall") return `<svg viewBox="0 0 24 24"><polygon points="12,7 17,10 16,16 12,19 8,16 7,10" fill="${c}" opacity="0.35" stroke="${c}" stroke-width="1.4"/></svg>`;
+  if (id === "glassPrison") return `<svg viewBox="0 0 24 24"><polygon points="12,2 20,12 12,22 4,12" fill="${c}" opacity="0.18" stroke="${c}" stroke-width="1.5"/><path d="M9 9 L9 15 M12 8 L12 16 M15 9 L15 15" stroke="${c}" stroke-width="1.2" opacity="0.8"/></svg>`;
   if (id === "boss") return `<svg viewBox="0 0 24 24"><polygon points="12,2 22,9 18,21 6,21 2,9" fill="none" stroke="${c}" stroke-width="1.7"/><circle cx="12" cy="13" r="3" fill="${c}"/></svg>`;
   if (id === "comet") return `<svg viewBox="0 0 24 24"><circle cx="17" cy="7" r="3" fill="${c}"/><path d="M14 10 L4 20" stroke="${c}" stroke-width="2" stroke-linecap="round"/></svg>`;
   if (id === "shockwave") return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="${c}" stroke-width="1.5"/><circle cx="12" cy="12" r="7" fill="none" stroke="${c}" stroke-width="1.5" opacity="0.6"/><circle cx="12" cy="12" r="11" fill="none" stroke="${c}" stroke-width="1.5" opacity="0.3"/></svg>`;
