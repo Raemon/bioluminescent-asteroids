@@ -62,13 +62,13 @@ const handleSubmit = async (game: Game, ev: Event) => {
       try {
         const bytes = await waitForReplayBytes(game);
         if (!bytes) {
-          setStatus(game, "Score saved. Replay unavailable for this run.", "success");
+          setStatus(game, "Score saved. Replay unavailable. Press enter to continue.", "success");
         } else {
           await uploadReplay(saved.id, rawName, bytes);
           setStatus(game, "Score + replay saved. Press enter to continue.", "success");
         }
       } catch (err) {
-        setStatus(game, `Score saved. Replay upload failed: ${(err as Error).message}`, "error");
+        setStatus(game, `Score saved (replay upload failed: ${(err as Error).message}). Press enter to continue.`, "error");
       }
     } else {
       setStatus(game, "Score saved. Press enter to continue.", "success");

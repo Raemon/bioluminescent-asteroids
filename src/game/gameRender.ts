@@ -131,6 +131,10 @@ export const targetsForReticule = (game: Game) => [
   ...game.comets,
   ...game.aliens,
   ...game.canisters,
+  // Moving gems (the fan a burst gold asteroid throws off) are real rhythm
+  // targets, so give them trajectory lines + a first-beat dot like any rock.
+  // Parked/near-still drops self-skip in the trajectory walk (speed<1).
+  ...game.gems.filter((g) => Math.hypot(g.vel.x, g.vel.y) >= 1),
 ];
 
 // ship + reticule are the foreground; popups (combo/pickup/debug) sit above everything else.
