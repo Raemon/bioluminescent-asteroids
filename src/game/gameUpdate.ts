@@ -573,14 +573,20 @@ const classifyNewBullets = (game: Game, firstNewIndex: number) => {
   }
   logBeatEvent(game, "FIRE", game.perceivedBeatTime, `bullets=${count}`);
   spawnBeatDebugPopup(game, game.ship.pos, game.perceivedBeatTime, "FIRE");
-  if (firedOnBeat) handleOnBeatFire(game, firstNewIndex);
-  else handleOffBeatFire(game);
+  if (firedOnBeat) {
+    boostNewBullets(game, firstNewIndex);
+    registerOnBeatFire(game);
+  } else {
+    registerOffBeatFire(game);
+  }
   // deeper fireBeat pluck reinforces "you nailed the beat"; ship no longer plays its own.
   game.sound.play(firedOnBeat ? "fireBeat" : "fire");
 };
 
-// 0→1 priming step; above 1 only on-beat hits + beat closures bump combo, not consecutive fires.
-const handleOnBeatFire = (game: Game, firstNewIndex: number) => {
+// Bullet-only: tag the freshly-spawned projectiles with the live halo tier so
+// they fly boosted/super-boosted. The laser owns its own per-tier visuals, so
+// it shares registerOnBeatFire below but not this.
+const boostNewBullets = (game: Game, firstNewIndex: number) => {
   // boosted bullets fly while the yellow halo (combo ≥ 4, tier 2) is up.
   const boosted = game.ship.comboHaloTier >= 2;
   // combo ≥ 12 promotes to the white "super-boosted" tier — sharper look and
@@ -598,6 +604,13 @@ const handleOnBeatFire = (game: Game, firstNewIndex: number) => {
       newBullet.fadeStartLife = Math.max(0, newBullet.maxLife - slotCount * BEAT_GRID);
     }
   }
+};
+
+// Shared by EVERY weapon's on-beat fire (bullets, laser, future). Rhythm is
+// gained by HITS, not fires — so this only does the 0→1 priming step; above 1
+// the combo climbs on on-beat hits + beat closures, never on consecutive fires.
+// Keep weapon-specific projectile setup out of here (see boostNewBullets).
+export const registerOnBeatFire = (game: Game) => {
   game.sound.play("comboTick");
   if (game.beatCombo === 0) {
     game.beatCombo = 1;
@@ -620,8 +633,10 @@ const handleOnBeatFire = (game: Game, firstNewIndex: number) => {
   }
 };
 
-// latch break till next beat closure so a kill on the same frame still rides the prior streak.
-const handleOffBeatFire = (game: Game) => {
+// Shared by EVERY weapon's off-beat fire. Latch the break till the next beat
+// closure so a kill on the same frame still rides the prior streak — the combo
+// isn't dropped here, evaluateClosedBeats spends it when the beat closes.
+export const registerOffBeatFire = (game: Game) => {
   game.firedOffBeatSinceLastBeat = true;
 };
 

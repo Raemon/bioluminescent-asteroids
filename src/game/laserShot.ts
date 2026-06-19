@@ -7,7 +7,8 @@ import { Vec, v, fromAngle, add, mul } from "../vec";
 import { Bullet } from "../Bullet";
 import { BEAT_GRID } from "./rhythmConstants";
 import { isDown } from "./controlBindings";
-import { isInBeatWindow, loseCombo } from "./rhythmGate";
+import { isInBeatWindow } from "./rhythmGate";
+import { registerOnBeatFire, registerOffBeatFire } from "./gameUpdate";
 import { buildJaggedBolt, strokePolyline } from "./bassLightning";
 import { drawGlow } from "../glow";
 import { rng } from "./rng";
@@ -17,6 +18,7 @@ import {
   onAlienKilled,
   onAlienCracked,
   onCometKilled,
+  applyHitToCombo,
 } from "./killEffects";
 import { explodeCanister, expireGem, crackGemForCanister } from "./collisions";
 import type { Gem } from "../Gem";
@@ -96,6 +98,9 @@ export class LaserBeam {
   // these, so things spawned mid-beam (kill-spawned children, freshly-warped
   // enemies) can't be hit as the beam ages — only what was there at fire time.
   eligible: Set<object>;
+  // Whether the fire-release landed on-beat. Carried onto every hit's fake
+  // bullet so beam strikes gain rhythm exactly like an on-beat bullet's hit.
+  firedOnBeat: boolean;
 
   constructor(ship: Ship, length: number, damage: number, dots: number, game: Game) {
     this.ship = ship;
@@ -109,6 +114,7 @@ export class LaserBeam {
     this.seed = rng() * Math.PI * 2;
     this.jags = [];
     this.alreadyHit = new Set();
+    this.firedOnBeat = false;
     // Eligibility is captured from every laser-affectable group at fire time, so
     // adding a new damageable entity to laserTargetGroups makes the beam hit it
     // automatically — no per-type wiring here.
@@ -243,17 +249,15 @@ const fireLaser = (game: Game, ship: Ship, dots: number) => {
   const damage = 2 << dots;
   const superBoosted = game.beatCombo >= 12;
   const length = computeBeamLength(ship, superBoosted, dots);
-  // A clean on-beat release earns rhythm; an off-beat release spends it. The
-  // beam's sweep damage is owned by its per-frame update, not this fire event.
-  if (isInBeatWindow(game, game.perceivedBeatTime)) {
-    game.beatCombo += 1;
-    if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
-    if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
-    syncHud(game);
-  } else {
-    loseCombo(game, ship.pos);
-  }
+  // Fire timing primes/latches rhythm exactly like a bullet (shared with the
+  // bullet path): an on-beat fire primes the streak, an off-beat fire latches a
+  // break for the next beat closure. Rhythm is *gained* by the beam's on-beat
+  // HITS — see the firedOnBeat flag carried into applyBeamDamage — not here.
+  const firedOnBeat = isInBeatWindow(game, game.perceivedBeatTime);
+  if (firedOnBeat) registerOnBeatFire(game);
+  else registerOffBeatFire(game);
   const beam = new LaserBeam(ship, length, damage, dots, game);
+  beam.firedOnBeat = firedOnBeat;
   game.lasers.push(beam);
   game.sound.playLaserShot(damage, dots);
   game.shake = Math.min(game.shake + 0.12 + dots * 0.12, 1.4);
@@ -291,14 +295,16 @@ const laserTargetGroups = (game: Game): LaserTargetGroup[] => [
       // impact every time it connects (the fake bullet is deliberately flagless,
       // so the bossHit gate in killEffects won't catch it).
       if (a.isBossFamily()) game.sound.play("bossHit", 1, a.pos);
+      const onBeat = beamHitOnBeat(game, fakeBullet);
       const { killed } = a.applyDamage(beam.damage);
       game.shake = Math.min(game.shake + (killed ? 0.3 : 0.15), 1.2);
+      applyHitToCombo(game, onBeat, fakeBullet.pos);
       if (!killed) {
         a.applyKnockback(dir.x, dir.y, beam.damage);
-        onAsteroidCrackedByBullet(game, a, fakeBullet, false);
+        onAsteroidCrackedByBullet(game, a, fakeBullet, onBeat);
         return [a];
       }
-      return onAsteroidKilledByBullet(game, a, fakeBullet, false);
+      return onAsteroidKilledByBullet(game, a, fakeBullet, onBeat);
     },
     set: (game, surviving) => { game.asteroids = surviving as Asteroid[]; },
   },
@@ -308,16 +314,18 @@ const laserTargetGroups = (game: Game): LaserTargetGroup[] => [
       const al = target as Alien;
       // Aliens take 1 hp per applyDamage; loop so charge tiers chew through HP
       // in a single beam pass instead of needing N separate shots.
+      const onBeat = beamHitOnBeat(game, fakeBullet);
       let killed = false;
       for (let i = 0; i < beam.damage; i++) {
         if (al.applyDamage().killed) { killed = true; break; }
       }
+      applyHitToCombo(game, onBeat, fakeBullet.pos);
       if (killed) {
-        onAlienKilled(game, al, fakeBullet, false);
+        onAlienKilled(game, al, fakeBullet, onBeat);
         return [];
       }
       al.applyKnockback(dir.x, dir.y, beam.damage);
-      onAlienCracked(game, false, al.pos);
+      onAlienCracked(game, onBeat, al.pos);
       return [al];
     },
     set: (game, surviving) => { game.aliens = surviving as Alien[]; },
@@ -325,20 +333,24 @@ const laserTargetGroups = (game: Game): LaserTargetGroup[] => [
   {
     list: () => game.comets,
     onHit: (game, target, _beam, _dir, fakeBullet) => {
-      onCometKilled(game, target as Comet, fakeBullet, false);
+      const onBeat = beamHitOnBeat(game, fakeBullet);
+      applyHitToCombo(game, onBeat, fakeBullet.pos);
+      onCometKilled(game, target as Comet, fakeBullet, onBeat);
       return [];
     },
     set: (game, surviving) => { game.comets = surviving as Comet[]; },
   },
   {
-    // Gems crack (yield canister/score) only for a ≥4-damage hit, else they're
-    // wasted — same threshold the bullet path applies. The beam already earned
-    // its rhythm at charge time, so a charged shot (1+ dots = ≥4 dmg) cracks; a
-    // bare 0-dot shot wastes, mirroring an off-beat bullet.
+    // Gems crack (yield canister/score) only on an on-beat hit of ≥4 damage —
+    // the same gate the bullet path applies (handleGems). An on-beat beam strike
+    // also gains rhythm via applyHitToCombo; an off-beat or under-powered strike
+    // wastes the gem, exactly like an off-beat bullet.
     list: () => game.gems,
-    onHit: (game, target, beam) => {
+    onHit: (game, target, beam, _dir, fakeBullet) => {
       const g = target as Gem;
-      if (beam.damage >= 4) crackGemForCanister(game, g);
+      const onBeat = beamHitOnBeat(game, fakeBullet);
+      applyHitToCombo(game, onBeat, fakeBullet.pos);
+      if (onBeat && beam.damage >= 4) crackGemForCanister(game, g);
       else expireGem(game, g); // wasted-gem feedback, same as an off-beat bullet
       return [];
     },
@@ -383,7 +395,7 @@ const applyBeamToGroup = (game: Game, beam: LaserBeam, dir: Vec, group: LaserTar
       surviving.push(target); continue;
     }
     beam.alreadyHit.add(target);
-    const fakeBullet = makeFakeBullet(closest, dir);
+    const fakeBullet = makeFakeBullet(closest, dir, beam.firedOnBeat);
     for (const remaining of group.onHit(game, target, beam, dir, fakeBullet)) {
       surviving.push(remaining);
     }
@@ -403,15 +415,25 @@ const closestApproach = (origin: Vec, dir: Vec, length: number, pos: Vec): numbe
 // .pos / .vel / .driftEligibleAtHit() without us re-wiring the whole kill
 // pipeline. The fake bullet is never added to game.bullets so it never
 // updates or renders.
-const makeFakeBullet = (pos: Vec, dir: Vec): Bullet => {
+const makeFakeBullet = (pos: Vec, dir: Vec, firedOnBeat: boolean): Bullet => {
   const b = new Bullet({ x: pos.x, y: pos.y }, { x: dir.x, y: dir.y }, 0.01);
-  b.onBeat = false;
+  // Carry the fire's on-beat state so beamHitOnBeat reads it just like the
+  // bullet path: a beam fired on-beat that connects in a beat window gains
+  // rhythm (priming-aware), shows the xN popup, and plays the escalating chime.
+  b.onBeat = firedOnBeat;
   b.boosted = false;
   b.superBoosted = false;
   b.pierce = false;
   b.driftLockedSlots = [];
   return b;
 };
+
+// A beam strike is an on-beat HIT under the same rule a bullet uses: the shot
+// was fired on-beat AND it connects inside a beat window. Centralising it here
+// means every laserTargetGroups onHit gains rhythm identically — the general
+// "all weapons work the same way" guarantee.
+const beamHitOnBeat = (game: Game, fakeBullet: Bullet): boolean =>
+  isInBeatWindow(game, game.perceivedBeatTime) && fakeBullet.onBeat;
 
 // Small deterministic jag array for a charge crackle arc. Reseeds ~8x/sec via
 // a coarse time bucket so the bolt flickers without per-frame randomness.
