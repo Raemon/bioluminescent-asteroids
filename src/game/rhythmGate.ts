@@ -52,6 +52,21 @@ export const currentBeatPulse = (game: Game): number => {
   return beatPulseEnvelope(signedBeatsFromNearestBeat / windowFractionOfGrid);
 };
 
+// every wave body flashes brighter the instant the beat lands, then tapers over ~100ms.
+//   Keyed to perceivedBeatTime so the flash peaks on the beat the player *hears*. Unlike
+//   currentBeatPulse this isn't gated to the judge window — it's pure decoration on each beat,
+//   so the taper is a fixed wall-clock 100ms rather than a fraction of the beat slot.
+const BEAT_FLASH_DECAY = 0.1;
+export const currentBeatFlash = (game: Game): number => {
+  if (game.state !== "playing" && game.state !== "dying") return 0;
+  const grid = comboGrid(game);
+  const beatPhase = game.perceivedBeatTime / grid;
+  const secondsSinceBeat = (beatPhase - Math.floor(beatPhase)) * grid;
+  if (secondsSinceBeat >= BEAT_FLASH_DECAY) return 0;
+  const normalized = 1 - secondsSinceBeat / BEAT_FLASH_DECAY;
+  return normalized * normalized;
+};
+
 // dev-only timing log, gated on DEBUG_BEAT_TIMING so it costs nothing in production.
 export const logBeatEvent = (game: Game, kind: string, time: number, extra?: string) => {
   if (!DEBUG_BEAT_TIMING) return;
@@ -73,7 +88,7 @@ export const spawnBeatDebugPopup = (game: Game, pos: Vec, time: number, prefix: 
 
 // only meaningful losses (combo ≥2 → 0) fire wrrr + red halo; primed-only loss is too noisy.
 //   sourcePos anchors the popup at whatever caused the break (ship fire / target hit).
-export const loseCombo = (game: Game, sourcePos?: Vec) => {
+export const loseCombo = (game: Game, sourcePos?: Vec, reason: "fire" | "hit" = "fire") => {
   if (game.beatCombo === 0) return;
   const prev = game.beatCombo;
   const wasMeaningful = prev >= 2;
@@ -90,7 +105,7 @@ export const loseCombo = (game: Game, sourcePos?: Vec) => {
     game.sound.play("comboLost");
     game.ship.comboLossFlash = 1;
     if (sourcePos && (!game.hasLostComboEver || haloActive)) {
-      game.popups.push(popupComboLost(sourcePos));
+      game.popups.push(popupComboLost(sourcePos, reason));
     }
     // Show the "fire and hit on the beat to gain rhythm" hint once per game,
     // on the first meaningful loss outside the tutorial. The tutorial's own

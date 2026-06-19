@@ -1,6 +1,7 @@
 import type { Game } from "../Game";
+import type { Vec } from "../vec";
 import { BEAT_GRID } from "./rhythmConstants";
-import { currentBeatPulse, comboGrid } from "./rhythmGate";
+import { currentBeatPulse, currentBeatFlash, comboGrid } from "./rhythmGate";
 import { renderTrails } from "./trailsRender";
 import { renderPopups } from "./popups";
 import { renderBassLightnings } from "./bassLightning";
@@ -61,6 +62,29 @@ const paintFocusGlow = (ctx: CanvasRenderingContext2D, t: ReticuleTarget) => {
   ctx.restore();
 };
 
+// On-beat brightening for every wave body. Same additive-disc trick as paintFocusGlow
+// (ctx.filter=brightness is a slow full-canvas pass — see that note), so the flash reads as
+// "this lit up" on top of the sprite without touching each entity's own draw pipeline.
+const BEAT_FLASH_RADIUS_MULT = 1.15;
+const BEAT_FLASH_ALPHA = 0.35;
+const paintBeatFlash = (
+  ctx: CanvasRenderingContext2D, pos: Vec, radius: number, flash: number,
+) => {
+  const r = Math.max(6, radius) * BEAT_FLASH_RADIUS_MULT;
+  const a = BEAT_FLASH_ALPHA * flash;
+  const g = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, r);
+  g.addColorStop(0, `rgba(255, 255, 255, ${a.toFixed(3)})`);
+  g.addColorStop(0.6, `rgba(255, 255, 255, ${(a * 0.4).toFixed(3)})`);
+  g.addColorStop(1, "rgba(255, 255, 255, 0)");
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+};
+
 // bodies must sit ON their own trails, so trails pass before any per-entity render call.
 const paintEntityLayers = (
   game: Game, focusedTarget: ReticuleTarget | null,
@@ -80,6 +104,15 @@ const paintEntityLayers = (
   renderBossBeams(ctx, game.bossBeams);
   for (const b of game.bullets) b.render(ctx);
   renderLasers(ctx, game.lasers);
+  // every wave body brightens on the beat then tapers over ~100ms (paints over the sprites above).
+  const beatFlash = currentBeatFlash(game);
+  if (beatFlash > 0) {
+    for (const a of game.asteroids) paintBeatFlash(ctx, a.pos, a.radius, beatFlash);
+    for (const c of game.comets) paintBeatFlash(ctx, c.pos, c.radius, beatFlash);
+    for (const al of game.aliens) paintBeatFlash(ctx, al.pos, al.radius, beatFlash);
+    for (const c of game.canisters) paintBeatFlash(ctx, c.pos, c.radius, beatFlash);
+    for (const g of game.gems) paintBeatFlash(ctx, g.pos, g.radius, beatFlash);
+  }
   if (focusedTarget) paintFocusGlow(ctx, focusedTarget);
   renderBassLightnings(ctx, game.bassLightnings, game.time * 0.001);
   game.particles.render(ctx);

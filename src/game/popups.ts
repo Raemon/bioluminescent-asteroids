@@ -156,19 +156,33 @@ export const popupTwinShot = (pos: Vec): Popup =>
   popupBonusLabel(pos, "TWIN SHOT", "#c9a6ff", "rgba(180, 140, 255, 0.85)");
 
 // surfaces the streak break at the spot that caused it (ship fire / target hit).
-export const popupComboLost = (pos: Vec): Popup => ({
-  pos: { x: pos.x, y: pos.y - 6 },
-  vel: { x: rand(-10, 10), y: -55 },
-  life: 1.1,
-  maxLife: 1.1,
-  text: "RHYTHM LOST",
-  font: "700 16px 'Space Grotesk', system-ui, sans-serif",
-  fill: "#ff6a6a",
-  shadowColor: "rgba(255, 90, 90, 0.85)",
-  decayX: 0.94, decayY: 0.94,
-  popPeak: 0.4, popDuration: 0.15,
-  holdUntil: 0, fadeGain: 1.4,
-});
+//   reason names which half of the rhythm gate failed so the player can correct it.
+export const popupComboLost = (pos: Vec, reason: "fire" | "hit"): Popup => {
+  const labelFont = "700 16px 'Space Grotesk', system-ui, sans-serif";
+  const subtitle = reason === "fire" ? "(Didn't fire on beat)" : "(Didn't hit on beat)";
+  return {
+    pos: { x: pos.x, y: pos.y - 6 },
+    vel: { x: rand(-10, 10), y: -55 },
+    life: 5,
+    maxLife: 5,
+    text: "RHYTHM LOST",
+    font: labelFont,
+    fill: "#ff6a6a",
+    shadowColor: "rgba(255, 90, 90, 0.85)",
+    decayX: 0.94, decayY: 0.94,
+    popPeak: 0.4, popDuration: 0.15,
+    holdUntil: 0.15, fadeGain: 1.4,
+    draw: (ctx) => {
+      ctx.font = labelFont;
+      ctx.fillStyle = "#ff6a6a";
+      ctx.shadowColor = "rgba(255, 90, 90, 0.85)";
+      ctx.fillText("RHYTHM LOST", 0, -10);
+      ctx.fillStyle = "#ffb3b3";
+      ctx.shadowColor = "rgba(255, 130, 130, 0.85)";
+      ctx.fillText(subtitle, 0, 12);
+    },
+  };
+};
 
 // "+N" readout at the kill site so the player sees exactly what their hit was worth.
 export const popupScore = (pos: Vec, points: number): Popup => ({

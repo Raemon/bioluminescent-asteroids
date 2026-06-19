@@ -133,7 +133,7 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
       if (game.beatCombo === 4) emitFirstWaveHintStage3Ready();
     }
   } else if (!isOnBeatHit && game.beatCombo !== 0) {
-    loseCombo(game, hitPos);
+    loseCombo(game, hitPos, "hit");
   }
 };
 
