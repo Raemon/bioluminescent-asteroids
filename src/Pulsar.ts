@@ -388,6 +388,19 @@ export class Pulsar {
     return { focalX: x, focalY: y, roll, approach };
   }
 
+  // Screen geometry the spectrum visualizer's radial mode aligns to: the
+  // pulsar's on-screen centre, its current radius, and a FIXED screen-space
+  // angle for the magnetic-axis line. As the pulsar spins, the live beam vector
+  // sweeps an ellipse on screen centred on the rotation-axis projection — the
+  // flashes are most prominent along that axis (the beams sweep through and
+  // bloom hardest as they cross it). We hand back that stable axis so the ring
+  // doesn't spin with the pulsar; it points where the flashes cluster.
+  visualizerAnchor(): { x: number; y: number; r: number; beamAngle: number } {
+    const { x, y } = this.pulsarPos();
+    const beamAngle = Math.atan2(this.rotAxis.y, this.rotAxis.x);
+    return { x, y, r: this.currentRadius(), beamAngle };
+  }
+
   // Outward jitter direction the game applies to objects on the frame of
   // the flash. Vector from the shock origin toward the supplied point,
   // normalised; falls back to a random angle for points coincident with

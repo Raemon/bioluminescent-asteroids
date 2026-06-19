@@ -3,7 +3,7 @@ import type { Sound } from "../../Sound";
 import { Vec, add, mul, fromAngle, wrap, TAU } from "../../vec";
 import { computeConeFrame } from "./coneGeometry";
 import { paintConeBackground, paintRangeArcs, RETICULE_DASH_HSL } from "./radarCone";
-import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost, expireHoverZoneHintIfHoverEnded, paintHoverZoneHint } from "./trajectoryPreview";
+import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost, expireHoverZoneHintIfHoverEnded, paintHoverZoneHint, nearestFirstBeatDot } from "./trajectoryPreview";
 import {
   reticuleOverlapsAnyTarget,
   paintAimDiscs,
@@ -37,6 +37,35 @@ const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
 // doubletime (rapid powerup or combo ≥ 12) fires every half-beat, so the off-beat bullet
 // only travels half as far before the next beat.
 const HALF_BEAT_FRACTION = 0.5;
+
+// guidance arrow: a small chevron orbiting the reticule that points toward the nearest
+// first-beat rhythm dot. Sits just outside the on-beat disc so it reads as part of the sight
+// without crowding the crosshair ticks. Hidden the moment the reticule grazes a dot (the lock
+// pulse takes over). The arrow only points; it never tells you distance.
+const ARROW_HSL = "195, 100%, 75%";
+const ARROW_ORBIT_RADIUS = BULLET_HIT_RADIUS_ON_BEAT + 14;
+const ARROW_HALF_WIDTH = 5;
+const ARROW_LENGTH = 8;
+const ARROW_LINE_WIDTH = 2;
+const ARROW_BASE_ALPHA = 0.55;
+const ARROW_PULSE_MIN = 0.35;
+const ARROW_PULSE_MAX = 0.85;
+const ARROW_PULSE_PERIOD_SEC = 1.6;
+// fade in/out so the arrow doesn't pop when a target appears/disappears or when hover toggles.
+const ARROW_FADE_SEC = 0.18;
+// once on a dot, a single ring expands outward from the reticule on every beat and fades — the
+// "you're locked on" confirmation that replaces the (now hidden) directional arrow.
+const HOVER_PULSE_START_R = BULLET_HIT_RADIUS_ON_BEAT;
+const HOVER_PULSE_END_R = BULLET_HIT_RADIUS_ON_BEAT + 34;
+const HOVER_PULSE_LINE_WIDTH = 2;
+const HOVER_PULSE_HSL = "48, 100%, 70%";
+const HOVER_PULSE_PEAK_ALPHA = 0.8;
+// module-scoped so the arrow and hover pulse can crossfade across frames.
+let arrowFade01 = 0;
+let hoverPulseFade01 = 0;
+// last heading the arrow pointed at — held so the arrow can keep fading out along its last
+// direction after the nearest dot vanishes (hover begins, or the target leaves the cone).
+let lastArrowAngle = 0;
 
 // bind ship state to per-target memo so trajectory previews can track entry-flash and fade across frames.
 // hoverDotRings: one entry per reachable on-beat slot (index 0 = 1-beat, 1 = 2-beat, ...). Array is
@@ -386,6 +415,69 @@ const cosineEnvelope = (beatTime: number, period: number, min: number, max: numb
   return min + (max - min) * v;
 };
 
+// chevron arrow orbiting the reticule, pointing along `angle` toward the nearest rhythm dot.
+// The tip sits ARROW_ORBIT_RADIUS out from the reticule center; two short barbs sweep back to
+// form the head. Painted under the caller's additive composite so it reads as part of the sight.
+const paintReticuleArrow = (
+  ctx: CanvasRenderingContext2D, center: Vec, angle: number, beatTime: number, fade01: number,
+) => {
+  if (fade01 <= 0) return;
+  const pulse = cosineEnvelope(beatTime, ARROW_PULSE_PERIOD_SEC, ARROW_PULSE_MIN, ARROW_PULSE_MAX);
+  const alpha = ARROW_BASE_ALPHA * pulse * fade01;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  // tip points outward along `angle`; barbs sweep back from the orbit base on each side.
+  const tipX = center.x + cos * (ARROW_ORBIT_RADIUS + ARROW_LENGTH);
+  const tipY = center.y + sin * (ARROW_ORBIT_RADIUS + ARROW_LENGTH);
+  const baseX = center.x + cos * ARROW_ORBIT_RADIUS;
+  const baseY = center.y + sin * ARROW_ORBIT_RADIUS;
+  const px = -sin * ARROW_HALF_WIDTH;
+  const py = cos * ARROW_HALF_WIDTH;
+  ctx.strokeStyle = `hsla(${ARROW_HSL}, ${alpha})`;
+  ctx.lineWidth = ARROW_LINE_WIDTH;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(baseX + px, baseY + py);
+  ctx.lineTo(tipX, tipY);
+  ctx.lineTo(baseX - px, baseY - py);
+  ctx.stroke();
+};
+
+// single ring expanding outward from the reticule, re-launched every beat — the lock-on pulse
+// shown while the reticule sits on a rhythm dot (replacing the directional arrow). Phase rides
+// the song grid so the pulse always lands on the beat.
+const paintHoverPulse = (
+  ctx: CanvasRenderingContext2D, center: Vec, beatTime: number, beatGrid: number, fade01: number,
+) => {
+  if (fade01 <= 0 || beatGrid <= 0) return;
+  const phase = ((beatTime % beatGrid) + beatGrid) % beatGrid / beatGrid;
+  const r = HOVER_PULSE_START_R + (HOVER_PULSE_END_R - HOVER_PULSE_START_R) * phase;
+  // ease in over the first sliver so a freshly-launched ring doesn't pop, then fade as it expands.
+  const fadeIn = Math.min(1, phase / 0.12);
+  const fadeOut = (1 - phase) * (1 - phase);
+  const alpha = HOVER_PULSE_PEAK_ALPHA * fadeIn * fadeOut * fade01;
+  ctx.strokeStyle = `hsla(${HOVER_PULSE_HSL}, ${alpha})`;
+  ctx.lineWidth = HOVER_PULSE_LINE_WIDTH;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, r, 0, TAU);
+  ctx.stroke();
+};
+
+// crossfade the arrow ↔ hover-pulse toward their targets at a beatTime-derived rate so neither
+// pops on hover toggle / target appearance. dt is clamped (paused frames or big jumps shouldn't
+// snap the fade). Mutates the module-scoped fade accumulators.
+let lastFadeBeatTime: number | null = null;
+const stepReticuleGuidanceFades = (beatTime: number, arrowVisible: boolean, pulseVisible: boolean) => {
+  const dt = lastFadeBeatTime === null ? 0 : Math.min(0.05, Math.max(0, beatTime - lastFadeBeatTime));
+  lastFadeBeatTime = beatTime;
+  const stepUp = ARROW_FADE_SEC > 0 ? dt / ARROW_FADE_SEC : 1;
+  arrowFade01 = arrowVisible ? Math.min(1, arrowFade01 + stepUp) : Math.max(0, arrowFade01 - stepUp);
+  hoverPulseFade01 = pulseVisible ? Math.min(1, hoverPulseFade01 + stepUp) : Math.max(0, hoverPulseFade01 - stepUp);
+};
+
 // hover hum: holds silent for DELAY (so a passing graze doesn't ping audio), then eases from
 // 0 to 1 with a smoothstep so the entrance feels like a swell rising in rather than a switch
 // flipping on. The two-stage release is handled inside Sound.stopFirstDotHum.
@@ -514,6 +606,21 @@ export const renderShipReticules = (
     if (anyLocked && anyHover) sound.updateFirstDotHarmonyHum(beatPhase01, beatGrid);
     else sound.stopFirstDotHarmonyHum();
   }
+  // guidance overlay on the player's reticule: a chevron pointing at the nearest first-beat
+  // rhythm dot, which swaps for an expanding lock pulse the moment the reticule grazes a dot.
+  // anyHover is the same "reticule is on a dot" signal that drives the octave hum, so the
+  // visual and audio cues flip together.
+  const nearestDot = anyHover
+    ? null
+    : nearestFirstBeatDot(apex, frame, w, h, beatGrid, aimCircleCenter, primaryReticule, targets);
+  stepReticuleGuidanceFades(beatTime, !anyHover && nearestDot !== null, anyHover);
+  if (nearestDot !== null) {
+    lastArrowAngle = Math.atan2(nearestDot.y - primaryReticule.y, nearestDot.x - primaryReticule.x);
+  }
+  if (arrowFade01 > 0) {
+    paintReticuleArrow(ctx, primaryReticule, lastArrowAngle, beatTime, arrowFade01);
+  }
+  paintHoverPulse(ctx, primaryReticule, beatTime, beatGrid, hoverPulseFade01);
   ctx.restore();
 };
 

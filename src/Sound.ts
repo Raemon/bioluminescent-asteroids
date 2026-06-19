@@ -493,6 +493,7 @@ export class Sound {
     analyser.connect(this.ctx.destination);
     this.masterAnalyser = analyser;
     this.analyserBins = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
+    this.analyserWave = new Uint8Array(new ArrayBuffer(analyser.fftSize));
 
     this.liveSum.connect(masterCompressor);
     masterCompressor.connect(masterLimiter);
@@ -766,6 +767,7 @@ export class Sound {
   // once here keeps the render loop allocation-free.
   private masterAnalyser: AnalyserNode | null = null;
   private analyserBins: Uint8Array<ArrayBuffer> | null = null;
+  private analyserWave: Uint8Array<ArrayBuffer> | null = null;
   // Set by play() while a single dispatch is in progress, so playBaked can
   // pick up the position without per-helper plumbing. Null when the call has
   // no spatial position.
@@ -1161,6 +1163,16 @@ export class Sound {
     if (!this.ctx || this.ctx.state !== "running") return null;
     this.masterAnalyser.getByteFrequencyData(this.analyserBins);
     return this.analyserBins;
+  }
+
+  // Master-bus time-domain waveform into the reused buffer, or null when there's
+  // no running context. Bytes are 0..255 centered on 128 (silence). One read per
+  // frame, no allocation — feeds the oscilloscope visualizer modes.
+  readWaveform(): Uint8Array<ArrayBuffer> | null {
+    if (!this.masterAnalyser || !this.analyserWave) return null;
+    if (!this.ctx || this.ctx.state !== "running") return null;
+    this.masterAnalyser.getByteTimeDomainData(this.analyserWave);
+    return this.analyserWave;
   }
 
   // Authoritative beat-time derived from the music's actual playback position

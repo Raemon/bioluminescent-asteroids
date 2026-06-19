@@ -997,6 +997,44 @@ const pickCenterMostTarget = (
 ): ReticuleTarget | null =>
   pickCenterMostTargetForFocus(ctx.apex, ctx.frame, ctx.w, ctx.h, targets);
 
+// canvas-space position of the first-beat (1-beat) rhythm dot nearest to `from`, across all
+// visible (in-cone or path-crossing) targets — the same on-beat hit surface the drawn dots use,
+// so an arrow aimed here points at a dot the player can actually see. Returns null when no target
+// is visible. Distance is measured toroidally so a dot wrapped to the far edge still wins if it's
+// genuinely closer across the seam.
+export const nearestFirstBeatDot = (
+  apex: Vec, frame: ConeFrame, w: number, h: number, beatGrid: number,
+  aimCenter: Vec, from: Vec, targets: ReadonlyArray<ReticuleTarget>,
+): Vec | null => {
+  if (frame.length <= 0) return null;
+  const [aimDx, aimDy] = toroidalDelta(aimCenter.x - apex.x, aimCenter.y - apex.y, w, h);
+  const aimX = apex.x + aimDx;
+  const aimY = apex.y + aimDy;
+  let best: Vec | null = null;
+  let bestD2 = Infinity;
+  for (const t of targets) {
+    const speed = Math.hypot(t.vel.x, t.vel.y);
+    if (speed < 1) continue;
+    const [dx, dy] = toroidalDelta(t.pos.x - apex.x, t.pos.y - apex.y, w, h);
+    const tr = t.radius ?? 0;
+    const targetInCone = targetIsInsideCone(dx, dy, tr, frame);
+    const rayInCone = !targetInCone && trajectoryRayOverlapsCone(dx, dy, t, frame);
+    if (!targetInCone && !rayInCone) continue;
+    const cx = apex.x + dx;
+    const cy = apex.y + dy;
+    const surface = computeFirstDotSurface(
+      cx, cy, t.vel.x, t.vel.y, tr, aimX, aimY, beatGrid,
+    );
+    const dotX = surface ? surface[0] : cx + t.vel.x * beatGrid;
+    const dotY = surface ? surface[1] : cy + t.vel.y * beatGrid;
+    const [drawX, drawY] = wrapToCanvas(dotX, dotY, w, h);
+    const [toDx, toDy] = toroidalDelta(drawX - from.x, drawY - from.y, w, h);
+    const d2 = toDx * toDx + toDy * toDy;
+    if (d2 < bestD2) { bestD2 = d2; best = { x: from.x + toDx, y: from.y + toDy }; }
+  }
+  return best;
+};
+
 // walks every visible target; returns strict overlap (for the 1-beat reticule lock-on visual),
 // the max soft proximity per slot (0..1, used by each slot's hover-commit ring), and which
 // reticule index inside the slot's reticule list won (so the renderer knows which prong to

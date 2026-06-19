@@ -30,6 +30,7 @@ import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
+import { VisualizerMode, VISUALIZER_MODES } from "./game/spectrumVisualizer";
 
 // re-export so existing external imports (Ship.ts) keep working without touching their imports.
 export { BEAT_GRID } from "./game/rhythmConstants";
@@ -275,6 +276,8 @@ export class Game implements HudElements {
   // ?debug=true in the URL forces debug-on from page load (handy for triaging
   // production issues where the player can't easily hit backtick on mobile).
   debugMode = new URLSearchParams(window.location.search).get("debug") === "true";
+  // Which spectrum-visualizer mode is active; switched live with number keys 1-5.
+  visualizerMode: VisualizerMode = "bars";
   // prevents a double-submit if the player mashes Enter while the POST is in flight.
   scoreSubmitState: "idle" | "submitting" | "submitted" = "idle";
   // lets the title screen after a game-over show a score-neighborhood (±5) around the
@@ -490,6 +493,11 @@ export class Game implements HudElements {
       if (k === "`") {
         this.debugMode = !this.debugMode;
         this.debugOverlayEl.classList.toggle("hidden", !this.debugMode);
+      }
+      // Number keys 1-5 switch the spectrum visualizer mode live.
+      if (k >= "1" && k <= "5") {
+        const mode = VISUALIZER_MODES[Number(k) - 1];
+        if (mode) this.visualizerMode = mode;
       }
     });
     showTitle(this);
