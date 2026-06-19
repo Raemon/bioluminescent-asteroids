@@ -483,13 +483,24 @@ export class Sound {
     masterLimiter.attack.value = 0.003;
     masterLimiter.release.value = 0.01;
     masterLimiter.knee.value = 0;
+    // Master-bus analyser tap. Both the live and baked legs route through it
+    // on their way to destination, so getByteFrequencyData() sees the full
+    // mix — sfx, halo music, vocals, base pulse — with zero per-voice wiring.
+    // A passthrough node: it observes the signal without altering it.
+    const analyser = this.ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.78;
+    analyser.connect(this.ctx.destination);
+    this.masterAnalyser = analyser;
+    this.analyserBins = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
+
     this.liveSum.connect(masterCompressor);
     masterCompressor.connect(masterLimiter);
-    masterLimiter.connect(this.ctx.destination);
+    masterLimiter.connect(analyser);
 
     this.bakedSum = this.ctx.createGain();
     this.bakedSum.gain.value = Sound.BAKED_BASE_GAIN * this.volume * this.pauseFadeFactor;
-    this.bakedSum.connect(this.ctx.destination);
+    this.bakedSum.connect(analyser);
 
     // Build the four channel pairs (live + baked legs each). Each leg is a
     // gain node whose value is the player's per-channel volume; it sits
@@ -750,6 +761,11 @@ export class Sound {
   // everything regardless of which channel a voice lives on.
   private liveSum: GainNode | null = null;
   private bakedSum: GainNode | null = null;
+  // Master-bus FFT tap + a reused read buffer. The visualizer pulls the
+  // current spectrum each frame via readSpectrum(); allocating the buffer
+  // once here keeps the render loop allocation-free.
+  private masterAnalyser: AnalyserNode | null = null;
+  private analyserBins: Uint8Array<ArrayBuffer> | null = null;
   // Set by play() while a single dispatch is in progress, so playBaked can
   // pick up the position without per-helper plumbing. Null when the call has
   // no spatial position.
@@ -1134,6 +1150,17 @@ export class Sound {
   // — can't slowly drift away from the looping music, which runs on this same hardware clock.
   runningAudioTime(): number | null {
     return this.ctx && this.ctx.state === "running" ? this.ctx.currentTime : null;
+  }
+
+  // Fill the master-bus FFT into the reused buffer and hand it back, or null
+  // when there's no running context. Bytes are 0..255 per frequency bin
+  // (bin 0 ≈ DC/sub-bass, last bin ≈ Nyquist/22kHz). The visualizer owns the
+  // bin→bar mapping; here we just read once per frame, no allocation.
+  readSpectrum(): Uint8Array<ArrayBuffer> | null {
+    if (!this.masterAnalyser || !this.analyserBins) return null;
+    if (!this.ctx || this.ctx.state !== "running") return null;
+    this.masterAnalyser.getByteFrequencyData(this.analyserBins);
+    return this.analyserBins;
   }
 
   // Authoritative beat-time derived from the music's actual playback position

@@ -11,6 +11,7 @@ import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
 import { renderLasers, renderLaserChargeDots, renderLaserAmbientFlash } from "./laserShot";
 import { renderBossBeams } from "./bossBeam";
 import { renderSlowMoTimerBar } from "./slowMoTimerBar";
+import { renderSpectrumVisualizer } from "./spectrumVisualizer";
 import { rng } from "./rng";
 
 // shake is purely cosmetic; isolate its math so render() reads top-down.
@@ -188,4 +189,7 @@ export const renderGame = (game: Game) => {
   renderLaserAmbientFlash(ctx, game);
   game.pulsar.renderShockwaveOverlay(ctx);
   ctx.restore();
+  // Master-bus spectrum bar across the bottom — drawn last, outside the shake
+  // translate, so it stays pinned to the screen edge as an always-on overlay.
+  renderSpectrumVisualizer(game);
 };
