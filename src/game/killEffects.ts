@@ -352,6 +352,10 @@ const playBossImpactIfLarge = (game: Game, a: Asteroid, b: Bullet) => {
 // Bassteroid chips also pay out (small) points + combo popup so multi-hit kills feel rewarding.
 export const onAsteroidCrackedByBullet = (game: Game, a: Asteroid, b: Bullet, isOnBeatHit: boolean) => {
   if (a.isBass()) game.sound.play("bassHit", 1, a.pos);
+  // Non-bass chip: play the body's own hit sound at reduced volume so a
+  // surviving hit is always audible, even when the shot lands after the beat
+  // window has closed (on-beat-fired bullets travel and can connect off-beat).
+  else game.sound.play(hitSoundFor(a), 0.55, a.pos);
   playBossImpactIfLarge(game, a, b);
   emitCrackParticles(game.particles, a, isOnBeatHit);
   if (isOnBeatHit) game.sound.play("comboSparkle", 1, b.pos);

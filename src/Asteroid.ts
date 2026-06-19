@@ -135,6 +135,16 @@ const splitChildSpeed = (parentVel: Vec, childSize: AsteroidSize): number => {
   return parentSpeed * rand(1.15, 1.65) + 40;
 };
 
+// Rhythm gate for the fastest terminal shards (solidCrystal smalls, gen-2
+// bassteroid pieces). These deliberately fly faster than a momentum-conserving
+// fragment to challenge the player — but only once they've earned enough
+// rhythm. Below this combo the shards are throttled to a calmer drift.
+const FAST_SHARD_RHYTHM = 4;
+// Multiplier applied to the shard's burst speed while under FAST_SHARD_RHYTHM.
+const SLOW_SHARD_MUL = 0.25;
+const fastShardSpeedMul = (combo: number | undefined): number =>
+  (combo ?? 0) >= FAST_SHARD_RHYTHM ? 1 : SLOW_SHARD_MUL;
+
 const SIZE_SCORE = ENTITY_CONFIG.asteroid.score;
 
 const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
@@ -3607,7 +3617,10 @@ export class Asteroid {
         // where the bullet came from.
         const sideOffset = (i === 0 ? -1 : 1) * (0.9 + rand(-0.2, 0.2));
         const a = baseAngle + sideOffset + rand(-0.2, 0.2);
-        const speedMag = splitChildSpeed(this.vel, childSize);
+        // Gen-2 smalls (the terminal, fastest pieces) are throttled until the
+        // player has built FAST_SHARD_RHYTHM; mediums keep their stock speed.
+        const shardMul = childSize === "small" ? fastShardSpeedMul(opts?.combo) : 1;
+        const speedMag = splitChildSpeed(this.vel, childSize) * shardMul;
         const child = new Asteroid({ ...this.pos }, fromAngle(a, speedMag), childSize, this.hue, this.kind, normalizeFragment(childFragments[i]));
         child.splitLevel = childLevel;
         // A gen-1 medium records which authored medium it is so its own split
@@ -3691,8 +3704,9 @@ export class Asteroid {
           y: this.pos.y + Math.sin(childAngle) * ejectDist,
         };
         // Fast-moving: parent speed + a generous burst kick. Floor ensures
-        // even a stationary parent ejects sharp shards.
-        const speedMag = parentSpeed * rand(1.1, 1.5) + rand(180, 240);
+        // even a stationary parent ejects sharp shards. Throttled to a calmer
+        // drift until the player has built FAST_SHARD_RHYTHM.
+        const speedMag = (parentSpeed * rand(1.1, 1.5) + rand(180, 240)) * fastShardSpeedMul(opts?.combo);
         const child = new Asteroid(childPos, fromAngle(childAngle, speedMag), "small", this.hue, "solidCrystalSmall");
         child.rotSpeed = rand(1.2, 2.4) * (rng() < 0.5 ? -1 : 1);
         fragmentList.push(child);
@@ -6030,4 +6044,3 @@ export const spawnAsteroidAtEdge = (
   const speed = rand(speedMin, speedMax);
   return new Asteroid(pos, v(dirX * speed, dirY * speed), size, hue, kind);
 };
-
