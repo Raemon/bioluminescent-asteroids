@@ -204,8 +204,12 @@ const drawBars = (game: Game) => {
 // ends of the beam axis — the directions the lighthouse flashes streak toward —
 // and treble meets in the perpendicular gaps. Quartering the circle (bass→treble
 // →bass→treble) yields the 4-fold mirror the flashes already suggest.
-const RADIAL_INNER_FRAC = 0.13; // ring radius floor as a fraction of min(w,h)
-const RADIAL_BAR_MAX = 120;
+const RADIAL_BAR_MAX = 75;
+// Extra dimming on top of MASTER_OPACITY, just for the pulsar ring.
+const RADIAL_OPACITY = 0.25;
+// Inner radius as a multiple of the pulsar radius. 1 = spokes start at the
+// pulsar's edge and radiate straight out with no gap.
+const RADIAL_INNER_R_MULT = 1;
 // Spoke i → frequency band, folded into quarters and mirrored so band 0 (bass)
 // sits on the axis at all four quadrant seams and the top band at the diagonals.
 const radialBandForSpoke = (i: number) => {
@@ -217,9 +221,8 @@ const radialBandForSpoke = (i: number) => {
 const drawRadial = (game: Game) => {
   const { ctx } = game;
   const { x: cx, y: cy, r, beamAngle } = game.pulsar.visualizerAnchor();
-  // Keep a generous ring even when the pulsar is a tiny distant point; let it
-  // grow with the pulsar as the camera closes in.
-  const inner = Math.max(Math.min(game.w, game.h) * RADIAL_INNER_FRAC, r * 3.2 + 14);
+  // Spokes start at the pulsar's surface and radiate straight out.
+  const inner = r * RADIAL_INNER_R_MULT;
   const sprite = buildGlowSprite();
 
   // Spoke i's absolute screen angle, measured from the beam axis so the ring's
@@ -237,7 +240,7 @@ const drawRadial = (game: Game) => {
     const sa = Math.sin(ang);
     const len = v * RADIAL_BAR_MAX;
     const hue = hueForBand(band);
-    ctx.strokeStyle = `hsla(${hue}, 95%, 68%, ${0.7 * Math.min(1, v * 2) * MASTER_OPACITY})`;
+    ctx.strokeStyle = `hsla(${hue}, 95%, 68%, ${0.7 * Math.min(1, v * 2) * MASTER_OPACITY * RADIAL_OPACITY})`;
     ctx.lineWidth = 3 + v * 4;
     ctx.beginPath();
     ctx.moveTo(cx + ca * inner, cy + sa * inner);
@@ -256,7 +259,7 @@ const drawRadial = (game: Game) => {
     const tx = cx + Math.cos(ang) * (inner + len);
     const ty = cy + Math.sin(ang) * (inner + len);
     const glowR = 10 + v * 26;
-    ctx.globalAlpha = (0.07 + v * 0.2) * MASTER_OPACITY;
+    ctx.globalAlpha = (0.07 + v * 0.2) * MASTER_OPACITY * RADIAL_OPACITY;
     ctx.drawImage(sprite, tx - glowR, ty - glowR, glowR * 2, glowR * 2);
   }
 };

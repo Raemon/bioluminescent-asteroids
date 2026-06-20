@@ -277,7 +277,7 @@ export class Game implements HudElements {
   // production issues where the player can't easily hit backtick on mobile).
   debugMode = new URLSearchParams(window.location.search).get("debug") === "true";
   // Which spectrum-visualizer mode is active; switched live with number keys 1-5.
-  visualizerMode: VisualizerMode = "bars";
+  visualizerMode: VisualizerMode = "radial";
   // prevents a double-submit if the player mashes Enter while the POST is in flight.
   scoreSubmitState: "idle" | "submitting" | "submitted" = "idle";
   // lets the title screen after a game-over show a score-neighborhood (±5) around the

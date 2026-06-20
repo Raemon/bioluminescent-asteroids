@@ -38,19 +38,21 @@ const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
 // only travels half as far before the next beat.
 const HALF_BEAT_FRACTION = 0.5;
 
-// guidance arrow: a small chevron orbiting the reticule that points toward the nearest
+// guidance arrow: a small filled triangle orbiting the reticule that points toward the nearest
 // first-beat rhythm dot. Sits just outside the on-beat disc so it reads as part of the sight
 // without crowding the crosshair ticks. Hidden the moment the reticule grazes a dot (the lock
 // pulse takes over). The arrow only points; it never tells you distance.
-const ARROW_HSL = "195, 100%, 75%";
-const ARROW_ORBIT_RADIUS = BULLET_HIT_RADIUS_ON_BEAT + 14;
-const ARROW_HALF_WIDTH = 5;
-const ARROW_LENGTH = 8;
-const ARROW_LINE_WIDTH = 2;
-const ARROW_BASE_ALPHA = 0.55;
-const ARROW_PULSE_MIN = 0.35;
-const ARROW_PULSE_MAX = 0.85;
-const ARROW_PULSE_PERIOD_SEC = 1.6;
+// resting hue matches the rest of the reticule; on the beat it flashes toward the brighter
+// Pulsar-logo blue (#4cb6ff ≈ hsl(207,100%,65%)) and lightens, so the downbeat reads hard.
+const ARROW_HSL_REST = "195, 100%, 75%";
+const ARROW_HSL_BEAT = "207, 100%, 78%";
+const ARROW_ORBIT_RADIUS = BULLET_HIT_RADIUS_ON_BEAT + 13;
+const ARROW_HALF_WIDTH = 4;
+const ARROW_LENGTH = 20;
+// resting → on-beat alpha. The beat boost rides the same square-decay envelope as the reticule
+// pulse so the flash spikes on the downbeat and falls off fast.
+const ARROW_REST_ALPHA = 0.4;
+const ARROW_BEAT_ALPHA = 1.0;
 // fade in/out so the arrow doesn't pop when a target appears/disappears or when hover toggles.
 const ARROW_FADE_SEC = 0.18;
 // once on a dot, a single ring expands outward from the reticule on every beat and fades — the
@@ -415,34 +417,38 @@ const cosineEnvelope = (beatTime: number, period: number, min: number, max: numb
   return min + (max - min) * v;
 };
 
-// chevron arrow orbiting the reticule, pointing along `angle` toward the nearest rhythm dot.
-// The tip sits ARROW_ORBIT_RADIUS out from the reticule center; two short barbs sweep back to
-// form the head. Painted under the caller's additive composite so it reads as part of the sight.
+// filled pointy triangle orbiting the reticule, pointing along `angle` toward the nearest rhythm
+// dot. The tip sits past ARROW_ORBIT_RADIUS; the base spans ARROW_HALF_WIDTH on each side. On the
+// downbeat it flashes brighter and shifts toward the Pulsar-logo blue, decaying fast over the
+// beat. Painted under the caller's additive composite so the flash glows without shadowBlur.
 const paintReticuleArrow = (
-  ctx: CanvasRenderingContext2D, center: Vec, angle: number, beatTime: number, fade01: number,
+  ctx: CanvasRenderingContext2D, center: Vec, angle: number,
+  beatTime: number, beatGrid: number, fade01: number,
 ) => {
   if (fade01 <= 0) return;
-  const pulse = cosineEnvelope(beatTime, ARROW_PULSE_PERIOD_SEC, ARROW_PULSE_MIN, ARROW_PULSE_MAX);
-  const alpha = ARROW_BASE_ALPHA * pulse * fade01;
+  // square-decay beat envelope: 1 on the downbeat, falling to 0 just before the next beat —
+  // same shape the reticule's own beat pulse uses, so the flash lands with the rest of the sight.
+  const phase = beatGrid > 0 ? ((beatTime % beatGrid) + beatGrid) % beatGrid / beatGrid : 0;
+  const beat01 = (1 - phase) * (1 - phase);
+  const alpha = (ARROW_REST_ALPHA + (ARROW_BEAT_ALPHA - ARROW_REST_ALPHA) * beat01) * fade01;
+  const hsl = beat01 > 0 ? lerpHsl(ARROW_HSL_REST, ARROW_HSL_BEAT, beat01) : ARROW_HSL_REST;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
-  // tip points outward along `angle`; barbs sweep back from the orbit base on each side.
+  // tip points outward along `angle`; the two base corners sit on the orbit circle either side.
   const tipX = center.x + cos * (ARROW_ORBIT_RADIUS + ARROW_LENGTH);
   const tipY = center.y + sin * (ARROW_ORBIT_RADIUS + ARROW_LENGTH);
   const baseX = center.x + cos * ARROW_ORBIT_RADIUS;
   const baseY = center.y + sin * ARROW_ORBIT_RADIUS;
   const px = -sin * ARROW_HALF_WIDTH;
   const py = cos * ARROW_HALF_WIDTH;
-  ctx.strokeStyle = `hsla(${ARROW_HSL}, ${alpha})`;
-  ctx.lineWidth = ARROW_LINE_WIDTH;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
+  ctx.fillStyle = `hsla(${hsl}, ${alpha})`;
   ctx.setLineDash([]);
   ctx.beginPath();
-  ctx.moveTo(baseX + px, baseY + py);
-  ctx.lineTo(tipX, tipY);
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(baseX + px, baseY + py);
   ctx.lineTo(baseX - px, baseY - py);
-  ctx.stroke();
+  ctx.closePath();
+  ctx.fill();
 };
 
 // single ring expanding outward from the reticule, re-launched every beat — the lock-on pulse
@@ -618,7 +624,7 @@ export const renderShipReticules = (
     lastArrowAngle = Math.atan2(nearestDot.y - primaryReticule.y, nearestDot.x - primaryReticule.x);
   }
   if (arrowFade01 > 0) {
-    paintReticuleArrow(ctx, primaryReticule, lastArrowAngle, beatTime, arrowFade01);
+    paintReticuleArrow(ctx, primaryReticule, lastArrowAngle, beatTime, beatGrid, arrowFade01);
   }
   paintHoverPulse(ctx, primaryReticule, beatTime, beatGrid, hoverPulseFade01);
   ctx.restore();
