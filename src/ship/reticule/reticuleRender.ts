@@ -44,6 +44,8 @@ const HALF_BEAT_FRACTION = 0.5;
 // pulse takes over). The arrow only points; it never tells you distance.
 // resting hue matches the rest of the reticule; on the beat it flashes toward the brighter
 // Pulsar-logo blue (#4cb6ff ≈ hsl(207,100%,65%)) and lightens, so the downbeat reads hard.
+// set false to hide the directional guidance triangle entirely (lock pulse still works)
+const ARROW_ENABLED = false;
 const ARROW_HSL_REST = "195, 100%, 75%";
 const ARROW_HSL_BEAT = "207, 100%, 78%";
 const ARROW_ORBIT_RADIUS = BULLET_HIT_RADIUS_ON_BEAT + 13;
@@ -623,7 +625,7 @@ export const renderShipReticules = (
   if (nearestDot !== null) {
     lastArrowAngle = Math.atan2(nearestDot.y - primaryReticule.y, nearestDot.x - primaryReticule.x);
   }
-  if (arrowFade01 > 0) {
+  if (ARROW_ENABLED && arrowFade01 > 0) {
     paintReticuleArrow(ctx, primaryReticule, lastArrowAngle, beatTime, beatGrid, arrowFade01);
   }
   paintHoverPulse(ctx, primaryReticule, beatTime, beatGrid, hoverPulseFade01);
