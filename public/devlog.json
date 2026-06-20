@@ -1,5 +1,53 @@
 [
   {
+    "id": "2026-06-20-2d8db7d",
+    "date": "2026-06-20",
+    "title": "Gems, Laser Shot, Spectrum Visualizer & Rhythm Tuning",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Collectible Gems now drop from gold-bearing asteroids and can be shot on-beat for points or a powerup, or picked up directly.",
+          "Burst Gem asteroids explode into a fan of fast-flying Gem blades — dodge or shoot them on-beat to claim the reward.",
+          "Gem swarm events send a flock of fast Gems streaking across the field as a timed rhythm challenge.",
+          "New Laser Shot powerup lets you activate laser capabilities during gameplay.",
+          "A spectrum visualizer now pulses around the pulsar; press keys 1–5 to switch between visualization modes.",
+          "The reticule now shows a guidance arrow orbiting toward the nearest first-beat rhythm dot, plus a lock-on pulse when hovering over one.",
+          "Wave bodies flash brighter on the beat for improved rhythm feedback."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Score submission status message now correctly indicates when a replay is available."
+        ]
+      },
+      {
+        "heading": "Tuning",
+        "items": [
+          "Fast asteroid shards are throttled to a calmer drift until you build a combo of 4, then snap to full speed.",
+          "Losing your combo now shows a subtitle explaining why the rhythm was broken.",
+          "Moving gems are included as reticule targeting hints with trajectory preview lines."
+        ]
+      }
+    ],
+    "commits": [
+      "2d8db7d",
+      "5b3ad6b",
+      "1249c6b",
+      "fd90d58",
+      "903c432",
+      "1f62ea4",
+      "f5b66d8",
+      "ac5f49c",
+      "c82aba2",
+      "a1039ba",
+      "a0854f6",
+      "2a52204",
+      "df00b36"
+    ]
+  },
+  {
     "id": "2026-06-17-2cb7f08",
     "date": "2026-06-17",
     "title": "Huge asteroids, gold gems, warbles, laser charge & replays",
