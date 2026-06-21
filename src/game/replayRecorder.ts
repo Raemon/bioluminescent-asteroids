@@ -1,7 +1,7 @@
 import type { IInput } from "../Input";
 import type { Ship } from "../Ship";
 import type { Bindings } from "./controlBindings";
-import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayDebugFrame, type ReplayFrame, type ReplayHeader, type ReplayPayload } from "./replayFormat";
+import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayDebugFrame, type ReplayFrame, type ReplayHeader, type ReplayPayload, type ReplayStartBeat } from "./replayFormat";
 
 // Build hash from Vite at compile time so playback can warn about
 // build-version mismatches. Falls back to "dev" when not injected.
@@ -25,8 +25,11 @@ export class ReplayRecorder {
   private vocab: string[] = [];
   private vocabIndex = new Map<string, number>();
   private lastKeys = new Set<string>();
-  private header: Omit<ReplayHeader, "score" | "wave" | "maxCombo" | "killCount" | "keyVocab">;
+  private header: Omit<ReplayHeader, "score" | "wave" | "maxCombo" | "killCount" | "keyVocab" | "startBeat">;
   private startedAt = 0;
+  // Beat-clock state at the first captured frame, snapshotted lazily because the
+  //   world is held under the intro (beatTime ticks) before recording begins.
+  private startBeat: ReplayStartBeat | null = null;
 
   constructor(meta: {
     seed: number;
@@ -55,7 +58,11 @@ export class ReplayRecorder {
     };
   }
 
-  captureFrame(dt: number, input: IInput): void {
+  captureFrame(dt: number, input: IInput, beat: ReplayStartBeat): void {
+    // The first captured frame fixes the run's beat-clock origin — by now the
+    //   held intro has advanced beatTime off zero, so the replay must start here,
+    //   not at startGame's reset.
+    if (this.startBeat === null) this.startBeat = { ...beat };
     let downMask = 0;
     let upMask = 0;
     // Newly-pressed keys go into downMask; released keys (in lastKeys but not
@@ -109,6 +116,9 @@ export class ReplayRecorder {
     const header: ReplayHeader = {
       ...this.header,
       keyVocab: this.vocab.slice(),
+      // Fall back to a zeroed origin if no frame was ever captured (degenerate
+      //   run); a real run always captured at least one frame before game-over.
+      startBeat: this.startBeat ?? { beatTime: 0, lastBgBeatIndex: -1, nextBeatToEvaluate: 0, lastBeatResnapAt: 0 },
       score: summary.score,
       wave: summary.wave,
       maxCombo: summary.maxCombo,

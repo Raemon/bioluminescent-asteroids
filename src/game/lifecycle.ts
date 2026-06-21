@@ -840,6 +840,18 @@ const seedReplayWorld = (game: Game, player: ReplayPlayer): void => {
     recorder: false,
     beatOffset: payload.header.beatOffset,
   });
+  // Restore the beat-clock to where the recording's first captured frame sat.
+  //   startGame spawned wave 1 at beatTime 0 (matching the recording — recorded
+  //   runs always spawn at 0, since the recorder is only created on the
+  //   startGameWithIntro path). The live run then held the world under the intro,
+  //   advancing beatTime to here with no frames captured. Without this the replay
+  //   re-sims from beatTime 0 while the recording's frame 0 was at T_intro,
+  //   shifting every on-beat judgment + bass hit and desyncing within wave 1.
+  const sb = payload.header.startBeat;
+  game.beatTime = sb.beatTime;
+  game.lastBgBeatIndex = sb.lastBgBeatIndex;
+  game.nextBeatToEvaluate = sb.nextBeatToEvaluate;
+  game.lastBeatResnapAt = sb.lastBeatResnapAt;
   game.replayPlayer = player;
   game.input = player.input;
 };

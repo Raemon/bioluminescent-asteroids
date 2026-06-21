@@ -603,7 +603,12 @@ const tickReplayDying = (game: Game, dt: number): boolean => {
 
 // ordered phases (ship → bass → world → collisions) so cause-and-effect reads top-down.
 const updatePlaying = (game: Game, dt: number) => {
-  game.recorder?.captureFrame(dt, game.input);
+  game.recorder?.captureFrame(dt, game.input, {
+    beatTime: game.beatTime,
+    lastBgBeatIndex: game.lastBgBeatIndex,
+    nextBeatToEvaluate: game.nextBeatToEvaluate,
+    lastBeatResnapAt: game.lastBeatResnapAt,
+  });
   tickWaveTransition(game, dt);
   tickBeatIntensityRamp(game, dt);
   tickTutorialSpawn(game);

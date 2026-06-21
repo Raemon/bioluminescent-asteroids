@@ -8,6 +8,19 @@ export const REPLAY_FORMAT_VERSION = 4;
 // v4 restores the recorded beatOffset on playback and moves wave-transition
 //   spawn + death-respawn onto the sim clock; pre-v4 re-sims desync, so decode
 //   rejects them rather than replaying a run that drifts off the recording.
+// Beat-clock snapshot taken on the recording's first captured frame. These are
+//   all deterministic dt-sums / dt-derived indices accumulated during the held
+//   intro; restoring them on replay reproduces the recording's frame-0 beat
+//   state. beatTime drives perceivedBeatTime (the whole on-beat gate); the
+//   indices keep the bass pulse scheduler + combo evaluator from replaying a
+//   backlog or stalling on frame 0.
+export type ReplayStartBeat = {
+  beatTime: number;
+  lastBgBeatIndex: number;
+  nextBeatToEvaluate: number;
+  lastBeatResnapAt: number;
+};
+
 export type ReplayHeader = {
   v: number;
   build: string;
@@ -25,6 +38,13 @@ export type ReplayHeader = {
   // recorded action→keys map so the replay-time isDown lookup matches the
   //   recording even if the watcher has rebound their controls.
   bindings: Record<string, string[]>;
+  // Beat-clock state at the first captured frame. The run holds the world under
+  //   the calibration/pilot's-log intro (beatTime ticks, no frames captured), so
+  //   by the time recording's frame 0 lands beatTime is already T_intro — but a
+  //   replay's startGame resets it to 0 with no intro. Restoring this snapshot
+  //   before the first recorded frame aligns the beat gate + bass clock with the
+  //   recording from frame 0. See ReplayStartBeat.
+  startBeat: ReplayStartBeat;
   score: number;
   wave: number;
   maxCombo: number;
