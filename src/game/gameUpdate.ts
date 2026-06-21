@@ -203,7 +203,20 @@ const routeStateUpdate = (game: Game, dt: number) => {
   if (game.state === "title") updateTitle(game, dt);
   else if (game.state === "gameover") updateGameOver(game, dt);
   else if (game.state === "dying") updateDying(game, dt);
-  else updatePlaying(game, dt);  // "playing" or "replaying"
+  else if (game.state === "replaying") updateReplaying(game, dt);
+  else updatePlaying(game, dt);  // "playing"
+};
+
+// Replay mirror of updateDying's frame structure: the dying countdown is
+//   decremented BEFORE the frame body and respawn happens AFTER it, so the
+//   freshly-spawned ship's first ship.update lands on the *next* frame — exactly
+//   as live play does (updateDying). Doing the respawn at the top of
+//   updatePlaying instead would move the new ship one frame early and desync the
+//   re-sim from the recording after every death.
+const updateReplaying = (game: Game, dt: number) => {
+  const dyingExpired = tickReplayDying(game, dt);
+  updatePlaying(game, dt);
+  if (dyingExpired && game.lives > 0) respawn(game);
 };
 
 // First-run warm-up tick: advance the beat clock and play the bgBeat (the very
@@ -574,23 +587,22 @@ const applyBeatPhaseCorrection = (game: Game, musicDt: number): number => {
   return musicDt + delta;
 };
 
-// Replay mirror of updateDying: live play counts down dyingTimer in the "dying"
-//   state and respawns, but a replay holds "replaying" so the scrubber keeps
-//   control. Count down here on the same recorded dt and respawn once it
-//   elapses (or just leave the ship gone on the final life — the recording's
-//   own frames run out shortly after). respawn() keeps state at "replaying".
-const tickReplayDying = (game: Game, dt: number) => {
-  if (game.replayDyingTimer === null) return;
+// Replay mirror of updateDying's countdown: live play counts down dyingTimer in
+//   the "dying" state, but a replay holds "replaying" so the scrubber keeps
+//   control. Decrement on the recorded dt and report the frame the timer elapses
+//   on; updateReplaying does the respawn *after* the frame body so timing matches
+//   live exactly. Returns true only on the expiry frame.
+const tickReplayDying = (game: Game, dt: number): boolean => {
+  if (game.replayDyingTimer === null) return false;
   game.replayDyingTimer -= dt;
-  if (game.replayDyingTimer > 0) return;
+  if (game.replayDyingTimer > 0) return false;
   game.replayDyingTimer = null;
-  if (game.lives > 0) respawn(game);
+  return true;
 };
 
 // ordered phases (ship → bass → world → collisions) so cause-and-effect reads top-down.
 const updatePlaying = (game: Game, dt: number) => {
   game.recorder?.captureFrame(dt, game.input);
-  tickReplayDying(game, dt);
   tickBeatIntensityRamp(game, dt);
   tickTutorialSpawn(game);
   if (game.controlsHintActive) tickControlsGate(game);
