@@ -1,10 +1,13 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 3;
+export const REPLAY_FORMAT_VERSION = 4;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
+// v4 restores the recorded beatOffset on playback and moves wave-transition
+//   spawn + death-respawn onto the sim clock; pre-v4 re-sims desync, so decode
+//   rejects them rather than replaying a run that drifts off the recording.
 export type ReplayHeader = {
   v: number;
   build: string;
@@ -64,7 +67,14 @@ export const encodeReplay = async (payload: ReplayPayload): Promise<Uint8Array> 
 export const decodeReplay = async (gz: Uint8Array): Promise<ReplayPayload> => {
   const bytes = await gunzip(gz);
   const json = new TextDecoder().decode(bytes);
-  return JSON.parse(json) as ReplayPayload;
+  const payload = JSON.parse(json) as ReplayPayload;
+  // Reject older formats outright: pre-v4 runs re-sim with a different beatOffset
+  //   / wave-transition / respawn timing than they were recorded under, so they'd
+  //   drift off the recording. Better a clear failure than a silently-wrong replay.
+  if (payload.header.v !== REPLAY_FORMAT_VERSION) {
+    throw new Error(`Unsupported replay version ${payload.header.v} (expected ${REPLAY_FORMAT_VERSION})`);
+  }
+  return payload;
 };
 
 const gzip = async (bytes: Uint8Array): Promise<Uint8Array> => {

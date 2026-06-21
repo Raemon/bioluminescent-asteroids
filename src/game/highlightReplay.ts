@@ -6,6 +6,7 @@ import { pickHighlightChain } from "./highlightTimeline";
 import { startHighlightReplay, showTitle } from "./lifecycle";
 import { hideScoreEntry, isScoreEntryBlockingEnter } from "./scoreEntry";
 import { wasPressed } from "./controlBindings";
+import { loadBeatOffset } from "./beatCalibration";
 
 // Seconds of run shown before the chain's priming fire — the "wind-up" the spec
 //   asks for so the highlight starts a beat or two before the player's first shot.
@@ -127,6 +128,9 @@ const exitHighlightToTitle = (game: Game) => {
   game.replayLockedDims = null;
   game.input = game.localInput;
   game.runSummary = null;
+  // Clip re-sim ran on the recording's beatOffset; restore the viewer's own so
+  //   the title screen + their next run judge on their latency, not the dead run's.
+  game.beatOffset = loadBeatOffset() ?? 0;
   game.resize();
   game.killedSnapshots = [];
   showTitle(game);

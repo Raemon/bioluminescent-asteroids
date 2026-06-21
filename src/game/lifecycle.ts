@@ -15,7 +15,7 @@ import { hideScoreEntry, isScoreEntryBlockingEnter, showLeaderboard, showScoreEn
 import { BOSS_MUSIC_VARIATION, HALO_MUSIC_POOL, HAUNTING_MUSIC_POOL } from "./haloMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
 import { hideGameOverIntro, showGameOverIntro } from "./gameOverIntro";
-import { hasCalibrated, CALIBRATION_BEAT_INTENSITY } from "./beatCalibration";
+import { hasCalibrated, CALIBRATION_BEAT_INTENSITY, loadBeatOffset } from "./beatCalibration";
 import { pickIntroHints } from "./introHints";
 import { isNewDaySession, markSessionStart } from "./sessionTracker";
 import { rng, seedRng } from "./rng";
@@ -401,6 +401,10 @@ export const startGame = (game: Game, overrides?: {
   tutorial: boolean;
   veteran: boolean;
   recorder: false;
+  // Replay path only: the recording's calibrated latency. perceivedBeatTime =
+  //   beatTime - beatOffset drives the whole on-beat gate, so the re-sim must
+  //   use the recorder's offset, not the viewer's persisted one.
+  beatOffset: number;
 }) => {
   game.sound.resume();
   game.sound.preloadPilotLog(6);
@@ -425,6 +429,9 @@ export const startGame = (game: Game, overrides?: {
   resetHuePaletteCursor();
   const tutorial = overrides ? overrides.tutorial : game.tutorialRequested;
   const veteran = overrides ? overrides.veteran : isVeteranPilot();
+  // Replay re-sim runs on the recording's latency offset; a live run keeps the
+  //   viewer's already-loaded game.beatOffset untouched.
+  if (overrides) game.beatOffset = overrides.beatOffset;
   // Replay path skips the recorder — playback uses the player, not capture.
   game.recorder = overrides ? null : new ReplayRecorder({
     seed: game.runSeed,
@@ -728,6 +735,9 @@ export const exitReplay = (game: Game): void => {
   game.replayLockedDims = null;
   game.input = game.localInput;
   game.runSummary = null;
+  // The replay overwrote game.beatOffset with the recording's value; restore the
+  //   viewer's own calibration so their next live run judges on their latency.
+  game.beatOffset = loadBeatOffset() ?? 0;
   game.resize();
   showTitle(game);
 };
@@ -824,6 +834,7 @@ const seedReplayWorld = (game: Game, player: ReplayPlayer): void => {
     tutorial: payload.header.tutorial,
     veteran: payload.header.veteran,
     recorder: false,
+    beatOffset: payload.header.beatOffset,
   });
   game.replayPlayer = player;
   game.input = player.input;
