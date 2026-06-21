@@ -1,7 +1,5 @@
 import type { Game } from "../Game";
-import { syncHud } from "./hud";
 import { BEAT_GRID } from "./rhythmConstants";
-import { checkBonusLife } from "./bonusLife";
 import { formatScore } from "./formatScore";
 
 // end-of-wave summary text — one row appears per beat with a paired
@@ -22,7 +20,7 @@ const DRAIN_DOUBLE_EVERY = 8;
 const DRAIN_CHUNK_GROUP = 4;
 const chunkSizeAt = (i: number) =>
   DRAIN_BASE_CHUNK * Math.pow(2, Math.floor(i / DRAIN_DOUBLE_EVERY));
-const planDrainChunks = (total: number): number[] => {
+export const planDrainChunks = (total: number): number[] => {
   if (total <= 0) return [];
   const chunks: number[] = [];
   let acc = 0;
@@ -67,6 +65,19 @@ const PAUSE_BEFORE_DRAIN_MS = BEAT_MS;
 //   2 seconds. The CSS transition matches the fade duration.
 const HOLD_BEFORE_FADE_MS = 3000;
 const FADE_OUT_MS = 2000;
+
+// Exported for the sim-clock transition driver (game/waveTransition.ts), which
+//   re-derives the same drain/spawn schedule in sim seconds so the score payout
+//   and next-wave spawn run on the recorded dt instead of these setTimeouts.
+export const WAVE_SUMMARY_BEAT_MS = BEAT_MS;
+export const WAVE_SUMMARY_TICK_MS = TICK_MS;
+export const WAVE_SUMMARY_FIRST_ROW_DELAY_MS = FIRST_ROW_DELAY_MS;
+export const WAVE_SUMMARY_PAUSE_BEFORE_DRAIN_MS = PAUSE_BEFORE_DRAIN_MS;
+export const WAVE_SUMMARY_HOLD_BEFORE_FADE_MS = HOLD_BEFORE_FADE_MS;
+export const WAVE_SUMMARY_FADE_OUT_MS = FADE_OUT_MS;
+// Number of summary rows revealed before the drain (wave / max / final / drift /
+//   bonus / score). The driver needs the count to place the drain start in time.
+export const WAVE_SUMMARY_ROW_COUNT = 6;
 
 type SummaryEls = {
   root: HTMLElement;
@@ -171,17 +182,24 @@ const DRAIN_PITCHES = [
   1.0,    // A   (9th of G — leans back into the next loop's downbeat)
 ];
 
+// The summary panel is now purely cosmetic: the score drain and next-wave spawn
+//   run on the sim clock (game/waveTransition.ts) so they reproduce in replays.
+//   This still drives the staggered row reveals, the drain melody, and the panel
+//   fade on setTimeout, and it *reads* game.score (drained by the sim clock) to
+//   keep the bonus/score numbers in lockstep with the real payout.
 export const showWaveSummary = (
   game: Game,
   completedWave: number,
   maxRhythm: number,
   finalRhythm: number,
   driftBonuses: number,
-  onFadeComplete?: () => void,
 ) => {
   cancelActiveTimers();
   const bonus = (maxRhythm + finalRhythm + driftBonuses) * 100;
   const { root, rows, bonusValueEl, scoreValueEl } = buildPanel();
+  // Score the sim clock will drain the bonus on top of; the cosmetic numbers
+  //   read game.score against this so the panel mirrors the real payout.
+  const startScore = game.score;
 
   setRow(root, "wave", String(completedWave));
   setRow(root, "max", `x${maxRhythm}`);
@@ -212,29 +230,28 @@ export const showWaveSummary = (
     activeTimers.push(id);
   });
 
-  // After the rows have all landed, drain the bonus into the score.
+  // After the rows have all landed, animate the drain. The sim clock owns the
+  //   actual game.score payout; this only animates the panel numbers (reading
+  //   game.score) and plays the drain melody.
   const drainStartMs = FIRST_ROW_DELAY_MS + rows.length * BEAT_MS + PAUSE_BEFORE_DRAIN_MS;
   const startDrain = window.setTimeout(() => {
     if (bonus <= 0) {
-      scheduleFadeOut(root, onFadeComplete);
+      scheduleFadeOut(root);
       return;
     }
     const chunks = planDrainChunks(bonus);
-    let remaining = bonus;
-    let displayedScore = game.score;
     let tickIndex = 0;
     bonusValueEl.classList.add("ws-draining");
 
     const step = () => {
-      const delta = chunks[tickIndex] ?? 0;
-      remaining -= delta;
-      displayedScore += delta;
-      game.score += delta;
+      // Read the sim-clock-drained score: remaining bonus = what hasn't yet
+      //   landed in game.score. Keeps the panel locked to the real payout even
+      //   though the two run on independent clocks.
+      const drained = Math.max(0, game.score - startScore);
+      const remaining = Math.max(0, bonus - drained);
       bonusValueEl.textContent = formatScore(remaining);
-      scoreValueEl.textContent = formatScore(displayedScore);
+      scoreValueEl.textContent = formatScore(game.score);
       pulseScore(scoreValueEl);
-      syncHud(game);
-      checkBonusLife(game);
 
       // Play the next note in the haunting minor melody. Every 4th tick is
       //   a downbeat — summaryDownbeat layers a rotating i-VI-III-VII chord
@@ -254,12 +271,14 @@ export const showWaveSummary = (
         activeTimers.push(id);
       } else {
         bonusValueEl.classList.remove("ws-draining");
+        bonusValueEl.textContent = formatScore(Math.max(0, bonus - Math.max(0, game.score - startScore)));
+        scoreValueEl.textContent = formatScore(game.score);
         // Cap the drain with the same C6+G6 chime the row sequence climbed
         //   to. Chime is harmonic (FM, C+G dyad) so it lands clean against
         //   the still-ringing G-major pad — root + fifth of C resolves the
         //   phrase to the game's tonal anchor instead of clanging.
         game.sound.play("chime", CHIME_C6);
-        scheduleFadeOut(root, onFadeComplete);
+        scheduleFadeOut(root);
       }
     };
     step();
@@ -271,15 +290,10 @@ export const showWaveSummary = (
 // entire panel (rows + score) over FADE_OUT_MS. The fade-out class stays on
 // after the animation ends (forwards fill-mode) so the panel remains
 // invisible — the next showWaveSummary call clears it as part of its reset.
-// onFadeComplete fires when the fade fully resolves, so callers can defer
-// the next-wave spawn until the player has finished reading the summary.
-const scheduleFadeOut = (root: HTMLElement, onFadeComplete?: () => void) => {
+// Purely cosmetic now — the next-wave spawn is fired by the sim-clock driver.
+const scheduleFadeOut = (root: HTMLElement) => {
   const fadeStart = window.setTimeout(() => {
     root.classList.add("fade-out");
-    if (onFadeComplete) {
-      const done = window.setTimeout(onFadeComplete, FADE_OUT_MS);
-      activeTimers.push(done);
-    }
   }, HOLD_BEFORE_FADE_MS);
   activeTimers.push(fadeStart);
 };

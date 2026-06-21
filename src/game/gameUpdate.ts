@@ -18,6 +18,7 @@ import { tickWaveEvents } from "./waveEvents";
 import { detonateShockwave } from "./shockwave";
 import { spawnWave, isBossWave, updateBgBeatIntensity, spawnTutorialSmall, spawnTutorialBig, rhythmSpeedMul, displayWave } from "./waveDirector";
 import { showWaveSummary } from "./waveSummary";
+import { beginWaveTransition, tickWaveTransition } from "./waveTransition";
 import {
   handleCollisions,
   handleAlienHits,
@@ -603,6 +604,7 @@ const tickReplayDying = (game: Game, dt: number): boolean => {
 // ordered phases (ship → bass → world → collisions) so cause-and-effect reads top-down.
 const updatePlaying = (game: Game, dt: number) => {
   game.recorder?.captureFrame(dt, game.input);
+  tickWaveTransition(game, dt);
   tickBeatIntensityRamp(game, dt);
   tickTutorialSpawn(game);
   if (game.controlsHintActive) tickControlsGate(game);
@@ -1049,7 +1051,12 @@ const advanceWave = (game: Game) => {
   game.pulsar.waveClear();
   if (wasBossWave) game.pulsar.setBossPlanetState("defeated");
   game.waveTransitioning = true;
-  showWaveSummary(game, displayWave(completedWave), maxRhythm, finalRhythm, driftBonuses, () => {
+  // Summary panel (rows + drain animation + fade) is cosmetic on setTimeout; the
+  //   sim-clock driver owns the score drain + the deferred spawn so they land on
+  //   the recorded dt and reproduce in replays. Both derive the same schedule.
+  showWaveSummary(game, displayWave(completedWave), maxRhythm, finalRhythm, driftBonuses);
+  const bonus = (maxRhythm + finalRhythm + driftBonuses) * 100;
+  beginWaveTransition(game, bonus, () => {
     game.wave = nextWave;
     // opening rocks' speed keys off the peak combo of the wave just cleared, not
     //   the live combo at spawn (which a death or whiff may have already reset).

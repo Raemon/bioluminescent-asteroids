@@ -182,6 +182,7 @@ export const showTitle = (game: Game) => {
   hideWaveSummary();
   setFirstWaveHintStage(game, 0);
   game.waveTransitioning = false;
+  game.waveTransition = null;
   emitGameState(game);
 };
 
@@ -518,6 +519,9 @@ const resetRunTimers = (game: Game) => {
   game.beatIntensityRamp = null;
   game.hasSpawnedFirstLevel = false;
   game.replayDyingTimer = null;
+  // Drop any in-flight end-of-wave drain/spawn so a stale schedule from the prior
+  //   run (or a torn-down replay) can't fire into this fresh world.
+  game.waveTransition = null;
 };
 
 // parade + drones from the previous title screen must be torn down before the new run runs.

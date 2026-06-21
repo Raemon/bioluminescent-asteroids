@@ -25,6 +25,7 @@ import type { HighscoreRow } from "./game/highscores";
 import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { HighlightTimeline } from "./game/highlightTimeline";
+import type { WaveTransition } from "./game/waveTransition";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
 import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro, advanceIntroOverlay, unfreezeIntroWorld, togglePause, exitReplay } from "./game/lifecycle";
@@ -192,6 +193,13 @@ export class Game implements HudElements {
   //   advanceWave each frame. Cleared when the summary finishes and the next
   //   wave's spawn fires.
   waveTransitioning = false;
+  // Sim-clock-driven end-of-wave transition. Owns the score drain (and its
+  //   bonus-life checks) and the deferred next-wave spawn so they advance on the
+  //   recorded dt instead of wall-clock setTimeout — replays re-sim them on the
+  //   same frames they happened live. null when no transition is in flight. The
+  //   summary panel's visuals/audio still run on setTimeout (cosmetic); this only
+  //   carries the sim-affecting payouts. See game/waveTransition.ts.
+  waveTransition: WaveTransition | null = null;
   // wave-1 instructional overlay. stage 1 holds until 3 on-beat fires land,
   //   stage 2 holds until 4x rhythm, stage 3 (the score-payoff line) auto-dismisses
   //   after a brief hold. once the player reaches 6x rhythm the tutorial is marked
