@@ -1,7 +1,7 @@
 import type { IInput } from "../Input";
 import type { Ship } from "../Ship";
 import type { Bindings } from "./controlBindings";
-import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayDebugFrame, type ReplayFrame, type ReplayHeader } from "./replayFormat";
+import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayDebugFrame, type ReplayFrame, type ReplayHeader, type ReplayPayload } from "./replayFormat";
 
 // Build hash from Vite at compile time so playback can warn about
 // build-version mismatches. Falls back to "dev" when not injected.
@@ -101,9 +101,11 @@ export class ReplayRecorder {
     });
   }
 
-  // Build the final payload and gzip it. Caller provides the run summary
-  // (score/wave/etc.) which only crystallises at game-over.
-  async serialize(summary: { score: number; wave: number; maxCombo: number; killCount: number }): Promise<Uint8Array> {
+  // Build the in-memory payload synchronously (no gzip). Used by the game-over
+  // highlight clip, which re-sims a window of the just-finished run and needs the
+  // frames immediately — no round-trip through gzip/decode. Shares header assembly
+  // with serialize() so both stay in lockstep.
+  buildPayload(summary: { score: number; wave: number; maxCombo: number; killCount: number }): ReplayPayload {
     const header: ReplayHeader = {
       ...this.header,
       keyVocab: this.vocab.slice(),
@@ -112,6 +114,12 @@ export class ReplayRecorder {
       maxCombo: summary.maxCombo,
       killCount: summary.killCount,
     };
-    return await encodeReplay({ header, frames: this.frames, debugFrames: this.debugFrames ?? undefined });
+    return { header, frames: this.frames.slice(), debugFrames: this.debugFrames ? this.debugFrames.slice() : undefined };
+  }
+
+  // Build the final payload and gzip it. Caller provides the run summary
+  // (score/wave/etc.) which only crystallises at game-over.
+  async serialize(summary: { score: number; wave: number; maxCombo: number; killCount: number }): Promise<Uint8Array> {
+    return await encodeReplay(this.buildPayload(summary));
   }
 }

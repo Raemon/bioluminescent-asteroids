@@ -22,8 +22,10 @@ import { rng, seedRng } from "./rng";
 import { ReplayRecorder } from "./replayRecorder";
 import { ReplayPlayer } from "./replayPlayer";
 import { decodeReplay } from "./replayFormat";
+import { HighlightTimeline } from "./highlightTimeline";
 import { resetHuePaletteCursor } from "../Asteroid";
 import { getBindings, normalizeBindings, setReplayBindings } from "./controlBindings";
+import { precomputeRhythmHistogram } from "./gameUpdate";
 
 // React-side <FirstWaveHint> subscribes to this so the canvas/game loop stays
 //   out of layout + transitions — CSS + a single setTimeout do the dismiss work.
@@ -151,6 +153,7 @@ export const showTitle = (game: Game) => {
   game.overlayStartEl.classList.remove("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.remove("gameover-layout");
+  game.overlayEl.classList.remove("highlight-clip");
   hideGameOverIntro();
   renderKilledRow(game);
   clearComboSilently(game);
@@ -435,6 +438,17 @@ export const startGame = (game: Game, overrides?: {
   });
   game.replayPlayer = null;
   game.lastRunReplay = null;
+  game.highlightTimeline = new HighlightTimeline();
+  game.highlightClip = null;
+  // A replay/highlight-clip rebuild (overrides set) must NOT wipe runSummary or
+  //   the loop's fade phase — the game-over screen is still showing the clip.
+  //   Only a genuine fresh run clears them (restartReplayWorld restores them
+  //   across the clip's own rebuilds).
+  if (!overrides) {
+    game.runSummary = null;
+    game.highlightLoop = null;
+    document.getElementById("highlight-fade")?.classList.remove("fading");
+  }
   game.input = game.localInput;
   game.betaMode = false;
   game.state = "playing";
@@ -496,6 +510,7 @@ const resetRunTimers = (game: Game) => {
   game.controlsHintActive = false;
   game.beatIntensityRamp = null;
   game.hasSpawnedFirstLevel = false;
+  game.replayDyingTimer = null;
 };
 
 // parade + drones from the previous title screen must be torn down before the new run runs.
@@ -570,7 +585,9 @@ const leavePause = (game: Game) => {
 // broadcast the game's coarse lifecycle state for UI chrome (pause button visibility,
 //   pause-screen controls panel). Cheap, fires only on transition.
 export const emitGameState = (game: Game) => {
-  window.dispatchEvent(new CustomEvent("game:state", { detail: { state: game.state } }));
+  // `highlight` lets the ReplayScrubber stay hidden during a game-over highlight
+  //   clip — it's a passive backdrop, not a scrubbable leaderboard replay.
+  window.dispatchEvent(new CustomEvent("game:state", { detail: { state: game.state, highlight: game.highlightClip !== null } }));
 };
 
 // Finalise the in-flight replay recorder (live runs only — replay-driven runs
@@ -630,11 +647,7 @@ export const respawn = (game: Game) => {
 
 // death pauses beatTime so a leftover streak would pin the HUD until respawn — drop it now.
 export const killShip = (game: Game) => {
-  game.lives -= 1;
   game.shake = 1.5;
-  game.state = "dying";
-  game.dyingTimer = 1.8;
-  emitGameState(game);
   clearComboSilently(game);
   game.sound.stopThrust();
   game.sound.stopReverseThrust();
@@ -643,6 +656,17 @@ export const killShip = (game: Game) => {
   game.sound.play("death");
   emitShipDebris(game.particles, game.ship.pos);
   game.ship.alive = false;
+  game.lives -= 1;
+  // During replay we render the death but never flip to "dying"/gameover — the
+  //   scrubber stays in control. We still mirror the death→respawn lifecycle so
+  //   the recorded inputs after the death drive a freshly-spawned ship (see
+  //   tickReplayDying); without this the ship stays dead for the rest of the
+  //   recording. The pause length matches dyingTimer so respawn timing — and
+  //   thus the re-sim — lines up frame-for-frame with the original run.
+  if (game.replayPlayer) { game.replayDyingTimer = 1.8; return; }
+  game.state = "dying";
+  game.dyingTimer = 1.8;
+  emitGameState(game);
 };
 
 // Slider position is the source of truth; volumeEl.max = 200 corresponds to
@@ -662,6 +686,19 @@ export const toggleMute = (game: Game) => {
   applyVolume(game, next);
 };
 
+// Hand the scrubber the per-frame rhythm samples so it can draw the histogram.
+//   A plain number[] copy crosses the React boundary cleanly (the Int16Array is
+//   reused if the world rebuilds). Sent once per replay, after the precompute.
+const emitReplayRhythm = (game: Game) => {
+  if (!game.replayPlayer) return;
+  window.dispatchEvent(new CustomEvent("replay:rhythm", {
+    detail: {
+      rhythm: Array.from(game.replayPlayer.rhythmByFrame),
+      waveStarts: game.replayPlayer.waveStarts.map((w) => ({ ...w })),
+    },
+  }));
+};
+
 // Start playing a recorded replay. startGame runs with the recorded seed +
 //   tutorial/veteran flags supplied up front, so wave-1 spawn and every
 //   downstream RNG draw match the original run. The ReplayPlayer's
@@ -670,10 +707,47 @@ export const startReplay = async (game: Game, bytes: Uint8Array): Promise<void> 
   const payload = await decodeReplay(bytes);
   const player = new ReplayPlayer(payload);
   seedReplayWorld(game, player);
+  // Re-sim the whole run once (muted) to fill the scrubber's rhythm histogram,
+  //   then rebuild at frame 0 so playback starts clean.
+  precomputeRhythmHistogram(game);
+  emitReplayRhythm(game);
   // Fresh replay always begins playing at 1x with the playhead at frame 0.
   game.replaySpeed = 1;
   game.replaySeekTarget = null;
   game.replayStepAccumulator = 0;
+  game.state = "replaying";
+  emitGameState(game);
+};
+
+// Leave a full replay (scrubber playback) and return to title. Undoes the
+//   replay's input swap + locked canvas dims the same way the highlight clip's
+//   exitHighlightToTitle does. Bound to Escape while a scrubber replay runs.
+export const exitReplay = (game: Game): void => {
+  game.replayPlayer = null;
+  game.replaySeekTarget = null;
+  game.replayLockedDims = null;
+  game.input = game.localInput;
+  game.runSummary = null;
+  game.resize();
+  showTitle(game);
+};
+
+// Start a looping highlight clip from an in-memory payload (the just-finished
+//   run's recording, no gzip round-trip). The clip range is consumed by the
+//   replay loop, which fast-forwards muted to clip.start, plays to clip.end, then
+//   rebuilds + fast-forwards back to start. Used on the game-over screen instead
+//   of the parade. Caller has already snapshotted game.runSummary so the world
+//   rebuild here doesn't corrupt score submission.
+export const startHighlightReplay = (game: Game, player: ReplayPlayer, clip: { start: number; end: number }): void => {
+  seedReplayWorld(game, player);
+  game.highlightClip = clip;
+  game.replaySpeed = 1;
+  game.replayStepAccumulator = 0;
+  // Enter through the same fade the loop uses: start black so the first
+  //   (synchronous) fast-forward from frame 0 to clip.start is hidden, then fade
+  //   in on the first clip frame. tickHighlightLoop performs the seek once black.
+  game.highlightLoop = { phase: "fadeOut", startedAt: performance.now() };
+  document.getElementById("highlight-fade")?.classList.add("fading");
   game.state = "replaying";
   emitGameState(game);
 };
@@ -684,9 +758,49 @@ export const startReplay = async (game: Game, bytes: Uint8Array): Promise<void> 
 export const restartReplayWorld = (game: Game): void => {
   const player = game.replayPlayer;
   if (!player) return;
+  // seedReplayWorld → startGame clears highlight state AND hides the game-over
+  //   overlay/score form. Snapshot both so a looping highlight clip survives its
+  //   own rebuild without re-running showGameOverIntro (which would re-fire the
+  //   staged fade + bell) or stealing focus from the score input each loop.
+  const clip = game.highlightClip;
+  const loop = game.highlightLoop;
+  const chrome = clip ? captureGameOverChrome(game) : null;
   player.rewindToStart();
   seedReplayWorld(game, player);
+  game.highlightClip = clip;
+  game.highlightLoop = loop;
+  if (chrome) restoreGameOverChrome(game, chrome);
   game.state = "replaying";
+};
+
+// Snapshot the game-over overlay's visibility classes + score-form state so a
+//   highlight-clip loop rebuild (startGame hides them) can put them back exactly,
+//   without re-triggering the intro animation or the form's focus/reset.
+type GameOverChrome = {
+  overlayHidden: boolean;
+  gameoverLayout: boolean;
+  highlightClipClass: boolean;
+  scoreFormHidden: boolean;
+  leaderboardHidden: boolean;
+  inputFocused: boolean;
+};
+const captureGameOverChrome = (game: Game): GameOverChrome => ({
+  overlayHidden: game.overlayEl.classList.contains("hidden"),
+  gameoverLayout: game.overlayEl.classList.contains("gameover-layout"),
+  highlightClipClass: game.overlayEl.classList.contains("highlight-clip"),
+  scoreFormHidden: game.scoreEntryFormEl.classList.contains("hidden"),
+  leaderboardHidden: game.leaderboardEl.classList.contains("hidden"),
+  inputFocused: document.activeElement === game.scoreEntryInputEl,
+});
+const restoreGameOverChrome = (game: Game, c: GameOverChrome): void => {
+  game.overlayEl.classList.toggle("hidden", c.overlayHidden);
+  game.overlayEl.classList.toggle("gameover-layout", c.gameoverLayout);
+  game.overlayEl.classList.toggle("highlight-clip", c.highlightClipClass);
+  game.scoreEntryFormEl.classList.toggle("hidden", c.scoreFormHidden);
+  game.leaderboardEl.classList.toggle("hidden", c.leaderboardHidden);
+  // startGame's hideScoreEntry blurred the name field; refocus if the player was
+  //   mid-type so the loop rebuild doesn't kick them out of the input.
+  if (c.inputFocused && !c.scoreFormHidden) game.scoreEntryInputEl.focus();
 };
 
 // Shared world setup for a replay player at frame 0. startGame resets

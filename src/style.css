@@ -851,6 +851,20 @@ html:has(#sound-root), body:has(> #sound-root) {
 
 #killed-row.hidden { display: none; }
 
+/* Highlight-clip loop mask. Transparent by default; .fading drives opacity to 1
+   to hide the synchronous re-sim hitch at each loop point. Above the stage canvas
+   (the replay backdrop) but below the gameover text + score form (z-index 10). */
+#highlight-fade {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 6;
+  transition: opacity 0.28s ease;
+}
+#highlight-fade.fading { opacity: 1; }
+
 /* Game-over layout: text column on the left (60vw), parade column on the
    right (40vw). The parade canvas is fixed-positioned in the right column
    so the left-column flow (gameover-stack + callsign form) stays a normal
@@ -886,6 +900,36 @@ html:has(#sound-root), body:has(> #sound-root) {
   max-width: 40vw;
   margin: 0;
   pointer-events: none;
+}
+
+/* Highlight-clip game-over: the player's best-rhythm replay loops on the stage
+   canvas behind the overlay. Drop the overlay's full-screen scrim so the replay
+   shows through, and give the text + score form their own readable panels so they
+   stay legible over the moving footage. */
+#overlay.highlight-clip::before {
+  background: none;
+  backdrop-filter: none;
+}
+/* No parade column in clip mode, so center the text + score panel vertically on
+   screen instead of the top-aligned parade layout. */
+#overlay.highlight-clip.gameover-layout {
+  justify-content: center;
+  padding-top: 32px;
+}
+#overlay.highlight-clip #gameover-stack,
+#overlay.highlight-clip #score-entry {
+  background: rgba(2, 6, 18, 0.62);
+  border: 1px solid rgba(106, 215, 255, 0.18);
+  border-radius: 14px;
+  padding: 20px 28px;
+  backdrop-filter: blur(3px);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+/* Keep the text + form to a centered column so the replay stays visible to the
+   sides instead of being fully covered. */
+#overlay.highlight-clip.gameover-layout #gameover-stack,
+#overlay.highlight-clip.gameover-layout #score-entry {
+  width: min(560px, 56vw);
 }
 
 /* Hide the in-flow gameover-stack everywhere except the gameover layout —
@@ -2999,6 +3043,34 @@ html:has(#sound-root), body:has(> #sound-root) {
   filter: drop-shadow(0 0 4px rgba(106, 215, 255, 0.8));
 }
 
+.replay-scrubber__exit {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #6ad7ff;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+.replay-scrubber__exit:hover { opacity: 1; }
+
+.replay-scrubber__exit svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(106, 215, 255, 0.8));
+}
+
 .replay-scrubber__time {
   flex: 0 0 auto;
   font-size: 12px;
@@ -3023,6 +3095,34 @@ html:has(#sound-root), body:has(> #sound-root) {
   content: "";
   position: absolute;
   inset: -9px 0;
+}
+
+.replay-scrubber__hist {
+  /* rhythm skyline rising above the track; height is set in JS (1px/rhythm) */
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  width: 100%;
+  pointer-events: none;
+}
+
+.replay-scrubber__wave-dot {
+  position: absolute;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translateY(-50%);
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+}
+
+.replay-scrubber__wave-dot:hover {
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
 }
 
 .replay-scrubber__fill {

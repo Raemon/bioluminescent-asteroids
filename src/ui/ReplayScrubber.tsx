@@ -17,18 +17,25 @@ const seekTo = (frame: number) =>
 
 const togglePlay = () => window.dispatchEvent(new CustomEvent("replay:togglePlay"));
 
+const exitReplay = () => window.dispatchEvent(new CustomEvent("replay:exit"));
+
 export const ReplayScrubber = () => {
   const [active, setActive] = useState(false);
   const [position, setPosition] = useState(0);
   const [total, setTotal] = useState(0);
   const [speed, setSpeedState] = useState(1);
+  const [waveStarts, setWaveStarts] = useState<{ frame: number; wave: number }[]>([]);
   const barRef = useRef<HTMLDivElement>(null);
+  const histCanvasRef = useRef<HTMLCanvasElement>(null);
+  const rhythmRef = useRef<number[]>([]);
   const draggingRef = useRef(false);
 
   useEffect(() => {
     const onState = (e: Event) => {
-      const detail = (e as CustomEvent<{ state: string }>).detail;
-      setActive(detail.state === "replaying");
+      const detail = (e as CustomEvent<{ state: string; highlight?: boolean }>).detail;
+      // The game-over highlight clip runs in "replaying" too, but it's a passive
+      //   backdrop — no scrubber for it.
+      setActive(detail.state === "replaying" && !detail.highlight);
     };
     const onProgress = (e: Event) => {
       const d = (e as CustomEvent<{ position: number; total: number; speed: number }>).detail;
@@ -36,13 +43,66 @@ export const ReplayScrubber = () => {
       setTotal(d.total);
       setSpeedState(d.speed);
     };
+    const onRhythm = (e: Event) => {
+      const d = (e as CustomEvent<{ rhythm: number[]; waveStarts: { frame: number; wave: number }[] }>).detail;
+      rhythmRef.current = d.rhythm;
+      setWaveStarts(d.waveStarts);
+      drawHistogram();
+    };
     window.addEventListener("game:state", onState as EventListener);
     window.addEventListener("replay:progress", onProgress as EventListener);
+    window.addEventListener("replay:rhythm", onRhythm as EventListener);
     return () => {
       window.removeEventListener("game:state", onState as EventListener);
       window.removeEventListener("replay:progress", onProgress as EventListener);
+      window.removeEventListener("replay:rhythm", onRhythm as EventListener);
     };
   }, []);
+
+  // Draw the rhythm-over-time skyline into the histogram canvas: one column per
+  //   device pixel of bar width, each column as tall as the peak rhythm in the
+  //   frames it spans — "1px per rhythm". Re-run when the bar resizes or new
+  //   samples arrive.
+  const drawHistogram = () => {
+    const canvas = histCanvasRef.current;
+    const bar = barRef.current;
+    const rhythm = rhythmRef.current;
+    if (!canvas || !bar || rhythm.length === 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = bar.clientWidth;
+    let peak = 1;
+    for (const r of rhythm) if (r > peak) peak = r;
+    // The canvas is exactly peak px tall (1px per rhythm unit) in CSS pixels.
+    const cssH = peak;
+    canvas.style.height = `${cssH}px`;
+    const w = Math.max(1, Math.round(cssW * dpr));
+    const h = Math.max(1, Math.round(cssH * dpr));
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "rgba(106, 215, 255, 0.35)";
+    const cols = Math.round(cssW);
+    for (let x = 0; x < cols; x++) {
+      const from = Math.floor((x / cols) * rhythm.length);
+      const to = Math.max(from + 1, Math.floor(((x + 1) / cols) * rhythm.length));
+      let colPeak = 0;
+      for (let i = from; i < to && i < rhythm.length; i++) if (rhythm[i] > colPeak) colPeak = rhythm[i];
+      if (colPeak <= 0) continue;
+      // 1 rhythm unit = 1 CSS px tall, drawn upward from the bottom of the canvas.
+      const barH = colPeak * dpr;
+      ctx.fillRect(x * dpr, h - barH, dpr, barH);
+    }
+  };
+
+  useEffect(() => {
+    if (!active) return;
+    const onResize = () => drawHistogram();
+    window.addEventListener("resize", onResize);
+    drawHistogram();
+    return () => window.removeEventListener("resize", onResize);
+  }, [active]);
 
   // Map a pointer x within the bar to a frame index and seek there.
   const seekFromPointer = (clientX: number) => {
@@ -99,7 +159,21 @@ export const ReplayScrubber = () => {
           seekFromPointer(e.clientX);
         }}
       >
+        <canvas ref={histCanvasRef} className="replay-scrubber__hist" aria-hidden="true" />
         <div className="replay-scrubber__fill" style={{ width: `${pct}%` }} />
+        {total > 0 && waveStarts.map((w) => (
+          <div
+            key={w.frame}
+            className="replay-scrubber__wave-dot"
+            style={{ left: `${(w.frame / total) * 100}%` }}
+            title={`Wave ${w.wave}`}
+            onPointerDown={(e) => {
+              // seek to the wave start; don't let the bar's drag-seek also fire.
+              e.stopPropagation();
+              seekTo(w.frame);
+            }}
+          />
+        ))}
         <div className="replay-scrubber__knob" style={{ left: `${pct}%` }} />
       </div>
       <span className="replay-scrubber__time">{fmt(total)}</span>
@@ -115,6 +189,14 @@ export const ReplayScrubber = () => {
           </button>
         ))}
       </div>
+      <button
+        type="button"
+        className="replay-scrubber__exit"
+        aria-label="Exit replay"
+        onClick={exitReplay}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      </button>
     </div>
   );
 };

@@ -114,8 +114,10 @@ const bindListeners = (game: Game) => {
 export const showScoreEntry = (game: Game) => {
   bindListeners(game);
   // ram-only or otherwise score-less runs shouldn't pester for a name —
-  // there's nothing meaningful to record.
-  if (game.score <= 0) {
+  // there's nothing meaningful to record. Prefer the frozen run summary: a
+  // running highlight clip has reset live game.score to its re-sim value.
+  const finalScore = game.runSummary ? game.runSummary.score : game.score;
+  if (finalScore <= 0) {
     game.scoreEntryFormEl.classList.add("hidden");
     return;
   }

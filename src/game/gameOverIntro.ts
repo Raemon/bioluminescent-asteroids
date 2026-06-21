@@ -41,12 +41,19 @@ export const showGameOverIntro = (game: Game, headlineKind: "gameover" | "aborte
   activeRoot = root;
   root.classList.remove("hidden");
 
+  // Prefer the frozen run summary when present: during a game-over highlight clip
+  //   the live game.* fields hold the clip's in-progress re-sim values, not the
+  //   finished run's. (For a normal game-over the snapshot equals the live values.)
+  const s = game.runSummary;
+  const finalWave = s ? s.wave : game.wave;
+  const finalMaxCombo = s ? s.maxCombo : game.maxCombo;
+  const finalScore = s ? s.score : game.score;
   const waveLine = headlineKind === "aborted"
-    ? `Mission aborted — Wave ${displayWave(game.wave)}`
-    : `You reached Wave ${displayWave(game.wave)}`;
+    ? `Mission aborted — Wave ${displayWave(finalWave)}`
+    : `You reached Wave ${displayWave(finalWave)}`;
   setLine("gameover-wave", waveLine);
-  setLine("gameover-peak-value", `${game.maxCombo}x`);
-  setLine("gameover-score", `Score: ${formatScorePadded(game.score)}`);
+  setLine("gameover-peak-value", `${finalMaxCombo}x`);
+  setLine("gameover-score", `Score: ${formatScorePadded(finalScore)}`);
 
   resetVisibility(root);
   // force reflow so the .in transitions actually animate on restart.

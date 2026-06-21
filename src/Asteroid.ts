@@ -1147,7 +1147,7 @@ export class Asteroid {
       // Slow tumble — the writhe body deformation does the real visual work.
       this.rotSpeed = rand(-0.4, 0.4);
       this.writhePhase = rand(0, TAU);
-      this.lungePhaseOffset = Math.random() < 0.5 ? 0 : BASS_MEASURE_LENGTH;
+      this.lungePhaseOffset = rng() < 0.5 ? 0 : BASS_MEASURE_LENGTH;
       // Five tendrils, evenly distributed around the body with per-piece
       // phase jitter so they wave asynchronously.
       const tendrilCount = 5;

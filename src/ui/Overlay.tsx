@@ -115,6 +115,10 @@ export const Overlay = () => {
         </div>
       </div>
       <canvas id="killed-row" className="hidden" width={0} height={0} />
+      {/* Masks the synchronous catch-up re-sim when the game-over highlight clip
+          loops — fades the replay backdrop to black, the hitch happens unseen,
+          then fades back. Sits above the canvas but below the gameover text/form. */}
+      <div id="highlight-fade" />
       <form id="score-entry" className="hidden" autoComplete="off" noValidate>
         <label htmlFor="score-entry-name">Enter callsign</label>
         <input

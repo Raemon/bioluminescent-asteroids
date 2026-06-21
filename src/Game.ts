@@ -24,9 +24,10 @@ import { KilledSnapshot } from "./game/killSnapshot";
 import type { HighscoreRow } from "./game/highscores";
 import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
+import { HighlightTimeline } from "./game/highlightTimeline";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
-import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro, advanceIntroOverlay, unfreezeIntroWorld, togglePause } from "./game/lifecycle";
+import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro, advanceIntroOverlay, unfreezeIntroWorld, togglePause, exitReplay } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
@@ -91,6 +92,11 @@ export class Game implements HudElements {
   nextBonusLifeScore = 50000;
   state: GameState = "title";
   dyingTimer = 0;
+  // Replay mirror of dyingTimer: live play flips to "dying" and respawns from
+  //   updateDying, but replay stays in "replaying" so the scrubber keeps
+  //   control. We count this down inside the replay update and respawn (or end
+  //   the run, on the last life) without leaving "replaying". null = ship alive.
+  replayDyingTimer: number | null = null;
   shake = 0;
   shakeSeed = 0;
   w = 0;
@@ -239,13 +245,24 @@ export class Game implements HudElements {
   // Set during replay to force resize() to use recorded sim dims instead of
   //   the live window; canvas is CSS-scaled to fit. Cleared when replay ends.
   replayLockedDims: { w: number; h: number; dpr: number } | null = null;
-  // Scrubber state. replaySpeed: 0 = paused, else recorded-frames-per-render
-  //   (0.5/1/2/4). replaySeekTarget: a frame index to jump to next tick (set by
-  //   the timeline drag / arrow keys); consumed and cleared by the seek step.
-  //   replayStepAccumulator carries fractional-speed remainders between ticks.
+  // Scrubber state. replaySpeed: 0 = paused, else a wall-clock multiplier
+  //   (0.5/1/2/4) — 1x plays back at the original run's real-time pace.
+  //   replaySeekTarget: a frame index to jump to next tick (set by the timeline
+  //   drag / arrow keys); consumed and cleared by the seek step.
+  //   replayStepAccumulator carries leftover time budget (seconds) between ticks.
   replaySpeed = 1;
   replaySeekTarget: number | null = null;
   replayStepAccumulator = 0;
+  // Highlight-clip mode: a looping sub-range of the recording played on the
+  //   game-over screen (best rhythm chain, 4s pre-roll → rhythm lost). When set,
+  //   the replay loop plays start→end then rebuilds + fast-forwards back to start
+  //   instead of running to the end of the stream. Null for normal full replays
+  //   (leaderboard playback), so the scrubber/scoreboard path is unaffected.
+  highlightClip: { start: number; end: number } | null = null;
+  // Loop fade state: null while the clip plays, else the phase of the
+  //   fade-out → silent catch-up re-sim → fade-in cycle that masks the
+  //   synchronous rewind hitch. startedAt is a performance.now() stamp.
+  highlightLoop: { phase: "fadeOut" | "fadeIn"; startedAt: number } | null = null;
   // localInput is the real keyboard-bound Input; the replay path swaps `input`
   //   to point at the player's ReplayInput while a replay is running, and we
   //   restore localInput when returning to title.
@@ -327,6 +344,21 @@ export class Game implements HudElements {
   paradeCanvasW = 0;
   paradeCanvasH = 0;
   paradeOrientation: "horizontal" | "vertical" = "horizontal";
+  // Segments the live run into rhythm chains so game-over can replay the
+  //   highest-rhythm one as a highlight clip. Re-created each startGame.
+  highlightTimeline = new HighlightTimeline();
+  // Frozen copy of the just-finished run's summary, taken at game-over BEFORE the
+  //   highlight clip rebuilds the world (which would reset game.score/maxCombo to
+  //   fresh-run values). Score submission reads this when present so the highlight
+  //   clip can run on the main sim without corrupting what gets submitted. Null
+  //   outside game-over. (Replay upload bytes still land on game.lastRunReplay via
+  //   the async finalizeRecorder gzip, which fires before the clip rebuild.)
+  runSummary: {
+    score: number;
+    wave: number;
+    maxCombo: number;
+    killTally: Partial<Record<KillBucket, number>>;
+  } | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -464,6 +496,9 @@ export class Game implements HudElements {
         detail: { position: this.replayPlayer.position(), total: this.replayPlayer.total(), speed: this.replaySpeed },
       }));
     });
+    window.addEventListener("replay:exit", () => {
+      if (this.replayPlayer && this.highlightClip === null) exitReplay(this);
+    });
     // <FirstWaveHint> owns its own stage-3 auto-dismiss timer; when it fades
     //   out it asks the game to clear the stage.
     window.addEventListener("first-wave-hint:dismiss", () => {
@@ -477,8 +512,10 @@ export class Game implements HudElements {
       const k = e.key.toLowerCase();
       if (k === "m" && this.state !== "title") toggleMute(this);
       // Replay scrubbing: arrows jump ~2s, space toggles play. Handled here
-      //   (not via game.input) because input is the recorded ReplayInput.
-      if (this.replayPlayer) {
+      //   (not via game.input) because input is the recorded ReplayInput. Skipped
+      //   for the game-over highlight clip — there Space/Enter mean "continue",
+      //   handled by tickHighlightGameOverInput, and there's no scrubber.
+      if (this.replayPlayer && this.highlightClip === null) {
         const SEEK_FRAMES = 120;
         if (k === "arrowleft" || k === "arrowright") {
           e.preventDefault();
@@ -488,6 +525,9 @@ export class Game implements HudElements {
         } else if (k === " " || k === "spacebar") {
           e.preventDefault();
           window.dispatchEvent(new CustomEvent("replay:togglePlay"));
+        } else if (k === "escape") {
+          e.preventDefault();
+          exitReplay(this);
         }
       }
       if (k === "`") {

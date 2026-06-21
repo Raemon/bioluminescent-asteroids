@@ -62,15 +62,26 @@ const TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD = 10;
 // proximity-glow band above so the early "you're on the right track" cue reads well before the
 // actual target lock. A small white pulse runs inward along each crosshair arm on every beat,
 // pointing at the target.
-const HOVER_ZONE_RADIUS = 100;
+const HOVER_ZONE_RADIUS = 150;
 const HOVER_ZONE_RING_PERIOD_BEATS = 1;
-const HOVER_ZONE_CROSSHAIR_ARM = 60;
+const HOVER_ZONE_CROSSHAIR_ARM = 90;
 const HOVER_ZONE_CROSSHAIR_INNER_GAP = 8;
 const HOVER_ZONE_CROSSHAIR_ALPHA = 0.1;
 const HOVER_ZONE_CROSSHAIR_LINE_WIDTH = 1;
 const HOVER_ZONE_PULSE_LENGTH = 10;
 const HOVER_ZONE_PULSE_LINE_WIDTH = 1.6;
-const HOVER_ZONE_PULSE_HSL = "0, 0%, 25%";
+// the pulse is drawn in two additive passes (the crosshair group blends with "lighter"): a uniform
+// medium-bright body dash, then a small bright dot at the leading head. Where they overlap the dot
+// adds onto the body, so the head reads as a hot point fading into the medium pulse behind it —
+// without relying on a gradient across a segment too short to register one.
+const HOVER_ZONE_PULSE_BODY_HSL = "0, 0%, 70%";
+const HOVER_ZONE_PULSE_BODY_ALPHA = 0.22;
+const HOVER_ZONE_PULSE_HEAD_HSL = "0, 0%, 100%";
+const HOVER_ZONE_PULSE_HEAD_ALPHA = 0.9;
+// radius of the bright head dot, with a wider, fainter halo around it for a touch of bloom.
+const HOVER_ZONE_PULSE_HEAD_RADIUS = 1.6;
+const HOVER_ZONE_PULSE_HEAD_HALO_RADIUS = 4;
+const HOVER_ZONE_PULSE_HEAD_HALO_ALPHA = 0.3;
 const HOVER_ZONE_FADE_IN_SEC = 0.05;
 // hint text that appears alongside the first crosshair shown per game session — only for
 // pre-veteran pilots (anyone who has never hit 6x rhythm). Veterans skip the hint entirely;
@@ -543,14 +554,36 @@ const paintApproachCrosshair = (
   const segStart = Math.max(inner, headDist);
   const segEnd = Math.min(outer, tailDist);
   if (segEnd > segStart) {
-    ctx.strokeStyle = `hsla(${HOVER_ZONE_PULSE_HSL}, 0.85)`;
+    // the pulse travels inward, so headDist (nearer the center) is the leading head. Pass 1: a
+    // uniform medium body dash over the visible [segStart, segEnd] slice. Pass 2: a bright dot at
+    // the head — only when the head itself is inside the arm (headDist >= inner), so the spark
+    // doesn't keep glowing after the pulse has run off the inner gap.
     ctx.lineWidth = HOVER_ZONE_PULSE_LINE_WIDTH;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = `hsla(${HOVER_ZONE_PULSE_BODY_HSL}, ${HOVER_ZONE_PULSE_BODY_ALPHA})`;
     ctx.beginPath();
-    ctx.moveTo(px - segEnd, py); ctx.lineTo(px - segStart, py);
-    ctx.moveTo(px + segStart, py); ctx.lineTo(px + segEnd, py);
-    ctx.moveTo(px, py - segEnd); ctx.lineTo(px, py - segStart);
-    ctx.moveTo(px, py + segStart); ctx.lineTo(px, py + segEnd);
+    const armBody = (dirX: number, dirY: number) => {
+      ctx.moveTo(px + dirX * segStart, py + dirY * segStart);
+      ctx.lineTo(px + dirX * segEnd, py + dirY * segEnd);
+    };
+    armBody(-1, 0); armBody(1, 0); armBody(0, -1); armBody(0, 1);
     ctx.stroke();
+    if (headDist >= inner) {
+      const headDot = (dirX: number, dirY: number) => {
+        const hx = px + dirX * headDist;
+        const hy = py + dirY * headDist;
+        ctx.fillStyle = `hsla(${HOVER_ZONE_PULSE_HEAD_HSL}, ${HOVER_ZONE_PULSE_HEAD_HALO_ALPHA})`;
+        ctx.beginPath();
+        ctx.arc(hx, hy, HOVER_ZONE_PULSE_HEAD_HALO_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `hsla(${HOVER_ZONE_PULSE_HEAD_HSL}, ${HOVER_ZONE_PULSE_HEAD_ALPHA})`;
+        ctx.beginPath();
+        ctx.arc(hx, hy, HOVER_ZONE_PULSE_HEAD_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+      };
+      headDot(-1, 0); headDot(1, 0); headDot(0, -1); headDot(0, 1);
+    }
+    ctx.lineCap = "butt";
   }
   // hint: only claim the anchor for the very first hover of this session, and freeze it on the
   // first paint of that hover. Veterans skip the hint pipeline; pre-veterans only see it once

@@ -31,6 +31,8 @@ import {
 import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState, finalizeRecorder, restartReplayWorld } from "./lifecycle";
 import { syncHud, syncPowerupHud, syncComboHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
+import { recordHighlightFrame } from "./highlightTimeline";
+import { tryStartHighlightClip, tickHighlightGameOverInput, beginHighlightLoop, tickHighlightLoop } from "./highlightReplay";
 import { snapshotShipKill } from "./killSnapshot";
 import { updatePopups, popupDriftBonus } from "./popups";
 import { updateBassLightnings } from "./bassLightning";
@@ -46,11 +48,12 @@ import { fireBossSweepBeam, tickBossBeams } from "./bossBeam";
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
   // Replay drives the sim from recorded frames rather than live dt. The
-  //   scrubber controls how many recorded frames advance per render tick:
-  //   paused → 0, 1x → 1, 2x/4x → several. Seeks (rewind/fast-forward to a
-  //   target frame) are handled separately by stepping the sim with audio
+  //   scrubber sets a wall-clock multiplier (paused → 0, 1x → real time,
+  //   2x/4x/0.5x → scaled); runReplay spends liveDt × speed of time budget
+  //   on recorded frames at their own recorded dt. Seeks (rewind/fast-forward
+  //   to a target frame) are handled separately by stepping the sim with audio
   //   muted. See runReplay for the speed/seek dispatch.
-  if (game.replayPlayer) { runReplay(game); return; }
+  if (game.replayPlayer) { runReplay(game, dt); return; }
   advanceFrame(game, dt);
 };
 
@@ -91,13 +94,26 @@ const stepReplayFrame = (game: Game): boolean => {
   const replayDt = game.replayPlayer!.nextFrame();
   if (replayDt === null) return false;
   advanceFrame(game, replayDt);
+  // Record the combo + wave this frame settled on, for the scrubber's rhythm
+  //   histogram and per-wave dots.
+  game.replayPlayer!.sampleRhythm(game.beatCombo, displayWave(game.wave));
   return true;
 };
 
 // Replay dispatch for one render tick. Handles seeking to a target frame
 //   (rewind = rebuild the world at frame 0, then fast-forward; both seek
 //   directions step with audio muted), then normal speed-scaled playback.
-const runReplay = (game: Game) => {
+//   liveDt is this render tick's real elapsed time, used to pace playback in
+//   wall-clock terms so 1x matches the original run regardless of the viewer's
+//   refresh rate.
+const runReplay = (game: Game, liveDt: number) => {
+  const clip = game.highlightClip;
+  // Highlight clip: the game-over UI (Enter to continue / Escape to skip) is
+  //   serviced here from the live keyboard, since updateGameOver doesn't run in
+  //   the "replaying" state. Exiting tears down the clip, so bail immediately.
+  if (clip && tickHighlightGameOverInput(game)) return;
+  // Mid-loop fade: hold the frame while the fade-out/catch-up/fade-in cycle runs.
+  if (clip && game.highlightLoop) { tickHighlightLoop(game, seekReplayToTarget); return; }
   if (game.replaySeekTarget !== null) {
     seekReplayToTarget(game);
     return;
@@ -108,13 +124,26 @@ const runReplay = (game: Game) => {
     emitReplayProgress(game);
     return;
   }
-  // 2x/4x run multiple recorded frames per render tick; fractional speeds
-  //   (0.5x) carry the remainder so they don't lose frames over time.
-  game.replayStepAccumulator += game.replaySpeed;
-  let steps = Math.floor(game.replayStepAccumulator);
-  game.replayStepAccumulator -= steps;
-  while (steps-- > 0) {
-    if (!stepReplayFrame(game)) { finishReplay(game); return; }
+  // Pace playback by wall-clock time: each render tick buys replaySpeed × liveDt
+  //   seconds of replay budget, and we spend it consuming recorded frames at their
+  //   own recorded dt. So 1x reproduces the original run's real-time pacing exactly
+  //   (independent of the viewer's refresh rate), and 0.5/2/4 are exact multiples.
+  //   replayStepAccumulator holds the leftover budget (seconds) between ticks.
+  game.replayStepAccumulator += game.replaySpeed * liveDt;
+  // Guard against a huge catch-up burst after a stall/background tab.
+  game.replayStepAccumulator = Math.min(game.replayStepAccumulator, 0.25);
+  while (game.replayStepAccumulator > 0) {
+    const nextDt = game.replayPlayer!.peekFrameDt();
+    if (nextDt === null) {
+      if (clip) { beginHighlightLoop(game); return; }
+      finishReplay(game);
+      return;
+    }
+    // Highlight clip: at the clip's end frame, begin the fade-masked loop back to
+    //   its start instead of running to the end of the recording.
+    if (clip && game.replayPlayer!.position() >= clip.end) { beginHighlightLoop(game); return; }
+    game.replayStepAccumulator -= nextDt;
+    stepReplayFrame(game);
   }
   emitReplayProgress(game);
 };
@@ -135,6 +164,20 @@ const seekReplayToTarget = (game: Game) => {
   emitReplayProgress(game);
 };
 
+// Fill rhythmByFrame for the whole recording up front so the scrubber can draw
+//   a complete rhythm histogram before the viewer scrubs. Steps every frame with
+//   audio muted, then rebuilds the world at frame 0 so playback starts clean.
+//   One-time cost at replay open (re-sims the run once); subsequent seeks reuse
+//   the cached samples.
+export const precomputeRhythmHistogram = (game: Game) => {
+  const player = game.replayPlayer;
+  if (!player) return;
+  const muted = game.sound.beginSeekMute();
+  while (stepReplayFrame(game)) { /* sampleRhythm runs inside */ }
+  restartReplayWorld(game);
+  game.sound.endSeekMute(muted);
+};
+
 const emitReplayProgress = (game: Game) => {
   if (!game.replayPlayer) return;
   window.dispatchEvent(new CustomEvent("replay:progress", {
@@ -146,15 +189,14 @@ const emitReplayProgress = (game: Game) => {
   }));
 };
 
+// Reaching the end of the stream parks the playhead on the final frame with the
+//   scrubber still up — the replay holds on the recorded death rather than
+//   dropping the viewer onto the real game-over/leaderboard screen. Scrubbing
+//   back resumes from wherever they seek to.
 const finishReplay = (game: Game) => {
-  game.replayPlayer = null;
-  // Unlock canvas dims and resize back to the live window now that the sim
-  //   isn't pinned to the recording's resolution anymore.
-  game.replayLockedDims = null;
-  game.resize();
-  // Treat reaching the end of the stream like the player's natural game-over so
-  //   the existing gameover overlay + leaderboard view light up unchanged.
-  transitionToGameOver(game);
+  game.replaySpeed = 0;
+  game.replayStepAccumulator = 0;
+  emitReplayProgress(game);
 };
 
 const routeStateUpdate = (game: Game, dt: number) => {
@@ -244,26 +286,76 @@ const updateDying = (game: Game, dt: number) => {
 };
 
 const transitionToGameOver = (game: Game) => {
+  // Safety net: if a highlight clip is somehow live when we reach game-over (e.g.
+  //   the re-sim diverged and the ship died inside the clip window before clip.end),
+  //   tear the clip down and fall through to a plain parade game-over rather than
+  //   re-entering the clip machinery. recorder is already null on the clip path, so
+  //   tryStartHighlightClip below no-ops anyway, but this restores input/dims/state.
+  if (game.highlightClip) {
+    game.highlightClip = null;
+    game.highlightLoop = null;
+    document.getElementById("highlight-fade")?.classList.remove("fading");
+    game.replayPlayer = null;
+    game.replayLockedDims = null;
+    game.input = game.localInput;
+    game.resize();
+  }
   game.state = "gameover";
-  finalizeRecorder(game);
+  // Snapshot the run summary BEFORE finalizeRecorder/highlight clip touch the
+  //   world — the highlight clip rebuilds the sim (resetting score/maxCombo/
+  //   lastRunReplay), so score submission reads this snapshot. Keep an existing
+  //   snapshot if present: a divergence re-entry (above) must not overwrite the
+  //   real run's summary with the partial re-sim's values.
+  game.runSummary ??= {
+    score: game.score,
+    wave: game.wave,
+    maxCombo: game.maxCombo,
+    killTally: { ...game.killTally },
+  };
   game.sound.stopAllAlienDrones();
   game.sound.stopAllBassteroidDrones();
   game.sound.stopAllWarbleDrones();
   game.sound.stopAllCometShimmers();
   game.sound.stopHaloAmbient();
   game.comets = [];
-  game.lastRunScore = game.score;
+  game.lastRunScore = game.runSummary.score;
   game.lastRunScoreId = null;
+  // Capture the death snapshot from the LIVE ship now, before the highlight clip
+  //   can rebuild the world. Needed for the parade fallback.
+  const shipSnap = snapshotShipKill(game.ship, "death");
+  if (shipSnap) game.killedSnapshots.push(shipSnap);
+  // Grab the recorder before anything nulls it: the highlight clip builds its
+  //   payload from it, and finalizeRecorder serialises the upload bytes from it.
+  //   Both must run off the same captured reference since the clip's startGame
+  //   clears game.recorder. Finalise first so game.lastRunReplay is populated
+  //   even though the clip then rebuilds the world.
+  const recorder = game.recorder;
+  finalizeRecorder(game);
+  // Start the clip FIRST: its startGame rebuild hides the overlay + score form,
+  //   so the game-over chrome must be (re)shown AFTER it, or the clip would wipe
+  //   it back out. The clip reads game.runSummary for its values, not live state.
+  const highlightStarted = tryStartHighlightClip(game, recorder);
+  // Game-over chrome — shown last so the clip's world-rebuild can't hide it. The
+  //   #overlay (gameover text + score form) layers above the replay canvas.
   game.overlayTitleEl.textContent = "";
   game.overlayStartEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
-  const shipSnap = snapshotShipKill(game.ship, "death");
-  if (shipSnap) game.killedSnapshots.push(shipSnap);
-  renderKilledRow(game, "vertical");
   showGameOverIntro(game, "gameover");
   showScoreEntry(game);
-  emitGameState(game);
+  if (highlightStarted) {
+    // Clip owns the canvas now; suppress the trophy parade. startHighlightReplay
+    //   already emitted the "replaying" game state. The highlight-clip class drops
+    //   the overlay's full-screen scrim so the replay shows through behind the
+    //   gameover text + score panel.
+    game.overlayEl.classList.add("highlight-clip");
+    stopParade(game);
+    game.killedRowEl.classList.add("hidden");
+  } else {
+    game.overlayEl.classList.remove("highlight-clip");
+    renderKilledRow(game, "vertical");
+    emitGameState(game);
+  }
 };
 
 import { BOSS_MUSIC_VARIATION, HALO_MUSIC_POOL, PLAY_COMBO_MUSIC, pickHaloMusicVariation, pickHaloMusicVariationExcluding } from "./haloMusicConfig";
@@ -482,9 +574,23 @@ const applyBeatPhaseCorrection = (game: Game, musicDt: number): number => {
   return musicDt + delta;
 };
 
+// Replay mirror of updateDying: live play counts down dyingTimer in the "dying"
+//   state and respawns, but a replay holds "replaying" so the scrubber keeps
+//   control. Count down here on the same recorded dt and respawn once it
+//   elapses (or just leave the ship gone on the final life — the recording's
+//   own frames run out shortly after). respawn() keeps state at "replaying".
+const tickReplayDying = (game: Game, dt: number) => {
+  if (game.replayDyingTimer === null) return;
+  game.replayDyingTimer -= dt;
+  if (game.replayDyingTimer > 0) return;
+  game.replayDyingTimer = null;
+  if (game.lives > 0) respawn(game);
+};
+
 // ordered phases (ship → bass → world → collisions) so cause-and-effect reads top-down.
 const updatePlaying = (game: Game, dt: number) => {
   game.recorder?.captureFrame(dt, game.input);
+  tickReplayDying(game, dt);
   tickBeatIntensityRamp(game, dt);
   tickTutorialSpawn(game);
   if (game.controlsHintActive) tickControlsGate(game);
@@ -527,6 +633,7 @@ const updatePlaying = (game: Game, dt: number) => {
   tickPendingRhythmBonuses(game);
   runCollisionPasses(game);
   evaluateClosedBeats(game);
+  recordHighlightFrame(game);
   syncPowerupHud(game);
   if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning && !game.tutorialActive) advanceWave(game);
 };

@@ -47,16 +47,21 @@ export const submitHighscore = async (
   name: string,
   game: Game,
 ): Promise<HighscoreRow> => {
+  // Read the frozen game-over snapshot when present: the highlight clip re-sims
+  //   the run on the live game object, so game.score/maxCombo/killTally now hold
+  //   the clip's in-progress values, not the finished run's. runSummary is the
+  //   run as it ended.
+  const s = game.runSummary;
   const res = await fetch("/api/highscores", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       name,
-      score: game.score,
-      wave: displayWave(game.wave),
-      max_combo: game.maxCombo,
-      kill_count: totalKills(game.killTally),
-      kill_summary: game.killTally,
+      score: s ? s.score : game.score,
+      wave: displayWave(s ? s.wave : game.wave),
+      max_combo: s ? s.maxCombo : game.maxCombo,
+      kill_count: totalKills(s ? s.killTally : game.killTally),
+      kill_summary: s ? s.killTally : game.killTally,
     }),
   });
   if (!res.ok) {

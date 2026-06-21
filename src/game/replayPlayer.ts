@@ -9,11 +9,34 @@ import type { ReplayPayload } from "./replayFormat";
 export class ReplayPlayer {
   readonly payload: ReplayPayload;
   readonly input = new ReplayInput();
+  // Per-frame rhythm (beatCombo) sampled during the re-sim, indexed by frame.
+  //   The replay payload only stores inputs, so combo is recovered by stepping
+  //   the sim; the scrubber draws this as a histogram. Filled lazily as frames
+  //   are consumed (a startReplay precompute sweep fills the whole thing).
+  readonly rhythmByFrame: Int16Array;
+  // First frame of each wave (with its displayed wave number), recovered during
+  //   the same re-sim sweep that fills rhythmByFrame. The scrubber marks these
+  //   as dots with a "Wave N" tooltip.
+  readonly waveStarts: { frame: number; wave: number }[] = [];
+  private prevWave = 0;
   private cursor = 0;
   private divergenceReported = false;
 
   constructor(payload: ReplayPayload) {
     this.payload = payload;
+    this.rhythmByFrame = new Int16Array(payload.frames.length);
+  }
+
+  // Record the rhythm value + watch for wave changes on the frame just consumed
+  //   (cursor - 1). Called after the sim advances so it reflects the combo/wave
+  //   that frame ended on.
+  sampleRhythm(combo: number, wave: number): void {
+    const i = this.cursor - 1;
+    if (i >= 0 && i < this.rhythmByFrame.length) this.rhythmByFrame[i] = combo;
+    if (wave !== this.prevWave) {
+      this.prevWave = wave;
+      if (i >= 0) this.waveStarts.push({ frame: i, wave });
+    }
   }
 
   // Frames already consumed (== the playhead position for the scrubber).
@@ -33,6 +56,13 @@ export class ReplayPlayer {
     this.divergenceReported = false;
     this.input.keys.clear();
     this.input.justPressed.clear();
+  }
+
+  // The next recorded frame's dt (seconds) without consuming it, or null when
+  //   finished. Lets the playback loop budget wall-clock time before stepping.
+  peekFrameDt(): number | null {
+    if (this.cursor >= this.payload.frames.length) return null;
+    return this.payload.frames[this.cursor][0];
   }
 
   // Returns the next recorded dt (seconds), or null when finished. Mutates
