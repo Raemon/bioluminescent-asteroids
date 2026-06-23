@@ -17,7 +17,7 @@ import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } 
 import { tickWaveEvents } from "./waveEvents";
 import { detonateShockwave } from "./shockwave";
 import { spawnWave, isBossWave, updateBgBeatIntensity, spawnTutorialSmall, spawnTutorialBig, rhythmSpeedMul, displayWave } from "./waveDirector";
-import { showWaveSummary } from "./waveSummary";
+import { showWaveSummary, hideWaveSummary } from "./waveSummary";
 import { beginWaveTransition, tickWaveTransition } from "./waveTransition";
 import {
   handleCollisions,
@@ -355,6 +355,7 @@ const transitionToGameOver = (game: Game) => {
   game.overlayStartEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
+  hideWaveSummary();
   showGameOverIntro(game, "gameover");
   showScoreEntry(game);
   if (highlightStarted) {
@@ -553,6 +554,12 @@ const PHASE_CORRECTION_RATE = 0.25;
 // position. Small errors get bled off over many frames via beatPhaseCorrection;
 // huge errors (post-stall) hard-snap and re-sync the bgBeat index.
 const tickBeatResnap = (game: Game) => {
+  // Replay is a pure dt+input re-sim: beatTime must stay a deterministic sum of
+  // the recorded musicDt. Resnap reads the live AudioContext position, which
+  // during replay sits at an unrelated wall-clock spot (audio is muted/seeked),
+  // so letting it run would shove beatTime onto a garbage value and desync
+  // every beatTime-keyed system (combo gate, bass clock, wave spawns).
+  if (game.replayPlayer) return;
   if (game.slowMoTimer > 0) return;
   if (game.beatTime - game.lastBeatResnapAt < BEAT_RESNAP_INTERVAL) return;
   game.lastBeatResnapAt = game.beatTime;

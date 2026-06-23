@@ -14,6 +14,9 @@ const TOP_PILOTS_DISTINCT_SCORES = 20;
 const TOP_PILOTS_BATCH = 100;
 const TOP_PILOTS_MAX_BATCHES = 5;
 const TOP_ROWS_CACHE_LIMIT = 100;
+// The title screen also pulls the most-recent rows so a "When" sort can surface
+//   fresh runs that aren't high enough to be in the top-by-score window.
+const RECENT_ROWS_LIMIT = 50;
 
 type KillSummary = Record<string, number>;
 
@@ -148,6 +151,7 @@ type CacheEntry<T> = { value: T; expires: number };
 const CACHE_TTL_MS = 60_000;
 let topPilotsCache: CacheEntry<RowOut[]> | null = null;
 let topRowsCache: CacheEntry<RowOut[]> | null = null;
+let recentRowsCache: CacheEntry<RowOut[]> | null = null;
 
 const readCache = <T>(entry: CacheEntry<T> | null): T | null => {
   if (!entry) return null;
@@ -158,6 +162,7 @@ const readCache = <T>(entry: CacheEntry<T> | null): T | null => {
 const invalidateCaches = () => {
   topPilotsCache = null;
   topRowsCache = null;
+  recentRowsCache = null;
 };
 
 // Leaderboard reads skip the heavy replay_data column and instead return a
@@ -240,6 +245,70 @@ const fetchTopRows = async (): Promise<RowOut[]> => {
   return mapped;
 };
 
+const fetchRecentRows = async (): Promise<RowOut[]> => {
+  const cached = readCache(recentRowsCache);
+  if (cached) return cached;
+  const rows = await prisma.highscore.findMany({
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: RECENT_ROWS_LIMIT,
+    select: LEADERBOARD_COLUMNS,
+  });
+  const hasReplayIds = await fetchHasReplayIds(rows.map((r) => r.id));
+  const mapped = withHasReplay(rows, hasReplayIds);
+  recentRowsCache = { value: mapped, expires: Date.now() + CACHE_TTL_MS };
+  return mapped;
+};
+
+// Post-run "your standing" view: the rows ranked just above and just below a
+//   given score id, under the global [score desc, createdAt desc] ordering.
+//   Anchored by id so a tie in score is split deterministically by createdAt,
+//   matching the rest of the board. Not cached — it's per-player and one-shot.
+const RADIUS_MAX = 25;
+
+const fetchAround = async (
+  id: number,
+  radius: number,
+): Promise<{ scores: RowOut[]; selfRank: number } | null> => {
+  const anchor = await prisma.highscore.findUnique({
+    where: { id },
+    select: LEADERBOARD_COLUMNS,
+  });
+  if (!anchor) return null;
+  // "Above" = strictly higher score, or same score submitted later (later
+  //   createdAt sorts first under the desc ordering). Fetch ascending+nearest,
+  //   then reverse into top-down display order.
+  const abovePredicate = {
+    OR: [
+      { score: { gt: anchor.score } },
+      { score: anchor.score, createdAt: { gt: anchor.createdAt } },
+    ],
+  };
+  const belowPredicate = {
+    OR: [
+      { score: { lt: anchor.score } },
+      { score: anchor.score, createdAt: { lt: anchor.createdAt } },
+    ],
+  };
+  const [aboveAsc, below, aboveCount] = await Promise.all([
+    prisma.highscore.findMany({
+      where: abovePredicate,
+      orderBy: [{ score: "asc" }, { createdAt: "asc" }],
+      take: radius,
+      select: LEADERBOARD_COLUMNS,
+    }),
+    prisma.highscore.findMany({
+      where: belowPredicate,
+      orderBy: [{ score: "desc" }, { createdAt: "desc" }],
+      take: radius,
+      select: LEADERBOARD_COLUMNS,
+    }),
+    prisma.highscore.count({ where: abovePredicate }),
+  ]);
+  const ordered = [...aboveAsc.reverse(), anchor, ...below];
+  const hasReplayIds = await fetchHasReplayIds(ordered.map((r) => r.id));
+  return { scores: withHasReplay(ordered, hasReplayIds), selfRank: aboveCount + 1 };
+};
+
 const setEdgeCache = (res: VercelResponse) => {
   // Short edge cache bounds cross-instance staleness; SWR lets the edge serve
   //   a slightly stale payload while a background revalidation fetches fresh.
@@ -258,6 +327,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(200).json({ scores: rows });
       } catch (err) {
         console.error("[highscores GET top-pilots] db read failed:", err);
+        res.status(500).json({ error: "DB read failed" });
+      }
+      return;
+    }
+
+    if (mode === "recent") {
+      try {
+        const rows = await fetchRecentRows();
+        setEdgeCache(res);
+        res.status(200).json({ scores: rows });
+      } catch (err) {
+        console.error("[highscores GET recent] db read failed:", err);
+        res.status(500).json({ error: "DB read failed" });
+      }
+      return;
+    }
+
+    if (mode === "around") {
+      const idRaw = req.query.id;
+      const radiusRaw = req.query.radius;
+      const id = sanitizeInt(Array.isArray(idRaw) ? idRaw[0] : idRaw, 1, Number.MAX_SAFE_INTEGER);
+      const radius = sanitizeInt(Array.isArray(radiusRaw) ? radiusRaw[0] : radiusRaw, 1, RADIUS_MAX) ?? RADIUS_MAX;
+      if (id === null) {
+        res.status(400).json({ error: "id is required" });
+        return;
+      }
+      try {
+        const result = await fetchAround(id, radius);
+        if (!result) {
+          res.status(404).json({ error: "score not found" });
+          return;
+        }
+        res.setHeader("Cache-Control", "no-store");
+        res.status(200).json(result);
+      } catch (err) {
+        console.error("[highscores GET around] db read failed:", err);
         res.status(500).json({ error: "DB read failed" });
       }
       return;
@@ -327,6 +432,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
       void fetchTopRows().catch((err) =>
         console.error("[highscores POST] cache warm top-rows failed:", err),
+      );
+      void fetchRecentRows().catch((err) =>
+        console.error("[highscores POST] cache warm recent failed:", err),
       );
       res.status(201).json({ score: toRowOut(row) });
     } catch (err) {

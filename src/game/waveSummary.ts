@@ -84,6 +84,7 @@ type SummaryEls = {
   rows: HTMLElement[];
   bonusValueEl: HTMLElement;
   scoreValueEl: HTMLElement;
+  extraLifeEl: HTMLElement;
 };
 
 let activeTimers: number[] = [];
@@ -108,6 +109,7 @@ const buildPanel = (): SummaryEls => {
       <div class="ws-row ws-drift"><span class="ws-label">Drift Shot</span> <span class="ws-value" data-row="drift"></span></div>
       <div class="ws-row ws-bonus"><span class="ws-label">Bonus</span> <span class="ws-value" data-row="bonus"></span></div>
       <div class="ws-row ws-score"><span class="ws-label">Score</span> <span class="ws-value" data-row="score"></span></div>
+      <div class="ws-extra-life" data-row="extra-life"></div>
     `;
     document.body.appendChild(root);
   }
@@ -117,6 +119,7 @@ const buildPanel = (): SummaryEls => {
     rows,
     bonusValueEl: root.querySelector<HTMLElement>('[data-row="bonus"]')!,
     scoreValueEl: root.querySelector<HTMLElement>('[data-row="score"]')!,
+    extraLifeEl: root.querySelector<HTMLElement>('[data-row="extra-life"]')!,
   };
 };
 
@@ -196,7 +199,7 @@ export const showWaveSummary = (
 ) => {
   cancelActiveTimers();
   const bonus = (maxRhythm + finalRhythm + driftBonuses) * 100;
-  const { root, rows, bonusValueEl, scoreValueEl } = buildPanel();
+  const { root, rows, bonusValueEl, scoreValueEl, extraLifeEl } = buildPanel();
   // Score the sim clock will drain the bonus on top of; the cosmetic numbers
   //   read game.score against this so the panel mirrors the real payout.
   const startScore = game.score;
@@ -215,9 +218,19 @@ export const showWaveSummary = (
   //   opacity transitions out — instead of the rows being at 0 the instant
   //   the panel reappears, ready for the staggered entrance.
   for (const row of rows) row.classList.remove("in");
+  extraLifeEl.classList.remove("in");
+  extraLifeEl.textContent = "";
   void root.offsetWidth;
   root.classList.remove("fade-out");
   void root.offsetWidth;
+
+  // Fade the next-bonus-life teaser in once the score has finished settling, so
+  //   the threshold reads against the just-paid score (a drain may have crossed
+  //   it and pushed nextBonusLifeScore forward).
+  const revealExtraLife = () => {
+    extraLifeEl.textContent = `Additional ship at ${formatScore(game.nextBonusLifeScore)}`;
+    extraLifeEl.classList.add("in");
+  };
 
   // One row per beat, each with a paired sound.
   rows.forEach((row, i) => {
@@ -236,6 +249,7 @@ export const showWaveSummary = (
   const drainStartMs = FIRST_ROW_DELAY_MS + rows.length * BEAT_MS + PAUSE_BEFORE_DRAIN_MS;
   const startDrain = window.setTimeout(() => {
     if (bonus <= 0) {
+      revealExtraLife();
       scheduleFadeOut(root);
       return;
     }
@@ -278,6 +292,7 @@ export const showWaveSummary = (
         //   the still-ringing G-major pad — root + fifth of C resolves the
         //   phrase to the game's tonal anchor instead of clanging.
         game.sound.play("chime", CHIME_C6);
+        revealExtraLife();
         scheduleFadeOut(root);
       }
     };
@@ -305,5 +320,7 @@ export const hideWaveSummary = () => {
     root.classList.remove("fade-out");
     const rows = root.querySelectorAll<HTMLElement>(".ws-row");
     for (const row of rows) row.classList.remove("in");
+    const extraLife = root.querySelector<HTMLElement>(".ws-extra-life");
+    if (extraLife) extraLife.classList.remove("in");
   }
 };

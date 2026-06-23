@@ -2438,6 +2438,23 @@ html:has(#sound-root), body:has(> #sound-root) {
   transform-origin: right center;
 }
 
+#wave-summary .ws-extra-life {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #9be8ff;
+  text-shadow: 0 0 10px rgba(120, 220, 255, 0.6);
+  opacity: 0;
+  transition: opacity 0.9s ease-in;
+}
+
+#wave-summary .ws-extra-life.in {
+  opacity: 0.85;
+}
+
 #wave-summary .ws-pulse {
   animation: ws-score-pulse 0.16s ease-out;
 }
@@ -3084,7 +3101,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 .replay-scrubber__bar {
   position: relative;
   flex: 1 1 auto;
-  height: 6px;
+  height: 1px;
   border-radius: 3px;
   background: rgba(106, 215, 255, 0.18);
   cursor: pointer;

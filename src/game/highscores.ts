@@ -93,6 +93,31 @@ export const fetchTopPilots = async (): Promise<HighscoreRow[]> => {
   return body.scores;
 };
 
+// The most-recent rows, regardless of score. Folded into the title-screen pool
+//   so a fresh run shows up by default only if it's a pilot's category best,
+//   but is always reachable by sorting on the "When" column.
+export const fetchRecentScores = async (): Promise<HighscoreRow[]> => {
+  const res = await fetch("/api/highscores?mode=recent", { method: "GET", cache: "no-store" });
+  if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+  const body = (await res.json()) as { scores: HighscoreRow[] };
+  return body.scores;
+};
+
+// Post-run "your standing": the rows ranked just above and below the player's
+//   submitted score, with selfRank giving the score's true global position so
+//   the leaderboard can show real rank numbers instead of a window-local index.
+export const fetchNeighborhood = async (
+  id: number,
+  radius = 25,
+): Promise<{ scores: HighscoreRow[]; selfRank: number }> => {
+  const res = await fetch(`/api/highscores?mode=around&id=${id}&radius=${radius}`, {
+    method: "GET",
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+  return (await res.json()) as { scores: HighscoreRow[]; selfRank: number };
+};
+
 // the leaderboard row shows a compressed kill breakdown; pick the top few
 // buckets so the row stays scannable instead of dumping every category.
 export const formatKillSummary = (summary: Record<string, number>): string => {

@@ -24,6 +24,7 @@ import { explodeCanister, expireGem, crackGemForCanister } from "./collisions";
 import type { Gem } from "../Gem";
 import type { Canister } from "../Canister";
 import { syncHud } from "./hud";
+import { prongOffsets } from "../ship/shipWeapons";
 
 // Absolute charge-dot ceiling (one per beat held). Damage doubles per dot from
 // a base of 2, so dots 0..4 deal 2, 4, 8, 16, 32 — a full charge melts large
@@ -101,11 +102,15 @@ export class LaserBeam {
   // Whether the fire-release landed on-beat. Carried onto every hit's fake
   // bullet so beam strikes gain rhythm exactly like an on-beat bullet's hit.
   firedOnBeat: boolean;
+  // Angular offset from the ship's heading. Prong fires one beam per offset, each
+  // fanned out like the bullet prong fan; 0 for the lone straight-ahead beam.
+  headingOffset: number;
 
-  constructor(ship: Ship, length: number, damage: number, dots: number, game: Game) {
+  constructor(ship: Ship, length: number, damage: number, dots: number, game: Game, headingOffset = 0) {
     this.ship = ship;
-    this.heading = ship.heading;
-    this.origin = muzzleOf(ship);
+    this.headingOffset = headingOffset;
+    this.heading = ship.heading + headingOffset;
+    this.origin = muzzleOf(ship, headingOffset);
     this.length = length;
     this.life = LASER_BEAM_LIFE;
     this.maxLife = LASER_BEAM_LIFE;
@@ -130,8 +135,8 @@ export class LaserBeam {
 
   // Re-anchor to the ship, sweep-damage anything newly crossed, then age out.
   update(dt: number, game: Game) {
-    this.heading = this.ship.heading;
-    this.origin = muzzleOf(this.ship);
+    this.heading = this.ship.heading + this.headingOffset;
+    this.origin = muzzleOf(this.ship, this.headingOffset);
     const dir = fromAngle(this.heading, 1);
     applyBeamDamage(game, this, dir);
     this.life -= dt;
@@ -142,9 +147,10 @@ export class LaserBeam {
   }
 }
 
-// Beam origin: the ship's muzzle, a touch ahead of the hull.
-const muzzleOf = (ship: Ship): Vec => {
-  const dir = fromAngle(ship.heading, 1);
+// Beam origin: the ship's muzzle, a touch ahead of the hull, along the beam's
+// (possibly prong-offset) heading.
+const muzzleOf = (ship: Ship, headingOffset = 0): Vec => {
+  const dir = fromAngle(ship.heading + headingOffset, 1);
   return add(ship.pos, mul(dir, ship.radius + 4));
 };
 
@@ -256,9 +262,12 @@ const fireLaser = (game: Game, ship: Ship, dots: number) => {
   const firedOnBeat = isInBeatWindow(game, game.perceivedBeatTime);
   if (firedOnBeat) registerOnBeatFire(game);
   else registerOffBeatFire(game);
-  const beam = new LaserBeam(ship, length, damage, dots, game);
-  beam.firedOnBeat = firedOnBeat;
-  game.lasers.push(beam);
+  // Prong fires one beam per fan direction, matching the bullet prong fan.
+  for (const offset of prongOffsets(ship.prongCount)) {
+    const beam = new LaserBeam(ship, length, damage, dots, game, offset);
+    beam.firedOnBeat = firedOnBeat;
+    game.lasers.push(beam);
+  }
   game.sound.playLaserShot(damage, dots);
   game.shake = Math.min(game.shake + 0.12 + dots * 0.12, 1.4);
   // Big white pop on release, scaled by charge; the buildup glow ends here.

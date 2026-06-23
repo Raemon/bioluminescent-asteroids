@@ -316,7 +316,12 @@ export class Game implements HudElements {
   leaderboardRows: HighscoreRow[] = [];
   // Unfiltered top-100 from the server; drives the rendered view when
   //   "top entries only" is OFF, and is the base for "show more" paging.
+  //   May also hold recent-only runs folded in for the "When" sort.
   leaderboardAllRows: HighscoreRow[] = [];
+  // Count of score-ranked rows in leaderboardAllRows (excludes the recent-only
+  //   runs folded in). The "show more" page offset reads this so the cursor
+  //   isn't thrown off by the appended recent rows.
+  leaderboardRankedCount = 0;
   // Deep server-deduped "top pilots" set — scanned far enough to surface ~20
   //   distinct scores' worth of pilots. Drives the rendered view when "top
   //   entries only" is ON, since the raw top-100 can be dominated by one pilot.
@@ -337,6 +342,18 @@ export class Game implements HudElements {
   // clickable column headers re-sort; rhythm is the default with score as
   //   the tiebreaker so the headline streak stat leads the board.
   leaderboardSort: "rhythm" | "score" | "wave" | "name" | "date" = "rhythm";
+  // One-shot: after submitting a score, the very next title screen shows the
+  //   ±25 neighborhood centred on the player instead of the hall-of-fame. The
+  //   fetch is armed during the game-over screen so there's no loading flash.
+  //   Both reset when a new run starts. See game/scoreEntry.ts.
+  showNeighborhoodOnce = false;
+  neighborhoodFetch: Promise<{ scores: HighscoreRow[]; selfRank: number } | null> | null = null;
+  // True while the neighborhood view is rendered: forces the full ±25 list to
+  //   render expanded (not windowed) so the page can scroll the self row to centre.
+  leaderboardNeighborhood = false;
+  // Global rank of the first rendered row, so the neighborhood view shows true
+  //   ranks instead of a window-local index. 0 on every other view.
+  leaderboardRankBase = 0;
 
   // post-run trophy lineup; replayed in the end-of-mission parade with original kill sounds.
   killedSnapshots: KilledSnapshot[] = [];

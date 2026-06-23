@@ -197,9 +197,11 @@ export const showTitle = (game: Game) => {
 //   is never exercised during gameplay.
 export const requestStart = (game: Game) => {
   if (game.calibrating || game.calibrationIntro || game.introOverlayActive || game.startPending) return;
-  game.sound.resume();
   game.startPending = true;
-  void game.sound.bakedCacheReady().then(() => {
+  // Await the context actually reaching "running" (resume now retries until it
+  //   does) alongside the baked-mp3 cache, so the run never starts scheduling
+  //   sounds into a still-suspended context — the cause of silent-until-reload.
+  void Promise.all([game.sound.resume(), game.sound.bakedCacheReady()]).then(() => {
     game.startPending = false;
     if (!hasCalibrated()) {
       startCalibrationIntro(game);
@@ -284,6 +286,10 @@ export const startCalibrationIntro = (game: Game) => {
   game.leaderboardEl.classList.add("hidden");
   game.lastRunScore = null;
   game.lastRunScoreId = null;
+  game.showNeighborhoodOnce = false;
+  game.neighborhoodFetch = null;
+  game.leaderboardNeighborhood = false;
+  game.leaderboardRankBase = 0;
   syncHud(game);
   emitGameState(game);
   window.dispatchEvent(new CustomEvent("beat-calibrator:open", { detail: { sound: game.sound, intro: true } }));
@@ -485,6 +491,10 @@ export const startGame = (game: Game, overrides?: {
   game.leaderboardEl.classList.add("hidden");
   game.lastRunScore = null;
   game.lastRunScoreId = null;
+  game.showNeighborhoodOnce = false;
+  game.neighborhoodFetch = null;
+  game.leaderboardNeighborhood = false;
+  game.leaderboardRankBase = 0;
   syncHud(game);
   emitGameState(game);
 };
@@ -638,6 +648,7 @@ export const abortMission = (game: Game) => {
   game.overlayStartEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
+  hideWaveSummary();
   const shipSnap = snapshotShipKill(game.ship, "death");
   if (shipSnap) game.killedSnapshots.push(shipSnap);
   renderKilledRow(game, "vertical");

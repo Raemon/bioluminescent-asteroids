@@ -1,6 +1,8 @@
 import type { Game } from "../Game";
 import {
   fetchHighscores,
+  fetchNeighborhood,
+  fetchRecentScores,
   fetchTopPilots,
   getCachedHighscores,
   getRecentName,
@@ -56,6 +58,12 @@ const handleSubmit = async (game: Game, ev: Event) => {
     saveRecentName(rawName);
     game.lastRunScoreId = saved.id;
     game.lastRunScore = saved.score;
+    // Arm the one-shot "your standing" view and pre-fetch its rows now, while
+    //   the player is still reading the game-over screen, so returning home
+    //   renders the centred neighborhood without a loading flash. The catch
+    //   keeps the promise non-rejecting; null falls back to the hall-of-fame.
+    game.showNeighborhoodOnce = true;
+    game.neighborhoodFetch = fetchNeighborhood(saved.id, 25).catch(() => null);
     game.scoreEntryInputEl.blur();
     if (wantReplay) {
       setStatus(game, "Uploading replay…", "info");
@@ -90,12 +98,17 @@ const handleSubmit = async (game: Game, ev: Event) => {
 const handleInputKeydown = (game: Game, ev: KeyboardEvent) => {
   if (ev.key === "Enter") {
     ev.stopPropagation();
+    // During a highlight clip game.input is the replay shim and the window
+    //   keydown is swallowed here, so mirror the press onto the live input —
+    //   tickHighlightGameOverInput reads it for Enter-to-continue.
+    if (game.highlightClip) game.localInput.setVirtual("enter", true);
     return;
   }
   if (ev.key === "Escape") {
     ev.stopPropagation();
     ev.preventDefault();
     hideScoreEntry(game);
+    if (game.highlightClip) game.localInput.setVirtual("escape", true);
   }
 };
 
@@ -270,7 +283,7 @@ const renderLeaderboard = (game: Game) => {
       '<li class="leaderboard-status">No scores yet — be the first pilot on the board.</li>';
     return;
   }
-  const expanded = game.leaderboardExpanded && game.lastRunScoreId === null;
+  const expanded = game.leaderboardNeighborhood || game.leaderboardExpanded;
   const windowSize = expanded ? rows.length : visibleWindowSize(game);
   const start = expanded ? 0 : windowStart(game.leaderboardSelection, rows.length, windowSize);
   const end = expanded ? rows.length : Math.min(rows.length, start + windowSize);
@@ -301,7 +314,7 @@ const renderLeaderboard = (game: Game) => {
       ? `<span class="lb-date"><span class="lb-date-text">${fromNow}</span><span class="lb-date-tip">${exactDate}</span></span>`
       : `<span class="lb-date"></span>`;
     items.push(`<li${cls}>
-      <span class="lb-rank">${i + 1}</span>
+      <span class="lb-rank">${i + 1 + game.leaderboardRankBase}</span>
       <span class="lb-name">${safeName}${replayBtn}</span>
       <span class="lb-score">${row.score.toLocaleString()}</span>
       <span class="lb-combo lb-combo-${comboTier}">
@@ -341,6 +354,21 @@ const pickBest = (
   return best;
 };
 
+// Union two row lists by id, keeping `base` order and appending any rows from
+//   `extra` not already present. Used to fold the recent-runs set into the
+//   score-ranked pools without introducing duplicate ids.
+const mergeById = (base: HighscoreRow[], extra: HighscoreRow[]): HighscoreRow[] => {
+  const seen = new Set(base.map((r) => r.id));
+  const out = [...base];
+  for (const row of extra) {
+    if (!seen.has(row.id)) {
+      seen.add(row.id);
+      out.push(row);
+    }
+  }
+  return out;
+};
+
 const dedupeByName = (rows: HighscoreRow[]): HighscoreRow[] => {
   const byPilot = new Map<string, HighscoreRow[]>();
   for (const row of rows) {
@@ -377,19 +405,31 @@ export const showLeaderboard = (game: Game) => {
   bindLeaderboardClicks(game);
   bindLeaderboardFooter(game);
   game.leaderboardEl.classList.remove("hidden");
-  const showNeighborhood = game.lastRunScoreId !== null;
-  // Post-run "your standing" view always shows the raw top-50 so the player
-  //   sees their actual row even if a previous run by them ranks higher.
-  game.leaderboardTopOnly = showNeighborhood ? false : getTopEntriesOnly();
-  // Title screen defaults to fully-expanded: the deduped top-50 reads as a
-  //   hall of fame, not a 7-row peek-window. Post-run keeps the scrolling
-  //   window so the yellow self-row stays centred.
-  game.leaderboardExpanded = !showNeighborhood;
+  // One-shot post-run view: the first title screen after a submitted score shows
+  //   the ±25 neighborhood centred on the player. Consume the flag immediately so
+  //   a later return-to-title or reload reverts to the hall-of-fame.
+  if (game.showNeighborhoodOnce && game.neighborhoodFetch) {
+    const pending = game.neighborhoodFetch;
+    game.showNeighborhoodOnce = false;
+    game.neighborhoodFetch = null;
+    void showNeighborhoodLeaderboard(game, pending);
+    return;
+  }
+  renderHallOfFame(game);
+};
+
+// The default title-screen view: deduped "top pilots" hall-of-fame, fully
+//   expanded, refreshed from the network behind cached rows.
+const renderHallOfFame = (game: Game) => {
+  game.leaderboardNeighborhood = false;
+  game.leaderboardRankBase = 0;
+  game.leaderboardTopOnly = getTopEntriesOnly();
+  game.leaderboardExpanded = true;
   game.leaderboardLoadingMore = false;
-  syncOverlayExpansion(!showNeighborhood);
+  syncOverlayExpansion(true);
   syncShowMoreVisibility(game);
   syncFooterUi(game);
-  syncFooterVisibility(showNeighborhood);
+  syncFooterVisibility(false);
   game.leaderboardSort = "rhythm";
   // Paint cached rows immediately so the title screen is never blank on reload;
   //   the in-flight fetch will swap them out with fresh data when it lands.
@@ -399,10 +439,10 @@ export const showLeaderboard = (game: Game) => {
     //   the toggle works before the live top-100 lands.
     game.leaderboardTopPilots = cached;
     game.leaderboardAllRows = cached;
-    applySort(game, game.lastRunScoreId);
+    applySort(game, null);
   } else {
     game.leaderboardListEl.innerHTML =
-      `<li class="leaderboard-status">${showNeighborhood ? "Loading your standing…" : "Loading top pilots…"}</li>`;
+      `<li class="leaderboard-status">Loading top pilots…</li>`;
     game.leaderboardTopPilots = [];
     game.leaderboardAllRows = [];
     game.leaderboardRows = [];
@@ -412,19 +452,81 @@ export const showLeaderboard = (game: Game) => {
   void refreshLeaderboard(game);
 };
 
+// Post-run "your standing": render the pre-fetched ±25 neighborhood with the
+//   player's row centred on the page. Falls back to the hall-of-fame if the
+//   fetch failed or returned nothing.
+const showNeighborhoodLeaderboard = async (
+  game: Game,
+  pending: Promise<{ scores: HighscoreRow[]; selfRank: number } | null>,
+) => {
+  game.leaderboardNeighborhood = true;
+  game.leaderboardExpanded = true;
+  game.leaderboardTopOnly = false;
+  game.leaderboardLoadingMore = false;
+  syncOverlayExpansion(true);
+  syncFooterVisibility(true);
+  syncShowMoreVisibility(game);
+  game.leaderboardListEl.innerHTML =
+    `<li class="leaderboard-status">Loading your standing…</li>`;
+  const result = await pending;
+  if (!result || result.scores.length === 0) {
+    renderHallOfFame(game);
+    return;
+  }
+  const rows = result.scores;
+  const selfIdx = rows.findIndex((r) => r.id === game.lastRunScoreId);
+  game.leaderboardAllRows = rows;
+  game.leaderboardRows = rows;
+  game.leaderboardSelection = selfIdx >= 0 ? selfIdx : 0;
+  // selfRank is the anchor's global rank; back out the rank of the first row so
+  //   every rendered row shows its true position.
+  game.leaderboardRankBase = result.selfRank - 1 - (selfIdx >= 0 ? selfIdx : 0);
+  game.leaderboardActive = true;
+  renderLeaderboard(game);
+  scrollSelfToCenter(game);
+};
+
+// Scroll the overlay so the highlighted self row sits at viewport centre. One
+//   rAF lets the reveal transition + layout settle before measuring.
+const scrollSelfToCenter = (game: Game) => {
+  requestAnimationFrame(() => {
+    const overlay = document.getElementById("overlay");
+    const self = game.leaderboardListEl.querySelector<HTMLElement>(".lb-self");
+    if (!overlay || !self) return;
+    // Rect-relative so it's correct regardless of offsetParent nesting: how far
+    //   the self row's centre is from the overlay's current scroll viewport top,
+    //   then shift so that point lands at the viewport's vertical centre.
+    const overlayRect = overlay.getBoundingClientRect();
+    const selfRect = self.getBoundingClientRect();
+    const selfCenterInView = selfRect.top - overlayRect.top + selfRect.height / 2;
+    const target = overlay.scrollTop + selfCenterInView - overlay.clientHeight / 2;
+    overlay.scrollTop = Math.max(0, target);
+  });
+};
+
 export const refreshLeaderboard = async (game: Game) => {
-  const selfId = game.lastRunScoreId;
+  // The hall-of-fame never highlights/centres a self row — the post-run
+  //   neighborhood view owns that. Passing null keeps it fully expanded even
+  //   when lastRunScoreId is still set from the run just played.
+  const selfId = null;
   // Two-phase. Phase 1: the deep top-pilots set (server-deduped, scanned far
   //   enough for ~20 distinct scores) — this is what the default "top entries
   //   only" view renders. Phase 2: the raw top-100, which powers the view once
   //   the toggle is turned OFF and is the base for "show more" paging. Phase 2
   //   must NOT clobber the phase-1 view — the raw top-100 can be one pilot deep.
+  // The recent-runs set folds into both pools below. Fetched once up front and
+  //   reused; a failure here just means recent-only runs stay absent until the
+  //   next refresh — the score-ranked views still render.
+  const recentRows = await fetchRecentScores().catch(() => [] as HighscoreRow[]);
   let paintedInitial = false;
   try {
     const initial = await fetchTopPilots();
     paintedInitial = true;
-    saveCachedHighscores(initial);
-    game.leaderboardTopPilots = initial;
+    // Fold recent runs into the dedupe pool so a fresh personal-best surfaces in
+    //   the default view; dedupeByName then keeps only category bests per pilot.
+    const pool = mergeById(initial, recentRows);
+    saveCachedHighscores(pool);
+    game.leaderboardTopPilots = pool;
     game.leaderboardHasMore = true;
     applySort(game, selfId);
     syncShowMoreVisibility(game);
@@ -433,8 +535,12 @@ export const refreshLeaderboard = async (game: Game) => {
   }
   try {
     const rows = await fetchHighscores(LEADERBOARD_FETCH_LIMIT);
-    game.leaderboardAllRows = rows;
-    game.leaderboardHasMore = rows.length >= LEADERBOARD_FETCH_LIMIT;
+    const hadFullPage = rows.length >= LEADERBOARD_FETCH_LIMIT;
+    game.leaderboardRankedCount = rows.length;
+    // Append recent-only runs so the "When" sort (toggle off) can reach fresh
+    //   runs that fell outside the top-by-score window.
+    game.leaderboardAllRows = mergeById(rows, recentRows);
+    game.leaderboardHasMore = hadFullPage;
     // Re-render only matters when the toggle is off (the on-view reads the
     //   phase-1 set); applySort handles both and is cheap.
     applySort(game, selfId);
@@ -456,13 +562,16 @@ const loadMoreLeaderboard = async (game: Game) => {
   game.leaderboardLoadingMore = true;
   syncShowMoreVisibility(game);
   try {
-    const offset = game.leaderboardAllRows.length;
+    // Page by the score-ranked count, not the merged length — the recent-only
+    //   runs folded in for the "When" sort aren't part of the score-ordered cursor.
+    const offset = game.leaderboardRankedCount;
     const rows = await fetchHighscores(LEADERBOARD_FETCH_LIMIT, offset);
     const existingIds = new Set(game.leaderboardAllRows.map((r) => r.id));
     const fresh = rows.filter((r) => !existingIds.has(r.id));
+    game.leaderboardRankedCount += rows.length;
     game.leaderboardAllRows = [...game.leaderboardAllRows, ...fresh];
     game.leaderboardHasMore = rows.length >= LEADERBOARD_FETCH_LIMIT;
-    applySort(game, game.lastRunScoreId);
+    applySort(game, null);
   } catch {
     // leave the existing list intact; user can retry by clicking again.
   } finally {
@@ -475,6 +584,9 @@ const loadMoreLeaderboard = async (game: Game) => {
 //   from the full top-100. The deep set still gets a client dedupe pass so a
 //   stale or over-broad payload can't leak duplicate pilot rows.
 const applySort = (game: Game, selfId: number | null) => {
+  // The post-run standing view is server-ordered by rank; column-header sorts
+  //   and footer toggles don't apply, and re-sorting would break the rank base.
+  if (game.leaderboardNeighborhood) return;
   const filtered = game.leaderboardTopOnly
     ? dedupeByName(game.leaderboardTopPilots)
     : game.leaderboardAllRows;
@@ -512,7 +624,7 @@ const bindLeaderboardFooter = (game: Game) => {
   checkbox.addEventListener("change", () => {
     game.leaderboardTopOnly = checkbox.checked;
     saveTopEntriesOnly(checkbox.checked);
-    applySort(game, game.lastRunScoreId);
+    applySort(game, null);
   });
   showMore.addEventListener("click", () => {
     if (game.leaderboardLoadingMore) return;
@@ -527,7 +639,7 @@ const bindLeaderboardFooter = (game: Game) => {
     if (justExpanded) {
       game.leaderboardExpanded = true;
       syncOverlayExpansion(true);
-      applySort(game, game.lastRunScoreId);
+      applySort(game, null);
       syncShowMoreVisibility(game);
       return;
     }
@@ -571,7 +683,14 @@ const bindLeaderboardClicks = (game: Game) => {
     const key = sortEl.dataset.sort as Game["leaderboardSort"] | undefined;
     if (!key || key === game.leaderboardSort) return;
     game.leaderboardSort = key;
-    applySort(game, game.lastRunScoreId);
+    // Sorting by recency only makes sense across every run, so drop the
+    //   one-row-per-pilot filter when the player asks for "When".
+    if (key === "date" && game.leaderboardTopOnly) {
+      game.leaderboardTopOnly = false;
+      saveTopEntriesOnly(false);
+      syncFooterUi(game);
+    }
+    applySort(game, null);
   });
 };
 

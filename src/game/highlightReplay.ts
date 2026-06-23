@@ -5,8 +5,12 @@ import { ReplayPlayer } from "./replayPlayer";
 import { pickHighlightChain } from "./highlightTimeline";
 import { startHighlightReplay, showTitle } from "./lifecycle";
 import { hideScoreEntry, isScoreEntryBlockingEnter } from "./scoreEntry";
-import { wasPressed } from "./controlBindings";
 import { loadBeatOffset } from "./beatCalibration";
+
+// Master switch for the game-over highlight clip. The replay re-sim isn't yet
+//   reliable enough to ship, so game-over falls back to the trophy parade. Flip
+//   to true to restore the replay-on-gameover screen — the infra below is intact.
+const HIGHLIGHT_CLIP_ON_GAMEOVER = false;
 
 // Seconds of run shown before the chain's priming fire — the "wind-up" the spec
 //   asks for so the highlight starts a beat or two before the player's first shot.
@@ -39,6 +43,7 @@ const frameSecondsBack = (payload: ReplayPayload, fromFrame: number, seconds: nu
 //   already finalised it — finalize nulls game.recorder but keeps the instance,
 //   whose in-memory frames the clip re-sims.
 export const tryStartHighlightClip = (game: Game, recorder: ReplayRecorder | null): boolean => {
+  if (!HIGHLIGHT_CLIP_ON_GAMEOVER) return false;
   if (!recorder || recorder.frameCount() === 0) return false;
   const chain = pickHighlightChain(game.highlightTimeline.chains);
   if (!chain) return false;
@@ -143,8 +148,10 @@ const exitHighlightToTitle = (game: Game) => {
 //   Returns true when it exited to title (caller should stop touching the clip).
 export const tickHighlightGameOverInput = (game: Game): boolean => {
   const live = game.localInput;
-  // Escape dismisses the score-entry form so Enter can then restart.
-  if (wasPressed(live, "pause")) hideScoreEntry(game);
+  // Escape dismisses the score-entry form so Enter can then restart. Read the
+  //   live key directly: wasPressed resolves against the recording's bindings
+  //   while the clip is up, which would match the wrong key.
+  if (live.pressed("escape")) hideScoreEntry(game);
   const startPressed =
     live.pressed("enter") || live.pressed("return") || live.pressed(" ") || live.pressed("spacebar");
   if (startPressed && !isScoreEntryBlockingEnter(game)) {

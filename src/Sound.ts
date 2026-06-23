@@ -1130,9 +1130,29 @@ export class Sound {
     }
   }
 
-  resume() {
+  // Resume (and, on first call, create) the AudioContext. MUST be invoked from
+  //   inside a user gesture. ctx.resume() returns a promise and the context is
+  //   NOT reliably "running" the instant it resolves — on some browsers the
+  //   first gesture leaves it stuck in "suspended" until a second nudge, which
+  //   is why sound "sometimes doesn't work until you reload". We await the
+  //   resume and retry a few times until the state actually flips to "running",
+  //   so callers that await this (the start gate) never schedule into a dead
+  //   context. Fire-and-forget callers still benefit from the retry.
+  async resume(): Promise<void> {
     this.ensureContext();
-    if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const isRunning = () => (ctx.state as string) === "running";
+    for (let attempt = 0; attempt < 5 && !isRunning(); attempt++) {
+      try {
+        await ctx.resume();
+      } catch {
+        // resume() can reject if called outside a gesture or mid-teardown;
+        //   the loop's state re-check decides whether another try is worth it.
+      }
+      if (isRunning()) return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
   }
 
   // Audio-clock "now" in seconds. The latency calibrator reads this the instant a
