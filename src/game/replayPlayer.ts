@@ -21,10 +21,20 @@ export class ReplayPlayer {
   private prevWave = 0;
   private cursor = 0;
   private divergenceReported = false;
+  // frameIndex → recorded beatTime adjustment the live run's resnap watchdog made.
+  //   Replay has no audio clock, so it re-applies these instead of re-deriving them.
+  private readonly beatResnapByFrame: Map<number, number>;
 
   constructor(payload: ReplayPayload) {
     this.payload = payload;
     this.rhythmByFrame = new Int16Array(payload.frames.length);
+    this.beatResnapByFrame = new Map(payload.beatResnaps ?? []);
+  }
+
+  // The recorded beat-resnap adjustment for the frame just consumed (cursor - 1),
+  //   or 0 if none. Applied to beatTime during replay to track the recording.
+  beatResnapForCurrentFrame(): number {
+    return this.beatResnapByFrame.get(this.cursor - 1) ?? 0;
   }
 
   // Record the rhythm value + watch for wave changes on the frame just consumed

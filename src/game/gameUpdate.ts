@@ -639,8 +639,23 @@ const updatePlaying = (game: Game, dt: number) => {
       lastCommandedPlaybackRate = slowMoFactor;
     }
   }
-  tickBeatResnap(game);
-  const musicDt = applyBeatPhaseCorrection(game, rawMusicDt);
+  // Resnap perturbs beatTime away from a pure dt-sum, two ways: a hard-snap jumps
+  //   beatTime directly here, and a bleed feeds beatPhaseCorrection into musicDt
+  //   (below) over many frames. Both are driven by the live audio clock, which a
+  //   replay lacks — so live play records the net adjustment per frame and replay
+  //   re-applies the recorded value instead of running the watchdog. snapDelta is
+  //   the hard-snap jump (0 on bleed/clean frames); the bleed delta is captured
+  //   after applyBeatPhaseCorrection as (musicDt - rawMusicDt).
+  const beatTimeBeforeSnap = game.beatTime;
+  if (!game.replayPlayer) tickBeatResnap(game);
+  const snapDelta = game.beatTime - beatTimeBeforeSnap;
+  const musicDt = game.replayPlayer
+    ? rawMusicDt + game.replayPlayer.beatResnapForCurrentFrame()
+    : applyBeatPhaseCorrection(game, rawMusicDt);
+  // Live: total resnap adjustment to beatTime this frame = the hard-snap jump plus
+  //   the bleed delta folded into musicDt. Replay already injected its recorded
+  //   value into musicDt above, so it records nothing.
+  game.recorder?.recordBeatResnap(snapDelta + (musicDt - rawMusicDt));
   // playbackRate maps beatTime → audio-clock seconds for the lookahead pulse
   // scheduler; under slow-mo musicDt < dt so beats are scheduled further out.
   const beatPlaybackRate = dt > 0 ? rawMusicDt / dt : 1;

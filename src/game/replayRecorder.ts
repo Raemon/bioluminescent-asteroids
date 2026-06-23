@@ -1,7 +1,7 @@
 import type { IInput } from "../Input";
 import type { Ship } from "../Ship";
 import type { Bindings } from "./controlBindings";
-import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayDebugFrame, type ReplayFrame, type ReplayHeader, type ReplayPayload, type ReplayStartBeat } from "./replayFormat";
+import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayBeatResnap, type ReplayDebugFrame, type ReplayFrame, type ReplayHeader, type ReplayPayload, type ReplayStartBeat } from "./replayFormat";
 
 // Build hash from Vite at compile time so playback can warn about
 // build-version mismatches. Falls back to "dev" when not injected.
@@ -22,6 +22,9 @@ export class ReplayRecorder {
   //   construction time. Packed into the serialized payload so __replayLast()
   //   can diff replay state against the recording.
   private debugFrames: ReplayDebugFrame[] | null = null;
+  // Sparse beat-resnap corrections: the net beatTime adjustment the watchdog made
+  //   on each frame it fired. Replay re-applies these since it has no audio clock.
+  private beatResnaps: ReplayBeatResnap[] = [];
   private vocab: string[] = [];
   private vocabIndex = new Map<string, number>();
   private lastKeys = new Set<string>();
@@ -79,6 +82,14 @@ export class ReplayRecorder {
     for (const k of input.keys) this.lastKeys.add(k);
   }
 
+  // Record the net beatTime adjustment the resnap watchdog made this frame, keyed
+  //   to the frame just captured (resnap runs after captureFrame in updatePlaying).
+  //   No-op for a zero delta so a clean run stores nothing.
+  recordBeatResnap(beatTimeDelta: number): void {
+    if (beatTimeDelta === 0) return;
+    this.beatResnaps.push([this.frames.length - 1, beatTimeDelta]);
+  }
+
   private bitFor(key: string): number {
     let idx = this.vocabIndex.get(key);
     if (idx === undefined) {
@@ -124,7 +135,12 @@ export class ReplayRecorder {
       maxCombo: summary.maxCombo,
       killCount: summary.killCount,
     };
-    return { header, frames: this.frames.slice(), debugFrames: this.debugFrames ? this.debugFrames.slice() : undefined };
+    return {
+      header,
+      frames: this.frames.slice(),
+      beatResnaps: this.beatResnaps.length ? this.beatResnaps.slice() : undefined,
+      debugFrames: this.debugFrames ? this.debugFrames.slice() : undefined,
+    };
   }
 
   // Build the final payload and gzip it. Caller provides the run summary
