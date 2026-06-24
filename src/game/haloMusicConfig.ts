@@ -48,7 +48,10 @@
 // Every pool entry is fetched + decoded at startGame so the first 4x
 // doesn't pay fetch latency regardless of which one comes up.
 import type { HaloMusicVariation } from "../Sound";
-import { rng } from "./rng";
+// Music-track variation picks are audio/cosmetic and fire from syncHaloAmbient,
+//   which branches on live audio state the muted replay re-sim doesn't share —
+//   so they must draw the cosmetic stream, never the gameplay one (would desync).
+import { cosmeticRng as rng } from "./rng";
 
 // Master on/off for the combo-driven music layers. When false, the 4x/6x/12x
 // halo tiers still light up visually but no music (pre-rendered or legacy

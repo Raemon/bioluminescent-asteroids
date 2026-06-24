@@ -1,4 +1,8 @@
-import { Vec, fromAngle, rand, TAU } from "../vec";
+// Explosion/burst particles are purely visual AND draw a variable number of
+//   values per call (loops over count) — exactly the case the rng.ts contract
+//   says must use the cosmetic stream, or the per-burst draw count shifts every
+//   downstream gameplay draw and desyncs replays. Aliased so call sites read clean.
+import { Vec, fromAngle, cosmeticRand as rand, TAU } from "../vec";
 import { ParticleSystem } from "../Particle";
 import { Asteroid } from "../Asteroid";
 import { Comet } from "../Comet";

@@ -11,7 +11,8 @@ import { isInBeatWindow } from "./rhythmGate";
 import { registerOnBeatFire, registerOffBeatFire } from "./gameUpdate";
 import { buildJaggedBolt, strokePolyline } from "./bassLightning";
 import { drawGlow } from "../glow";
-import { rng } from "./rng";
+// Beam seed/jag visuals only — cosmetic stream so it can't desync replays.
+import { cosmeticRng as rng } from "./rng";
 import {
   onAsteroidKilledByBullet,
   onAsteroidCrackedByBullet,

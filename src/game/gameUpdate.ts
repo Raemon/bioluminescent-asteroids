@@ -1,4 +1,6 @@
 import type { Game } from "../Game";
+import type { ReplayPlayer } from "./replayPlayer";
+import { getRngSeed } from "./rng";
 import { dist } from "../vec";
 import { Asteroid } from "../Asteroid";
 import { Alien, ALIEN_FIRE_PATTERN_BEATS, bigAlienBurstAngleOffset } from "../Alien";
@@ -45,6 +47,7 @@ import { showGameOverIntro } from "./gameOverIntro";
 import { isDown, wasPressed } from "./controlBindings";
 import { tickLaserShot, FIRE_FLASH_DECAY } from "./laserShot";
 import { fireBossSweepBeam, tickBossBeams } from "./bossBeam";
+import { targetsForReticule } from "./gameRender";
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
@@ -100,6 +103,12 @@ const stepReplayFrame = (game: Game): boolean => {
   game.replayPlayer!.sampleRhythm(game.beatCombo, displayWave(game.wave));
   return true;
 };
+
+// Test seam: step exactly one recorded replay frame (inputs + sim + checkpoint
+//   assert), bypassing runReplay's wall-clock pacing. Used only by the headless
+//   re-sim harness (scripts/resim-replay.mjs) to trace per-frame entity state
+//   around a divergence; not referenced by the app.
+export const __stepReplayFrameForTest = (game: Game): boolean => stepReplayFrame(game);
 
 // Replay dispatch for one render tick. Handles seeking to a target frame
 //   (rewind = rebuild the world at frame 0, then fast-forward; both seek
@@ -174,9 +183,77 @@ export const precomputeRhythmHistogram = (game: Game) => {
   const player = game.replayPlayer;
   if (!player) return;
   const muted = game.sound.beginSeekMute();
-  while (stepReplayFrame(game)) { /* sampleRhythm runs inside */ }
+  // Quiet the per-frame divergence spam during the sweep — the end-of-sweep audit
+  //   is the clean summary. Divergences still accumulate into player.divergences.
+  player.logDivergences = false;
+  while (stepReplayFrame(game)) { /* sampleRhythm + assertCheckpoint run inside */ }
+  // This full-run sweep is the primary desync audit: every checkpoint was just
+  //   asserted. Report it now, BEFORE restartReplayWorld → rewindToStart clears
+  //   player.divergences for the upcoming live playback.
+  reportReplayAudit(player);
+  player.logDivergences = true;
   restartReplayWorld(game);
   game.sound.endSeekMute(muted);
+};
+
+// One-shot console audit of a replay's determinism, logged at replay open after
+//   the precompute sweep has asserted every checkpoint. Surfaces the failure
+//   modes that otherwise look like a silent "replay didn't work": no checkpoints
+//   in the payload (recorded pre-v6 → nothing to assert), a build-hash mismatch
+//   (re-sim ran different code than the recording), and the first + total
+//   checkpoint divergences with where they began.
+const reportReplayAudit = (player: ReplayPlayer) => {
+  const h = player.payload.header;
+  const frames = player.total();
+  // eslint-disable-next-line no-console
+  console.log(
+    `[replay] audit — v${h.v}, build ${h.build}, ${frames} frames, ` +
+    `${player.checkpointCount()} checkpoints, ${player.beatResnapCount()} beat-resnaps`,
+  );
+  if (!player.hasCheckpoints()) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[replay] NO checkpoints in this recording — it predates the v6 format, so " +
+      "the auto desync-check has nothing to assert against. Re-record to diagnose.",
+    );
+    return;
+  }
+  const currentBuild = (import.meta.env as unknown as { VITE_BUILD_HASH?: string })?.VITE_BUILD_HASH ?? "dev";
+  if (h.build !== currentBuild) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[replay] BUILD MISMATCH — recorded under build ${h.build}, replaying under ` +
+      `${currentBuild}. Any sim-logic change between them desyncs the re-sim by design.`,
+    );
+  }
+  const divs = player.divergences;
+  if (divs.length === 0) {
+    // eslint-disable-next-line no-console
+    console.log("[replay] audit PASSED — no checkpoint divergence across the whole run.");
+    return;
+  }
+  const first = divs[0];
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[replay] audit FAILED — ${divs.length} divergent checkpoint(s). First at frame ` +
+    `${first.frame} (${first.timeSec.toFixed(2)}s in), fields: ` +
+    first.fields.map((f) => `${f.field}(rec ${f.recorded} → rep ${f.replayed})`).join(", "),
+  );
+  // The full recorded vs replayed checkpoint at the first divergence — the most
+  //   useful single object for diagnosis. rngState mismatch ⇒ unseeded/draw-count
+  //   leak; rngState match with score/combo drift ⇒ rhythm-judgment drift.
+  const pair = player.firstDivergencePair;
+  if (pair) {
+    // eslint-disable-next-line no-console
+    console.warn("[replay] first divergence detail (also at window.__firstDivergence):", pair);
+    (window as unknown as { __firstDivergence?: unknown }).__firstDivergence = { ...pair };
+  }
+  // Stash a COPY: restartReplayWorld → rewindToStart empties player.divergences
+  //   in place right after this, so the live reference would read back as [].
+  const snapshot = divs.map((d) => ({ ...d, fields: d.fields.map((f) => ({ ...f })) }));
+  // eslint-disable-next-line no-console
+  console.warn("[replay] full divergence history (also at window.__replayDivergences):", snapshot);
+  (window as unknown as { __replayDivergences?: unknown }).__replayDivergences = snapshot;
 };
 
 const emitReplayProgress = (game: Game) => {
@@ -549,6 +626,10 @@ const BEAT_RESNAP_HARD_SNAP = 0.5;
 // fraction of dt that any single frame's correction is allowed to consume,
 // so corrections sound like a subtle breath rather than a tempo shift.
 const PHASE_CORRECTION_RATE = 0.25;
+// Cadence (in frames) for tracker-style sim-state checkpoints. ~once a second at
+//   60fps — sparse enough that the always-on cost is negligible, dense enough to
+//   localise a desync to a one-second window. See captureOrAssertCheckpoint.
+const CHECKPOINT_INTERVAL = 60;
 
 // Watchdog: once a measure, compare beatTime to the music's actual playback
 // position. Small errors get bled off over many frames via beatPhaseCorrection;
@@ -677,6 +758,50 @@ const updatePlaying = (game: Game, dt: number) => {
   recordHighlightFrame(game);
   syncPowerupHud(game);
   if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning && !game.tutorialActive) advanceWave(game);
+  tickHoverLock(game);
+  captureOrAssertCheckpoint(game);
+};
+
+// Drift-shot hover-lock, lifted out of render so it's deterministic for replay (it gates a +1
+//   combo). Runs at END of the frame with the SAME post-advance perceivedBeatTime + post-update
+//   ship pos the live render used, so the recorded run reproduces frame-for-frame. classifyNewBullets
+//   (earlier in the frame) reads the PRIOR frame's lock state — exactly as it did when render owned
+//   this. emit=false on replay so it doesn't re-fire the lock hum over the recorded audio stream.
+const tickHoverLock = (game: Game) => {
+  const doubletime = comboGrid(game) < BEAT_GRID;
+  const superBoosted = game.beatCombo >= 12;
+  game.ship.tickReticuleLock(
+    BEAT_GRID, game.w, game.h, targetsForReticule(game), game.perceivedBeatTime, doubletime,
+    superBoosted, game.gems, game.sound, !game.replayPlayer,
+  );
+};
+
+// Tracker-style desync guard. On the recording path, snapshot settled sim state
+//   every CHECKPOINT_INTERVAL frames; on the replay path, assert the live state
+//   against the recorded snapshot so a divergence reports its exact frame +
+//   field. The frame index is read from whichever side owns this frame (recorder
+//   captured it at the top of updatePlaying; replay consumed it via nextFrame),
+//   so both gate on the same indices and the checkpoints line up.
+const checkpointState = (game: Game) => ({
+  score: game.score,
+  wave: game.wave,
+  lives: game.lives,
+  beatCombo: game.beatCombo,
+  beatTime: game.beatTime,
+  asteroids: game.asteroids.length,
+  bullets: game.bullets.length,
+  aliens: game.aliens.length,
+  rngState: getRngSeed(),
+});
+
+const captureOrAssertCheckpoint = (game: Game) => {
+  if (game.replayPlayer) {
+    game.replayPlayer.assertCheckpoint(checkpointState(game));
+    return;
+  }
+  if (!game.recorder) return;
+  if ((game.recorder.frameCount() - 1) % CHECKPOINT_INTERVAL !== 0) return;
+  game.recorder.captureCheckpoint(checkpointState(game));
 };
 
 // Drift Shot queue: on-beat hits made under a fully-locked first-dot hover ring

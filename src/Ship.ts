@@ -10,7 +10,7 @@ import { tickShip } from "./ship/shipPhysics";
 import { fireBullets, applyPowerup } from "./ship/shipWeapons";
 import { setComboFromValue } from "./ship/shipComboHalo";
 import { renderShipBody } from "./ship/shipRender";
-import { renderShipReticules, ReticuleHoverProbe } from "./ship/reticule/reticuleRender";
+import { renderShipReticules, tickHoverLockState, ReticuleHoverProbe } from "./ship/reticule/reticuleRender";
 import { ReticuleTarget, TrajectoryTrackMap } from "./ship/reticule/trajectoryPreview";
 
 // BEAT_GRID is re-exported from Game.ts for backwards compatibility; Ship code reads it directly here.
@@ -147,6 +147,18 @@ export class Ship {
     hoverProbes: ReadonlyArray<ReticuleHoverProbe> = [],
   ) {
     renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRings: this.hoverDotRingStates }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight, sound, audioBeatTime, superBoosted, hoverProbes);
+  }
+
+  // SIM-side hover-lock tick — runs the lock state machine (drift-shot eligibility) deterministically
+  //   each frame from updatePlaying, sharing the reticule geometry with renderReticules but headless.
+  //   `emit` true on live (fires the lock hum/hint), false on replay.
+  tickReticuleLock(
+    beatGrid: number, w: number, h: number,
+    targets: ReadonlyArray<ReticuleTarget>, beatTime: number, doubletime: boolean,
+    superBoosted: boolean, hoverProbes: ReadonlyArray<ReticuleHoverProbe>,
+    sound: Sound | null, emit: boolean,
+  ) {
+    tickHoverLockState(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRings: this.hoverDotRingStates }, beatGrid, w, h, targets, beatTime, doubletime, superBoosted, hoverProbes, sound, emit);
   }
 
   // hull + thrust + retro + shield + combo halo all composite together in one save/restore block.

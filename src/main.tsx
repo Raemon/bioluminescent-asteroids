@@ -34,12 +34,18 @@ const game = new Game(canvas);
 (window as any).__game = game;
 // Console hook: replay the most recently completed run without round-tripping
 //   through the leaderboard. Useful for debugging replay determinism — record
-//   a run, die, then call __replayLast() from devtools.
+//   a run, die, then call __replayLast() from devtools. Tracker-style sim-state
+//   checkpoints assert automatically during any replay (no __replayDebug needed)
+//   and log "[replay] checkpoint divergence at frame N" with the drifted fields.
 (window as any).__replayLast = async () => {
   if (!game.lastRunReplay) { console.warn("no replay bytes yet — finish a run first"); return; }
   const { startReplay } = await import("./game/lifecycle");
   await startReplay(game, game.lastRunReplay);
 };
+// Inspect the live replay's accumulated checkpoint divergences (the precompute
+//   sweep also stashes its own snapshot at window.__replayDivergences). Empty
+//   array = no desync detected so far; null = no replay running.
+(window as any).__divergences = () => game.replayPlayer?.divergences ?? null;
 installBetaTest(game);
 installInstructionsDemos();
 

@@ -272,7 +272,11 @@ export type TrajectoryTrack = {
 export type TrajectoryTrackMap = Map<object, TrajectoryTrack>;
 
 export type TrajectoryContext = {
-  ctx: CanvasRenderingContext2D;
+  // null = COMPUTE-ONLY pass: run all geometry + proximity (the DotWalkResult the
+  //   hover-lock state machine needs) but skip every paint + cosmetic side-effect.
+  //   The sim runs this headless each frame so drift-lock eligibility is deterministic
+  //   (it used to be computed only during render → invisible to the muted replay re-sim).
+  ctx: CanvasRenderingContext2D | null;
   apex: Vec;
   beatGrid: number;
   beatTime: number;
@@ -625,7 +629,7 @@ const wrapToCanvas = (x: number, y: number, w: number, h: number): [number, numb
 // in doubletime, an extra fainter dot is interleaved at each half-beat between the beat dots,
 // and a second, fainter "first dot" precedes the on-beat first dot at the half-beat lead.
 const drawBeatDotsAlongRay = (
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | null,
   rawStartX: number, rawStartY: number, ux: number, uy: number,
   reticulesBySlot: Array<Array<[number, number]>>,
   sMin: number, sMax: number, dotStep: number, dotOffset: number,
@@ -677,13 +681,13 @@ const drawBeatDotsAlongRay = (
       if (drawnHalfBeatDots === 0) {
         // dimmed first-dot glow — no proximity check against the on-beat reticule, since
         // this dot represents a different bullet endpoint (half-beat shot, not on-beat shot).
-        if (SHOW_FIRST_BEAT_DOT) {
+        if (ctx && SHOW_FIRST_BEAT_DOT) {
           paintFirstBeatDot(
             ctx, drawX, drawY, 0, entryFlashBoost, beatPulseBoost, focusBoost,
             TRAJECTORY_HALF_BEAT_FIRST_DOT_ALPHA_FACTOR, false, focused,
           );
         }
-      } else {
+      } else if (ctx) {
         paintHalfBeatDot(ctx, drawX, drawY, entryFlashBoost, focusBoost);
       }
       drawnHalfBeatDots++;
@@ -705,12 +709,12 @@ const drawBeatDotsAlongRay = (
         if (within75) slotWithin75[slotIdx] = true;
         // giant approach crosshairs sit centered on the dot; pulse phase is locked to the beat
         // grid so it's always mid-flight, with a 50ms opacity ramp from zoneEnter for a soft fade-in.
-        if (within75) {
+        if (ctx && within75) {
           const zoneEnter = slotIdx < hoverZoneEnterBySlot.length ? hoverZoneEnterBySlot[slotIdx] : null;
           paintApproachCrosshair(ctx, drawX, drawY, beatTime, beatGrid, zoneEnter);
         }
         const tickLength = slotCrosshairLengthTrajectory(slotIdx + 1);
-        if (SHOW_FIRST_BEAT_DOT) {
+        if (ctx && SHOW_FIRST_BEAT_DOT) {
           // tutorial highlight + the 1st-dot strict-overlap signal only apply to the 1-beat slot.
           paintFirstBeatDot(
             ctx, drawX, drawY, bestProximity, entryFlashBoost, beatPulseBoost, focusBoost,
@@ -723,7 +727,7 @@ const drawBeatDotsAlongRay = (
           slotProximities[slotIdx] = bestProximity;
           slotWinnerReticuleIdx[slotIdx] = bestRetIdx;
         }
-      } else {
+      } else if (ctx) {
         paintBeatDot(ctx, drawX, drawY, entryFlashBoost, focusBoost);
       }
       drawnOnBeatDots++;
@@ -731,7 +735,7 @@ const drawBeatDotsAlongRay = (
   }
   // 'both' mode: a dimmed player-relative marker alongside the primary (edge) dot. Purely visual —
   // no proximity/lock-on so the lock cue isn't doubled; the edge dot stays the interactive one.
-  if (firstDotSecondary !== null && SHOW_FIRST_BEAT_DOT) {
+  if (ctx && firstDotSecondary !== null && SHOW_FIRST_BEAT_DOT) {
     const [sx, sy] = wrapToCanvas(firstDotSecondary[0], firstDotSecondary[1], w, h);
     paintFirstBeatDot(
       ctx, sx, sy, 0, entryFlashBoost, beatPulseBoost, focusBoost,
@@ -920,7 +924,8 @@ const paintTrajectoryFromSnapshot = (
   // during the entry-flash window, override the pulse ramp so brightness peaks immediately rather
   // than easing in — the flash is the visual cue that the contact JUST appeared.
   const effectivePulse = entryFlashBoost > 1 ? Math.max(pulse, 1) : pulse;
-  ctx.ctx.globalAlpha = Math.min(1, TRAJECTORY_ALPHA * effectivePulse * alphaMultiplier);
+  const c = ctx.ctx; // null on the compute-only (sim) pass — paints below are skipped
+  if (c) c.globalAlpha = Math.min(1, TRAJECTORY_ALPHA * effectivePulse * alphaMultiplier);
 
   const [retX, retY] = remapReticuleToTarget(ctx.apex, ctx.reticulePos, ctx.w, ctx.h);
   const reticulesBySlot: Array<Array<[number, number]>> = ctx.reticulesBySlot.map(slotRets =>
@@ -935,29 +940,33 @@ const paintTrajectoryFromSnapshot = (
   const { primary: firstDotOverride, secondary: firstDotSecondary } = computeFirstDotOverride(
     cx, cy, snap.velX, snap.velY, r, aimCenterX, aimCenterY, ctx.beatGrid,
   );
-  ctx.ctx.save();
-  ctx.ctx.setLineDash([]);
-  if (SHOW_AIM_INTERSECTION_X) {
-    drawAimIntersectionsAlongRay(
-      ctx.ctx, rawStartX, rawStartY, ux, uy, aimCenterX, aimCenterY,
-      ctx.aimCircleRadius, sMin, sMax, entryFlashBoost, focusBoost, ctx.w, ctx.h,
-    );
+  if (c) {
+    c.save();
+    c.setLineDash([]);
+    if (SHOW_AIM_INTERSECTION_X) {
+      drawAimIntersectionsAlongRay(
+        c, rawStartX, rawStartY, ux, uy, aimCenterX, aimCenterY,
+        ctx.aimCircleRadius, sMin, sMax, entryFlashBoost, focusBoost, ctx.w, ctx.h,
+      );
+    }
   }
+  // drawBeatDotsAlongRay computes the DotWalkResult (proximities/overlap — the lock inputs)
+  //   regardless of ctx; it only paints when c is non-null.
   const result = drawBeatDotsAlongRay(
-    ctx.ctx, rawStartX, rawStartY, ux, uy, reticulesBySlot,
+    c, rawStartX, rawStartY, ux, uy, reticulesBySlot,
     sMin, sMax, dotStep, dotOffset, entryFlashBoost, beatPulseBoost, focusBoost,
     ctx.w, ctx.h, ctx.doubletime, ctx.tutorialHighlight, showOnRhythmSpot,
     ctx.beatTime, ctx.beatGrid, ctx.hoverZoneEnterBySlot, firstDotOverride, firstDotSecondary,
   );
-  if (SHOW_ON_RHYTHM_RETICULE && showOnRhythmSpot) {
+  if (c && SHOW_ON_RHYTHM_RETICULE && showOnRhythmSpot) {
     const aim = computeOnBeatAim(
       cx, cy, snap.velX, snap.velY, r,
       aimCenterX, aimCenterY, ctx.aimCircleRadius, ctx.beatGrid, retX, retY,
     );
     const [aimDrawX, aimDrawY] = wrapToCanvas(aim.x, aim.y, ctx.w, ctx.h);
-    paintOnRhythmSpot(ctx.ctx, aimDrawX, aimDrawY, aim.willHitOnBeat, aim.reachable, entryFlashBoost, beatPulseBoost, focusBoost);
+    paintOnRhythmSpot(c, aimDrawX, aimDrawY, aim.willHitOnBeat, aim.reachable, entryFlashBoost, beatPulseBoost, focusBoost);
   }
-  ctx.ctx.restore();
+  if (c) c.restore();
   return result;
 };
 
@@ -1133,9 +1142,8 @@ export const paintTrajectoryPreviews = (
 ): TrajectoryPreviewResult => {
   const slotCount = ctx.reticulesBySlot.length;
   if (ctx.frame.length <= 0) return { overlapsReticule: false, slotProximities: emptySlotProximities(slotCount), slotWinnerReticuleIdx: emptyWinnerIdx(slotCount), slotWithin75: emptyWithin75(slotCount) };
-  ctx.ctx.save();
-  ctx.ctx.setLineDash([]);
-  ctx.ctx.lineWidth = 1.5;
+  const c = ctx.ctx; // null on the compute-only (sim) pass
+  if (c) { c.save(); c.setLineDash([]); c.lineWidth = 1.5; }
   const rendered = new Set<object>();
   const spotTarget = pickCenterMostTarget(ctx, targets);
   let overlapsReticule = false;
@@ -1155,7 +1163,8 @@ export const paintTrajectoryPreviews = (
       if (i < r.slotWithin75.length && r.slotWithin75[i]) slotWithin75[i] = true;
     }
   }
-  renderFadingTrajectories(ctx, rendered, liveByKey);
-  ctx.ctx.restore();
+  // Fade-out ghosts are render-only and mutate trajectoryTracks (delete) — skip on the
+  //   compute pass so the sim never touches that cosmetic map.
+  if (c) { renderFadingTrajectories(ctx, rendered, liveByKey); c.restore(); }
   return { overlapsReticule, slotProximities, slotWinnerReticuleIdx, slotWithin75 };
 };

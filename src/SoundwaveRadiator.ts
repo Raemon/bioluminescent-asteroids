@@ -1,5 +1,7 @@
 import type { SilhouetteSample } from "./Asteroid";
-import { rng } from "./game/rng";
+// Cosmetic visualiser only — route every draw through the cosmetic stream so it
+//   can't shift the gameplay RNG draw count and desync replays.
+import { cosmeticRng as rng } from "./game/rng";
 
 // Radiating-soundwave visualiser for fragmented (post-split) bassteroids.
 // Replaces the slow glow Trail once a bassteroid has been broken into mediums

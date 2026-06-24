@@ -865,4 +865,12 @@ const seedReplayWorld = (game: Game, player: ReplayPlayer): void => {
   game.lastBeatResnapAt = sb.lastBeatResnapAt;
   game.replayPlayer = player;
   game.input = player.input;
+  // Enter "replaying" NOW, before any stepping. startGame above left state
+  //   "playing", but the precompute sweep (and seek catch-up) step the sim
+  //   immediately — and the death→respawn lifecycle only runs in updateReplaying.
+  //   If the sweep ran in "playing" the ship would die and never respawn, so the
+  //   rhythm histogram + checkpoint audit would diverge for the whole post-death
+  //   tail of any run with a death. restartReplayWorld already sets this; the
+  //   first seed (startReplay/startHighlightReplay) must too.
+  game.state = "replaying";
 };

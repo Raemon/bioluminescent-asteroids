@@ -1,7 +1,7 @@
-import { Vec, v, fromAngle, rand, TAU, addScaledMut, wrapMut } from "./vec";
+import { Vec, v, fromAngle, rand, cosmeticRand, TAU, addScaledMut, wrapMut } from "./vec";
 import { Trail } from "./Trail";
 import { SoundwaveRadiator } from "./SoundwaveRadiator";
-import { rng } from "./game/rng";
+import { rng, cosmeticRng } from "./game/rng";
 import { ENTITY_CONFIG } from "./game/entityConfig";
 import { drawGlow } from "./glow";
 
@@ -645,34 +645,38 @@ type AsteroidCrack = {
   angle: number;
   branches: { points: Vec[] }[];
 };
+// Crack-overlay geometry is purely visual — drawn on damage, read by nothing in
+//   the sim. It also draws a VARIABLE number of values per asteroid (forkCount,
+//   segments), so it must pull from the COSMETIC stream; on the gameplay stream
+//   its count would shift every downstream gameplay draw and desync the replay.
 const rollCracks = (count: number): AsteroidCrack[] => {
   const cracks: AsteroidCrack[] = [];
   for (let i = 0; i < count; i++) {
-    const a = rand(0, TAU);
-    const r = rand(0.2, 0.78);
-    const size = rand(0.28, 0.42);
+    const a = cosmeticRand(0, TAU);
+    const r = cosmeticRand(0.2, 0.78);
+    const size = cosmeticRand(0.28, 0.42);
     // 3–4 jagged forks per impact, each a short zig-zag polyline radiating
     // from the impact centre. Forks are stored in local crack-space; the
     // renderer translates+rotates them into the bassteroid's frame.
-    const forkCount = 3 + Math.floor(rng() * 2);
+    const forkCount = 3 + Math.floor(cosmeticRng() * 2);
     const branches: { points: Vec[] }[] = [];
     for (let f = 0; f < forkCount; f++) {
-      const baseAngle = (f / forkCount) * TAU + rand(-0.4, 0.4);
-      const segments = 3 + Math.floor(rng() * 2);
+      const baseAngle = (f / forkCount) * TAU + cosmeticRand(-0.4, 0.4);
+      const segments = 3 + Math.floor(cosmeticRng() * 2);
       const points: Vec[] = [v(0, 0)];
       let cx = 0;
       let cy = 0;
       let ang = baseAngle;
       for (let s = 0; s < segments; s++) {
-        const len = size * rand(0.35, 0.7);
-        ang += rand(-0.7, 0.7);
+        const len = size * cosmeticRand(0.35, 0.7);
+        ang += cosmeticRand(-0.7, 0.7);
         cx += Math.cos(ang) * len;
         cy += Math.sin(ang) * len;
         points.push(v(cx, cy));
       }
       branches.push({ points });
     }
-    cracks.push({ pos: v(Math.cos(a) * r, Math.sin(a) * r), size, angle: rand(0, TAU), branches });
+    cracks.push({ pos: v(Math.cos(a) * r, Math.sin(a) * r), size, angle: cosmeticRand(0, TAU), branches });
   }
   return cracks;
 };
@@ -2298,11 +2302,14 @@ export class Asteroid {
     // the silhouette is suggestive, not crisp.
     const facetCount = 6;
     const baseR = this.radius * 0.34;
-    const tilt = rand(0, TAU);
+    // Facet geometry is built at draw time and render doesn't run during the
+    //   muted replay re-sim — so these MUST draw the cosmetic stream, or the
+    //   per-gem draw count diverges between record and replay and desyncs.
+    const tilt = cosmeticRand(0, TAU);
     const verts: { x: number; y: number }[] = [];
     for (let i = 0; i < facetCount; i++) {
       const a = tilt + (i / facetCount) * TAU;
-      const rj = baseR * rand(0.78, 1.08);
+      const rj = baseR * cosmeticRand(0.78, 1.08);
       verts.push({ x: Math.cos(a) * rj, y: Math.sin(a) * rj });
     }
     ctx.filter = "blur(3.5px)";
@@ -2686,7 +2693,9 @@ export class Asteroid {
       const verts: { x: number; y: number }[] = [];
       for (let i = 0; i < facetCount; i++) {
         const a = (i / facetCount) * TAU;
-        const rj = spot.r * rand(0.82, 1.04);
+        // Draw-time facet jitter → cosmetic stream (render is skipped in the
+        //   replay re-sim; gameplay stream here would desync). See paintEmbeddedGem.
+        const rj = spot.r * cosmeticRand(0.82, 1.04);
         verts.push({ x: Math.cos(a) * rj, y: Math.sin(a) * rj });
       }
       ctx.filter = "blur(3px)";
@@ -4623,8 +4632,8 @@ export class Asteroid {
     let shakeX = 0, shakeY = 0;
     if (phase.shudder > 0.001) {
       const amp = phase.shudder * 6;
-      shakeX = Math.sin(t * 0.05) * amp * 0.5 + (rng() - 0.5) * amp;
-      shakeY = Math.cos(t * 0.061) * amp * 0.5 + (rng() - 0.5) * amp;
+      shakeX = Math.sin(t * 0.05) * amp * 0.5 + (cosmeticRng() - 0.5) * amp;
+      shakeY = Math.cos(t * 0.061) * amp * 0.5 + (cosmeticRng() - 0.5) * amp;
     }
     ctx.translate(this.pos.x + shakeX, this.pos.y + shakeY);
 

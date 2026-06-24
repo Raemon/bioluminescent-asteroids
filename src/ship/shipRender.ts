@@ -1,6 +1,7 @@
 import type { Ship } from "../Ship";
 import { Vec, add, fromAngle, TAU } from "../vec";
-import { rng } from "../game/rng";
+// Render-only flame/vent jitter — cosmetic stream so it can't desync replays.
+import { cosmeticRng as rng } from "../game/rng";
 import { POWERUP_HUE } from "../Canister";
 import { renderComboHalo } from "./shipComboHalo";
 import { haloVertices } from "./shipHitbox";

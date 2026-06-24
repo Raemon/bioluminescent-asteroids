@@ -1,7 +1,8 @@
 import type { Ship } from "../Ship";
 import { add, mul, fromAngle } from "../vec";
 import { ParticleSystem } from "../Particle";
-import { rng } from "../game/rng";
+// Particle visuals only — cosmetic stream so it can't desync replays.
+import { cosmeticRng as rng } from "../game/rng";
 
 export const emitThrust = (ship: Ship, particles: ParticleSystem, t: number) => {
   const back = fromAngle(ship.heading + Math.PI, 1);

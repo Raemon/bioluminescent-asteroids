@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 5;
+export const REPLAY_FORMAT_VERSION = 7;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -12,7 +12,15 @@ export const REPLAY_FORMAT_VERSION = 5;
 //   play nudges beatTime toward the audio clock once a measure (bleed) or hard-
 //   snaps after a stall; replay has no audio clock and disables the watchdog, so
 //   without these the recorded beatTime trajectory is unreproducible and the run
-//   drifts off-beat ~30s in. See ReplayBeatResnap + applyRecordedBeatResnap.
+//   drifts off-beat ~30s in. See ReplayBeatResnap + beatResnapForCurrentFrame.
+// v6 adds sparse tracker-style sim-state checkpoints (ReplayCheckpoint) that
+//   replay asserts against, so a future desync surfaces the exact frame + field
+//   that drifted instead of being noticed by eye. Verification only — not load-
+//   bearing for the re-sim.
+// v7 adds rngState to each checkpoint: the mulberry32 state, which fingerprints
+//   the seeded-draw stream. A matching beatTime + score but mismatched rngState
+//   localises a desync to an unseeded code path; matching rngState + mismatched
+//   score points at a rhythm-judgment drift instead. Diagnostic only.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat
@@ -69,6 +77,32 @@ export type ReplayFrame = [number, number, number];
 //   each delta back on its frame to reproduce the recording's beatTime exactly.
 export type ReplayBeatResnap = [number, number];
 
+// Tracker-style ground-truth checkpoint of settled sim state at one frame. SC2's
+//   replays carry an equivalent side-channel so external tools (and the engine)
+//   can detect a re-sim that has drifted instead of silently rendering a wrong
+//   replay. Unlike ReplayBeatResnap (load-bearing INPUT the sim can't recompute)
+//   these are redundant OUTPUT: the re-sim should already produce them, and replay
+//   asserts against them to catch the first frame + field that diverges. Sampled
+//   sparsely (every N frames) so the always-on cost stays tiny — no per-frame ship
+//   snapshot bloat. assertCheckpoint pinpoints the drift; see ReplayPlayer.
+export type ReplayCheckpoint = {
+  frame: number;
+  score: number;
+  wave: number;
+  lives: number;
+  beatCombo: number;
+  beatTime: number;
+  asteroids: number;
+  bullets: number;
+  aliens: number;
+  // Current mulberry32 state — a fingerprint of how many seeded draws have run
+  //   from the seed. Matches between record/replay IFF the rng streams are aligned;
+  //   a mismatch means an UNSEEDED branch (or a differing count of seeded draws)
+  //   was taken — i.e. a true determinism leak, vs. a pure rhythm-judgment drift
+  //   that leaves rng untouched. The single most diagnostic checkpoint field.
+  rngState: number;
+};
+
 // Per-frame ship snapshot for replay divergence debugging. Captured during the
 //   live recording right after ship.update and packed alongside the input frames.
 //   Replay re-captures the same snapshot post-ship.update and logs the first
@@ -88,6 +122,9 @@ export type ReplayPayload = {
   // Sparse beat-resnap corrections, frame-indexed and ascending. Absent/empty
   //   when the run never drifted enough to trigger the watchdog.
   beatResnaps?: ReplayBeatResnap[];
+  // Sparse sim-state checkpoints, frame-indexed and ascending. Replay asserts
+  //   against them to detect a desync at the frame + field it first appears.
+  checkpoints?: ReplayCheckpoint[];
   debugFrames?: ReplayDebugFrame[];
 };
 

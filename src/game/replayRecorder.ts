@@ -1,7 +1,7 @@
 import type { IInput } from "../Input";
 import type { Ship } from "../Ship";
 import type { Bindings } from "./controlBindings";
-import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayBeatResnap, type ReplayDebugFrame, type ReplayFrame, type ReplayHeader, type ReplayPayload, type ReplayStartBeat } from "./replayFormat";
+import { REPLAY_FORMAT_VERSION, encodeReplay, type ReplayBeatResnap, type ReplayCheckpoint, type ReplayDebugFrame, type ReplayFrame, type ReplayHeader, type ReplayPayload, type ReplayStartBeat } from "./replayFormat";
 
 // Build hash from Vite at compile time so playback can warn about
 // build-version mismatches. Falls back to "dev" when not injected.
@@ -25,6 +25,9 @@ export class ReplayRecorder {
   // Sparse beat-resnap corrections: the net beatTime adjustment the watchdog made
   //   on each frame it fired. Replay re-applies these since it has no audio clock.
   private beatResnaps: ReplayBeatResnap[] = [];
+  // Sparse ground-truth sim-state checkpoints. Replay asserts against these to
+  //   detect a desync; verification only, not fed back into the sim.
+  private checkpoints: ReplayCheckpoint[] = [];
   private vocab: string[] = [];
   private vocabIndex = new Map<string, number>();
   private lastKeys = new Set<string>();
@@ -90,6 +93,12 @@ export class ReplayRecorder {
     this.beatResnaps.push([this.frames.length - 1, beatTimeDelta]);
   }
 
+  // Snapshot settled sim state for the frame just captured. Caller supplies the
+  //   fields; the recorder stamps the frame index (matching recordBeatResnap).
+  captureCheckpoint(state: Omit<ReplayCheckpoint, "frame">): void {
+    this.checkpoints.push({ frame: this.frames.length - 1, ...state });
+  }
+
   private bitFor(key: string): number {
     let idx = this.vocabIndex.get(key);
     if (idx === undefined) {
@@ -139,6 +148,7 @@ export class ReplayRecorder {
       header,
       frames: this.frames.slice(),
       beatResnaps: this.beatResnaps.length ? this.beatResnaps.slice() : undefined,
+      checkpoints: this.checkpoints.length ? this.checkpoints.slice() : undefined,
       debugFrames: this.debugFrames ? this.debugFrames.slice() : undefined,
     };
   }

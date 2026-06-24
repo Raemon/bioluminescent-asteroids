@@ -1,7 +1,7 @@
-import { Vec, v, add, mul, fromAngle, rand, TAU, circleHit } from "./vec";
+import { Vec, v, add, mul, fromAngle, rand, cosmeticRand, TAU, circleHit } from "./vec";
 import { AlienBullet } from "./AlienBullet";
 import { Trail } from "./Trail";
-import { rng } from "./game/rng";
+import { rng, cosmeticRng } from "./game/rng";
 import { ENTITY_CONFIG } from "./game/entityConfig";
 
 // Three sizes, each with its own role in the rhythm:
@@ -259,30 +259,33 @@ type AlienCrack = {
   branches: { points: Vec[] }[];
 };
 
+// Visual-only crack overlay with a VARIABLE per-alien draw count — must use the
+//   cosmetic stream so it can't shift gameplay draws and desync replays. Mirror
+//   of Asteroid.rollCracks; see the cosmetic-stream note in rng.ts.
 const rollAlienCracks = (count: number): AlienCrack[] => {
   const cracks: AlienCrack[] = [];
   for (let i = 0; i < count; i++) {
-    const a = rand(0, TAU);
-    const r = rand(0.18, 0.7);
-    const forkCount = 3 + Math.floor(rng() * 2);
+    const a = cosmeticRand(0, TAU);
+    const r = cosmeticRand(0.18, 0.7);
+    const forkCount = 3 + Math.floor(cosmeticRng() * 2);
     const branches: { points: Vec[] }[] = [];
     for (let f = 0; f < forkCount; f++) {
-      const baseAngle = (f / forkCount) * TAU + rand(-0.4, 0.4);
-      const segments = 3 + Math.floor(rng() * 2);
+      const baseAngle = (f / forkCount) * TAU + cosmeticRand(-0.4, 0.4);
+      const segments = 3 + Math.floor(cosmeticRng() * 2);
       const points: Vec[] = [v(0, 0)];
       let cx = 0;
       let cy = 0;
       let ang = baseAngle;
       for (let s = 0; s < segments; s++) {
-        const len = rand(0.12, 0.22);
-        ang += rand(-0.7, 0.7);
+        const len = cosmeticRand(0.12, 0.22);
+        ang += cosmeticRand(-0.7, 0.7);
         cx += Math.cos(ang) * len;
         cy += Math.sin(ang) * len;
         points.push(v(cx, cy));
       }
       branches.push({ points });
     }
-    cracks.push({ pos: v(Math.cos(a) * r, Math.sin(a) * r), angle: rand(0, TAU), branches });
+    cracks.push({ pos: v(Math.cos(a) * r, Math.sin(a) * r), angle: cosmeticRand(0, TAU), branches });
   }
   return cracks;
 };

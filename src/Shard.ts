@@ -1,4 +1,6 @@
-import { Vec, add, fromAngle, rand, TAU, addScaledMut, scaleMut } from "./vec";
+// Shard spin/speed/scale are explosion-debris visuals — cosmetic stream so they
+//   can't shift the gameplay RNG draw count and desync replays.
+import { Vec, add, fromAngle, cosmeticRand as rand, TAU, addScaledMut, scaleMut } from "./vec";
 import { Asteroid } from "./Asteroid";
 
 export class Shard {

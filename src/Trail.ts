@@ -1,5 +1,6 @@
 import { drawGlow } from "./glow";
-import { rng } from "./game/rng";
+// Visual trail only — cosmetic stream so it can't desync replays.
+import { cosmeticRng as rng } from "./game/rng";
 
 // Pre-baked, GC-free glow trail. Each trailed object owns one Trail; the trail
 // records (x, y, age) for the object's recent positions in a fixed-size ring

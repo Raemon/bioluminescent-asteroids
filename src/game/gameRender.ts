@@ -12,15 +12,18 @@ import { renderLasers, renderLaserChargeDots, renderLaserAmbientFlash } from "./
 import { renderBossBeams } from "./bossBeam";
 import { renderSlowMoTimerBar } from "./slowMoTimerBar";
 import { renderSpectrumVisualizer } from "./spectrumVisualizer";
-import { rng } from "./rng";
+import { cosmeticRng } from "./rng";
 
 // shake is purely cosmetic; isolate its math so render() reads top-down.
+// Uses the cosmetic RNG stream — render runs every animation frame live but NOT
+//   during the muted replay re-sim sweep, so drawing the gameplay stream here
+//   shifts its draw count and desyncs replays (rngState drifts ~first hit).
 const applyScreenShake = (game: Game): { shakeX: number; shakeY: number } => {
   if (game.shake <= 0) return { shakeX: 0, shakeY: 0 };
   game.shakeSeed += 1;
   return {
-    shakeX: (rng() - 0.5) * game.shake * 10,
-    shakeY: (rng() - 0.5) * game.shake * 10,
+    shakeX: (cosmeticRng() - 0.5) * game.shake * 10,
+    shakeY: (cosmeticRng() - 0.5) * game.shake * 10,
   };
 };
 

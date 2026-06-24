@@ -1,6 +1,17 @@
 import { ReplayInput } from "./replayInput";
 import type { Ship } from "../Ship";
-import type { ReplayPayload } from "./replayFormat";
+import type { ReplayCheckpoint, ReplayPayload } from "./replayFormat";
+
+// One detected checkpoint mismatch: the frame it occurred on, the recording's
+//   wall-time offset (sum of dt up to that frame, for "Ns in"), and every field
+//   that drifted with its recorded vs replayed values + delta. Collected into a
+//   queryable history so a desync can be inspected after the fact, not just on
+//   the one frame a console.warn happened to fire.
+export type CheckpointDivergence = {
+  frame: number;
+  timeSec: number;
+  fields: { field: string; recorded: number; replayed: number; delta: number }[];
+};
 
 // Drives a deterministic re-run from a serialised payload. Each tick:
 //   1. tick(game) — pops the next frame; sets game's dt + key state on the
@@ -21,14 +32,103 @@ export class ReplayPlayer {
   private prevWave = 0;
   private cursor = 0;
   private divergenceReported = false;
+  // Loudly log only the FIRST divergence in full; later ones still accumulate
+  //   into `divergences` but log compactly, so the console isn't flooded.
+  private firstDivergenceLogged = false;
   // frameIndex → recorded beatTime adjustment the live run's resnap watchdog made.
   //   Replay has no audio clock, so it re-applies these instead of re-deriving them.
   private readonly beatResnapByFrame: Map<number, number>;
+  // frameIndex → ground-truth sim-state checkpoint. Replay asserts against these.
+  private readonly checkpointByFrame: Map<number, ReplayCheckpoint>;
+  // frameIndex → recording wall-time (cumulative dt) at that frame, for "Ns in".
+  private readonly frameTimeSec: Map<number, number>;
+  // Full history of every checkpoint mismatch seen this playthrough. Cleared on
+  //   rewindToStart so a fresh sweep/seek starts clean. Queryable post-hoc.
+  readonly divergences: CheckpointDivergence[] = [];
+  // When false, assertCheckpoint records into `divergences` but emits no console
+  //   output — the precompute sweep sets this so only the end-of-sweep audit
+  //   prints, instead of flooding the console with hundreds of cascade lines.
+  logDivergences = true;
+  // Full recorded vs replayed checkpoint at the FIRST divergence, for devtools
+  //   inspection (window.__firstDivergence) without console truncation.
+  firstDivergencePair: { recorded: ReplayCheckpoint; replayed: ReplayCheckpoint } | null = null;
 
   constructor(payload: ReplayPayload) {
     this.payload = payload;
     this.rhythmByFrame = new Int16Array(payload.frames.length);
     this.beatResnapByFrame = new Map(payload.beatResnaps ?? []);
+    this.checkpointByFrame = new Map((payload.checkpoints ?? []).map((c) => [c.frame, c]));
+    // Prefix-sum dt up to each checkpoint frame so divergences can report "Ns in".
+    this.frameTimeSec = new Map();
+    let t = 0;
+    for (let i = 0; i < payload.frames.length; i++) {
+      t += payload.frames[i][0];
+      if (this.checkpointByFrame.has(i)) this.frameTimeSec.set(i, t);
+    }
+  }
+
+  // True if this run carries checkpoints (older payloads / clip rebuilds may not).
+  hasCheckpoints(): boolean {
+    return this.checkpointByFrame.size > 0;
+  }
+
+  // Count of recorded beat-resnap corrections — zero means the watchdog never
+  //   fired during recording, so any beatTime drift can't be a missing-resnap bug.
+  beatResnapCount(): number {
+    return this.beatResnapByFrame.size;
+  }
+
+  checkpointCount(): number {
+    return this.checkpointByFrame.size;
+  }
+
+  // Assert the live sim state against the recorded checkpoint for the frame just
+  //   consumed, if one exists. EVERY mismatch is appended to `divergences` (so the
+  //   full drift history is queryable); the FIRST is logged loudly with full
+  //   context, the rest compactly so the console isn't flooded. beatTime gets a
+  //   float epsilon; the rest are exact integers. No early latch — we want to see
+  //   the whole cascade (which field broke first vs. which followed).
+  assertCheckpoint(state: Omit<ReplayCheckpoint, "frame">): void {
+    const cp = this.checkpointByFrame.get(this.cursor - 1);
+    if (!cp) return;
+    const BEAT_EPS = 1e-3;
+    const fields: CheckpointDivergence["fields"] = [];
+    const check = (field: keyof typeof state, eps = 0) => {
+      const recorded = cp[field];
+      const replayed = state[field];
+      const delta = replayed - recorded;
+      if (Math.abs(delta) > eps) fields.push({ field, recorded, replayed, delta });
+    };
+    check("score");
+    check("wave");
+    check("lives");
+    check("beatCombo");
+    check("beatTime", BEAT_EPS);
+    check("asteroids");
+    check("bullets");
+    check("aliens");
+    check("rngState");
+    if (fields.length === 0) return;
+    const timeSec = this.frameTimeSec.get(cp.frame) ?? 0;
+    this.divergences.push({ frame: cp.frame, timeSec, fields });
+    if (this.firstDivergencePair === null) {
+      this.firstDivergencePair = { recorded: cp, replayed: { frame: cp.frame, ...state } };
+    }
+    if (!this.logDivergences) return;
+    if (!this.firstDivergenceLogged) {
+      this.firstDivergenceLogged = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[replay] FIRST checkpoint divergence — frame ${cp.frame} (${timeSec.toFixed(2)}s in):`,
+        fields,
+        "\n  recorded:", cp,
+        "\n  replayed:", { frame: cp.frame, ...state },
+      );
+    } else {
+      const summary = fields.map((f) => `${f.field} Δ${f.delta}`).join(", ");
+      // eslint-disable-next-line no-console
+      console.warn(`[replay] divergence frame ${cp.frame} (${timeSec.toFixed(2)}s): ${summary}`);
+    }
   }
 
   // The recorded beat-resnap adjustment for the frame just consumed (cursor - 1),
@@ -64,6 +164,9 @@ export class ReplayPlayer {
   rewindToStart(): void {
     this.cursor = 0;
     this.divergenceReported = false;
+    this.firstDivergenceLogged = false;
+    this.divergences.length = 0;
+    this.firstDivergencePair = null;
     this.input.keys.clear();
     this.input.justPressed.clear();
   }

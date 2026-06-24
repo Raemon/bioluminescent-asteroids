@@ -1,5 +1,5 @@
 import { Vec, v, rand, TAU } from "./vec";
-import { rng } from "./game/rng";
+import { rng, cosmeticRng } from "./game/rng";
 import { ENTITY_CONFIG } from "./game/entityConfig";
 
 // Background pulsar + parallax planets. The pulsar spins continuously (twin
@@ -367,8 +367,10 @@ export class Pulsar {
       // Peaks heavy at the apex so the visual tension matches the audio
       // rising into the bass drop.
       const intensity = t * t * 22;
-      x += (rng() - 0.5) * 2 * intensity;
-      y += (rng() - 0.5) * 2 * intensity;
+      // cosmetic shock-shudder offset (render-only) — gameplay stream would
+      //   desync replays since render doesn't run during the muted re-sim.
+      x += (cosmeticRng() - 0.5) * 2 * intensity;
+      y += (cosmeticRng() - 0.5) * 2 * intensity;
     }
     return { x, y };
   }

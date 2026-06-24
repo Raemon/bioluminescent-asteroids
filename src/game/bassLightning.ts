@@ -1,7 +1,8 @@
 import type { Game } from "../Game";
 import type { Asteroid } from "../Asteroid";
 import { Vec } from "../vec";
-import { rng } from "./rng";
+// Bolt jag/seed visuals only — cosmetic stream so it can't desync replays.
+import { cosmeticRng as rng } from "./rng";
 import { comboGrid } from "./rhythmGate";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
 import { resonanceValueOf } from "./resonanceBonus";

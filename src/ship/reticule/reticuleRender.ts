@@ -272,6 +272,15 @@ const computeReticulePositions = (
   return { positions, primaryIndex, slotPositionIndices };
 };
 
+// Pure predicate: has the dashed lock ring finished building at this `elapsed`? This is the
+//   GAMEPLAY-relevant edge — it stamps completionBeatTime, which gates drift-shot eligibility
+//   (+1 combo). Extracted from paintHoverDotRing so the SIM can run the hover-lock state machine
+//   without rendering (replay re-sims headless; if this only ran in paint the lock never fired
+//   in replay → drift bonus desync). Painting reuses the same expression.
+const hoverRingFullyBuilt = (elapsed: number): boolean =>
+  Math.min(HOVER_DOT_COUNT, Math.floor(elapsed / HOVER_RING_SLOT_SEC) + 1) >= HOVER_DOT_COUNT
+  && (elapsed - (HOVER_DOT_COUNT - 1) * HOVER_RING_SLOT_SEC) >= HOVER_ARC_FADE_IN_SEC;
+
 // arcs fill across HOVER_RING_FILL_SEC, then a brief HOVER_FLARE_SEC arc-brightening marks
 // lock acquisition. While the ring is fully built, concentric soundwave rings radiate
 // outward in time with the beat for as long as the player holds hover. Returns whether the
@@ -593,8 +602,9 @@ export const renderShipReticules = (
       zoneIntensity = Math.max(zoneIntensity, hoverSwell(beatTime - ringState.zoneEnterBeatTime));
     }
     const hovering = proximity > 0 && ringPosIdx >= 0;
-    const center = hovering ? reticulePositions[ringPosIdx] : null;
-    updateHoverRing(ringState, hovering, center, ctx, beatTime, beatGrid, sound);
+    // The hover-lock STATE MACHINE now runs in the sim (tickHoverLockState) so it's deterministic
+    //   for replay; render only PAINTS the ring from the state the sim already set this frame.
+    paintHoverRingFromState(ringState, ctx, beatTime, beatGrid);
     if (hovering) anyHover = true;
     if (ringState.completionBeatTime !== null) anyLocked = true;
   }
@@ -630,6 +640,52 @@ export const renderShipReticules = (
   }
   paintHoverPulse(ctx, primaryReticule, beatTime, beatGrid, hoverPulseFade01);
   ctx.restore();
+};
+
+// SIM-side hover-lock tick (the determinism fix). Runs the SAME geometry as renderShipReticules
+//   (reticule positions + trajectory-walk proximity + probe merge) but COMPUTE-ONLY (ctx=null), then
+//   drives the per-slot hover-lock state machine (hoverStartBeatTime/completionBeatTime). Render no
+//   longer owns that state — it paints from it. Called every frame from updatePlaying so drift-shot
+//   eligibility (which reads completionBeatTime) is deterministic and reproduces in the muted replay
+//   re-sim. `emit` true on live, false on replay (replay plays the recorded lock hum, doesn't re-fire).
+//   Mutates only the hoverDotRings state machine fields (NOT zoneEnterBeatTime — that's a render-only
+//   approach-ring visual). Uses a throwaway trajectoryTracks map so the fade-ghost cache stays render-owned.
+export const tickHoverLockState = (
+  ship: Ship, state: ReticuleState,
+  beatGrid: number, w: number, h: number,
+  targets: ReadonlyArray<ReticuleTarget>, beatTime: number, doubletime: boolean,
+  superBoosted: boolean, hoverProbes: ReadonlyArray<ReticuleHoverProbe>,
+  sound: Sound | null, emit: boolean,
+): void => {
+  if (!ship.alive) return;
+  const { positions: reticulePositions, slotPositionIndices } = computeReticulePositions(ship, beatGrid, w, h, doubletime, superBoosted);
+  while (state.hoverDotRings.length < slotPositionIndices.length) {
+    state.hoverDotRings.push({ hoverStartBeatTime: null, completionBeatTime: null, zoneEnterBeatTime: null, fadeOutStartTime: null, lastRingCenter: null });
+  }
+  const apex = ship.pos;
+  const primaryReticule = reticulePositions.length > 0 ? reticulePositions[0] : apex;
+  const { center: aimCircleCenter, radius: aimCircleRadius } = computeAimCircle(ship, beatGrid);
+  const frame = computeConeFrame(ship);
+  const reticulesBySlot: Vec[][] = slotPositionIndices.map(idxs => idxs.map(i => reticulePositions[i]));
+  // ctx: null → compute-only. Throwaway tracks map so refreshTrack's mutations don't touch the
+  //   render-owned fade-ghost cache.
+  const trajectoryResult = paintTrajectoryPreviews({
+    ctx: null, apex, beatGrid, beatTime, w, h, frame, reticulePos: primaryReticule,
+    reticulesBySlot, aimCircleCenter, aimCircleRadius,
+    trajectoryTracks: new Map(), doubletime, tutorialHighlight: false,
+    hoverZoneEnterBySlot: state.hoverDotRings.map(r => r.zoneEnterBeatTime),
+  }, targets);
+  const probeMerged = mergeProbeProximities(trajectoryResult, hoverProbes, reticulesBySlot, w, h);
+  for (let slot = 0; slot < slotPositionIndices.length; slot++) {
+    const proximity = probeMerged.slotProximities[slot] ?? 0;
+    const winnerIdx = probeMerged.slotWinnerReticuleIdx[slot] ?? -1;
+    const positionIdxs = slotPositionIndices[slot];
+    const ringPosIdx = winnerIdx >= 0 && winnerIdx < positionIdxs.length ? positionIdxs[winnerIdx] : -1;
+    const ringState = state.hoverDotRings[slot];
+    const hovering = proximity > 0 && ringPosIdx >= 0;
+    const center = hovering ? reticulePositions[ringPosIdx] : null;
+    updateHoverRing(ringState, hovering, center, beatTime, beatGrid, sound, emit);
+  }
 };
 
 // smoothstep proximity ramp from "touching the probe" (1) out to PROBE_PROXIMITY_PAD past it (0).
@@ -708,30 +764,28 @@ const snapToPrevSubBeat = (beatTime: number, beatGrid: number): number => {
   return Math.floor(beatTime / step) * step;
 };
 
-// per-ring state machine + visual paint for the tight target-area lock ring. Drives the dashed
-// clockwise fill and stamps completionBeatTime + fires the fifth (lock) hum on the rising edge.
-// When hover ends, fades out the ring over HOVER_DOT_FADEOUT_SEC before clearing the state.
+// The hover-lock STATE MACHINE — drives the dashed clockwise fill's lifecycle and stamps
+//   completionBeatTime (+ hoverStartBeatTime). The SIM owns it (runs every frame via
+//   tickHoverLockState), because completionBeatTime gates drift-shot eligibility (+1 combo) — a
+//   gameplay outcome that must be deterministic and reproduce in the muted replay re-sim. It does
+//   NOT paint; render draws the ring from this state via paintHoverRingFromState.
+//     emit — true only on the LIVE pass: fires the lock hum + drift-lock hint on the lock edge.
+//            Replay passes false (it plays the recorded audio stream, doesn't re-emit).
+//   Transitions are pure fns of (hovering, ringCenter, beatTime).
 const updateHoverRing = (
   ring: { hoverStartBeatTime: number | null; completionBeatTime: number | null; fadeOutStartTime: number | null; lastRingCenter: Vec | null },
   hovering: boolean, ringCenter: Vec | null,
-  ctx: CanvasRenderingContext2D, beatTime: number, beatGrid: number, sound: Sound | null,
+  beatTime: number, beatGrid: number, sound: Sound | null,
+  emit: boolean,
 ): void => {
   // start fade-out if we were hovering and now we're not
   if (!hovering && ring.hoverStartBeatTime !== null && ring.fadeOutStartTime === null) {
     ring.fadeOutStartTime = beatTime;
   }
 
-  // handle fade-out animation
+  // handle fade-out animation (the fade timing lives here; render paints it from state)
   if (ring.fadeOutStartTime !== null) {
-    const fadeElapsed = beatTime - ring.fadeOutStartTime;
-    const fadeT = Math.min(1, fadeElapsed / HOVER_DOT_FADEOUT_SEC);
-    const fadeOutAlpha = 1 - fadeT;
-
-    if (ring.lastRingCenter !== null) {
-      const elapsed = beatTime - ring.hoverStartBeatTime!;
-      paintHoverDotRing(ctx, ring.lastRingCenter, elapsed, beatTime, beatGrid, fadeOutAlpha);
-    }
-
+    const fadeT = Math.min(1, (beatTime - ring.fadeOutStartTime) / HOVER_DOT_FADEOUT_SEC);
     if (fadeT >= 1) {
       ring.hoverStartBeatTime = null;
       ring.completionBeatTime = null;
@@ -758,13 +812,38 @@ const updateHoverRing = (
     ring.completionBeatTime = null;
   }
   const elapsed = beatTime - ring.hoverStartBeatTime;
-  const { fillJustCompleted } = paintHoverDotRing(ctx, ringCenter, elapsed, beatTime, beatGrid);
+  const fillJustCompleted = hoverRingFullyBuilt(elapsed);
   if (fillJustCompleted && ring.completionBeatTime === null) {
     // defer the lock cue (flare + hum + bright wave) to the next beat boundary so it lands
     // on-grid even if the fill mechanically finished mid-beat. With the back-snap above the
     // fill *should* already complete on a beat, but this is a guard against subgrid drift.
     ring.completionBeatTime = snapToNextBeat(beatTime, beatGrid);
-    if (sound) sound.startFirstDotLockHum();
-    tryClaimDriftLockHint(ringCenter, beatTime);
+    // Lock-cue audio + hint fire on the LIVE sim pass (emit=true); replay (emit=false) plays the
+    //   recorded audio stream and must not re-emit. The drift-lock hint is live-UX only.
+    if (emit) {
+      if (sound) sound.startFirstDotLockHum();
+      tryClaimDriftLockHint(ringCenter, beatTime);
+    }
+  }
+};
+
+// Paint the hover-lock ring purely from the state the SIM's updateHoverRing already set this
+//   frame — render no longer runs the state machine (that's sim-owned for determinism). Mirrors
+//   the two paint branches of updateHoverRing (fade-out vs active fill) using only ring state.
+const paintHoverRingFromState = (
+  ring: { hoverStartBeatTime: number | null; completionBeatTime: number | null; fadeOutStartTime: number | null; lastRingCenter: Vec | null },
+  ctx: CanvasRenderingContext2D, beatTime: number, beatGrid: number,
+): void => {
+  if (ring.fadeOutStartTime !== null) {
+    if (ring.lastRingCenter !== null && ring.hoverStartBeatTime !== null) {
+      const fadeT = Math.min(1, (beatTime - ring.fadeOutStartTime) / HOVER_DOT_FADEOUT_SEC);
+      const elapsed = beatTime - ring.hoverStartBeatTime;
+      paintHoverDotRing(ctx, ring.lastRingCenter, elapsed, beatTime, beatGrid, 1 - fadeT);
+    }
+    return;
+  }
+  if (ring.hoverStartBeatTime !== null && ring.lastRingCenter !== null) {
+    const elapsed = beatTime - ring.hoverStartBeatTime;
+    paintHoverDotRing(ctx, ring.lastRingCenter, elapsed, beatTime, beatGrid);
   }
 };

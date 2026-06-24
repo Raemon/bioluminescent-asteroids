@@ -1,4 +1,6 @@
-import { Vec, rand } from "../vec";
+// Popup drift velocity is purely visual — cosmetic stream so it can't shift the
+//   gameplay RNG draw count and desync replays.
+import { Vec, cosmeticRand as rand } from "../vec";
 import { PowerupKind, POWERUP_HUE } from "../Canister";
 import { formatScore } from "./formatScore";
 

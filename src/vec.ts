@@ -42,8 +42,14 @@ export const wrapMut = (a: Vec, w: number, h: number): void => {
 
 export const TAU = Math.PI * 2;
 
-import { rng } from "./game/rng";
+import { rng, cosmeticRng } from "./game/rng";
 
 export const rand = (min: number, max: number): number => min + rng() * (max - min);
 export const randInt = (min: number, max: number): number => Math.floor(rand(min, max + 1));
 export const pick = <T>(arr: readonly T[]): T => arr[Math.floor(rng() * arr.length)];
+
+// Cosmetic-stream twins of rand/randInt/pick — for visual-only randomness that
+//   must not consume gameplay-rng draws (cracks, shape jitter, hues). See rng.ts.
+export const cosmeticRand = (min: number, max: number): number => min + cosmeticRng() * (max - min);
+export const cosmeticRandInt = (min: number, max: number): number => Math.floor(cosmeticRand(min, max + 1));
+export const cosmeticPick = <T>(arr: readonly T[]): T => arr[Math.floor(cosmeticRng() * arr.length)];
