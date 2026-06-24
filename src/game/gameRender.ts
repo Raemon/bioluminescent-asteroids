@@ -89,24 +89,62 @@ const paintBeatFlash = (
   ctx.restore();
 };
 
+// Wrapping bodies pop across the seam: their pos teleports edge-to-edge in one
+// frame (wrapMut). To make a body slide across instead, draw it a second time
+// at the wrapped-across offset whenever it straddles an edge — as it leaves the
+// right, its twin is already entering from the left. `reach` is the body's
+// visible extent (silhouette + glow), so the twin enters the moment the glow
+// touches the seam, not when the centre does; off the seam nothing extra draws.
+const drawWrapped = (
+  ctx: CanvasRenderingContext2D,
+  pos: Vec, reach: number, w: number, h: number,
+  draw: () => void,
+) => {
+  draw();
+  const dx = pos.x < reach ? w : pos.x > w - reach ? -w : 0;
+  const dy = pos.y < reach ? h : pos.y > h - reach ? -h : 0;
+  if (dx === 0 && dy === 0) return;
+  const twin = (ox: number, oy: number) => {
+    ctx.save();
+    ctx.translate(ox, oy);
+    draw();
+    ctx.restore();
+  };
+  if (dx !== 0) twin(dx, 0);
+  if (dy !== 0) twin(0, dy);
+  if (dx !== 0 && dy !== 0) twin(dx, dy);
+};
+
+// Visible reach past each body's hitbox radius: the glow halo extends well
+// beyond the bullet/plasma core, so the twin must appear while the halo is
+// still mid-seam. Asteroids/gems are silhouette-dominant; a small pad covers
+// their rim glow.
+const BODY_GLOW_REACH = 1.5;
+const BULLET_GLOW_REACH = 12;
+const ALIEN_BULLET_GLOW_REACH = 6;
+
 // bodies must sit ON their own trails, so trails pass before any per-entity render call.
 const paintEntityLayers = (
   game: Game, focusedTarget: ReticuleTarget | null,
 ) => {
-  const { ctx } = game;
+  const { ctx, w, h } = game;
   renderTrails(game, ctx);
   for (const c of game.comets) c.render(ctx);
   for (const s of game.shards) s.render(ctx);
   // bassteroids wear the ship's 4+/12+ combo halo — share the ship's eased
   // intensity + the live beat pulse so every halo on the field rides one rhythm.
   const comboHalo = { intensity: game.ship.comboHaloIntensity, beatPulse: currentBeatPulse(game) };
-  for (const a of game.asteroids) a.render(ctx, game.time, comboHalo);
+  for (const a of game.asteroids) drawWrapped(ctx, a.pos, a.radius * BODY_GLOW_REACH, w, h, () => a.render(ctx, game.time, comboHalo));
   for (const c of game.canisters) c.render(ctx, game.time);
-  for (const g of game.gems) g.render(ctx, game.time);
+  // only flung blades wrap; parked/drifting gems settle in place, so no twin.
+  for (const g of game.gems) {
+    if (g.fast) drawWrapped(ctx, g.pos, g.radius * BODY_GLOW_REACH, w, h, () => g.render(ctx, game.time));
+    else g.render(ctx, game.time);
+  }
   for (const al of game.aliens) al.render(ctx, game.time);
-  for (const ab of game.alienBullets) ab.render(ctx);
+  for (const ab of game.alienBullets) drawWrapped(ctx, ab.pos, ab.radius * ALIEN_BULLET_GLOW_REACH, w, h, () => ab.render(ctx));
   renderBossBeams(ctx, game.bossBeams);
-  for (const b of game.bullets) b.render(ctx);
+  for (const b of game.bullets) drawWrapped(ctx, b.pos, b.radius * BULLET_GLOW_REACH, w, h, () => b.render(ctx));
   renderLasers(ctx, game.lasers);
   // every wave body brightens on the beat then tapers over ~100ms (paints over the sprites above).
   const beatFlash = currentBeatFlash(game);
