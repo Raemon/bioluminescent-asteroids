@@ -11,8 +11,9 @@ import { stopParade } from "./killedParade";
 import { renderKilledRow } from "./killedParade";
 import { snapshotShipKill } from "./killSnapshot";
 import { emitShipDebris } from "./particleBursts";
-import { hideScoreEntry, isScoreEntryBlockingEnter, showLeaderboard, showScoreEntry } from "./scoreEntry";
+import { clearPlayerFilter, hideScoreEntry, isScoreEntryBlockingEnter, showLeaderboard, showScoreEntry } from "./scoreEntry";
 import { BOSS_MUSIC_VARIATION, HALO_MUSIC_POOL, HAUNTING_MUSIC_POOL } from "./haloMusicConfig";
+import { FULL_HALO_SONGS, USE_FULL_HALO_MUSIC, type FullHaloSong } from "./haloFullMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
 import { hideGameOverIntro, showGameOverIntro } from "./gameOverIntro";
 import { hasCalibrated, CALIBRATION_BEAT_INTENSITY, loadBeatOffset } from "./beatCalibration";
@@ -129,6 +130,10 @@ const stopAllPersistentAudio = (game: Game) => {
   game.sound.stopAllWarbleDrones();
   game.sound.stopAllCometShimmers();
   game.sound.stopHaloAmbient();
+  // The full-length halo song is a long un-looped track that can outlive a wave
+  // like a drone — explicitly stop it on every state exit so it can't bleed
+  // into a cutscene / title / game-over.
+  game.sound.stopHaloFullMusic();
   game.comets = [];
 };
 
@@ -262,6 +267,11 @@ export const startCalibrationIntro = (game: Game) => {
   // because back-to-back decodes during the intro starve the audio
   // scheduler and skip beats.
   for (const variation of HALO_MUSIC_POOL) game.sound.preloadHaloMusic(variation);
+  // Wave 1 is a full-halo wave when USE_FULL_HALO_MUSIC is on, so warm the
+  // full-song layer stems too — its first 4x will start a full song, not a loop.
+  if (USE_FULL_HALO_MUSIC) {
+    for (const song of Object.keys(FULL_HALO_SONGS) as FullHaloSong[]) game.sound.preloadHaloFullMusic(song);
+  }
   game.betaMode = false;
   game.state = "playing";
   game.calibrationIntro = true;
@@ -290,6 +300,7 @@ export const startCalibrationIntro = (game: Game) => {
   game.neighborhoodFetch = null;
   game.leaderboardNeighborhood = false;
   game.leaderboardRankBase = 0;
+  clearPlayerFilter(game);
   syncHud(game);
   emitGameState(game);
   window.dispatchEvent(new CustomEvent("beat-calibrator:open", { detail: { sound: game.sound, intro: true } }));
@@ -495,6 +506,7 @@ export const startGame = (game: Game, overrides?: {
   game.neighborhoodFetch = null;
   game.leaderboardNeighborhood = false;
   game.leaderboardRankBase = 0;
+  clearPlayerFilter(game);
   syncHud(game);
   emitGameState(game);
 };

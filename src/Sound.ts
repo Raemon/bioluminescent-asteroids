@@ -5,6 +5,7 @@ import type * as Tone from "tone";
 import { cfgN, cfgU } from "./soundConfig";
 import { getChannelVolume, type AudioChannel } from "./game/audioPrefs";
 import { musicGain, loadMusicConfig, type MusicLayer } from "./musicConfig";
+import { FULL_HALO_TIER_THRESHOLDS, type FullHaloSong } from "./game/haloFullMusicConfig";
 
 type ToneModule = typeof import("tone");
 let toneModulePromise: Promise<ToneModule> | null = null;
@@ -178,6 +179,37 @@ type HaloMusicNode = {
   startedAtBeatTime: number;
   // Last commanded playbackRate (1.0 normally, < 1 during slow-mo).
   currentPlaybackRate: number;
+};
+
+// Full-length halo song — the parallel "different system" to HaloMusicNode.
+// Six phase-locked, NON-looping layer sources fade in at the combo thresholds
+// in FULL_HALO_TIER_THRESHOLDS (4x/6x/12x/18x/24x/32x). Unlike the loop node
+// every source is the whole ~2:10 track; a tier change is just a gain ramp.
+// When the track ends, onTrackEnd fires so the caller can switch songs.
+// Song id type is owned by haloFullMusicConfig.ts (re-exported for callers
+// that only import from Sound).
+export type FullHaloSongId = FullHaloSong;
+
+type HaloFullMusicNode = {
+  // l1..l6 buffer sources, one per combo tier. All start at the same audio
+  // time and run un-looped for the track's length, so switching a tier is a
+  // gain ramp on the matching layerGain — never a fresh .start() (which would
+  // desync the layers).
+  layerSrcs: AudioBufferSourceNode[];
+  layerGains: GainNode[];
+  mainGain: GainNode;
+  song: FullHaloSongId;
+  // Highest tier index currently faded up (so a flick down-and-up doesn't
+  // re-ramp layers already at their target). -1 = nothing audible yet.
+  activeTier: number;
+  // ctx.currentTime / game.beatTime at which the sources were scheduled.
+  startedAtAudioTime: number;
+  startedAtBeatTime: number;
+  // Last commanded playbackRate (1.0 normally, < 1 during slow-mo).
+  currentPlaybackRate: number;
+  // Fired once when the track reaches its natural end (the l1 source's
+  // onended). Cleared on teardown so a stop()-triggered onended is a no-op.
+  onTrackEnd: (() => void) | null;
 };
 
 // Optional pan + distance-falloff splice. When a sound (one-shot or drone)
@@ -379,6 +411,10 @@ export class Sound {
   // Active pre-rendered halo music node — null when no music is playing
   // (i.e. combo < 4 or the legacy synthesized pad is selected).
   haloMusic: HaloMusicNode | null = null;
+  // Active full-length halo song node (the "different system" for levels 1–9).
+  // Null unless a full song is playing. Mutually exclusive with haloMusic —
+  // syncHaloAmbient routes to one or the other, never both at once.
+  haloFullMusic: HaloFullMusicNode | null = null;
   // Per-stem buffer cache, keyed by URL. AudioBuffers are decoded once and
   // reused across all start/stop cycles for a given variation.
   haloMusicBuffers: Map<string, AudioBuffer> = new Map();
@@ -3545,6 +3581,169 @@ export class Sound {
     node.melodicSrc.stop(stopAt);
     if (node.layer3Src) node.layer3Src.stop(stopAt);
     this.haloMusic = null;
+  }
+
+  // === Full-length halo music (the parallel "different system" for L1–9) ===
+
+  private haloFullMusicUrl(song: FullHaloSongId, layer: number): string {
+    return `/sounds/halo-music-full/${song}-l${layer}.mp3`;
+  }
+
+  // Per-layer peak gain for the six full-song tiers (l1→l6). The build script
+  // already peak-normalizes each stem to ~-12 dBFS, so these are light
+  // perceptual trims rather than the big per-variation calibration the loop
+  // pool needs: the bed/guitar/bass sit a touch lower, the drum + climax
+  // layers ride a touch hotter so each new tier reads as an arrival.
+  private haloFullMusicLayerGain(_song: FullHaloSongId, layerIdx: number): number {
+    const gains = [0.26, 0.24, 0.26, 0.30, 0.30, 0.28];
+    return gains[layerIdx] ?? 0.26;
+  }
+
+  // Eagerly fetch + decode all six layer stems for a full song so the first 4x
+  // doesn't pay fetch latency. Idempotent (loadHaloMusicBuffer caches).
+  preloadHaloFullMusic(song: FullHaloSongId): void {
+    for (let i = 1; i <= 6; i++) {
+      void this.loadHaloMusicBuffer(this.haloFullMusicUrl(song, i));
+    }
+  }
+
+  // Start a full-length song. Six layer sources start phase-locked at the
+  // measure-aligned downbeat; each layer's gain is faded up only once its
+  // combo tier (FULL_HALO_TIER_THRESHOLDS) is already met at start. Non-looping
+  // — onTrackEnd fires when the track finishes so the caller can roll to the
+  // next song. measureAlignDelay/currentBeatTime mirror startHaloMusic.
+  async startHaloFullMusic(song: FullHaloSongId, combo: number,
+                           measureAlignDelay: number = 0,
+                           currentBeatTime: number = 0,
+                           onTrackEnd: (() => void) | null = null): Promise<void> {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    // Same song already running — just sync the tiers.
+    if (this.haloFullMusic && this.haloFullMusic.song === song) {
+      this.setHaloFullMusicTier(combo);
+      return;
+    }
+    if (this.haloFullMusic) this.stopHaloFullMusic();
+    // A full song and a loop track never play together.
+    if (this.haloMusic) this.stopHaloMusic();
+
+    const bufs = await Promise.all(
+      Array.from({ length: 6 }, (_, i) => this.loadHaloMusicBuffer(this.haloFullMusicUrl(song, i + 1))),
+    );
+    if (!this.ctx || !this.master) return;
+    if (this.haloFullMusic) return;  // raced with another start
+    if (bufs.some((b) => !b)) return;  // a layer failed to load — bail cleanly
+
+    const t = this.ctx.currentTime;
+    const startAt = t + Math.max(0, measureAlignDelay);
+    const startedAtBeatTime = currentBeatTime + (startAt - t);
+    const activeTier = this.fullTierForCombo(combo);
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.value = 1.0;
+    if (this.chMusicLive) mainGain.connect(this.chMusicLive);
+
+    const layerSrcs: AudioBufferSourceNode[] = [];
+    const layerGains: GainNode[] = [];
+    for (let i = 0; i < 6; i++) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = bufs[i];
+      src.loop = false;
+      const g = this.ctx.createGain();
+      const peak = this.haloFullMusicLayerGain(song, i);
+      g.gain.setValueAtTime(0.0001, startAt);
+      // Fade this layer up immediately if its tier is already met at start.
+      if (i <= activeTier) {
+        g.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), startAt + 1.5);
+      }
+      src.connect(g);
+      g.connect(mainGain);
+      layerSrcs.push(src);
+      layerGains.push(g);
+    }
+
+    for (const src of layerSrcs) src.start(startAt);
+
+    const node: HaloFullMusicNode = {
+      layerSrcs, layerGains, mainGain, song,
+      activeTier,
+      startedAtAudioTime: startAt,
+      startedAtBeatTime,
+      currentPlaybackRate: 1.0,
+      onTrackEnd,
+    };
+    // The l1 source spans the whole track, so its onended marks the song's
+    // natural end. Guarded by the node still being current and onTrackEnd not
+    // already consumed (a stop()-triggered onended must be a no-op).
+    layerSrcs[0].onended = () => {
+      if (this.haloFullMusic !== node) return;
+      const cb = node.onTrackEnd;
+      node.onTrackEnd = null;
+      if (cb) cb();
+    };
+    this.haloFullMusic = node;
+  }
+
+  private fullTierForCombo(combo: number): number {
+    let tier = -1;
+    for (let i = 0; i < FULL_HALO_TIER_THRESHOLDS.length; i++) {
+      if (combo >= FULL_HALO_TIER_THRESHOLDS[i]) tier = i;
+    }
+    return tier;
+  }
+
+  // Fade the six layers to match the current combo tier. Layers at or below the
+  // active tier ramp up to their peak; layers above it ramp down to silence.
+  // Idempotent: only re-ramps when the active tier actually changes.
+  setHaloFullMusicTier(combo: number): void {
+    if (!this.ctx || !this.haloFullMusic) return;
+    const node = this.haloFullMusic;
+    const tier = this.fullTierForCombo(combo);
+    if (tier === node.activeTier) return;
+    const t = this.ctx.currentTime;
+    for (let i = 0; i < node.layerGains.length; i++) {
+      const on = i <= tier;
+      const peak = this.haloFullMusicLayerGain(node.song, i);
+      const target = on ? Math.max(0.0001, peak) : 0.0001;
+      // Higher tiers bloom in a touch slower; fade-outs cushion a combo dip.
+      const ramp = on ? 0.6 : 1.0;
+      const g = node.layerGains[i];
+      g.gain.cancelScheduledValues(t);
+      g.gain.setValueAtTime(g.gain.value, t);
+      g.gain.exponentialRampToValueAtTime(target, t + ramp);
+    }
+    node.activeTier = tier;
+  }
+
+  // Slow-mo: match the music playbackRate to the gameplay clock, same as
+  // setHaloMusicPlaybackRate but across all six full-song layers.
+  setHaloFullMusicPlaybackRate(rate: number, rampSec: number = 0): void {
+    if (!this.haloFullMusic || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    for (const src of this.haloFullMusic.layerSrcs) {
+      src.playbackRate.cancelScheduledValues(now);
+      src.playbackRate.setValueAtTime(src.playbackRate.value, now);
+      if (rampSec > 0) src.playbackRate.linearRampToValueAtTime(rate, now + rampSec);
+      else src.playbackRate.setValueAtTime(rate, now);
+    }
+    this.haloFullMusic.currentPlaybackRate = rate;
+  }
+
+  // Long fade-out + teardown, matching stopHaloMusic's ~1.2s curve. Clears
+  // onTrackEnd first so the scheduled stop()'s onended can't fire the
+  // song-switch after a combo break.
+  stopHaloFullMusic(): void {
+    if (!this.ctx || !this.haloFullMusic) return;
+    const t = this.ctx.currentTime;
+    const node = this.haloFullMusic;
+    node.onTrackEnd = null;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+    const stopAt = t + 1.3;
+    for (const src of node.layerSrcs) src.stop(stopAt);
+    this.haloFullMusic = null;
   }
 
   // Comet-on-screen toggle. Slides the third voice between E4 (no comet) and

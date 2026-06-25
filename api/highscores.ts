@@ -259,6 +259,72 @@ const fetchRecentRows = async (): Promise<RowOut[]> => {
   return mapped;
 };
 
+// Player-profile view. The initial load (offset 0) gathers the top-N runs in
+//   each leaderboard category (score, rhythm, wave, and most-recent) and unions
+//   them by id: a pilot whose best-score run differs from their best-wave run
+//   keeps both, and the "when" pass folds in fresh runs that aren't a category
+//   best. "Load more" then pages the pilot's remaining runs by score-desc — a
+//   plain linear cursor past the first PLAYER_CATEGORY_LIMIT score-ranked rows.
+//   Case-insensitive name match mirrors the dedupe key used everywhere else.
+//   Not cached — it's a rarely-hit per-pilot view.
+const PLAYER_CATEGORY_LIMIT = 50;
+
+const playerWhere = (name: string) =>
+  ({ name: { equals: name, mode: "insensitive" as const } });
+
+const fetchPlayerScores = async (name: string): Promise<RowOut[]> => {
+  const where = playerWhere(name);
+  const [byScore, byRhythm, byWave, byRecent] = await Promise.all([
+    prisma.highscore.findMany({
+      where,
+      orderBy: [{ score: "desc" }, { createdAt: "desc" }],
+      take: PLAYER_CATEGORY_LIMIT,
+      select: LEADERBOARD_COLUMNS,
+    }),
+    prisma.highscore.findMany({
+      where,
+      orderBy: [{ maxCombo: "desc" }, { score: "desc" }],
+      take: PLAYER_CATEGORY_LIMIT,
+      select: LEADERBOARD_COLUMNS,
+    }),
+    prisma.highscore.findMany({
+      where,
+      orderBy: [{ wave: "desc" }, { score: "desc" }],
+      take: PLAYER_CATEGORY_LIMIT,
+      select: LEADERBOARD_COLUMNS,
+    }),
+    prisma.highscore.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: PLAYER_CATEGORY_LIMIT,
+      select: LEADERBOARD_COLUMNS,
+    }),
+  ]);
+  const byId = new Map<number, RawRow>();
+  for (const r of [...byScore, ...byRhythm, ...byWave, ...byRecent]) byId.set(r.id, r);
+  const merged = [...byId.values()];
+  const hasReplayIds = await fetchHasReplayIds(merged.map((r) => r.id));
+  return withHasReplay(merged, hasReplayIds);
+};
+
+// "Load more" page for a profile: that pilot's runs by score-desc, offset into
+//   the score-ranked list. The client dedupes against rows already shown.
+const fetchPlayerPage = async (
+  name: string,
+  offset: number,
+  limit: number,
+): Promise<RowOut[]> => {
+  const rows = await prisma.highscore.findMany({
+    where: playerWhere(name),
+    orderBy: [{ score: "desc" }, { createdAt: "desc" }],
+    take: limit,
+    skip: offset,
+    select: LEADERBOARD_COLUMNS,
+  });
+  const hasReplayIds = await fetchHasReplayIds(rows.map((r) => r.id));
+  return withHasReplay(rows, hasReplayIds);
+};
+
 // Post-run "your standing" view: the rows ranked just above and just below a
 //   given score id, under the global [score desc, createdAt desc] ordering.
 //   Anchored by id so a tie in score is split deterministically by createdAt,
@@ -339,6 +405,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(200).json({ scores: rows });
       } catch (err) {
         console.error("[highscores GET recent] db read failed:", err);
+        res.status(500).json({ error: "DB read failed" });
+      }
+      return;
+    }
+
+    if (mode === "player") {
+      const nameRaw = req.query.name;
+      const name = sanitizeName(Array.isArray(nameRaw) ? nameRaw[0] : nameRaw);
+      if (!name) {
+        res.status(400).json({ error: "name is required" });
+        return;
+      }
+      // offset 0 (or absent) → the 4-category union; offset > 0 → a score-desc
+      //   "load more" page. limit only applies to the paged form.
+      const offsetRaw = req.query.offset;
+      const limitRaw = req.query.limit;
+      const offset = sanitizeInt(Array.isArray(offsetRaw) ? offsetRaw[0] : offsetRaw, 0, 1_000_000) ?? 0;
+      const limit = sanitizeInt(Array.isArray(limitRaw) ? limitRaw[0] : limitRaw, 1, MAX_LIMIT) ?? PLAYER_CATEGORY_LIMIT;
+      try {
+        const rows = offset > 0
+          ? await fetchPlayerPage(name, offset, limit)
+          : await fetchPlayerScores(name);
+        setEdgeCache(res);
+        res.status(200).json({ scores: rows });
+      } catch (err) {
+        console.error("[highscores GET player] db read failed:", err);
         res.status(500).json({ error: "DB read failed" });
       }
       return;

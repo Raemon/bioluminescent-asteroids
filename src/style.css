@@ -731,6 +731,20 @@ html:has(#sound-root), body:has(> #sound-root) {
   display: inline-block;
 }
 
+/* On a pilot profile the title doubles as the way back to the global board. */
+#overlay h1.title-back {
+  cursor: pointer;
+  transition: color 0.15s ease, text-shadow 0.15s ease;
+}
+
+#overlay h1.title-back:hover {
+  color: #ffffff;
+  text-shadow:
+    0 0 20px #6ad7ff,
+    0 0 50px rgba(106, 215, 255, 0.7),
+    0 0 100px rgba(106, 215, 255, 0.4);
+}
+
 #overlay p {
   font-size: 14px;
   letter-spacing: 0.2em;
@@ -1260,6 +1274,40 @@ html:has(#sound-root), body:has(> #sound-root) {
   white-space: nowrap;
   text-align: left;
   justify-self: start;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* The pilot name is a button that opens that pilot's full board. Styled to read
+   as the plain name until hovered, with the truncation moved onto the button
+   itself (it's the overflowing child now, not the .lb-name cell). */
+.lb-name-link {
+  pointer-events: auto;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  transition: color 0.12s ease, text-shadow 0.12s ease;
+}
+
+.lb-name-link:hover {
+  color: #ffffff;
+  text-shadow: 0 0 10px rgba(106, 215, 255, 0.6);
+}
+
+li.lb-self .lb-name-link:hover {
+  text-shadow: 0 0 10px rgba(255, 216, 106, 0.7);
 }
 
 .lb-combo {
@@ -1419,6 +1467,8 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 
 #leaderboard-show-more.hidden { display: none; }
+
+#leaderboard-top-only.hidden { display: none; }
 
 #leaderboard-top-only {
   display: inline-flex;

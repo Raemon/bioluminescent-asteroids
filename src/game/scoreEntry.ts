@@ -2,6 +2,8 @@ import type { Game } from "../Game";
 import {
   fetchHighscores,
   fetchNeighborhood,
+  fetchPlayerPage,
+  fetchPlayerScores,
   fetchRecentScores,
   fetchTopPilots,
   getCachedHighscores,
@@ -313,9 +315,12 @@ const renderLeaderboard = (game: Game) => {
     const dateCell = fromNow
       ? `<span class="lb-date"><span class="lb-date-text">${fromNow}</span><span class="lb-date-tip">${exactDate}</span></span>`
       : `<span class="lb-date"></span>`;
+    // Clicking the name opens that pilot's full board. The attribute holds the
+    //   escaped name; reading el.dataset.pilot hands back the decoded original.
+    const nameBtn = `<button class="lb-name-link" data-pilot="${safeName}" type="button" title="See ${safeName}'s scores">${safeName}</button>`;
     items.push(`<li${cls}>
       <span class="lb-rank">${i + 1 + game.leaderboardRankBase}</span>
-      <span class="lb-name">${safeName}${replayBtn}</span>
+      <span class="lb-name">${nameBtn}${replayBtn}</span>
       <span class="lb-score">${row.score.toLocaleString()}</span>
       <span class="lb-combo lb-combo-${comboTier}">
         <span class="lb-combo-value">${combo}<span class="lb-combo-x">×</span></span>
@@ -336,6 +341,11 @@ const escapeHtml = (s: string): string =>
 //   ranked anywhere in the top tier will be found by id and the rotation has
 //   enough pilots to scroll through.
 const LEADERBOARD_FETCH_LIMIT = 100;
+
+// Mirrors the API's PLAYER_CATEGORY_LIMIT: the per-category union size and the
+//   profile "load more" page size both use it, and it's where the score-desc
+//   paging cursor resumes after the initial union.
+const PLAYER_CATEGORY_LIMIT = 50;
 
 // For the title-screen "Top entries only" view, keep each pilot's personal
 //   best in *each* category (score, wave, rhythm) — so a pilot whose top-score
@@ -401,10 +411,90 @@ const dedupeByName = (rows: HighscoreRow[]): HighscoreRow[] => {
   return out;
 };
 
+// ?player=NAME drives the pilot-profile view. Reading it on boot makes a shared
+//   profile link land directly on that pilot's board; writing it on a name click
+//   keeps the URL shareable and the browser back button meaningful.
+const PLAYER_PARAM = "player";
+
+const readPlayerParam = (): string | null => {
+  try {
+    const raw = new URLSearchParams(window.location.search).get(PLAYER_PARAM);
+    const name = raw?.trim();
+    return name ? name : null;
+  } catch {
+    return null;
+  }
+};
+
+// Write ?player=NAME (or clear it) without reloading. A name click pushes a new
+//   entry so Back returns to the prior view; a programmatic clear (run start)
+//   replaces, so it scrubs the param without leaving dead history behind.
+const setPlayerParam = (name: string | null, mode: "push" | "replace" = "push") => {
+  try {
+    const url = new URL(window.location.href);
+    if (name) url.searchParams.set(PLAYER_PARAM, name);
+    else url.searchParams.delete(PLAYER_PARAM);
+    const state = { player: name ?? null };
+    if (mode === "replace") window.history.replaceState(state, "", url);
+    else window.history.pushState(state, "", url);
+  } catch {
+    // history may be unavailable (sandboxed iframe); the in-memory view still
+    //   switches — only the shareable URL and Back button are lost.
+  }
+};
+
+let popstateBound = false;
+const bindPlayerPopstate = (game: Game) => {
+  if (popstateBound) return;
+  popstateBound = true;
+  window.addEventListener("popstate", () => {
+    // Only re-route the leaderboard while it owns the screen — mid-run the URL
+    //   change shouldn't yank the player out of a game.
+    if (game.leaderboardEl.classList.contains("hidden")) return;
+    const name = readPlayerParam();
+    game.leaderboardPlayerFilter = name;
+    if (name) void renderPlayerProfile(game, name);
+    else renderHallOfFame(game);
+  });
+};
+
+// Starting a run leaves the pilot-profile view behind: clear the filter and the
+//   ?player= URL so the post-run "your standing" view (and a later return to
+//   title) shows the global board, not whatever profile was last open.
+export const clearPlayerFilter = (game: Game) => {
+  if (game.leaderboardPlayerFilter === null && readPlayerParam() === null) return;
+  game.leaderboardPlayerFilter = null;
+  setPlayerParam(null, "replace");
+};
+
+// The "Pulsar" title becomes a back-affordance only while a profile is open.
+const syncTitleBackAffordance = (game: Game, isProfile: boolean) => {
+  game.overlayTitleEl.classList.toggle("title-back", isProfile);
+};
+
+// User-initiated return from a pilot profile to the global board (clicking the
+//   "Pulsar" title or the "Pilot" header). Pushes a history entry so Back goes
+//   to the profile they came from. No-op when no profile is showing.
+const exitPlayerProfile = (game: Game) => {
+  if (!game.leaderboardPlayerFilter) return;
+  game.leaderboardPlayerFilter = null;
+  setPlayerParam(null);
+  renderHallOfFame(game);
+};
+
 export const showLeaderboard = (game: Game) => {
   bindLeaderboardClicks(game);
   bindLeaderboardFooter(game);
+  bindPlayerPopstate(game);
   game.leaderboardEl.classList.remove("hidden");
+  // A ?player= URL (shared link or a name the player clicked) wins over every
+  //   other view — show that pilot's full board.
+  const player = game.leaderboardPlayerFilter ?? readPlayerParam();
+  if (player) {
+    game.leaderboardPlayerFilter = player;
+    void renderPlayerProfile(game, player);
+    return;
+  }
   // One-shot post-run view: the first title screen after a submitted score shows
   //   the ±25 neighborhood centred on the player. Consume the flag immediately so
   //   a later return-to-title or reload reverts to the hall-of-fame.
@@ -416,6 +506,88 @@ export const showLeaderboard = (game: Game) => {
     return;
   }
   renderHallOfFame(game);
+};
+
+// Pilot-profile view: every run by one pilot (top-50 per category, server-
+//   gathered), rendered unfiltered and fully expanded. Column-header sorts still
+//   work against this set; "show more" pages the pilot's remaining runs by score.
+//   Falls back to the hall-of-fame if the pilot has no rows or the fetch fails.
+const renderPlayerProfile = async (game: Game, name: string) => {
+  game.leaderboardNeighborhood = false;
+  game.leaderboardRankBase = 0;
+  game.leaderboardTopOnly = false;
+  game.leaderboardExpanded = true;
+  game.leaderboardLoadingMore = false;
+  game.leaderboardHasMore = false;
+  game.leaderboardSort = "score";
+  syncOverlayExpansion(true);
+  syncShowMoreVisibility(game);
+  // The footer stays visible for "show more", but the per-pilot dedupe toggle is
+  //   meaningless on a single pilot's board — hide just that control.
+  syncFooterVisibility(false);
+  syncTopOnlyVisibility(true);
+  syncTitleBackAffordance(game, true);
+  game.leaderboardListEl.innerHTML =
+    `<li class="leaderboard-status">Loading ${escapeHtml(name)}'s scores…</li>`;
+  let rows: HighscoreRow[];
+  try {
+    rows = await fetchPlayerScores(name);
+  } catch {
+    // A failed fetch shouldn't strand the player on a blank list; clear the
+    //   filter (and the URL) and drop back to the global board.
+    game.leaderboardPlayerFilter = null;
+    setPlayerParam(null, "replace");
+    renderHallOfFame(game);
+    return;
+  }
+  // The view may have moved on (player clicked Back / another name) while the
+  //   fetch was in flight — don't clobber the newer view with stale rows.
+  if (game.leaderboardPlayerFilter !== name) return;
+  if (rows.length === 0) {
+    game.leaderboardPlayerFilter = null;
+    setPlayerParam(null, "replace");
+    renderHallOfFame(game);
+    return;
+  }
+  game.leaderboardAllRows = rows;
+  game.leaderboardTopPilots = rows;
+  // The union's score slice covered the top PLAYER_CATEGORY_LIMIT runs, so that's
+  //   where the score-desc "load more" cursor resumes. A full-size union means
+  //   the pilot has at least that many runs and there may be more to page.
+  game.leaderboardRankedCount = PLAYER_CATEGORY_LIMIT;
+  game.leaderboardHasMore = rows.length >= PLAYER_CATEGORY_LIMIT;
+  applySort(game, null);
+  syncShowMoreVisibility(game);
+};
+
+// "Load more" on a profile: page the pilot's next runs by score-desc, dedupe
+//   against what's shown, and append. Mirrors loadMoreLeaderboard but hits the
+//   per-pilot endpoint and keys off leaderboardPlayerFilter.
+const loadMorePlayerScores = async (game: Game) => {
+  const name = game.leaderboardPlayerFilter;
+  if (!name || game.leaderboardLoadingMore || !game.leaderboardHasMore) return;
+  game.leaderboardLoadingMore = true;
+  syncShowMoreVisibility(game);
+  try {
+    const offset = game.leaderboardRankedCount;
+    const page = await fetchPlayerPage(name, offset, PLAYER_CATEGORY_LIMIT);
+    // A view switch mid-fetch (Back, another pilot) means these rows are stale.
+    if (game.leaderboardPlayerFilter !== name) return;
+    const existingIds = new Set(game.leaderboardAllRows.map((r) => r.id));
+    const fresh = page.filter((r) => !existingIds.has(r.id));
+    game.leaderboardRankedCount += page.length;
+    game.leaderboardAllRows = [...game.leaderboardAllRows, ...fresh];
+    game.leaderboardTopPilots = game.leaderboardAllRows;
+    game.leaderboardHasMore = page.length >= PLAYER_CATEGORY_LIMIT;
+    applySort(game, null);
+  } catch {
+    // leave the existing list intact; the player can retry by clicking again.
+  } finally {
+    if (game.leaderboardPlayerFilter === name) {
+      game.leaderboardLoadingMore = false;
+      syncShowMoreVisibility(game);
+    }
+  }
 };
 
 // The default title-screen view: deduped "top pilots" hall-of-fame, fully
@@ -430,6 +602,8 @@ const renderHallOfFame = (game: Game) => {
   syncShowMoreVisibility(game);
   syncFooterUi(game);
   syncFooterVisibility(false);
+  syncTopOnlyVisibility(false);
+  syncTitleBackAffordance(game, false);
   game.leaderboardSort = "rhythm";
   // Paint cached rows immediately so the title screen is never blank on reload;
   //   the in-flight fetch will swap them out with fresh data when it lands.
@@ -466,6 +640,7 @@ const showNeighborhoodLeaderboard = async (
   syncOverlayExpansion(true);
   syncFooterVisibility(true);
   syncShowMoreVisibility(game);
+  syncTitleBackAffordance(game, false);
   game.leaderboardListEl.innerHTML =
     `<li class="leaderboard-status">Loading your standing…</li>`;
   const result = await pending;
@@ -607,11 +782,19 @@ const syncFooterUi = (game: Game) => {
   if (checkbox) checkbox.checked = game.leaderboardTopOnly;
 };
 
-// Hide the filter controls on the post-run "your standing" view; the player
-//   wants to see their actual rank there, not a deduped global view.
+// Hide the whole footer (filter toggle + show-more) on the post-run "your
+//   standing" view; the player wants to see their actual rank there, not a
+//   deduped global view.
 const syncFooterVisibility = (hide: boolean) => {
   const footer = document.getElementById("leaderboard-footer");
   if (footer) footer.classList.toggle("hidden", hide);
+};
+
+// Hide just the "top entries only" control (keeping "show more"); used on a
+//   pilot profile, where per-pilot dedupe is meaningless but paging still is.
+const syncTopOnlyVisibility = (hide: boolean) => {
+  const toggle = document.getElementById("leaderboard-top-only");
+  if (toggle) toggle.classList.toggle("hidden", hide);
 };
 
 let leaderboardFooterBound = false;
@@ -628,6 +811,12 @@ const bindLeaderboardFooter = (game: Game) => {
   });
   showMore.addEventListener("click", () => {
     if (game.leaderboardLoadingMore) return;
+    // On a pilot profile the list is already fully expanded; "show more" just
+    //   pages that pilot's next runs from the per-pilot endpoint.
+    if (game.leaderboardPlayerFilter) {
+      void loadMorePlayerScores(game);
+      return;
+    }
     if (game.leaderboardTopOnly) {
       game.leaderboardTopOnly = false;
       saveTopEntriesOnly(false);
@@ -668,6 +857,15 @@ let leaderboardClicksBound = false;
 const bindLeaderboardClicks = (game: Game) => {
   if (leaderboardClicksBound) return;
   leaderboardClicksBound = true;
+  // Clicking the "Pulsar" title exits a pilot profile back to the global board.
+  //   When no profile is open it stays inert (cursor set per-view below) so the
+  //   title-screen click can't be mistaken for a Start.
+  game.overlayTitleEl.addEventListener("click", (ev) => {
+    if (!game.leaderboardPlayerFilter) return;
+    if (game.leaderboardEl.classList.contains("hidden")) return;
+    ev.stopPropagation();
+    exitPlayerProfile(game);
+  });
   game.leaderboardListEl.addEventListener("click", (ev) => {
     const el = ev.target as HTMLElement | null;
     if (!el) return;
@@ -678,10 +876,29 @@ const bindLeaderboardClicks = (game: Game) => {
       if (id > 0) void launchReplay(game, id);
       return;
     }
+    const nameEl = el.closest<HTMLElement>("[data-pilot]");
+    if (nameEl) {
+      // Stop the click bubbling to the overlay, which would start a run.
+      ev.stopPropagation();
+      const pilot = nameEl.dataset.pilot?.trim();
+      if (!pilot || pilot === game.leaderboardPlayerFilter) return;
+      game.leaderboardPlayerFilter = pilot;
+      setPlayerParam(pilot);
+      void renderPlayerProfile(game, pilot);
+      return;
+    }
     const sortEl = el.closest<HTMLElement>("[data-sort]");
     if (!sortEl) return;
     const key = sortEl.dataset.sort as Game["leaderboardSort"] | undefined;
-    if (!key || key === game.leaderboardSort) return;
+    if (!key) return;
+    // On a pilot profile the "Pilot" header doubles as the way back to the
+    //   global board (sorting one pilot's runs by name is meaningless).
+    if (game.leaderboardPlayerFilter && key === "name") {
+      ev.stopPropagation();
+      exitPlayerProfile(game);
+      return;
+    }
+    if (key === game.leaderboardSort) return;
     game.leaderboardSort = key;
     // Sorting by recency only makes sense across every run, so drop the
     //   one-row-per-pilot filter when the player asks for "When".

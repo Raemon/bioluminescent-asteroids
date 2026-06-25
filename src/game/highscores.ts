@@ -103,6 +103,35 @@ export const fetchRecentScores = async (): Promise<HighscoreRow[]> => {
   return body.scores;
 };
 
+// Player-profile view: every run by one pilot, server-gathered as the top-50 in
+//   each category (score, rhythm, wave, most-recent) and unioned. The view
+//   renders these unfiltered (no per-pilot dedupe) so the player sees their
+//   full board.
+export const fetchPlayerScores = async (name: string): Promise<HighscoreRow[]> => {
+  const res = await fetch(`/api/highscores?mode=player&name=${encodeURIComponent(name)}`, {
+    method: "GET",
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+  const body = (await res.json()) as { scores: HighscoreRow[] };
+  return body.scores;
+};
+
+// "Load more" for a profile: that pilot's next page of runs by score-desc, past
+//   the score-ranked rows already shown. Deduped against the loaded set by the
+//   caller; an offset of 0 would re-fetch the union, so callers pass offset > 0.
+export const fetchPlayerPage = async (
+  name: string,
+  offset: number,
+  limit = 50,
+): Promise<HighscoreRow[]> => {
+  const url = `/api/highscores?mode=player&name=${encodeURIComponent(name)}&offset=${offset}&limit=${limit}`;
+  const res = await fetch(url, { method: "GET", cache: "no-store" });
+  if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+  const body = (await res.json()) as { scores: HighscoreRow[] };
+  return body.scores;
+};
+
 // Post-run "your standing": the rows ranked just above and below the player's
 //   submitted score, with selfRank giving the score's true global position so
 //   the leaderboard can show real rank numbers instead of a window-local index.

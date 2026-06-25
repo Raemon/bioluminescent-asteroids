@@ -451,6 +451,7 @@ const transitionToGameOver = (game: Game) => {
 };
 
 import { BOSS_MUSIC_VARIATION, HALO_MUSIC_POOL, PLAY_COMBO_MUSIC, pickHaloMusicVariation, pickHaloMusicVariationExcluding } from "./haloMusicConfig";
+import { isFullHaloWave, pickFullHaloSong, pickFullHaloSongExcluding } from "./haloFullMusicConfig";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
 
 // Only true comets carry the phrygian shimmer the comet-mode pad voices around;
@@ -490,7 +491,29 @@ const syncHaloAmbient = (game: Game) => {
     return;
   }
 
-  if (HALO_MUSIC_POOL.length > 0) {
+  if (isFullHaloWave(game.wave)) {
+    // Full-length song path (levels 1–9, the "different system"). One whole
+    // ~2:10 track with six combo-tier layers (4x/6x/12x/18x/24x/32x). When the
+    // track ends mid-halo it rolls over to the next song. Bypasses the loop
+    // pool entirely on these waves; boss/haunting waves still use it below.
+    if (hasYellowHalo) {
+      if (!game.sound.haloFullMusic) {
+        const song = pickFullHaloSong();
+        const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
+        const measureAlignDelay = nextDownbeat - game.beatTime;
+        game.beatPhaseCorrection = 0;
+        void game.sound.startHaloFullMusic(song, game.beatCombo, measureAlignDelay, game.beatTime,
+          () => switchFullHaloSong(game));
+      } else {
+        game.sound.setHaloFullMusicTier(game.beatCombo);
+      }
+    } else if (game.sound.haloFullMusic) {
+      game.sound.stopHaloFullMusic();
+    }
+  } else if (HALO_MUSIC_POOL.length > 0) {
+    // Full-song node never coexists with the loop node — if we left a full
+    // wave still holding a full song, tear it down before the loop path runs.
+    if (game.sound.haloFullMusic) game.sound.stopHaloFullMusic();
     // Pre-rendered music path. Three layers: ambient (4x) + melodic (6x) + layer3 (12x).
     // On boss waves, force the dedicated climactic variation. The boss
     // theme replaces the random halo pick AND blocks the 24x climax swap so
@@ -542,6 +565,23 @@ const syncHaloAmbient = (game: Game) => {
     }
   }
   game.sound.setHaloAmbientCometMode(game.comets.length > 0);
+};
+
+// Fired when a full-length song reaches its natural end while a halo is still
+// held. Rolls over to a different song from the current one, restarting at the
+// player's live combo tier so the build-up doesn't reset to silence. If the
+// halo broke between the track ending and this firing, leaves music stopped
+// (the next 4x will pick a fresh song). Runs from the audio thread's onended,
+// so it reads live game state rather than a captured snapshot.
+const switchFullHaloSong = (game: Game) => {
+  if (!game.sound.haloFullMusic) return;
+  if (game.beatCombo < 4) { game.sound.stopHaloFullMusic(); return; }
+  const next = pickFullHaloSongExcluding(game.sound.haloFullMusic.song);
+  const nextDownbeat = Math.ceil(game.beatTime / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
+  const measureAlignDelay = nextDownbeat - game.beatTime;
+  game.beatPhaseCorrection = 0;
+  void game.sound.startHaloFullMusic(next, game.beatCombo, measureAlignDelay, game.beatTime,
+    () => switchFullHaloSong(game));
 };
 
 // seconds the reticule must rest on a first-beat dot to clear the hover gate.
@@ -717,6 +757,7 @@ const updatePlaying = (game: Game, dt: number) => {
     const slowMoFactor = rawMusicDt / dt;
     if (Math.abs(slowMoFactor - lastCommandedPlaybackRate) > 0.001) {
       game.sound.setHaloMusicPlaybackRate(slowMoFactor, 0);
+      game.sound.setHaloFullMusicPlaybackRate(slowMoFactor, 0);
       lastCommandedPlaybackRate = slowMoFactor;
     }
   }

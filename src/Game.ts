@@ -354,6 +354,10 @@ export class Game implements HudElements {
   // Global rank of the first rendered row, so the neighborhood view shows true
   //   ranks instead of a window-local index. 0 on every other view.
   leaderboardRankBase = 0;
+  // When set (via ?player= or a click on a leaderboard name), the title screen
+  //   shows that pilot's full board — every run, top-50 per category — instead
+  //   of the global hall-of-fame. See game/scoreEntry.ts.
+  leaderboardPlayerFilter: string | null = null;
 
   // post-run trophy lineup; replayed in the end-of-mission parade with original kill sounds.
   killedSnapshots: KilledSnapshot[] = [];
