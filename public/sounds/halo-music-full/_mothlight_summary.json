@@ -1,32 +1,44 @@
-[
-  {
-    "name": "mothlight-l1",
-    "mp3": "/Users/raymondarnold/Documents/coding/pulsar/scripts/music-gen/../../public/sounds/halo-music-full/mothlight-l1.mp3",
-    "duration_s": 119.3
+{
+  "source_bpm": 114.9913,
+  "stretch_rate": 1.043557,
+  "global_stretch_gate": {
+    "period_ms": 499.63,
+    "half_drift_ms": 7.2,
+    "pass": true
   },
-  {
-    "name": "mothlight-l2",
-    "mp3": "/Users/raymondarnold/Documents/coding/pulsar/scripts/music-gen/../../public/sounds/halo-music-full/mothlight-l2.mp3",
-    "duration_s": 119.3
+  "post_quantize_gate": {
+    "period_ms": 500.31,
+    "half_drift_ms": 4.1,
+    "pass": true
   },
-  {
-    "name": "mothlight-l3",
-    "mp3": "/Users/raymondarnold/Documents/coding/pulsar/scripts/music-gen/../../public/sounds/halo-music-full/mothlight-l3.mp3",
-    "duration_s": 119.3
+  "drum_quantize": {
+    "onsets": 156,
+    "snapped": 128
   },
-  {
-    "name": "mothlight-l4",
-    "mp3": "/Users/raymondarnold/Documents/coding/pulsar/scripts/music-gen/../../public/sounds/halo-music-full/mothlight-l4.mp3",
-    "duration_s": 119.3
-  },
-  {
-    "name": "mothlight-l5",
-    "mp3": "/Users/raymondarnold/Documents/coding/pulsar/scripts/music-gen/../../public/sounds/halo-music-full/mothlight-l5.mp3",
-    "duration_s": 119.3
-  },
-  {
-    "name": "mothlight-l6",
-    "mp3": "/Users/raymondarnold/Documents/coding/pulsar/scripts/music-gen/../../public/sounds/halo-music-full/mothlight-l6.mp3",
-    "duration_s": 119.3
-  }
-]
+  "layers": [
+    {
+      "name": "mothlight-l1",
+      "duration_s": 119.885
+    },
+    {
+      "name": "mothlight-l2",
+      "duration_s": 119.885
+    },
+    {
+      "name": "mothlight-l3",
+      "duration_s": 119.885
+    },
+    {
+      "name": "mothlight-l4",
+      "duration_s": 119.885
+    },
+    {
+      "name": "mothlight-l5",
+      "duration_s": 119.885
+    },
+    {
+      "name": "mothlight-l6",
+      "duration_s": 119.885
+    }
+  ]
+}

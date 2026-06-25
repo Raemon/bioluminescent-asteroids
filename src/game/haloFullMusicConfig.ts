@@ -36,8 +36,8 @@ export type FullHaloSongDef = {
 export const FULL_HALO_SONGS: Record<FullHaloSong, FullHaloSongDef> = {
   mothlight: {
     song: "mothlight",
-    durationS: 119.33,
-    layerOrder: ["pad/atmosphere", "guitar", "bass", "drums-low", "drums-high", "vocal+shimmer"],
+    durationS: 119.88,
+    layerOrder: ["atmosphere-bed", "pulse-no-guitar", "guitar", "bass", "drums-high", "shimmer"],
   },
 };
 

@@ -3592,10 +3592,11 @@ export class Sound {
   // Per-layer peak gain for the six full-song tiers (l1→l6). The build script
   // already peak-normalizes each stem to ~-12 dBFS, so these are light
   // perceptual trims rather than the big per-variation calibration the loop
-  // pool needs: the bed/guitar/bass sit a touch lower, the drum + climax
-  // layers ride a touch hotter so each new tier reads as an arrival.
+  // pool needs. The palette is section-built (see haloFullMusicConfig.ts
+  // layerOrder): atmosphere bed, then a no-guitar pulse, then guitar, bass,
+  // drums-high, and a shimmer climax — each new tier reads as an arrival.
   private haloFullMusicLayerGain(_song: FullHaloSongId, layerIdx: number): number {
-    const gains = [0.26, 0.24, 0.26, 0.30, 0.30, 0.28];
+    const gains = [0.26, 0.28, 0.26, 0.30, 0.30, 0.26];
     return gains[layerIdx] ?? 0.26;
   }
 
