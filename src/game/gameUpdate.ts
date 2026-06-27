@@ -49,6 +49,7 @@ import { isDown, wasPressed } from "./controlBindings";
 import { tickLaserShot, FIRE_FLASH_DECAY } from "./laserShot";
 import { fireBossSweepBeam, tickBossBeams } from "./bossBeam";
 import { targetsForReticule } from "./gameRender";
+import { driftTierForRing } from "../ship/reticule/reticuleRender";
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
@@ -585,8 +586,10 @@ const switchFullHaloSong = (game: Game) => {
     () => switchFullHaloSong(game));
 };
 
-// seconds the reticule must rest on a first-beat dot to clear the hover gate.
-const TUTORIAL_HOVER_SEC = 1.0;
+// seconds the reticule must rest on a first-beat dot to clear the hover gate. Mirrors the basic
+//   drift-shot lock time (HOVER_RING_FILL_SEC) so the tutorial progress bar fills in lockstep
+//   with the visible ring; kept as a separate literal rather than imported from the renderer.
+const TUTORIAL_HOVER_SEC = 0.5;
 
 // Guided-tutorial spawn machine. Holds exactly one small practice rock (respawns
 //   when killed) and watches the two gates: hover a first-beat dot for 1s, then
@@ -855,14 +858,14 @@ const tickPendingDriftBonuses = (game: Game) => {
   for (const entry of game.pendingDriftBonuses) {
     if (game.perceivedBeatTime < entry.fireAt) { keep.push(entry); continue; }
     if (game.beatCombo === 0) continue;
-    game.beatCombo += 1;
+    game.beatCombo += entry.amount;
     if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
     if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
     game.driftBonusesThisWave += 1;
     syncComboHud(game);
     game.sound.playComboChime(game.beatCombo, entry.pos);
     const firstOfRun = !game.hasShownDriftShotLabel;
-    game.popups.push(popupDriftBonus(entry.pos, firstOfRun));
+    game.popups.push(popupDriftBonus(entry.pos, entry.tier, firstOfRun));
     if (firstOfRun) game.hasShownDriftShotLabel = true;
   }
   game.pendingDriftBonuses = keep;
@@ -881,7 +884,9 @@ const classifyNewBullets = (game: Game, firstNewIndex: number) => {
   //   late on the raw audio grid.
   const firedOnBeat = isInBeatWindow(game, game.perceivedBeatTime);
   const count = game.bullets.length - firstNewIndex;
-  const lockedSlots = game.ship.hoverDotRingStates.map(r => r.completionBeatTime !== null);
+  // snapshot each ring's drift TIER (0 = unlocked; 1/2/3 = held tier). Uses game.beatTime — the
+  //   same clock tickHoverLockState stamped hoverStartBeatTime on — so the tier is deterministic.
+  const lockedSlots = game.ship.hoverDotRingStates.map(r => driftTierForRing(r, game.beatTime));
   for (let i = firstNewIndex; i < game.bullets.length; i++) {
     game.bullets[i].firedAtBeatTime = game.perceivedBeatTime;
     game.bullets[i].driftLockedSlots = lockedSlots;

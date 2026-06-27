@@ -124,8 +124,9 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     if (b.life <= 0) continue;
     if (!a.collidesWith(b.pos, b.hitRadius())) continue;
     const onBeat = isHitOnBeat(game, b);
-    const isDriftShot = onBeat && b.driftEligibleAtHit();
-    const dmg = b.damage() * (isDriftShot ? 4 : 1);
+    // drift tier scales the bonus: tier1→2×, tier2→3×, tier3→4× damage (was a flat 4×).
+    const driftTier = onBeat ? b.driftTierAtHit() : 0;
+    const dmg = b.damage() * (driftTier > 0 ? driftTier + 1 : 1);
     // Peek at the outcome before consuming the bullet: a hit too weak to break
     // the target's armour deflects instead of landing — no damage, no combo,
     // and the shot ricochets off the surface so it can travel on.
@@ -390,7 +391,8 @@ export const handleGems = (game: Game) => {
       applyHitToCombo(game, onBeat, b.pos);
       if (onBeat && dmg >= 4) {
         crackGemForCanister(game, g);
-        if (b.driftEligibleAtHit()) queueDriftBonusForGem(game, g);
+        const driftTier = b.driftTierAtHit();
+        if (driftTier > 0) queueDriftBonusForGem(game, g, driftTier);
       } else wasteGem(game, g);
       continue;
     }
@@ -440,10 +442,12 @@ export const crackGemForCanister = (game: Game, g: Gem) => {
 // Drift-locked on-beat crack: same pending-bonus pattern as asteroid drift shots — queues a
 // +1 combo bump one beat later (cancelled if the streak breaks in the meantime) and plays the
 // drift-shot fanfare immediately so the reward reads at the hit, not just at the popup.
-const queueDriftBonusForGem = (game: Game, g: Gem) => {
+const queueDriftBonusForGem = (game: Game, g: Gem, tier: number) => {
   game.pendingDriftBonuses.push({
     fireAt: game.perceivedBeatTime + BEAT_GRID,
     pos: { x: g.pos.x, y: g.pos.y },
+    amount: tier,
+    tier,
   });
   game.sound.playDriftShotHit();
 };

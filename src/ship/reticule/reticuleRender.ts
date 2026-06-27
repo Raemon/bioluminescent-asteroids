@@ -95,9 +95,11 @@ const HOVER_ARC_LINE_WIDTH = 1.5;
 // sits just past the crosshair tips so arcs don't crowd the aim disc.
 const HOVER_DOT_RING_RADIUS = 26;
 const HOVER_DOT_BUILDING_ALPHA = 0.45;
-// full ring fills in 1.0s; per-arc fade-in is just under one slot so the leading edge sweeps
-// before the next arc starts. Completion flare runs for FLARE_SEC afterward.
-const HOVER_RING_FILL_SEC = 1.0;
+// ring fills in HOVER_RING_FILL_SEC; per-arc fade-in is just under one slot so the leading edge
+// sweeps before the next arc starts. Completion flare runs for FLARE_SEC afterward. The fill time
+// IS the tier-1 (basic) drift-shot hold (DRIFT_TIER_HOLD_SEC[0]) — lowering it speeds the whole
+// fill animation in lockstep, since every per-arc duration derives from HOVER_RING_SLOT_SEC.
+const HOVER_RING_FILL_SEC = 0.5;
 const HOVER_RING_SLOT_SEC = HOVER_RING_FILL_SEC / HOVER_DOT_COUNT;
 const HOVER_ARC_FADE_IN_SEC = HOVER_RING_SLOT_SEC * 0.9;
 // once complete, arcs breathe 1.0 → reticule's hovered base alpha so peak = "this shot lands".
@@ -143,6 +145,35 @@ const HOVER_LOCK_WAVE_PEAK_ALPHA = 0.95;
 const HOVER_LOCK_WAVE_LINE_WIDTH = 2.8;
 // gold hue at the peak — drift the dash colour toward warm/white so the lock reads as "reward".
 const HOVER_FLARE_WARM_HSL = "48, 100%, 70%";
+
+// Drift-shot tiers: keep hovering past the basic lock to climb tiers, each one raising the
+// damage and rhythm-bonus multipliers (+1 per tier: 2× / 3× / 4× damage) and shifting the
+// lock visuals + hum stack. Hold time is measured from hover START (total), so index 0 == the
+// ring-fill time == the basic lock. Tier number returned is 1-based (0 = not yet locked).
+const DRIFT_TIER_HOLD_SEC = [HOVER_RING_FILL_SEC, 2.0, 8.0] as const;
+const DRIFT_TIER_MAX = DRIFT_TIER_HOLD_SEC.length;
+// elapsed = beatTime - hoverStartBeatTime. 0 below the first threshold, else the highest tier reached.
+const driftTierForElapsed = (elapsed: number): number => {
+  let tier = 0;
+  for (let i = 0; i < DRIFT_TIER_HOLD_SEC.length; i++) {
+    if (elapsed >= DRIFT_TIER_HOLD_SEC[i]) tier = i + 1;
+  }
+  return tier;
+};
+// tier from a ring's hover-lock state: 0 unless the ring has actually completed its lock
+// (completionBeatTime set), so an un-built ring never reports a tier even if hover has run long.
+type HoverLockReadState = { hoverStartBeatTime: number | null; completionBeatTime: number | null };
+export const driftTierForRing = (ring: HoverLockReadState, beatTime: number): number => {
+  if (ring.completionBeatTime === null || ring.hoverStartBeatTime === null) return 0;
+  return Math.max(1, driftTierForElapsed(beatTime - ring.hoverStartBeatTime));
+};
+// per-tier pulse colour: gold (basic) → the game's signature cyan → a hot magenta at the top,
+// walking across the existing UI palette so each tier reads as "deeper into rare territory".
+const DRIFT_TIER_PULSE_HSL = ["48, 100%, 70%", "195, 100%, 65%", "300, 100%, 68%"] as const;
+// higher tiers widen the pulse/soundwave circles so the escalation is legible at a glance.
+const DRIFT_TIER_WIDTH_MULT = [1.0, 1.35, 1.7] as const;
+const driftTierPulseHsl = (tier: number): string => DRIFT_TIER_PULSE_HSL[Math.max(0, Math.min(DRIFT_TIER_MAX - 1, tier - 1))];
+const driftTierWidthMult = (tier: number): number => DRIFT_TIER_WIDTH_MULT[Math.max(0, Math.min(DRIFT_TIER_MAX - 1, tier - 1))];
 
 // one-shot hint that surfaces the first time the player ever holds a hover long enough to
 // complete the lock ring fill. Persistence via localStorage so it only appears on the player's
@@ -309,8 +340,13 @@ const paintHoverDotRing = (
     ? pulsing + (HOVER_DOT_RESTING_ALPHA - pulsing) * fadeT
     : HOVER_DOT_BUILDING_ALPHA;
   const arcAlphaBoost = 1 + (HOVER_FLARE_PEAK_BOOST - 1) * burstEnvelope;
+  // tier from total hold — drives the warm flare/soundwave colour + soundwave width so the
+  // lock visuals shift gold → cyan → magenta as the player keeps holding past each threshold.
+  const tier = fullyBuilt ? Math.max(1, driftTierForElapsed(elapsed)) : 0;
+  const tierWarmHsl = tier > 0 ? driftTierPulseHsl(tier) : HOVER_FLARE_WARM_HSL;
+  const tierWidth = tier > 0 ? driftTierWidthMult(tier) : 1;
   const arcHsl = burstEnvelope > 0
-    ? lerpHsl(HOVER_DOT_HSL, HOVER_FLARE_WARM_HSL, burstEnvelope)
+    ? lerpHsl(HOVER_DOT_HSL, tierWarmHsl, burstEnvelope)
     : HOVER_DOT_HSL;
   // apply overall fadeOut multiplier (used when reticule leaves the trigger zone)
   const effectiveAlphaMultiplier = fadeOutAlpha;
@@ -319,7 +355,7 @@ const paintHoverDotRing = (
   // pulse is already underway by the time the arcs finish locking in.
   const wavesStartSec = fillCompleteSec - HOVER_WAVE_LEAD_BEATS * beatGrid;
   if (elapsed >= wavesStartSec) {
-    paintSoundwaves(ctx, center, elapsed - wavesStartSec, beatTime, beatGrid, fadeOutAlpha);
+    paintSoundwaves(ctx, center, elapsed - wavesStartSec, beatTime, beatGrid, fadeOutAlpha, tierWarmHsl, tierWidth);
   }
   // white center flash on lock acquisition — sized to the bullet's on-beat hit radius so the
   // moment of lock visually anchors on the actual hit zone, not the wider dashed dot ring.
@@ -370,7 +406,7 @@ const paintHoverDotRing = (
 // `lockAge` is seconds since the ring filled (≥0 when fully built).
 const paintSoundwaves = (
   ctx: CanvasRenderingContext2D, center: Vec, lockAge: number, beatTime: number, beatGrid: number,
-  fadeOutAlpha: number = 1,
+  fadeOutAlpha: number = 1, tierHsl: string = HOVER_FLARE_WARM_HSL, widthMult: number = 1,
 ) => {
   if (beatGrid <= 0) return;
   ctx.lineCap = "round";
@@ -391,7 +427,8 @@ const paintSoundwaves = (
     // to the moment the player actually achieved hover.
     if (ageBeats > beatsSinceLock + 0.01) continue;
     const t = ageBeats / HOVER_WAVE_LIFETIME_BEATS;
-    const r = HOVER_WAVE_START_R + (HOVER_WAVE_END_R - HOVER_WAVE_START_R) * t;
+    // higher tiers push the soundwaves out wider so the escalation reads at a glance.
+    const r = HOVER_WAVE_START_R + (HOVER_WAVE_END_R - HOVER_WAVE_START_R) * t * widthMult;
     // fade-in over the first ~10% so a newly-emitted wave doesn't pop in too hard, then
     // fade out the rest of its life. Quadratic falloff feels like a soundwave dissipating.
     const fadeIn = Math.min(1, t / 0.1);
@@ -404,7 +441,7 @@ const paintSoundwaves = (
     const peakAlpha = isLockWave ? HOVER_LOCK_WAVE_PEAK_ALPHA : HOVER_WAVE_PEAK_ALPHA;
     const lineWidth = isLockWave ? HOVER_LOCK_WAVE_LINE_WIDTH : HOVER_WAVE_LINE_WIDTH;
     ctx.lineWidth = lineWidth;
-    ctx.strokeStyle = `hsla(${HOVER_FLARE_WARM_HSL}, ${peakAlpha * envelope * fadeOutAlpha})`;
+    ctx.strokeStyle = `hsla(${tierHsl}, ${peakAlpha * envelope * fadeOutAlpha})`;
     ctx.beginPath();
     ctx.arc(center.x, center.y, r, 0, TAU);
     ctx.stroke();
@@ -467,15 +504,21 @@ const paintReticuleArrow = (
 // the song grid so the pulse always lands on the beat.
 const paintHoverPulse = (
   ctx: CanvasRenderingContext2D, center: Vec, beatTime: number, beatGrid: number, fade01: number,
+  tier: number = 0,
 ) => {
   if (fade01 <= 0 || beatGrid <= 0) return;
   const phase = ((beatTime % beatGrid) + beatGrid) % beatGrid / beatGrid;
-  const r = HOVER_PULSE_START_R + (HOVER_PULSE_END_R - HOVER_PULSE_START_R) * phase;
+  // tier (live, from total hold) tints the pulse gold → cyan → magenta and widens it, so the
+  // "you're going deeper" escalation shows on the same circles the player is watching.
+  const hsl = tier > 0 ? driftTierPulseHsl(tier) : HOVER_PULSE_HSL;
+  const widthMult = tier > 0 ? driftTierWidthMult(tier) : 1;
+  const endR = HOVER_PULSE_START_R + (HOVER_PULSE_END_R - HOVER_PULSE_START_R) * widthMult;
+  const r = HOVER_PULSE_START_R + (endR - HOVER_PULSE_START_R) * phase;
   // ease in over the first sliver so a freshly-launched ring doesn't pop, then fade as it expands.
   const fadeIn = Math.min(1, phase / 0.12);
   const fadeOut = (1 - phase) * (1 - phase);
   const alpha = HOVER_PULSE_PEAK_ALPHA * fadeIn * fadeOut * fade01;
-  ctx.strokeStyle = `hsla(${HOVER_PULSE_HSL}, ${alpha})`;
+  ctx.strokeStyle = `hsla(${hsl}, ${alpha})`;
   ctx.lineWidth = HOVER_PULSE_LINE_WIDTH;
   ctx.setLineDash([]);
   ctx.beginPath();
@@ -584,6 +627,9 @@ export const renderShipReticules = (
   let zoneIntensity = 0;
   let anyHover = false;
   let anyLocked = false;
+  // highest drift tier among locked rings this frame — drives the live pulse colour/width and
+  // the tier-2/3 hum layering, so what the player sees and hears tracks their current hold depth.
+  let maxLiveTier = 0;
   for (let slot = 0; slot < slotPositionIndices.length; slot++) {
     const proximity = probeMerged.slotProximities[slot] ?? 0;
     const within75 = probeMerged.slotWithin75[slot] ?? false;
@@ -606,7 +652,10 @@ export const renderShipReticules = (
     //   for replay; render only PAINTS the ring from the state the sim already set this frame.
     paintHoverRingFromState(ringState, ctx, beatTime, beatGrid);
     if (hovering) anyHover = true;
-    if (ringState.completionBeatTime !== null) anyLocked = true;
+    if (ringState.completionBeatTime !== null) {
+      anyLocked = true;
+      maxLiveTier = Math.max(maxLiveTier, driftTierForRing(ringState, beatTime));
+    }
   }
   expireHoverZoneHintIfHoverEnded(state.hoverDotRings.map(r => r.zoneEnterBeatTime), beatTime);
   paintHoverZoneHint(ctx, beatTime);
@@ -623,6 +672,12 @@ export const renderShipReticules = (
     // reticule is still in the tight hover radius — it drops the instant either gate opens.
     if (anyLocked && anyHover) sound.updateFirstDotHarmonyHum(beatPhase01, beatGrid);
     else sound.stopFirstDotHarmonyHum();
+    // tier-2 sub root (C3) and tier-3 bright fifth (G5) layer on as the player holds deeper.
+    // Gated on the live tier + still hovering, so they fade the moment the reticule slips off.
+    if (anyHover && maxLiveTier >= 2) sound.updateFirstDotSubHum(beatPhase01, beatGrid);
+    else sound.stopFirstDotSubHum();
+    if (anyHover && maxLiveTier >= 3) sound.updateFirstDotShimmerHum(beatPhase01, beatGrid);
+    else sound.stopFirstDotShimmerHum();
   }
   // guidance overlay on the player's reticule: a chevron pointing at the nearest first-beat
   // rhythm dot, which swaps for an expanding lock pulse the moment the reticule grazes a dot.
@@ -638,7 +693,7 @@ export const renderShipReticules = (
   if (ARROW_ENABLED && arrowFade01 > 0) {
     paintReticuleArrow(ctx, primaryReticule, lastArrowAngle, beatTime, beatGrid, arrowFade01);
   }
-  paintHoverPulse(ctx, primaryReticule, beatTime, beatGrid, hoverPulseFade01);
+  paintHoverPulse(ctx, primaryReticule, beatTime, beatGrid, hoverPulseFade01, maxLiveTier);
   ctx.restore();
 };
 

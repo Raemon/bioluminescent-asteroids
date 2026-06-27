@@ -65,14 +65,19 @@ export const popupCombo = (pos: Vec, multiplier: number): Popup => ({
 });
 
 // +1-beat reward for landing an on-beat hit while the first-dot hover ring is locked.
-//   Cyan to read distinctly from the gold multiplier popup it follows.
-//   withSubtitle adds a "2× DAMAGE" line underneath — used the first time per run so the
-//   player learns what a Drift Shot is worth without nagging them on every subsequent one.
-export const popupDriftBonus = (pos: Vec, withSubtitle = false): Popup => {
+//   The label is tinted per drift tier (gold → cyan → magenta, matching the hover-ring colour
+//   the player just held) so a deeper hold visibly pays off. withSubtitle adds the "N× DAMAGE"
+//   line — shown the first time per run so the player learns the worth without nagging after.
+// fill + glow per tier, mirroring DRIFT_TIER_PULSE_HSL in reticuleRender (gold/cyan/magenta).
+const DRIFT_POPUP_FILL = ["#ffd86a", "#7fe8ff", "#ff8bf0"] as const;
+const DRIFT_POPUP_SHADOW = ["rgba(255, 200, 80, 0.85)", "rgba(120, 220, 255, 0.85)", "rgba(255, 120, 235, 0.85)"] as const;
+export const popupDriftBonus = (pos: Vec, tier = 1, withSubtitle = false): Popup => {
   const labelFont = "700 18px 'Space Grotesk', system-ui, sans-serif";
   const subFont = "600 13px 'Space Grotesk', system-ui, sans-serif";
-  const fill = "#9be8ff";
-  const shadow = "rgba(120, 220, 255, 0.85)";
+  const ti = Math.max(0, Math.min(2, tier - 1));
+  const fill = DRIFT_POPUP_FILL[ti];
+  const shadow = DRIFT_POPUP_SHADOW[ti];
+  const dmgMult = tier + 1; // tier 1/2/3 → 2×/3×/4× damage
   const life = withSubtitle ? 1.6 : COMBO_POPUP_LIFE;
   return {
     pos: { x: pos.x, y: pos.y - 18 },
@@ -94,7 +99,7 @@ export const popupDriftBonus = (pos: Vec, withSubtitle = false): Popup => {
       ctx.font = subFont;
       ctx.fillStyle = "#ffd86a";
       ctx.shadowColor = "rgba(255, 200, 80, 0.85)";
-      ctx.fillText("2× DAMAGE", 0, 12);
+      ctx.fillText(`${dmgMult}× DAMAGE`, 0, 12);
     } : undefined,
   };
 };

@@ -6,7 +6,7 @@ import { cfgN, cfgU } from "./soundConfig";
 import { getChannelVolume, type AudioChannel } from "./game/audioPrefs";
 import { musicGain, loadMusicConfig, type MusicLayer } from "./musicConfig";
 import { FULL_HALO_TIER_THRESHOLDS, type FullHaloSong } from "./game/haloFullMusicConfig";
-import { fullHaloOffset, loadHaloFullConfig } from "./haloFullConfig";
+import { fullHaloLayerOffset, loadHaloFullConfig } from "./haloFullConfig";
 
 type ToneModule = typeof import("tone");
 let toneModulePromise: Promise<ToneModule> | null = null;
@@ -211,8 +211,11 @@ type HaloFullMusicNode = {
   // Fired once when the track reaches its natural end (the l1 source's
   // onended). Cleared on teardown so a stop()-triggered onended is a no-op.
   onTrackEnd: (() => void) | null;
-  // Wrapped per-song beat-sync offset (seconds) the sources were started at.
+  // Wrapped beat-sync offset (seconds) of layer 0 — the playhead reference.
   offset: number;
+  // Wrapped per-layer offsets (l1..l6) the sources were started at. Equal to
+  // `offset` for every layer unless a stem was nudged independently (cmd-drag).
+  layerOffsets: number[];
   // True only for the /music Beat Sync editor: sources loop so the editor can
   // cycle and re-offset live. The game leaves this false (non-looping).
   loopForTuning: boolean;
@@ -397,6 +400,13 @@ export class Sound {
   // the lock fifth, it drops the instant the reticule leaves the small radius, so it tracks the
   // tighter hover band rather than the persistent lock state.
   private firstDotHarmonyHum: FirstDotHumNode | null = null;
+  // Drift-tier-2 sub-octave root hum (C3) — joins once the player holds past the tier-2 threshold,
+  // dropping the C-major root a full octave below the base hum to anchor the stack with weight.
+  // Tracks the tight hover band with the lock fifth's fast release, same as the harmony third.
+  private firstDotSubHum: FirstDotHumNode | null = null;
+  // Drift-tier-3 bright fifth hum (G5) — the top tier's sparkle, the perfect fifth two octaves
+  // up. Sits above the whole stack reading as "ascending / mastery"; bright formant, low gain.
+  private firstDotShimmerHum: FirstDotHumNode | null = null;
   // Per-bassteroid ambient drone, keyed by the Asteroid instance. Only
   // populated for medium/small bass pieces (a large piece is "sealed" — it
   // hasn't been broken open yet).
@@ -1381,6 +1391,8 @@ export class Sound {
     if (!on) this.stopFirstDotOctaveHum();
     if (!on) this.stopFirstDotLockHum();
     if (!on) this.stopFirstDotHarmonyHum();
+    if (!on) this.stopFirstDotSubHum();
+    if (!on) this.stopFirstDotShimmerHum();
     if (!on) this.stopAllBassteroidDrones();
     if (!on) this.stopAllCometShimmers();
     if (!on) this.stopHaloAmbient();
@@ -1673,7 +1685,7 @@ export class Sound {
   private static readonly FIRST_DOT_HUM_FILTER_TROUGH_HZ = 700;
   private static readonly FIRST_DOT_HUM_FILTER_PEAK_HZ = 950;
 
-  // shared voice builder for the three first-dot hums: two detuned sines (chorus beating) through
+  // shared voice builder for the first-dot hums: two detuned sines (chorus beating) through
   // a bandpass "mm" formant, a slow vibrato, a pulseGain for the on-beat accent and a mainGain for
   // the hover swell. The node starts effectively silent; the caller ramps mainGain to taste.
   private createHumVoice(
@@ -1963,6 +1975,101 @@ export class Sound {
       try { node.vibratoLfo.stop(stopAt); } catch {}
       this.firstDotHarmonyHum = null;
     }, Math.ceil(Sound.FIRST_DOT_HARMONY_HUM_FAST_RELEASE_SEC * 1000) + 20);
+  }
+
+  // Drift-tier-2 sub-octave root hum (C3 = 130.81 Hz): the C-major root dropped a full octave
+  // below the base hover hum, layered once the player holds past the tier-2 threshold. Anchors the
+  // C4/C5/G4/E4 stack with low-end weight — the "deeper hum" reward for committing to a longer hold.
+  // Soft swell-in so it eases under the song, low formant for a chest-resonant "mm". Same lazy
+  // spin-up + fast-release shape as the harmony third, so it drops the instant the hover slips off.
+  private static readonly FIRST_DOT_SUB_HUM_PEAK_GAIN = 0.038;
+  private static readonly FIRST_DOT_SUB_HUM_ATTACK_SEC = 0.45;
+  private static readonly FIRST_DOT_SUB_HUM_FILTER_TROUGH_HZ = 300;
+  private static readonly FIRST_DOT_SUB_HUM_FILTER_PEAK_HZ = 450;
+  updateFirstDotSubHum(beatPhase01: number, beatGrid: number) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    if (!this.firstDotSubHum) {
+      this.firstDotSubHum = this.createHumVoice(130.81, 4.1, 0.0035, Sound.FIRST_DOT_SUB_HUM_FILTER_TROUGH_HZ);
+      if (!this.firstDotSubHum) return;
+      this.firstDotSubHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_SUB_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_SUB_HUM_ATTACK_SEC);
+    }
+    const node = this.firstDotSubHum;
+    if (node.releasing) {
+      this.resumeHumIfReleasing(node, t);
+      node.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_SUB_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_SUB_HUM_ATTACK_SEC);
+    }
+    if (beatGrid > 0) this.scheduleHumBeatPulse(node, t, beatPhase01, beatGrid, Sound.FIRST_DOT_SUB_HUM_FILTER_TROUGH_HZ, Sound.FIRST_DOT_SUB_HUM_FILTER_PEAK_HZ);
+  }
+
+  private static readonly FIRST_DOT_SUB_HUM_FAST_RELEASE_SEC = 0.05;
+  stopFirstDotSubHum() {
+    if (!this.firstDotSubHum || !this.ctx) return;
+    const node = this.firstDotSubHum;
+    if (node.releasing) return;
+    const t = this.ctx.currentTime;
+    const releaseEnd = t + Sound.FIRST_DOT_SUB_HUM_FAST_RELEASE_SEC;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.linearRampToValueAtTime(0.0001, releaseEnd);
+    node.releasing = true;
+    node.releaseCleanupTimer = setTimeout(() => {
+      if (this.firstDotSubHum !== node) return;
+      const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
+      try { node.oscA.stop(stopAt); } catch {}
+      try { node.oscB.stop(stopAt); } catch {}
+      try { node.vibratoLfo.stop(stopAt); } catch {}
+      this.firstDotSubHum = null;
+    }, Math.ceil(Sound.FIRST_DOT_SUB_HUM_FAST_RELEASE_SEC * 1000) + 20);
+  }
+
+  // Drift-tier-3 bright fifth hum (G5 = 783.99 Hz): the perfect fifth two octaves above the lock
+  // G4, layered at the top tier. Deliberately HIGH rather than deeper — the bass field already
+  // occupies the low octaves, so a bright fifth gives clean tier separation and reads as the hold
+  // "ascending" into mastery. Bright formant, lowest gain of the stack so it sparkles on top.
+  private static readonly FIRST_DOT_SHIMMER_HUM_PEAK_GAIN = 0.03;
+  private static readonly FIRST_DOT_SHIMMER_HUM_ATTACK_SEC = 0.4;
+  private static readonly FIRST_DOT_SHIMMER_HUM_FILTER_TROUGH_HZ = 1500;
+  private static readonly FIRST_DOT_SHIMMER_HUM_FILTER_PEAK_HZ = 1900;
+  updateFirstDotShimmerHum(beatPhase01: number, beatGrid: number) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    if (!this.firstDotShimmerHum) {
+      this.firstDotShimmerHum = this.createHumVoice(783.99, 4.8, 0.003, Sound.FIRST_DOT_SHIMMER_HUM_FILTER_TROUGH_HZ);
+      if (!this.firstDotShimmerHum) return;
+      this.firstDotShimmerHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_SHIMMER_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_SHIMMER_HUM_ATTACK_SEC);
+    }
+    const node = this.firstDotShimmerHum;
+    if (node.releasing) {
+      this.resumeHumIfReleasing(node, t);
+      node.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_SHIMMER_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_SHIMMER_HUM_ATTACK_SEC);
+    }
+    if (beatGrid > 0) this.scheduleHumBeatPulse(node, t, beatPhase01, beatGrid, Sound.FIRST_DOT_SHIMMER_HUM_FILTER_TROUGH_HZ, Sound.FIRST_DOT_SHIMMER_HUM_FILTER_PEAK_HZ);
+  }
+
+  private static readonly FIRST_DOT_SHIMMER_HUM_FAST_RELEASE_SEC = 0.05;
+  stopFirstDotShimmerHum() {
+    if (!this.firstDotShimmerHum || !this.ctx) return;
+    const node = this.firstDotShimmerHum;
+    if (node.releasing) return;
+    const t = this.ctx.currentTime;
+    const releaseEnd = t + Sound.FIRST_DOT_SHIMMER_HUM_FAST_RELEASE_SEC;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.linearRampToValueAtTime(0.0001, releaseEnd);
+    node.releasing = true;
+    node.releaseCleanupTimer = setTimeout(() => {
+      if (this.firstDotShimmerHum !== node) return;
+      const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
+      try { node.oscA.stop(stopAt); } catch {}
+      try { node.oscB.stop(stopAt); } catch {}
+      try { node.vibratoLfo.stop(stopAt); } catch {}
+      this.firstDotShimmerHum = null;
+    }, Math.ceil(Sound.FIRST_DOT_SHIMMER_HUM_FAST_RELEASE_SEC * 1000) + 20);
   }
 
   // Ambient drone played for the lifetime of a broken-open bassteroid. There
@@ -3652,16 +3759,18 @@ export class Sound {
     const startedAtBeatTime = currentBeatTime + (startAt - t);
     const activeTier = this.fullTierForCombo(combo);
 
-    // Per-song beat-sync offset (seconds), drag-tuned on the /music page and
+    // Per-LAYER beat-sync offsets (seconds), drag-tuned on the /music page and
     // persisted to halo-full-config.json. The song's musical downbeat sits this
-    // far into the stems; reading from there lands it on the bass-field
-    // downbeat. Wrapped into [0, duration) so a negative or >duration value
-    // cycles cleanly. The game path (loopForTuning=false) reads from the offset
-    // to the natural end; the tuning view loops so the dropped head plays at the
-    // tail (the end→beginning cycling the editor wants).
-    const dur = bufs[0]!.duration;
-    const rawOffset = fullHaloOffset(song);
-    const offset = dur > 0 ? ((rawOffset % dur) + dur) % dur : 0;
+    // far into each stem; reading from there lands it on the bass-field
+    // downbeat. Each is wrapped into [0, duration) so a negative or >duration
+    // value cycles cleanly. Layers normally share one value (fullHaloLayerOffset
+    // falls back to the song offset) but a single stem can be nudged
+    // independently (cmd-drag). The game path (loopForTuning=false) reads from
+    // the offset to the natural end; the tuning view loops so the dropped head
+    // plays at the tail (the end→beginning cycling the editor wants).
+    const wrap = (raw: number, d: number) => (d > 0 ? ((raw % d) + d) % d : 0);
+    const layerOffsets = bufs.map((b, i) => wrap(fullHaloLayerOffset(song, i), b!.duration));
+    const offset = layerOffsets[0];
 
     const mainGain = this.ctx.createGain();
     mainGain.gain.value = 1.0;
@@ -3692,7 +3801,7 @@ export class Sound {
       layerGains.push(g);
     }
 
-    for (const src of layerSrcs) src.start(startAt, offset);
+    for (let i = 0; i < layerSrcs.length; i++) layerSrcs[i].start(startAt, layerOffsets[i]);
 
     const node: HaloFullMusicNode = {
       layerSrcs, layerGains, mainGain, song,
@@ -3702,6 +3811,7 @@ export class Sound {
       currentPlaybackRate: 1.0,
       onTrackEnd,
       offset,
+      layerOffsets,
       loopForTuning,
     };
     // The l1 source spans the whole track, so its onended marks the song's
@@ -3761,13 +3871,36 @@ export class Sound {
     this.haloFullMusic.currentPlaybackRate = rate;
   }
 
-  // /music Beat Sync editor only — re-seat the (looping) full-song sources at a
-  // new wrapped offset so dragging the waveform updates the audio live. A
-  // BufferSource's read-head can't be moved in place, so this stops the current
-  // sources and starts fresh ones at the new offset, keeping the same gains,
-  // tier, and main-gain node (no fade — the editor wants an immediate jump).
-  // No-ops on a non-tuning (in-game) node so gameplay playback is never
-  // re-seated out from under itself.
+  // Re-seat a fresh looping source for one layer at a given base offset, picking
+  // up at the elapsed position so it stays phase-coherent with the layers we
+  // leave running. A BufferSource's read-head can't be moved in place, so we
+  // stop the old source and start a new one (no fade — the editor wants an
+  // immediate jump). Shared by the all-layers and single-layer offset setters.
+  private reseatFullLayer(layerIdx: number, baseOffset: number, startAt: number): AudioBufferSourceNode | null {
+    const node = this.haloFullMusic;
+    if (!this.ctx || !node) return null;
+    const old = node.layerSrcs[layerIdx];
+    const dur = old?.buffer?.duration ?? 0;
+    if (!old || dur <= 0) return null;
+    const wrapped = ((baseOffset % dur) + dur) % dur;
+    // Advance the read-head by however far the song has progressed since the
+    // shared start, so this layer lands at the same elapsed point as the others.
+    const elapsed = Math.max(0, (startAt - node.startedAtAudioTime) * node.currentPlaybackRate);
+    const readAt = ((wrapped + elapsed) % dur + dur) % dur;
+    try { old.onended = null; old.stop(startAt); } catch { /* already stopped */ }
+    const src = this.ctx.createBufferSource();
+    src.buffer = old.buffer;
+    src.loop = true;
+    src.loopStart = 0;
+    src.loopEnd = dur;
+    src.playbackRate.value = node.currentPlaybackRate;
+    src.connect(node.layerGains[layerIdx]);
+    src.start(startAt, readAt);
+    node.layerSrcs[layerIdx] = src;
+    node.layerOffsets[layerIdx] = wrapped;
+    return src;
+  }
+
   setHaloFullMusicOffset(offsetS: number): void {
     if (!this.ctx || !this.haloFullMusic) return;
     const node = this.haloFullMusic;
@@ -3791,10 +3924,24 @@ export class Sound {
       src.connect(node.layerGains[i]);
       src.start(startAt, offset);
       fresh.push(src);
+      node.layerOffsets[i] = offset;
     }
     node.layerSrcs = fresh;
     node.offset = offset;
     node.startedAtAudioTime = startAt;
+  }
+
+  // /music Beat Sync editor — re-seat ONE layer at a new base offset (cmd-drag),
+  // leaving the other five running so you hear that stem slide alone. Keeps the
+  // shared startedAtAudioTime so the untouched layers stay phase-locked. No-ops
+  // on a non-tuning (in-game) node.
+  setHaloFullMusicLayerOffset(layerIdx: number, offsetS: number): void {
+    if (!this.ctx || !this.haloFullMusic) return;
+    const node = this.haloFullMusic;
+    if (!node.loopForTuning) return;
+    if (layerIdx < 0 || layerIdx >= node.layerSrcs.length) return;
+    const startAt = this.ctx.currentTime + 0.02;
+    this.reseatFullLayer(layerIdx, offsetS, startAt);
   }
 
   // /music Beat Sync editor — current read position WITHIN the full song's

@@ -149,7 +149,7 @@ const advanceFirstWaveHintOnCombo = (game: Game) => {
 // multiplier + sparkle + popup are the on-beat reward — one helper guarantees consistency.
 //   Returns the points actually added so the parade can flash the same "+N" per kill.
 const awardScoreForKill = (
-  game: Game, hitPos: Vec, baseScore: number, isOnBeatHit: boolean, driftEligible: boolean = false,
+  game: Game, hitPos: Vec, baseScore: number, isOnBeatHit: boolean, driftTier: number = 0,
 ): number => {
   let scoreEarned = baseScore;
   if (isOnBeatHit) {
@@ -161,12 +161,14 @@ const awardScoreForKill = (
     game.sound.play("comboSparkle", 1, hitPos);
     game.sound.playComboChime(multiplier, hitPos);
     if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
-    // Drift Shot: on-beat hit by a bullet fired while any hover ring was locked queues a
-    //   +1-rhythm reward 1 beat later. Cancelled if the streak breaks in the meantime.
-    if (driftEligible) {
+    // Drift Shot: on-beat hit by a bullet fired while a hover ring was locked queues a +tier
+    //   rhythm reward 1 beat later (tier 1/2/3 → +1/+2/+3). Cancelled if the streak breaks.
+    if (driftTier > 0) {
       game.pendingDriftBonuses.push({
         fireAt: game.perceivedBeatTime + BEAT_GRID,
         pos: { x: hitPos.x, y: hitPos.y },
+        amount: driftTier,
+        tier: driftTier,
       });
       // celebratory fanfare on top of the standard on-beat sparkle/chime.
       game.sound.playDriftShotHit();
@@ -302,7 +304,7 @@ export const onAsteroidKilledByBullet = (
   b: Bullet,
   isOnBeatHit: boolean,
 ): Asteroid[] => {
-  const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit, b.driftEligibleAtHit());
+  const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit, b.driftTierAtHit());
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   if (isOnBeatHit) triggerBassLightning(game, a.pos, a);
   if (a.isBass()) game.sound.play("bassEcho", 1, a.pos);
@@ -359,7 +361,7 @@ export const onAsteroidCrackedByBullet = (game: Game, a: Asteroid, b: Bullet, is
   playBossImpactIfLarge(game, a, b);
   emitCrackParticles(game.particles, a, isOnBeatHit);
   if (isOnBeatHit) game.sound.play("comboSparkle", 1, b.pos);
-  if (a.isBass()) awardScoreForKill(game, b.pos, bassChipScore(a), isOnBeatHit, b.driftEligibleAtHit());
+  if (a.isBass()) awardScoreForKill(game, b.pos, bassChipScore(a), isOnBeatHit, b.driftTierAtHit());
 };
 
 // ram crack uses asteroidHit (not bassHit) so the impact reads as a kick, not a chip.
@@ -370,7 +372,7 @@ export const onAsteroidCrackedByRam = (game: Game, a: Asteroid) => {
 
 // no split path here — alien deaths fall into the "single body, fixed sound" pattern.
 export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boolean) => {
-  const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit, b.driftEligibleAtHit());
+  const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit, b.driftTierAtHit());
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   if (isOnBeatHit) triggerBassLightning(game, al.pos);
   game.shake = Math.min(game.shake + 0.5, 1.4);

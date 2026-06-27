@@ -73,9 +73,10 @@ export class Game implements HudElements {
   // bass-echo arcs from a firing bassteroid to an on-rhythm kill — see
   //   game/bassLightning.ts for the trigger conditions and rendering.
   bassLightnings: BassLightning[] = [];
-  // on-beat hits while the first-dot hover ring is fully locked queue a +1-beat
-  //   bonus increment here. Each tick fires (or cancels) the entries whose moment has come.
-  pendingDriftBonuses: Array<{ fireAt: number; pos: { x: number; y: number } }> = [];
+  // on-beat hits while a hover ring is locked queue a deferred rhythm bonus here. `amount` is
+  //   the drift tier (+1/+2/+3 combo for tier 1/2/3); `tier` drives the popup's colour + label.
+  //   Each tick fires (or cancels) the entries whose moment has come.
+  pendingDriftBonuses: Array<{ fireAt: number; pos: { x: number; y: number }; amount: number; tier: number }> = [];
   // rhythm-hit pairing for the Rapid Rhythm / Twin Shot bonuses (game/rhythmBonus.ts):
   //   beat center of the latest combo-incrementing hit (-1 = none since last break),
   //   how many such hits landed on that beat, and where the last one struck.

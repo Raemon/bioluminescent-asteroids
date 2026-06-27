@@ -64,10 +64,11 @@ export class Bullet {
   // reticule, so the visible bullet dims out across the post-reticule tail
   // where any hit would no longer land on a beat. 0 = no fade.
   fadeStartLife = 0;
-  // Snapshot of which hover rings had finished their lock animation at fire-time (index 0 =
-  // 1-beat slot, 1 = 2-beat, ...). Any true entry makes this bullet drift-eligible — the
-  // on-beat rhythm-grace is already enforced separately at fire-time.
-  driftLockedSlots: boolean[] = [];
+  // Snapshot of each hover ring's DRIFT TIER at fire-time (index 0 = 1-beat slot, 1 = 2-beat,
+  // ...). 0 = ring not locked; 1/2/3 = the tier reached by holding (0.5s / 2s / 8s). Any entry
+  // > 0 makes this bullet drift-eligible; the on-beat rhythm-grace is enforced separately at
+  // fire-time. driftTierAtHit() reads the best tier for the damage/rhythm-bonus payout.
+  driftLockedSlots: number[] = [];
   // counts the integer-beat reticule lines the bullet has already crossed (incremented by
   // gameUpdate). Each new crossing samples the rhythm window; if on-beat, flashTimer fires.
   reticuleCrossings = 0;
@@ -93,10 +94,17 @@ export class Bullet {
   // any hit by this bullet pays out — matching "if you got the lock
   // animation, you should be able to land a drift shot".
   driftEligibleAtHit(): boolean {
+    return this.driftTierAtHit() > 0;
+  }
+
+  // Best drift tier across all locked slots at fire-time (0 = no lock; 1/2/3 = held tier).
+  // Drives the tier-scaled damage multiplier and the +tier rhythm bonus.
+  driftTierAtHit(): number {
+    let best = 0;
     for (let i = 0; i < this.driftLockedSlots.length; i++) {
-      if (this.driftLockedSlots[i]) return true;
+      if (this.driftLockedSlots[i] > best) best = this.driftLockedSlots[i];
     }
-    return false;
+    return best;
   }
 
   // Visual core radius. On-beat shots render larger; hitRadius() scales with

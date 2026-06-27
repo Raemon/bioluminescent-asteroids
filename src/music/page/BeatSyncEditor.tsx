@@ -25,7 +25,7 @@ import {
   loadHaloFullConfig,
   getHaloFullConfig,
   saveHaloFullConfig,
-  fullHaloOffset,
+  fullHaloLayerOffset,
   type HaloFullConfig,
 } from "../../haloFullConfig";
 
@@ -52,6 +52,9 @@ const REF_LANE_HEIGHT = 30;
 // w-20 label (80) + gap-2 (8). The playhead is left-anchored here so it tracks
 // the waveform, not the label.
 const LABEL_GUTTER = 92;
+// Visual-only amplification of the waveform envelope so quiet stems are legible.
+// Does not affect audio. Drawn values are clamped to the lane height.
+const WAVE_GAIN = 6;
 
 type WaveData = {
   // Peak envelope: one [min,max] pair per pixel column across the whole track.
@@ -110,11 +113,18 @@ export const BeatSyncEditor = () => {
   // hear the whole arrangement while aligning; drop it to hear a single tier.
   const [previewCombo, setPreviewCombo] = useState<number>(FULL_HALO_TIER_THRESHOLDS[5]);
 
-  // Live offset in seconds (the value being dragged). Initialized from the
-  // on-disk config once it loads.
-  const [offset, setOffset] = useState(0);
-  const offsetRef = useRef(0);
-  offsetRef.current = offset;
+  // Per-layer offsets in seconds (l1..l6). A plain drag slides all six by the
+  // same delta (the shared song offset); a cmd-drag slides only the grabbed
+  // lane (an independent per-stem nudge). Initialized from the on-disk config.
+  const [layerOffsets, setLayerOffsets] = useState<number[]>(() => Array(6).fill(0));
+  const layerOffsetsRef = useRef<number[]>(Array(6).fill(0));
+  layerOffsetsRef.current = layerOffsets;
+  // True once any layer differs from the others — surfaces a "per-layer" hint
+  // and switches persistence to write the layerOffsets array.
+  const perLayerActive = useMemo(
+    () => layerOffsets.some((o) => Math.abs(o - layerOffsets[0]) > 1e-4),
+    [layerOffsets],
+  );
   const [dirty, setDirty] = useState(false);
 
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
@@ -142,12 +152,13 @@ export const BeatSyncEditor = () => {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      // Pulls + caches halo-full-config.json; fullHaloOffset then reads it.
+      // Pulls + caches halo-full-config.json; per-layer reads fall back to the
+      // shared song offset when a layer has no override.
       await loadHaloFullConfig();
       if (!cancelled) {
-        const o = fullHaloOffset(song);
-        setOffset(o);
-        offsetRef.current = o;
+        const init = Array.from({ length: 6 }, (_, i) => fullHaloLayerOffset(song, i));
+        setLayerOffsets(init);
+        layerOffsetsRef.current = init;
       }
       const bufs = await Promise.all(
         Array.from({ length: 6 }, (_, i) => decodeUrl(fullHaloUrl(song, i + 1))),
@@ -191,6 +202,7 @@ export const BeatSyncEditor = () => {
     height: number,
     color: string,
     dim: boolean,
+    laneOffsetS: number,
   ) => {
     if (!canvas) return;
     const ctx2d = canvas.getContext("2d");
@@ -210,16 +222,21 @@ export const BeatSyncEditor = () => {
     if (wave) {
       const cols = wave.peaks.length / 2;
       // Offset in pixels; positive offset advances playback, i.e. shifts the
-      // content LEFT (later audio sits under the downbeat sooner).
-      const shiftPx = Math.round(offsetRef.current * PX_PER_SEC);
+      // content LEFT (later audio sits under the downbeat sooner). Per-lane so a
+      // cmd-dragged stem slides independently of the rest.
+      const shiftPx = Math.round(laneOffsetS * PX_PER_SEC);
+      // Amplify the envelope so quiet stems read clearly. Clamp to the lane so a
+      // loud transient doesn't draw past the edge. (WAVE_GAIN is purely visual —
+      // it never touches the audio.)
+      const amp = (mid - 1) * WAVE_GAIN;
       ctx2d.fillStyle = dim ? color.replace(/0\.\d+\)$/, "0.18)") : color;
       for (let x = 0; x < w; x++) {
         // Which source column shows at screen x, wrapped.
-        let c = (((x + shiftPx) % cols) + cols) % cols;
+        const c = (((x + shiftPx) % cols) + cols) % cols;
         const mn = wave.peaks[c * 2];
         const mx = wave.peaks[c * 2 + 1];
-        const y0 = mid - mx * (mid - 1);
-        const y1 = mid - mn * (mid - 1);
+        const y0 = Math.max(0, mid - Math.min(mid - 1, mx * amp));
+        const y1 = Math.min(height, mid - Math.max(-(mid - 1), mn * amp));
         ctx2d.fillRect(x, y0, 1, Math.max(1, y1 - y0));
       }
     }
@@ -256,58 +273,101 @@ export const BeatSyncEditor = () => {
       return tier;
     })();
     for (let i = 0; i < 6; i++) {
-      drawLane(canvasRefs.current[i], waves[i], LANE_HEIGHT, COLORS[i], i > activeTier);
+      drawLane(canvasRefs.current[i], waves[i], LANE_HEIGHT, COLORS[i], i > activeTier, layerOffsets[i]);
     }
-    drawLane(refCanvasRef.current, refWave, REF_LANE_HEIGHT, "rgba(255,200,120,0.85)", false);
+    // REF lane is the fixed grid anchor — never offset.
+    drawLane(refCanvasRef.current, refWave, REF_LANE_HEIGHT, "rgba(255,200,120,0.85)", false, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waves, refWave, offset, totalWidth, previewCombo]);
+  }, [waves, refWave, layerOffsets, totalWidth, previewCombo]);
+
+  const wrapDur = (v: number) => {
+    const dur = def.durationS;
+    return ((v % dur) + dur) % dur;
+  };
+
+  // Apply a new offset array to state + live audio. `changed` lists which layer
+  // indices moved (so we only re-seat those sources, leaving the rest running).
+  const applyOffsets = (next: number[], changed: number[]) => {
+    setLayerOffsets(next);
+    layerOffsetsRef.current = next;
+    setDirty(true);
+    if (!playing) return;
+    // A whole-song move (all six changed by the same delta) re-seats everything
+    // in lockstep; a single-layer move re-seats just that source.
+    if (changed.length >= 6) sound.setHaloFullMusicOffset(next[0]);
+    else for (const i of changed) sound.setHaloFullMusicLayerOffset(i, next[i]);
+  };
 
   // --- drag to offset ---------------------------------------------------------
-  const dragRef = useRef<{ startX: number; startOffset: number } | null>(null);
+  // perLayer: cmd/meta-drag moves only `lane`; otherwise all six move together.
+  const dragRef = useRef<
+    { startX: number; start: number[]; perLayer: boolean; lane: number } | null
+  >(null);
 
-  const onPointerDown = (e: React.PointerEvent) => {
+  const onPointerDown = (lane: number) => (e: React.PointerEvent) => {
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    dragRef.current = { startX: e.clientX, startOffset: offsetRef.current };
+    dragRef.current = {
+      startX: e.clientX,
+      start: [...layerOffsetsRef.current],
+      perLayer: e.metaKey || e.ctrlKey,
+      lane,
+    };
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     const d = dragRef.current;
     if (!d) return;
-    // Drag RIGHT → content should move right → playback retreats → offset
-    // decreases. (dx>0 ⇒ offset−.) Wrap into the track length.
+    // Drag RIGHT → content moves right → playback retreats → offset decreases.
     const dx = e.clientX - d.startX;
-    const dur = def.durationS;
-    let next = d.startOffset - dx / PX_PER_SEC;
-    next = ((next % dur) + dur) % dur;
-    setOffset(next);
-    offsetRef.current = next;
-    setDirty(true);
-    if (playing) sound.setHaloFullMusicOffset(next);
+    const deltaS = dx / PX_PER_SEC;
+    if (d.perLayer) {
+      const next = [...layerOffsetsRef.current];
+      next[d.lane] = wrapDur(d.start[d.lane] - deltaS);
+      applyOffsets(next, [d.lane]);
+    } else {
+      const next = d.start.map((o) => wrapDur(o - deltaS));
+      applyOffsets(next, [0, 1, 2, 3, 4, 5]);
+    }
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
     if (!dragRef.current) return;
     dragRef.current = null;
     (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
-    void persist(offsetRef.current);
+    void persist();
   };
 
-  // Nudge buttons — fine alignment by a fraction of a beat.
+  // Nudge buttons — fine alignment by a fraction of a beat. Moves all layers
+  // together (the shared offset); cmd-drag a lane for a single-stem nudge.
   const nudge = (deltaS: number) => {
-    const dur = def.durationS;
-    let next = (((offsetRef.current + deltaS) % dur) + dur) % dur;
-    setOffset(next);
-    offsetRef.current = next;
-    setDirty(true);
-    if (playing) sound.setHaloFullMusicOffset(next);
-    void persist(next);
+    const next = layerOffsetsRef.current.map((o) => wrapDur(o + deltaS));
+    applyOffsets(next, [0, 1, 2, 3, 4, 5]);
+    void persist();
   };
 
-  const persist = async (value: number) => {
+  // Reset all layers back to a common offset (clears any per-layer nudges).
+  const resetAll = () => {
+    const next = Array(6).fill(0);
+    applyOffsets(next, [0, 1, 2, 3, 4, 5]);
+    void persist();
+  };
+
+  // Persist current per-layer offsets. When all six share a value we write just
+  // the shared `offsets[song]` and drop any stale layerOffsets entry (clean
+  // diff); otherwise we write both the shared base (layer 0) and the full
+  // per-layer array so the game reproduces each stem's nudge.
+  const persist = async () => {
+    const offs = layerOffsetsRef.current.map((v) => Math.round(v * 1000) / 1000);
     const cur: HaloFullConfig = getHaloFullConfig();
+    const shared = offs[0];
+    const anyDiffer = offs.some((o) => Math.abs(o - shared) > 1e-4);
+    const nextLayer: HaloFullConfig["layerOffsets"] = { ...(cur.layerOffsets ?? {}) };
+    if (anyDiffer) nextLayer[song] = offs;
+    else delete nextLayer[song];
     const next: HaloFullConfig = {
       ...cur,
-      offsets: { ...cur.offsets, [song]: Math.round(value * 1000) / 1000 },
+      offsets: { ...cur.offsets, [song]: shared },
+      layerOffsets: Object.keys(nextLayer).length ? nextLayer : undefined,
     };
     await saveHaloFullConfig(next);
     setDirty(false);
@@ -355,15 +415,15 @@ export const BeatSyncEditor = () => {
   };
 
   // Cursor sweep — read the real audio-clock playhead each frame and place the
-  // overlay. x = wrapped elapsed (playhead − offset) × PX_PER_SEC, which lands
-  // the cursor over the content currently sounding (lanes draw content shifted
-  // by offset, so elapsed maps straight to screen x).
+  // overlay. x = wrapped elapsed (playhead − layer-0 offset) × PX_PER_SEC, which
+  // lands the cursor over the content currently sounding (lanes draw content
+  // shifted by their offset; the playhead tracks the layer-0/shared reference).
   const tickCursor = () => {
     const p = sound.fullMusicPlayheadSec();
     const el = cursorRef.current;
     if (p != null && el) {
       const dur = def.durationS;
-      const elapsed = (((p - offsetRef.current) % dur) + dur) % dur;
+      const elapsed = (((p - layerOffsetsRef.current[0]) % dur) + dur) % dur;
       el.style.transform = `translateX(${elapsed * PX_PER_SEC}px)`;
       el.style.opacity = "1";
     } else if (el) {
@@ -413,7 +473,8 @@ export const BeatSyncEditor = () => {
     if (playing) sound.setHaloFullMusicTier(combo);
   };
 
-  const offsetBeats = offset / BEAT_GRID;
+  const sharedOffset = layerOffsets[0];
+  const offsetBeats = sharedOffset / BEAT_GRID;
 
   return (
     <section className="rounded-lg border border-[rgba(255,200,120,0.3)] bg-[rgba(255,200,120,0.04)] px-4 py-3">
@@ -422,8 +483,8 @@ export const BeatSyncEditor = () => {
           BEAT SYNC — {song}
         </h2>
         <span className="text-[11px] text-[#9bb5d6]">
-          drag a lane to slide the song against the beat grid · the orange lines are
-          measure downbeats · cyan are quarter-beats
+          drag a lane to slide the whole song against the beat grid · ⌘-drag a lane
+          to nudge that stem alone · orange lines = measure downbeats, cyan = quarter-beats
         </span>
         <div className="ml-auto flex items-center gap-2">
           {!playing ? (
@@ -452,11 +513,12 @@ export const BeatSyncEditor = () => {
           <button type="button" onClick={() => nudge(-BEAT_GRID / 4)} className="rounded border border-[rgba(106,215,255,0.35)] px-1.5 py-0.5 text-[#6ad7ff]" title="−1/16 beat">−</button>
           <button type="button" onClick={() => nudge(-0.005)} className="rounded border border-[rgba(106,215,255,0.25)] px-1.5 py-0.5 text-[#6ad7ff]" title="−5ms">·</button>
           <span className="w-44 text-center tabular-nums text-[#d6ecff]">
-            {offset >= 0 ? "+" : ""}{offset.toFixed(3)}s ({offsetBeats.toFixed(2)} beats)
+            {sharedOffset >= 0 ? "+" : ""}{sharedOffset.toFixed(3)}s ({offsetBeats.toFixed(2)} beats)
           </span>
           <button type="button" onClick={() => nudge(0.005)} className="rounded border border-[rgba(106,215,255,0.25)] px-1.5 py-0.5 text-[#6ad7ff]" title="+5ms">·</button>
           <button type="button" onClick={() => nudge(BEAT_GRID / 4)} className="rounded border border-[rgba(106,215,255,0.35)] px-1.5 py-0.5 text-[#6ad7ff]" title="+1/16 beat">+</button>
-          <button type="button" onClick={() => nudge(-offsetRef.current)} className="rounded border border-[rgba(255,120,120,0.35)] px-2 py-0.5 text-[#ff9b9b]" title="reset to 0">reset</button>
+          <button type="button" onClick={resetAll} className="rounded border border-[rgba(255,120,120,0.35)] px-2 py-0.5 text-[#ff9b9b]" title="reset all layers to 0">reset</button>
+          {perLayerActive && <span className="text-[#ffd49b]" title="layers have independent offsets">per-layer</span>}
           {dirty && <span className="text-[#ffd49b]">saving…</span>}
           {!dirty && loaded && <span className="text-[#7bd58e]">saved</span>}
         </div>
@@ -495,21 +557,27 @@ export const BeatSyncEditor = () => {
             <span className="w-20 shrink-0 text-[10px] uppercase tracking-[0.14em] text-[#ffd49b]">PULSE ref</span>
             <canvas ref={refCanvasRef} className="block" style={{ height: REF_LANE_HEIGHT }} />
           </div>
-          {Array.from({ length: 6 }, (_, i) => (
-            <div key={i} className="flex items-center gap-2 px-1 py-0.5">
-              <span className="w-20 shrink-0 text-[10px] uppercase tracking-[0.14em] text-[#9bb5d6]">
-                {LAYER_SHORT[i]}
-              </span>
-              <canvas
-                ref={(el) => { canvasRefs.current[i] = el; }}
-                className="block cursor-ew-resize touch-none"
-                style={{ height: LANE_HEIGHT }}
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-              />
-            </div>
-          ))}
+          {Array.from({ length: 6 }, (_, i) => {
+            const nudged = Math.abs(layerOffsets[i] - layerOffsets[0]) > 1e-4;
+            return (
+              <div key={i} className="flex items-center gap-2 px-1 py-0.5">
+                <span className="flex w-20 shrink-0 flex-col text-[10px] uppercase tracking-[0.14em] text-[#9bb5d6]">
+                  <span>{LAYER_SHORT[i]}</span>
+                  <span className={"tabular-nums " + (nudged ? "text-[#ffd49b]" : "text-[#5a7290]")}>
+                    {layerOffsets[i] >= 0 ? "+" : ""}{layerOffsets[i].toFixed(3)}
+                  </span>
+                </span>
+                <canvas
+                  ref={(el) => { canvasRefs.current[i] = el; }}
+                  className="block cursor-ew-resize touch-none"
+                  style={{ height: LANE_HEIGHT }}
+                  onPointerDown={onPointerDown(i)}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 

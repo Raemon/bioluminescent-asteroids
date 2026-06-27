@@ -16,8 +16,14 @@ export type HaloFullConfig = {
   _version: number;
   // Seconds to advance each song's playback start within its own buffer. May be
   // negative; Sound.startHaloFullMusic wraps it into [0, duration) so the track
-  // cycles end→beginning. Absent song = 0 offset.
+  // cycles end→beginning. Absent song = 0 offset. This is the SHARED base
+  // offset applied to every layer that has no per-layer override below.
   offsets: Partial<Record<FullHaloSong, number>>;
+  // Optional per-layer (l1..l6) overrides. layerOffsets[song][i] supersedes the
+  // shared offsets[song] for layer i when finite; otherwise the layer inherits
+  // the shared value. Used to nudge a single stem that was baked a hair off the
+  // others (cmd-drag in the Beat Sync editor). Absent / NaN entry = inherit.
+  layerOffsets?: Partial<Record<FullHaloSong, number[]>>;
 };
 
 let current: HaloFullConfig = { _version: 1, offsets: {} };
@@ -55,11 +61,21 @@ export function onHaloFullConfigChange(fn: (c: HaloFullConfig) => void) {
   return () => listeners.delete(fn);
 }
 
-// Per-song offset in seconds, defaulting to 0 when unset. Sound.ts reads this
-// when starting a full song so the page's drag-aligned value is what plays.
+// Per-song shared offset in seconds, defaulting to 0 when unset. Sound.ts reads
+// this when starting a full song so the page's drag-aligned value is what plays.
 export function fullHaloOffset(song: FullHaloSong): number {
   const v = current.offsets[song];
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+// Effective offset for one layer (0-based l1..l6): the per-layer override if
+// finite, else the shared song offset. This is what Sound.startHaloFullMusic
+// applies per source so a single nudged stem stays nudged in-game.
+export function fullHaloLayerOffset(song: FullHaloSong, layerIdx: number): number {
+  const perLayer = current.layerOffsets?.[song];
+  const v = perLayer?.[layerIdx];
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  return fullHaloOffset(song);
 }
 
 // POST the config to the dev endpoint, then update local state. Returns true on
