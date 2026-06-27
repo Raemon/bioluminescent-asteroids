@@ -44,7 +44,9 @@ export const FULL_HALO_SONGS: Record<FullHaloSong, FullHaloSongDef> = {
 // Master switch: when true, internal waves 1–10 play a full-length song instead
 // of a 32s loop from HALO_MUSIC_POOL. Leaves the loop pool (and the haunting /
 // boss pools) untouched on every other wave.
-export const USE_FULL_HALO_MUSIC = true;
+// TEMPORARILY DISABLED: falls back to the 32s loop pool on waves 1–10 while the
+// mothlight beat-sync is being dialed in. Flip back to true to re-enable.
+export const USE_FULL_HALO_MUSIC = false;
 
 // Internal-wave range that gets full-length songs (display levels 0–9). Matches
 // the standard loop pool's range; boss (11) and haunting (12–20) are unaffected.

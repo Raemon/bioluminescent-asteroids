@@ -156,15 +156,19 @@ def octave_down(y: np.ndarray, gain: float = 0.5) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Drum-derived beat quantize, applied IDENTICALLY to every stem (phase-lock).
 # ---------------------------------------------------------------------------
-def drum_warp_map(drums_mono: np.ndarray, grid_s: float,
-                  max_warp_ms: float = 55.0, max_ratio_dev: float = 0.16):
-    """Return (src_boundaries, tgt_boundaries) segment lists that snap the drum
+def onset_warp_map(src_mono: np.ndarray, grid_s: float,
+                   max_warp_ms: float = 55.0, max_ratio_dev: float = 0.16,
+                   delta: float = 0.15):
+    """Return (src_boundaries, tgt_boundaries) segment lists that snap `src_mono`'s
     onsets onto the `grid_s` grid. Same shape contract as quantize_to_beat.py:
     boundaries are midpoints between consecutive onsets, anchored at 0 and EOF.
-    Applying the SAME map to every stem keeps the six layers sample-aligned."""
+    Built from the DRUMS and applied to every stem, this keeps the six layers
+    sample-aligned (the global phase-lock). Don't quantize a sustained/syncopated
+    stem this way -- its soft onsets detect unreliably and the warp scatters it;
+    impose rhythm with beat_gate instead (see L2)."""
     onsets = librosa.onset.onset_detect(
-        y=drums_mono, sr=SR, units="time", delta=0.15, backtrack=False, hop_length=512)
-    audio_len_s = len(drums_mono) / SR
+        y=src_mono, sr=SR, units="time", delta=delta, backtrack=False, hop_length=512)
+    audio_len_s = len(src_mono) / SR
     if len(onsets) == 0:
         return [0.0, audio_len_s], [0.0, audio_len_s], {"onsets": 0, "snapped": 0}
 
@@ -302,6 +306,84 @@ def soft_compress(y: np.ndarray, thresh_db: float = -30.0, ratio: float = 4.0,
     return y * gain
 
 
+def beat_gate(y: np.ndarray, grid_s: float, open_s: float = 0.05,
+              floor: float = 0.10, attack_s: float = 0.004,
+              release_s: float = 0.03) -> np.ndarray:
+    """Turn a SUSTAINED pad into an on-beat pulse by amplitude-gating it to the
+    grid. The source pad is syncopated and its energy is ~uniform across the bar
+    (on/off-beat ratio ~0.94), so its NOTE onsets can't be snapped without
+    scatter -- but its rhythm can be IMPOSED: open the gate briefly on every
+    `grid_s` line and duck to `floor` between, so what the player hears pulses
+    exactly on the Pulsar beat regardless of where notes began. `floor`>0 keeps
+    the pad audible between beats (a pulse, not a chop).
+
+    Align the gate's RISING EDGE to the gridline, not its energy peak. The ear
+    locks rhythm to the ATTACK of a pulse; a peak-aligned gate (argmax on the
+    grid) fires its rising edge ~half-a-window EARLY -- here the gated pad's
+    detected onsets landed ~100ms ahead of the beat and the lead drifted through
+    the song (the "6x pad doesn't line up" complaint). Rolling so the attack
+    (midpoint crossing on the way up) sits on the gridline lands the onsets at
+    ~-5ms, dead stable front-to-back. Keep the window narrow + the release short
+    so the pulse is percussive (energy stays concentrated at the attack) and the
+    off-beat floor can't drag it; a long release would smear energy past the beat
+    and reintroduce the late-peak the attack-align is meant to avoid. The gate is
+    phase-locked to gridline 0, so it rides the same grid as drums-low."""
+    n = y.shape[1]
+    period = int(round(grid_s * SR))
+    a_at = np.exp(-1.0 / (attack_s * SR))
+    a_re = np.exp(-1.0 / (release_s * SR))
+    # Build ONE beat-period gate shape, then tile it -- the pattern repeats every
+    # gridline, so we run the asymmetric one-pole smoother over a couple of
+    # periods to settle the steady-state shape and keep the last period. Fast when
+    # opening (a_at), slower when closing (a_re).
+    reps = 3
+    t = np.arange(period * reps) / SR
+    dist = np.minimum(t % grid_s, grid_s - (t % grid_s))
+    tgt = np.where(dist < open_s / 2, 1.0, floor).astype(np.float32)
+    g1 = np.empty_like(tgt)
+    prev = floor
+    for i in range(len(tgt)):
+        coef = a_at if tgt[i] > prev else a_re
+        prev = tgt[i] + (prev - tgt[i]) * coef
+        g1[i] = prev
+    shape = g1[-period:]                              # settled steady-state period
+    # Roll so the ATTACK edge (first upward midpoint crossing) lands on gridline 0.
+    mid = (floor + 1.0) / 2
+    crossings = np.where((shape[:-1] < mid) & (shape[1:] >= mid))[0]
+    edge_i = int(crossings[0]) if len(crossings) else int(np.argmax(shape))
+    shape = np.roll(shape, -edge_i)
+    g = np.tile(shape, n // period + 2)[:n]
+    return y * g.astype(np.float32)
+
+
+def loop_to_length(y: np.ndarray, start_s: float, len_s: float, total_n: int,
+                   xfade_ms: float = 120.0, intro_fade_s: float = 1.0) -> np.ndarray:
+    """Tile a seamless beat-aligned slice of `y` to span `total_n` samples. The
+    loop period is EXACTLY `len_s` (must be a multiple of 2.0s so every repeat
+    lands on the game's downbeat grid); the seam is hidden by crossfading the
+    loop's head with a short lookahead grabbed from JUST PAST the loop end, so the
+    crossfade does not shorten the period. The source is already at 120 BPM, so
+    the loop stays in phase with the other layers. A short intro_fade eases the
+    first copy in."""
+    period = int(round(len_s * SR))
+    a = int(start_s * SR)
+    xf = int(SR * xfade_ms / 1000)
+    unit = y[:, a:a + period].copy()
+    # Crossfade the head over a lookahead chunk taken from just after the loop,
+    # which is what the END of the previous copy "wants" to flow into. Period
+    # stays exactly `len_s`.
+    if xf > 0 and a + period + xf <= y.shape[1] and unit.shape[1] > xf:
+        ramp = np.linspace(0.0, 1.0, xf, dtype=np.float32)
+        lookahead = y[:, a + period:a + period + xf]
+        unit[:, :xf] = unit[:, :xf] * ramp + lookahead * ramp[::-1]
+    reps = total_n // period + 2
+    tiled = np.tile(unit, (1, reps))[:, :total_n]
+    n = int(SR * intro_fade_s)
+    if n > 0 and tiled.shape[1] > n:
+        tiled[:, :n] *= np.linspace(0.0, 1.0, n, dtype=np.float32)
+    return tiled
+
+
 def fit_len(y: np.ndarray, n: int) -> np.ndarray:
     if y.shape[1] >= n:
         return y[:, :n]
@@ -398,7 +480,7 @@ def main():
     # Build ONE drum-derived warp map (8th-note grid) and apply to every stem so
     # the kick/snare land on the grid while all layers stay phase-locked.
     grid_s = (60.0 / TARGET_BPM) * (4 / 8)  # 8th note = 0.25s at 120
-    src_b, tgt_b, wstat = drum_warp_map(librosa.to_mono(proc["drums"]), grid_s)
+    src_b, tgt_b, wstat = onset_warp_map(librosa.to_mono(proc["drums"]), grid_s)
     print(f"  drum quantize: {wstat['snapped']}/{wstat['onsets']} onsets snapped to {grid_s*1000:.0f}ms grid")
     for k in proc:
         proc[k] = apply_warp_map(proc[k], src_b, tgt_b)
@@ -432,8 +514,28 @@ def main():
     pad_bed += fit_len(octave_down(pad_bed, gain=0.30), pad_bed.shape[1])
 
     # L2: pulse without guitar -- drums-low + a soft, heavily-filtered pad pulse.
+    # The raw pad is a sustained, syncopated wash (energy ~uniform across the bar),
+    # so at 6x its melodic motion drifts ~80ms off the beat in the back third --
+    # the "6x melody doesn't line up with the Pulsar beat" complaint. Its onsets
+    # can't be snapped without scatter, so instead beat-gate it: the pad's PITCH
+    # rides through but its audible RHYTHM is forced onto the 0.5s grid, pulsing
+    # exactly with the bass field. drums-low (already on-grid) carries the attack.
     pad_pulse = band_split(proc["other"], 1200.0, "low") * 0.5
+    pad_pulse = beat_gate(pad_pulse, 0.5)
     l2 = drums_lo + fit_len(pad_pulse, target_n)
+
+    # L4: bass. The source only has bass in its chorus (~55-74s), so the raw stem
+    # would leave the 18x tier silent for 80% of the song. Instead tile a
+    # seamless 6-measure (12s) loop from the chorus across the whole track so 18x
+    # always delivers. The loop's note profile is C/D#/F/G -- the song's tonic
+    # harmony -- so it sits under the moving guitar/pad without clashing (verified
+    # per-2s: only transient tension at a few chord changes, masked in the low end).
+    # Anchor the loop on real bass DOWNBEATS 6 measures apart (54.03s & 66.03s
+    # are both bass attacks ~on the bar line, 12.00s = 6 measures), so each repeat
+    # re-syncs to the bar. The bass groove is intentionally laid-back/syncopated
+    # within the bar -- we don't quantize it (that would kill the feel); we only
+    # align the loop's downbeat to the grid.
+    bass_loop = loop_to_length(proc["bass"], start_s=54.033, len_s=12.0, total_n=target_n)
 
     # L6: climax topper -- bright +octave shimmer of the pad (vocals are empty).
     shimmer = fit_len(octave_up_shimmer(proc["other"]), target_n)
@@ -442,7 +544,7 @@ def main():
         "mothlight-l1": pad_bed,        # 4x  atmosphere bed
         "mothlight-l2": l2,             # 6x  pulse, no guitar
         "mothlight-l3": proc["guitar"], # 12x guitar arrives
-        "mothlight-l4": proc["bass"],   # 18x bass / full-band feel
+        "mothlight-l4": bass_loop,      # 18x bass loop / full-band feel, song-long
         "mothlight-l5": drums_hi,       # 24x kit opens up
         "mothlight-l6": shimmer,        # 32x climax shimmer
     }
