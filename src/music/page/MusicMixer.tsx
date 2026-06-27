@@ -9,6 +9,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PianoKeyboard } from "./PianoKeyboard";
+import { BeatSyncEditor } from "./BeatSyncEditor";
 import { HALO_MUSIC_POOL } from "../../game/haloMusicConfig";
 import { BEAT_GRID } from "../../game/rhythmConstants";
 import { getChannelVolume, setChannelVolume } from "../../game/audioPrefs";
@@ -538,6 +539,8 @@ export const MusicMixer = () => {
         </p>
 
         <PianoKeyboard />
+
+        <BeatSyncEditor />
 
         <div className="flex flex-col gap-3">
           {VARIATIONS.map((variation) => {

@@ -102,7 +102,8 @@ export const loseCombo = (game: Game, sourcePos?: Vec, reason: "fire" | "hit" = 
   game.rhythmHitsThisBeat = 0;
   game.lastRhythmHitPos = null;
   if (wasMeaningful) {
-    game.sound.play("comboLost");
+    // sharper sour wrrr for a mistimed press, deflating wrrr for an off-beat hit.
+    game.sound.play(reason === "fire" ? "comboLostFire" : "comboLost");
     game.ship.comboLossFlash = 1;
     if (sourcePos && (!game.hasLostComboEver || haloActive)) {
       game.popups.push(popupComboLost(sourcePos, reason));
@@ -128,8 +129,10 @@ export const loseCombo = (game: Game, sourcePos?: Vec, reason: "fire" | "hit" = 
   }
 };
 
-// silence holds combo; only an off-beat fire latched during the closing beat drops it to 0.
-//   ship pos is the source for off-beat fires — that's the shot the player got wrong.
+// Off-beat fires now drop the combo immediately (registerOffBeatFire), so the
+// latch stays false and the loss branch below is a dormant backstop. This still
+// marches nextBeatToEvaluate so rebaseBeatEval keeps a valid index as the grid
+// shifts (rapid / sparkle / loss).
 export const evaluateClosedBeats = (game: Game) => {
   const grid = comboGrid(game);
   const window = beatWindow(game);

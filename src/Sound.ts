@@ -6,6 +6,7 @@ import { cfgN, cfgU } from "./soundConfig";
 import { getChannelVolume, type AudioChannel } from "./game/audioPrefs";
 import { musicGain, loadMusicConfig, type MusicLayer } from "./musicConfig";
 import { FULL_HALO_TIER_THRESHOLDS, type FullHaloSong } from "./game/haloFullMusicConfig";
+import { fullHaloOffset, loadHaloFullConfig } from "./haloFullConfig";
 
 type ToneModule = typeof import("tone");
 let toneModulePromise: Promise<ToneModule> | null = null;
@@ -210,6 +211,11 @@ type HaloFullMusicNode = {
   // Fired once when the track reaches its natural end (the l1 source's
   // onended). Cleared on teardown so a stop()-triggered onended is a no-op.
   onTrackEnd: (() => void) | null;
+  // Wrapped per-song beat-sync offset (seconds) the sources were started at.
+  offset: number;
+  // True only for the /music Beat Sync editor: sources loop so the editor can
+  // cycle and re-offset live. The game leaves this false (non-looping).
+  loopForTuning: boolean;
 };
 
 // Optional pan + distance-falloff splice. When a sound (one-shot or drone)
@@ -270,6 +276,7 @@ export type SoundName =
   | "canisterAppear"
   | "canisterDestroyed"
   | "comboLost"
+  | "comboLostFire"
   | "wraithScream"
   | "wraithHit"
   | "wraithLunge"
@@ -3603,6 +3610,9 @@ export class Sound {
   // Eagerly fetch + decode all six layer stems for a full song so the first 4x
   // doesn't pay fetch latency. Idempotent (loadHaloMusicBuffer caches).
   preloadHaloFullMusic(song: FullHaloSongId): void {
+    // Pull the per-song beat-sync offset once so the first start reads the
+    // drag-tuned value (mirrors preloadHaloMusic pulling loadMusicConfig).
+    void loadHaloFullConfig();
     for (let i = 1; i <= 6; i++) {
       void this.loadHaloMusicBuffer(this.haloFullMusicUrl(song, i));
     }
@@ -3616,7 +3626,8 @@ export class Sound {
   async startHaloFullMusic(song: FullHaloSongId, combo: number,
                            measureAlignDelay: number = 0,
                            currentBeatTime: number = 0,
-                           onTrackEnd: (() => void) | null = null): Promise<void> {
+                           onTrackEnd: (() => void) | null = null,
+                           loopForTuning: boolean = false): Promise<void> {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
@@ -3641,6 +3652,17 @@ export class Sound {
     const startedAtBeatTime = currentBeatTime + (startAt - t);
     const activeTier = this.fullTierForCombo(combo);
 
+    // Per-song beat-sync offset (seconds), drag-tuned on the /music page and
+    // persisted to halo-full-config.json. The song's musical downbeat sits this
+    // far into the stems; reading from there lands it on the bass-field
+    // downbeat. Wrapped into [0, duration) so a negative or >duration value
+    // cycles cleanly. The game path (loopForTuning=false) reads from the offset
+    // to the natural end; the tuning view loops so the dropped head plays at the
+    // tail (the end→beginning cycling the editor wants).
+    const dur = bufs[0]!.duration;
+    const rawOffset = fullHaloOffset(song);
+    const offset = dur > 0 ? ((rawOffset % dur) + dur) % dur : 0;
+
     const mainGain = this.ctx.createGain();
     mainGain.gain.value = 1.0;
     if (this.chMusicLive) mainGain.connect(this.chMusicLive);
@@ -3650,7 +3672,13 @@ export class Sound {
     for (let i = 0; i < 6; i++) {
       const src = this.ctx.createBufferSource();
       src.buffer = bufs[i];
-      src.loop = false;
+      if (loopForTuning) {
+        src.loop = true;
+        src.loopStart = 0;
+        src.loopEnd = bufs[i]!.duration;
+      } else {
+        src.loop = false;
+      }
       const g = this.ctx.createGain();
       const peak = this.haloFullMusicLayerGain(song, i);
       g.gain.setValueAtTime(0.0001, startAt);
@@ -3664,7 +3692,7 @@ export class Sound {
       layerGains.push(g);
     }
 
-    for (const src of layerSrcs) src.start(startAt);
+    for (const src of layerSrcs) src.start(startAt, offset);
 
     const node: HaloFullMusicNode = {
       layerSrcs, layerGains, mainGain, song,
@@ -3673,6 +3701,8 @@ export class Sound {
       startedAtBeatTime,
       currentPlaybackRate: 1.0,
       onTrackEnd,
+      offset,
+      loopForTuning,
     };
     // The l1 source spans the whole track, so its onended marks the song's
     // natural end. Guarded by the node still being current and onTrackEnd not
@@ -3729,6 +3759,58 @@ export class Sound {
       else src.playbackRate.setValueAtTime(rate, now);
     }
     this.haloFullMusic.currentPlaybackRate = rate;
+  }
+
+  // /music Beat Sync editor only — re-seat the (looping) full-song sources at a
+  // new wrapped offset so dragging the waveform updates the audio live. A
+  // BufferSource's read-head can't be moved in place, so this stops the current
+  // sources and starts fresh ones at the new offset, keeping the same gains,
+  // tier, and main-gain node (no fade — the editor wants an immediate jump).
+  // No-ops on a non-tuning (in-game) node so gameplay playback is never
+  // re-seated out from under itself.
+  setHaloFullMusicOffset(offsetS: number): void {
+    if (!this.ctx || !this.haloFullMusic) return;
+    const node = this.haloFullMusic;
+    if (!node.loopForTuning) return;
+    const dur = node.layerSrcs[0]?.buffer?.duration ?? 0;
+    if (dur <= 0) return;
+    const offset = ((offsetS % dur) + dur) % dur;
+    const now = this.ctx.currentTime;
+    const startAt = now + 0.02;  // tiny lead so every layer re-starts in lockstep
+    const rate = node.currentPlaybackRate;
+    const fresh: AudioBufferSourceNode[] = [];
+    for (let i = 0; i < node.layerSrcs.length; i++) {
+      const old = node.layerSrcs[i];
+      try { old.onended = null; old.stop(startAt); } catch { /* already stopped */ }
+      const src = this.ctx.createBufferSource();
+      src.buffer = old.buffer;
+      src.loop = true;
+      src.loopStart = 0;
+      src.loopEnd = old.buffer ? old.buffer.duration : dur;
+      src.playbackRate.value = rate;
+      src.connect(node.layerGains[i]);
+      src.start(startAt, offset);
+      fresh.push(src);
+    }
+    node.layerSrcs = fresh;
+    node.offset = offset;
+    node.startedAtAudioTime = startAt;
+  }
+
+  // /music Beat Sync editor — current read position WITHIN the full song's
+  // buffer (seconds, [0, duration)), derived from the audio clock so the editor
+  // playhead is sample-accurate rather than frame-estimated. Accounts for the
+  // start offset, the measure-align lead-in (negative elapsed before startAt
+  // clamps to the offset), and the playbackRate. Returns null when nothing is
+  // playing. Wraps, matching the looping tuning sources.
+  fullMusicPlayheadSec(): number | null {
+    if (!this.ctx || !this.haloFullMusic) return null;
+    const node = this.haloFullMusic;
+    const dur = node.layerSrcs[0]?.buffer?.duration ?? 0;
+    if (dur <= 0) return null;
+    const elapsed = (this.ctx.currentTime - node.startedAtAudioTime) * node.currentPlaybackRate;
+    const pos = node.offset + Math.max(0, elapsed);
+    return ((pos % dur) + dur) % dur;
   }
 
   // Long fade-out + teardown, matching stopHaloMusic's ~1.2s curve. Clears
@@ -3994,6 +4076,7 @@ export class Sound {
       case "canisterAppear": this.playCanisterAppear(); break;
       case "canisterDestroyed": this.playCanisterDestroyed(); break;
       case "comboLost": this.playComboLost(); break;
+      case "comboLostFire": this.playComboLostFire(); break;
       case "wraithScream": this.playWraithScream(); break;
       case "wraithHit": this.playWraithHit(); break;
       case "wraithLunge": this.playWraithLunge(); break;
@@ -7304,6 +7387,42 @@ export class Sound {
       gain.connect(this.master);
       osc.start(t);
       osc.stop(t + 0.45);
+    }
+  }
+
+  // Off-beat *fire* loss — same wrrr family as playComboLost (the hit-loss),
+  // but tuned to read as a mistimed *press* rather than a deflating motor:
+  // higher, faster, with a sharper sawtooth attack and a wider sour detune so
+  // the dissonance bites up front. Shorter tail keeps it from stepping on the
+  // shot. The two losses share a family so the player groups them as "rhythm
+  // broke", yet are distinguishable so they learn which half they got wrong.
+  private playComboLostFire() {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const voices: Array<{ start: number; end: number; detune: number; level: number }> = [
+      { start: 523.3, end: 196.0, detune: 0, level: 0.14 },   // C5 → G3
+      { start: 523.3, end: 196.0, detune: -22, level: 0.11 }, // sour twin, wider detune
+    ];
+    for (const v of voices) {
+      const osc = this.ctx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(v.start, t);
+      osc.frequency.exponentialRampToValueAtTime(v.end, t + 0.22);
+      osc.detune.value = v.detune;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.Q.value = 1.4;
+      filter.frequency.setValueAtTime(2600, t);
+      filter.frequency.exponentialRampToValueAtTime(520, t + 0.22);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(v.level, t + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      osc.start(t);
+      osc.stop(t + 0.33);
     }
   }
 

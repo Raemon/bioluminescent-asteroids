@@ -159,9 +159,17 @@ export const popupTwinShot = (pos: Vec): Popup =>
 
 // surfaces the streak break at the spot that caused it (ship fire / target hit).
 //   reason names which half of the rhythm gate failed so the player can correct it.
+//   Distinct hues so a glance tells you which: crimson = mistimed *press* (the
+//   action you most control), amber = off-beat *hit* (a softer near-miss). Amber
+//   stays clear of the saturated gold combo halo so a loss never looks like a
+//   reward.
 export const popupComboLost = (pos: Vec, reason: "fire" | "hit"): Popup => {
   const labelFont = "700 16px 'Space Grotesk', system-ui, sans-serif";
   const subtitle = reason === "fire" ? "(Didn't fire on beat)" : "(Didn't hit on beat)";
+  const titleFill = reason === "fire" ? "#ff6a6a" : "#ffae4d";
+  const titleShadow = reason === "fire" ? "rgba(255, 90, 90, 0.85)" : "rgba(255, 150, 50, 0.85)";
+  const subFill = reason === "fire" ? "#ffb3b3" : "#ffd9a8";
+  const subShadow = reason === "fire" ? "rgba(255, 130, 130, 0.85)" : "rgba(255, 185, 110, 0.85)";
   return {
     pos: { x: pos.x, y: pos.y - 6 },
     vel: { x: rand(-10, 10), y: -55 },
@@ -169,18 +177,18 @@ export const popupComboLost = (pos: Vec, reason: "fire" | "hit"): Popup => {
     maxLife: 5,
     text: "RHYTHM LOST",
     font: labelFont,
-    fill: "#ff6a6a",
-    shadowColor: "rgba(255, 90, 90, 0.85)",
+    fill: titleFill,
+    shadowColor: titleShadow,
     decayX: 0.94, decayY: 0.94,
     popPeak: 0.4, popDuration: 0.15,
     holdUntil: 0.15, fadeGain: 1.4,
     draw: (ctx) => {
       ctx.font = labelFont;
-      ctx.fillStyle = "#ff6a6a";
-      ctx.shadowColor = "rgba(255, 90, 90, 0.85)";
+      ctx.fillStyle = titleFill;
+      ctx.shadowColor = titleShadow;
       ctx.fillText("RHYTHM LOST", 0, -10);
-      ctx.fillStyle = "#ffb3b3";
-      ctx.shadowColor = "rgba(255, 130, 130, 0.85)";
+      ctx.fillStyle = subFill;
+      ctx.shadowColor = subShadow;
       ctx.fillText(subtitle, 0, 12);
     },
   };

@@ -312,7 +312,8 @@ export const OBJECTS: GameObject[] = [
     about: "rhythm-multiplier feedback around the ship",
     actions: [
       { verb: "sparkles on on-beat kill", sound: "comboSparkle", trigger: beat(2) },
-      { verb: "breaks on off-beat fire", sound: "comboLost", trigger: beat(8) },
+      { verb: "breaks on off-beat fire", sound: "comboLostFire", trigger: beat(8) },
+      { verb: "breaks on off-beat hit", sound: "comboLost", trigger: beat(8) },
     ],
   },
 
@@ -385,7 +386,7 @@ const MENTIONED_SOUNDS = [
   // shockwave
   "shockwaveCharge", "shockwaveBoom",
   // combo
-  "comboSparkle", "comboLost",
+  "comboSparkle", "comboLost", "comboLostFire",
   // wave summary UI
   "waveClear", "scoreBlip", "summaryDownbeat",
 ] as const;

@@ -345,8 +345,10 @@ const semitonesToRatio = (st: number) => Math.pow(2, st / 12);
 const noteLabel = (n: Note) => `${n.name}${n.octave}`;
 
 // Shared Sound instance — same pattern as SoundEditor.tsx so the WebAudio
-// context is created once and stays warm across re-renders.
-const sound = new Sound();
+// context is created once and stays warm across re-renders. Exported so the
+// Beat Sync section in MusicMixer can drive the REAL in-game full-halo path
+// (startHaloFullMusic) on the same warm context instead of a parallel player.
+export const sound = new Sound();
 
 // Sample-buffer cache, populated lazily on first play of each sample source.
 const sampleBuffers = new Map<string, AudioBuffer>();

@@ -14,6 +14,7 @@ import {
   evaluateClosedBeats,
   currentBeatPulse,
   comboGrid,
+  loseCombo,
 } from "./rhythmGate";
 import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } from "./bassClock";
 import { tickWaveEvents } from "./waveEvents";
@@ -947,11 +948,14 @@ export const registerOnBeatFire = (game: Game) => {
   }
 };
 
-// Shared by EVERY weapon's off-beat fire. Latch the break till the next beat
-// closure so a kill on the same frame still rides the prior streak — the combo
-// isn't dropped here, evaluateClosedBeats spends it when the beat closes.
+// Shared by EVERY weapon's off-beat fire. The break is now immediate: pressing
+// off the beat drops the streak the instant the shot leaves the barrel (sound +
+// "RHYTHM LOST" text + halo music cut on the next syncHaloAmbient). Clear the
+// deferred latch so evaluateClosedBeats doesn't re-penalize at beat closure —
+// it would otherwise drop a doubletime streak from its 4x floor to 0.
 export const registerOffBeatFire = (game: Game) => {
-  game.firedOffBeatSinceLastBeat = true;
+  game.firedOffBeatSinceLastBeat = false;
+  loseCombo(game, game.ship.pos, "fire");
 };
 
 // cheap respawn-grace — extend invuln if a rock is still inside the safe radius near the end.
