@@ -15,6 +15,7 @@ import { popupCombo, popupScore } from "./popups";
 import { resonanceBonus } from "./resonanceBonus";
 import { trackRhythmComboHit } from "./rhythmBonus";
 import { triggerBassLightning } from "./bassLightning";
+import { spawnDriftBurst } from "./driftBurst";
 import { checkBonusLife } from "./bonusLife";
 import { BEAT_GRID } from "./rhythmConstants";
 import {
@@ -170,8 +171,11 @@ const awardScoreForKill = (
         amount: driftTier,
         tier: driftTier,
       });
-      // celebratory fanfare on top of the standard on-beat sparkle/chime.
-      game.sound.playDriftShotHit();
+      // celebratory fanfare on top of the standard on-beat sparkle/chime —
+      // tier scales the sub-boom so the top tier lands with real low-end weight.
+      game.sound.playDriftShotHit(driftTier);
+      // soundwave-visualizer explosion radiating from the hit, tier-coloured/sized.
+      spawnDriftBurst(game, hitPos.x, hitPos.y, driftTier);
     }
   }
   game.score += scoreEarned;

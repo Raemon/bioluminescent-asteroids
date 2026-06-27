@@ -5,6 +5,7 @@ import { currentBeatPulse, currentBeatFlash, comboGrid } from "./rhythmGate";
 import { renderTrails } from "./trailsRender";
 import { renderPopups } from "./popups";
 import { renderBassLightnings } from "./bassLightning";
+import { renderDriftBursts } from "./driftBurst";
 import { computeConeFrame } from "../ship/reticule/coneGeometry";
 import { pickCenterMostTargetForFocus, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
 import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
@@ -157,6 +158,7 @@ const paintEntityLayers = (
   }
   if (focusedTarget) paintFocusGlow(ctx, focusedTarget);
   renderBassLightnings(ctx, game.bassLightnings, game.time * 0.001);
+  renderDriftBursts(ctx, game.driftBursts, game.time * 0.001);
   game.particles.render(ctx);
 };
 

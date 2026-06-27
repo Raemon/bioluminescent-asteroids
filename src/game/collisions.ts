@@ -17,6 +17,7 @@ import { BEAT_GRID } from "./rhythmConstants";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGemPickup, emitBounceSparks, emitAlienBulletPop } from "./particleBursts";
+import { spawnDriftBurst } from "./driftBurst";
 import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage } from "./popups";
 import { checkBonusLife } from "./bonusLife";
 import {
@@ -124,7 +125,7 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     if (b.life <= 0) continue;
     if (!a.collidesWith(b.pos, b.hitRadius())) continue;
     const onBeat = isHitOnBeat(game, b);
-    // drift tier scales the bonus: tier1→2×, tier2→3×, tier3→4× damage (was a flat 4×).
+    // drift tier scales the bonus: tier1→2× … tier6→7× damage (was a flat 4×).
     const driftTier = onBeat ? b.driftTierAtHit() : 0;
     const dmg = b.damage() * (driftTier > 0 ? driftTier + 1 : 1);
     // Peek at the outcome before consuming the bullet: a hit too weak to break
@@ -449,7 +450,8 @@ const queueDriftBonusForGem = (game: Game, g: Gem, tier: number) => {
     amount: tier,
     tier,
   });
-  game.sound.playDriftShotHit();
+  game.sound.playDriftShotHit(tier);
+  spawnDriftBurst(game, g.pos.x, g.pos.y, tier);
 };
 
 // Off-beat / weak shot: same "wasted upgrade" feedback as shooting a canister

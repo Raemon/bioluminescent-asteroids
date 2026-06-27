@@ -552,6 +552,7 @@ const resetRunCollections = (game: Game) => {
   game.bullets = [];
   game.popups = [];
   game.bassLightnings = [];
+  game.driftBursts = [];
   game.shards = [];
   game.canisters = [];
   game.gems = [];

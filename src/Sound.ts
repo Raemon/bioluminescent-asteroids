@@ -198,6 +198,10 @@ type HaloFullMusicNode = {
   // desync the layers).
   layerSrcs: AudioBufferSourceNode[];
   layerGains: GainNode[];
+  // Per-layer mute gains, downstream of layerGains. The tier logic owns
+  // layerGains; the /music editor's solo/mute owns these — they multiply, so a
+  // tier ramp never fights a mute. 1.0 in-game (untouched), 0/1 in the editor.
+  muteGains: GainNode[];
   mainGain: GainNode;
   song: FullHaloSongId;
   // Highest tier index currently faded up (so a flick down-and-up doesn't
@@ -404,9 +408,20 @@ export class Sound {
   // dropping the C-major root a full octave below the base hum to anchor the stack with weight.
   // Tracks the tight hover band with the lock fifth's fast release, same as the harmony third.
   private firstDotSubHum: FirstDotHumNode | null = null;
-  // Drift-tier-3 bright fifth hum (G5) — the top tier's sparkle, the perfect fifth two octaves
-  // up. Sits above the whole stack reading as "ascending / mastery"; bright formant, low gain.
+  // Drift-tier-3 bright fifth hum (G5) — the perfect fifth two octaves up. Sits above the stack
+  // reading as "ascending / mastery"; bright formant, low gain.
   private firstDotShimmerHum: FirstDotHumNode | null = null;
+  // Drift-tier-4 major-9th hum (D5) — adds the 9th to turn the C triad into a lush Cadd9; D is in
+  // both C-major and C-minor scales and the add9 skips the third, so it harmonises with every song
+  // (including the C-minor boss track) without ever clashing.
+  private firstDotNinthHum: FirstDotHumNode | null = null;
+  // Drift-tier-5 major-third hum (E5) — adds the 3rd up high, turning Cadd9 into a full bright
+  // C-major chord: a standard, triumphant harmony that sounds like arrival. (Field name kept for
+  // continuity; the tone is now the third, not the sixth.)
+  private firstDotSixthHum: FirstDotHumNode | null = null;
+  // Drift-tier-6 deep-root foundation hum (C2) — grounds the spread with the root an octave BELOW
+  // the tier-2 sub root: a deep, chest-felt foundation that crowns the hold. Pure root, the floor.
+  private firstDotHaloHum: FirstDotHumNode | null = null;
   // Per-bassteroid ambient drone, keyed by the Asteroid instance. Only
   // populated for medium/small bass pieces (a large piece is "sealed" — it
   // hasn't been broken open yet).
@@ -1393,6 +1408,9 @@ export class Sound {
     if (!on) this.stopFirstDotHarmonyHum();
     if (!on) this.stopFirstDotSubHum();
     if (!on) this.stopFirstDotShimmerHum();
+    if (!on) this.stopFirstDotNinthHum();
+    if (!on) this.stopFirstDotSixthHum();
+    if (!on) this.stopFirstDotHaloHum();
     if (!on) this.stopAllBassteroidDrones();
     if (!on) this.stopAllCometShimmers();
     if (!on) this.stopHaloAmbient();
@@ -2070,6 +2088,146 @@ export class Sound {
       try { node.vibratoLfo.stop(stopAt); } catch {}
       this.firstDotShimmerHum = null;
     }, Math.ceil(Sound.FIRST_DOT_SHIMMER_HUM_FAST_RELEASE_SEC * 1000) + 20);
+  }
+
+  // Drift-tier-4 major-9th hum (D5 = 587.33 Hz): the top-tier capstone. Adds the major 9th over
+  // the C-major stack to make a lush Cadd9 — D belongs to both C-major and C-minor, and the add9
+  // skips the third, so it sweetens every song (including the C-minor boss track) without ever
+  // clashing. Mid-bright formant between the harmony third and the shimmer fifth; gentle swell.
+  private static readonly FIRST_DOT_NINTH_HUM_PEAK_GAIN = 0.032;
+  private static readonly FIRST_DOT_NINTH_HUM_ATTACK_SEC = 0.5;
+  private static readonly FIRST_DOT_NINTH_HUM_FILTER_TROUGH_HZ = 1000;
+  private static readonly FIRST_DOT_NINTH_HUM_FILTER_PEAK_HZ = 1400;
+  updateFirstDotNinthHum(beatPhase01: number, beatGrid: number) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    if (!this.firstDotNinthHum) {
+      this.firstDotNinthHum = this.createHumVoice(587.33, 4.6, 0.003, Sound.FIRST_DOT_NINTH_HUM_FILTER_TROUGH_HZ);
+      if (!this.firstDotNinthHum) return;
+      this.firstDotNinthHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_NINTH_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_NINTH_HUM_ATTACK_SEC);
+    }
+    const node = this.firstDotNinthHum;
+    if (node.releasing) {
+      this.resumeHumIfReleasing(node, t);
+      node.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_NINTH_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_NINTH_HUM_ATTACK_SEC);
+    }
+    if (beatGrid > 0) this.scheduleHumBeatPulse(node, t, beatPhase01, beatGrid, Sound.FIRST_DOT_NINTH_HUM_FILTER_TROUGH_HZ, Sound.FIRST_DOT_NINTH_HUM_FILTER_PEAK_HZ);
+  }
+
+  private static readonly FIRST_DOT_NINTH_HUM_FAST_RELEASE_SEC = 0.05;
+  stopFirstDotNinthHum() {
+    if (!this.firstDotNinthHum || !this.ctx) return;
+    const node = this.firstDotNinthHum;
+    if (node.releasing) return;
+    const t = this.ctx.currentTime;
+    const releaseEnd = t + Sound.FIRST_DOT_NINTH_HUM_FAST_RELEASE_SEC;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.linearRampToValueAtTime(0.0001, releaseEnd);
+    node.releasing = true;
+    node.releaseCleanupTimer = setTimeout(() => {
+      if (this.firstDotNinthHum !== node) return;
+      const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
+      try { node.oscA.stop(stopAt); } catch {}
+      try { node.oscB.stop(stopAt); } catch {}
+      try { node.vibratoLfo.stop(stopAt); } catch {}
+      this.firstDotNinthHum = null;
+    }, Math.ceil(Sound.FIRST_DOT_NINTH_HUM_FAST_RELEASE_SEC * 1000) + 20);
+  }
+
+  // Drift-tier-5 major-third hum (E5 = 659.25 Hz): the major 3rd up high turns the spread into a
+  // bright, fully-consonant C-major chord (root/3rd/5th/9th) — a standard triumphant harmony rather
+  // than the spicier added-6th it replaced. Higher formant to match the lifted pitch, soft swell.
+  private static readonly FIRST_DOT_SIXTH_HUM_PEAK_GAIN = 0.03;
+  private static readonly FIRST_DOT_SIXTH_HUM_ATTACK_SEC = 0.55;
+  private static readonly FIRST_DOT_SIXTH_HUM_FILTER_TROUGH_HZ = 1100;
+  private static readonly FIRST_DOT_SIXTH_HUM_FILTER_PEAK_HZ = 1500;
+  updateFirstDotSixthHum(beatPhase01: number, beatGrid: number) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    if (!this.firstDotSixthHum) {
+      this.firstDotSixthHum = this.createHumVoice(659.25, 4.5, 0.0033, Sound.FIRST_DOT_SIXTH_HUM_FILTER_TROUGH_HZ);
+      if (!this.firstDotSixthHum) return;
+      this.firstDotSixthHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_SIXTH_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_SIXTH_HUM_ATTACK_SEC);
+    }
+    const node = this.firstDotSixthHum;
+    if (node.releasing) {
+      this.resumeHumIfReleasing(node, t);
+      node.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_SIXTH_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_SIXTH_HUM_ATTACK_SEC);
+    }
+    if (beatGrid > 0) this.scheduleHumBeatPulse(node, t, beatPhase01, beatGrid, Sound.FIRST_DOT_SIXTH_HUM_FILTER_TROUGH_HZ, Sound.FIRST_DOT_SIXTH_HUM_FILTER_PEAK_HZ);
+  }
+
+  private static readonly FIRST_DOT_SIXTH_HUM_FAST_RELEASE_SEC = 0.05;
+  stopFirstDotSixthHum() {
+    if (!this.firstDotSixthHum || !this.ctx) return;
+    const node = this.firstDotSixthHum;
+    if (node.releasing) return;
+    const t = this.ctx.currentTime;
+    const releaseEnd = t + Sound.FIRST_DOT_SIXTH_HUM_FAST_RELEASE_SEC;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.linearRampToValueAtTime(0.0001, releaseEnd);
+    node.releasing = true;
+    node.releaseCleanupTimer = setTimeout(() => {
+      if (this.firstDotSixthHum !== node) return;
+      const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
+      try { node.oscA.stop(stopAt); } catch {}
+      try { node.oscB.stop(stopAt); } catch {}
+      try { node.vibratoLfo.stop(stopAt); } catch {}
+      this.firstDotSixthHum = null;
+    }, Math.ceil(Sound.FIRST_DOT_SIXTH_HUM_FAST_RELEASE_SEC * 1000) + 20);
+  }
+
+  // Drift-tier-6 deep-root foundation hum (C2 = 65.41 Hz): the root an octave BELOW the tier-2 sub
+  // root, crowning the hold with a deep, chest-felt foundation rather than a bright top. Pure root so
+  // it's universally safe; low formant so the fundamental carries, with the stack's highest gain since
+  // low frequencies need more amplitude to register at equal loudness.
+  private static readonly FIRST_DOT_HALO_HUM_PEAK_GAIN = 0.05;
+  private static readonly FIRST_DOT_HALO_HUM_ATTACK_SEC = 0.6;
+  private static readonly FIRST_DOT_HALO_HUM_FILTER_TROUGH_HZ = 180;
+  private static readonly FIRST_DOT_HALO_HUM_FILTER_PEAK_HZ = 280;
+  updateFirstDotHaloHum(beatPhase01: number, beatGrid: number) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    if (!this.firstDotHaloHum) {
+      this.firstDotHaloHum = this.createHumVoice(65.41, 4.9, 0.0028, Sound.FIRST_DOT_HALO_HUM_FILTER_TROUGH_HZ);
+      if (!this.firstDotHaloHum) return;
+      this.firstDotHaloHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_HALO_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_HALO_HUM_ATTACK_SEC);
+    }
+    const node = this.firstDotHaloHum;
+    if (node.releasing) {
+      this.resumeHumIfReleasing(node, t);
+      node.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_HALO_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_HALO_HUM_ATTACK_SEC);
+    }
+    if (beatGrid > 0) this.scheduleHumBeatPulse(node, t, beatPhase01, beatGrid, Sound.FIRST_DOT_HALO_HUM_FILTER_TROUGH_HZ, Sound.FIRST_DOT_HALO_HUM_FILTER_PEAK_HZ);
+  }
+
+  private static readonly FIRST_DOT_HALO_HUM_FAST_RELEASE_SEC = 0.05;
+  stopFirstDotHaloHum() {
+    if (!this.firstDotHaloHum || !this.ctx) return;
+    const node = this.firstDotHaloHum;
+    if (node.releasing) return;
+    const t = this.ctx.currentTime;
+    const releaseEnd = t + Sound.FIRST_DOT_HALO_HUM_FAST_RELEASE_SEC;
+    node.mainGain.gain.cancelScheduledValues(t);
+    node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
+    node.mainGain.gain.linearRampToValueAtTime(0.0001, releaseEnd);
+    node.releasing = true;
+    node.releaseCleanupTimer = setTimeout(() => {
+      if (this.firstDotHaloHum !== node) return;
+      const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
+      try { node.oscA.stop(stopAt); } catch {}
+      try { node.oscB.stop(stopAt); } catch {}
+      try { node.vibratoLfo.stop(stopAt); } catch {}
+      this.firstDotHaloHum = null;
+    }, Math.ceil(Sound.FIRST_DOT_HALO_HUM_FAST_RELEASE_SEC * 1000) + 20);
   }
 
   // Ambient drone played for the lifetime of a broken-open bassteroid. There
@@ -3778,6 +3936,7 @@ export class Sound {
 
     const layerSrcs: AudioBufferSourceNode[] = [];
     const layerGains: GainNode[] = [];
+    const muteGains: GainNode[] = [];
     for (let i = 0; i < 6; i++) {
       const src = this.ctx.createBufferSource();
       src.buffer = bufs[i];
@@ -3795,16 +3954,22 @@ export class Sound {
       if (i <= activeTier) {
         g.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), startAt + 1.5);
       }
+      // Mute gain sits between the tier gain and main; 1.0 unless the editor
+      // mutes this layer (see setHaloFullMusicLayerMute).
+      const m = this.ctx.createGain();
+      m.gain.value = 1.0;
       src.connect(g);
-      g.connect(mainGain);
+      g.connect(m);
+      m.connect(mainGain);
       layerSrcs.push(src);
       layerGains.push(g);
+      muteGains.push(m);
     }
 
     for (let i = 0; i < layerSrcs.length; i++) layerSrcs[i].start(startAt, layerOffsets[i]);
 
     const node: HaloFullMusicNode = {
-      layerSrcs, layerGains, mainGain, song,
+      layerSrcs, layerGains, muteGains, mainGain, song,
       activeTier,
       startedAtAudioTime: startAt,
       startedAtBeatTime,
@@ -3942,6 +4107,21 @@ export class Sound {
     if (layerIdx < 0 || layerIdx >= node.layerSrcs.length) return;
     const startAt = this.ctx.currentTime + 0.02;
     this.reseatFullLayer(layerIdx, offsetS, startAt);
+  }
+
+  // /music Beat Sync editor — mute/unmute one layer independent of its combo
+  // tier. Rides the dedicated mute gain so a tier ramp can't undo it. Short
+  // ramp so toggling doesn't click. No-ops on a non-tuning (in-game) node.
+  setHaloFullMusicLayerMute(layerIdx: number, muted: boolean): void {
+    if (!this.ctx || !this.haloFullMusic) return;
+    const node = this.haloFullMusic;
+    if (!node.loopForTuning) return;
+    const m = node.muteGains[layerIdx];
+    if (!m) return;
+    const t = this.ctx.currentTime;
+    m.gain.cancelScheduledValues(t);
+    m.gain.setValueAtTime(m.gain.value, t);
+    m.gain.linearRampToValueAtTime(muted ? 0 : 1, t + 0.03);
   }
 
   // /music Beat Sync editor — current read position WITHIN the full song's
@@ -5920,16 +6100,28 @@ export class Sound {
   // is locked (i.e. the same condition that queues the +1 Drift Shot and the 4x damage). A
   // bright, celebratory layer that sits *on top of* the normal comboSparkle + chime so the
   // player hears the regular on-beat reward AND a distinct extra "ding" for the drift-shot.
-  //   Three layers:
+  //   Five layers:
   //   1) Fast rising arpeggio (C5–E5–G5–C6) on a soft triangle — reads as "achievement unlocked".
   //   2) A small bell strike at C6 with two inharmonic partials — adds shimmer and pitch focus.
   //   3) A high noise sparkle burst — the "magic dust" topping.
+  //   4) A deep sub-boom (tier-scaled) — the explosive low-end weight.
+  //   5) A harmonic bloom (tier-scaled) — a chord swell that RESOLVES the drift-hum stack.
   // No spatial panning: like comboChime, this is a melodic reward and should sit centered.
-  playDriftShotHit() {
+  // tier 1..6 = drift tier landed (callers always pass ≥1; default 1). The bright
+  // zing/bell/sparkle is the same at every tier, but each tier adds another voice
+  // of the held C-major chord (layer 5) and more sub-boom weight (layer 4) and
+  // lifts the overall gain — so a higher tier doesn't just sparkle brighter, it
+  // lands as a fuller, more harmonically-resolved detonation.
+  playDriftShotHit(tier = 1) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
+    // 0..1 climb across the tier ladder — drives the sub-boom depth/gain so the
+    // weight arrives gradually and peaks at the final tier rather than popping on.
+    const tierClimb = Math.max(0, Math.min(1, (tier - 1) / 5));
+    // overall lift: the whole hit gets louder as the tier climbs (1.0 → ~1.5×).
+    const tierGain = 1 + 0.5 * tierClimb;
     // 1) Rising arpeggio — C major triad climbing into an octave. Steps land
     //    fast (every 25ms) so the whole flourish fits inside ~150ms — a "zing" rather than a tune.
     const arpFreqs = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
@@ -5940,7 +6132,7 @@ export class Sound {
       osc.type = "triangle";
       osc.frequency.value = arpFreqs[i];
       const start = t + i * stepSec;
-      const peak = 0.10;
+      const peak = 0.10 * tierGain;
       const release = 0.18;
       gain.gain.setValueAtTime(0.0001, start);
       gain.gain.exponentialRampToValueAtTime(peak, start + 0.008);
@@ -5959,7 +6151,7 @@ export class Sound {
       const gain = this.ctx.createGain();
       osc.type = "sine";
       osc.frequency.value = bellFundamental * bellPartials[i];
-      const peak = 0.09 / (i + 1.2);
+      const peak = 0.09 * tierGain / (i + 1.2);
       const decay = 0.5 - i * 0.12;
       gain.gain.setValueAtTime(0.0001, bellStart);
       gain.gain.exponentialRampToValueAtTime(peak, bellStart + 0.006);
@@ -5980,13 +6172,111 @@ export class Sound {
       filter.Q.value = 0.8;
       const gain = this.ctx.createGain();
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.12, t + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.12 * tierGain, t + 0.005);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
       noise.connect(filter);
       filter.connect(gain);
       gain.connect(this.master);
       noise.start(t);
       noise.stop(t + 0.20);
+    }
+    // 4) Deep sub-boom — a pitch-collapsing C2→C1 sine thump that grounds the
+    //    sparkle with real low-end weight. Silent at tier 1 and swells in with
+    //    the tier climb so the FINAL tier lands like a detonation under the zing.
+    //    A short body sine an octave up (C2) gives it a punchy attack the pure
+    //    sub can't carry on small speakers.
+    if (tierClimb > 0) {
+      const boomGain = this.ctx.createGain();
+      // shaped swell: barely there at low tiers, dominant at the top (^1.6 curve).
+      const boomPeak = 0.55 * Math.pow(tierClimb, 1.6) * tierGain;
+      // slight pre-delay so the boom lands just after the bright transient — the
+      // ear hears "crack THEN weight", which reads as bigger than a simultaneous hit.
+      const boomStart = t + 0.012;
+      const boomDecay = 0.34 + 0.30 * tierClimb; // longer tail at the top tier
+      boomGain.gain.setValueAtTime(0.0001, boomStart);
+      boomGain.gain.exponentialRampToValueAtTime(boomPeak, boomStart + 0.012);
+      boomGain.gain.exponentialRampToValueAtTime(0.0001, boomStart + boomDecay);
+      // gentle lowpass keeps it round (no fizzy harmonics) and protects tweeters.
+      const boomLp = this.ctx.createBiquadFilter();
+      boomLp.type = "lowpass";
+      boomLp.frequency.value = 220;
+      boomLp.Q.value = 0.7;
+      boomLp.connect(boomGain);
+      boomGain.connect(this.master);
+      // sub: C2 (65.4 Hz) collapsing toward C1 (32.7 Hz) for that "drop" feel.
+      const sub = this.ctx.createOscillator();
+      sub.type = "sine";
+      sub.frequency.setValueAtTime(65.41, boomStart);
+      sub.frequency.exponentialRampToValueAtTime(32.70, boomStart + boomDecay * 0.7);
+      sub.connect(boomLp);
+      sub.start(boomStart);
+      sub.stop(boomStart + boomDecay + 0.05);
+      // body: C2 octave-up sine for attack punch, quieter and shorter than the sub.
+      const body = this.ctx.createGain();
+      body.gain.setValueAtTime(0.0001, boomStart);
+      body.gain.exponentialRampToValueAtTime(boomPeak * 0.45, boomStart + 0.008);
+      body.gain.exponentialRampToValueAtTime(0.0001, boomStart + boomDecay * 0.5);
+      body.connect(this.master);
+      const bodyOsc = this.ctx.createOscillator();
+      bodyOsc.type = "sine";
+      bodyOsc.frequency.setValueAtTime(130.81, boomStart);
+      bodyOsc.frequency.exponentialRampToValueAtTime(65.41, boomStart + boomDecay * 0.5);
+      bodyOsc.connect(body);
+      bodyOsc.start(boomStart);
+      bodyOsc.stop(boomStart + boomDecay * 0.5 + 0.05);
+    }
+    // 5) Harmonic bloom — a chord swell that RESOLVES the drift-hum stack the
+    //    player has been holding. Each tier unlocks one more voice of the same
+    //    C-major spread the hover hums build (see the drift-tier hum ladder in
+    //    Sound: C4/G4/E4/C5 base → +C3 → +G5 → +D5 (add9) → +E5 → +C2), so the
+    //    hit doesn't just get louder — it crowns the exact chord that was
+    //    sustaining, blooming fuller the longer you held. Soft sine voices
+    //    through a shared gentle lowpass so it reads as warm and beautiful
+    //    layered under the bright zing, never as a second percussive stab.
+    const BLOOM_VOICES = [
+      261.63, // C4  — the hover-hum root; present at every tier
+      392.00, // G4  — perfect fifth (tier ≥ 2)
+      523.25, // C5  — octave (tier ≥ 3)
+      587.33, // D5  — major 9th → Cadd9 (tier ≥ 4)
+      659.25, // E5  — major 3rd up high (tier ≥ 5)
+      130.81, // C3  — sub-octave root anchoring the spread (tier ≥ 6)
+    ];
+    const bloomCount = Math.max(1, Math.min(BLOOM_VOICES.length, tier));
+    const bloomBus = this.ctx.createGain();
+    // Whole bloom swells with the tier so a tier-1 hit is a faint single note
+    // and the top tier is a full, radiant chord.
+    bloomBus.gain.value = 0.5 + 0.5 * tierClimb;
+    const bloomLp = this.ctx.createBiquadFilter();
+    bloomLp.type = "lowpass";
+    bloomLp.frequency.value = 3200;
+    bloomLp.Q.value = 0.5;
+    bloomLp.connect(bloomBus);
+    bloomBus.connect(this.master);
+    // Land the bloom on the same beat as the bell so it reads as one resolved
+    // event; a touch of attack so it swells in rather than clicking.
+    const bloomStart = bellStart;
+    const bloomAttack = 0.03;
+    const bloomSustain = 0.5;
+    const bloomRelease = 1.1;
+    for (let i = 0; i < bloomCount; i++) {
+      // higher voices a little quieter so the chord stays grounded, not shrill.
+      const peak = (0.07 / (1 + i * 0.35)) * tierGain;
+      // two sines detuned ±5 cents = soft analog chorus, matching the hum voices.
+      for (const detune of [-3, 3]) {
+        const osc = this.ctx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.value = BLOOM_VOICES[i];
+        osc.detune.value = detune;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, bloomStart);
+        g.gain.exponentialRampToValueAtTime(peak * 0.5, bloomStart + bloomAttack);
+        g.gain.exponentialRampToValueAtTime(peak * 0.22, bloomStart + bloomAttack + bloomSustain);
+        g.gain.exponentialRampToValueAtTime(0.0001, bloomStart + bloomAttack + bloomSustain + bloomRelease);
+        osc.connect(g);
+        g.connect(bloomLp);
+        osc.start(bloomStart);
+        osc.stop(bloomStart + bloomAttack + bloomSustain + bloomRelease + 0.05);
+      }
     }
   }
 

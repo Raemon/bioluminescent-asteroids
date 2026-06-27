@@ -40,6 +40,7 @@ import { tryStartHighlightClip, tickHighlightGameOverInput, beginHighlightLoop, 
 import { snapshotShipKill } from "./killSnapshot";
 import { updatePopups, popupDriftBonus } from "./popups";
 import { updateBassLightnings } from "./bassLightning";
+import { updateDriftBursts } from "./driftBurst";
 import { tickPendingRhythmBonuses } from "./rhythmBonus";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
@@ -635,8 +636,10 @@ const tickControlsGate = (game: Game) => {
   if (!used.rotate && (isDown(game.input, "rotateLeft") || isDown(game.input, "rotateRight"))) { used.rotate = true; changed = true; }
   if (!used.thrust && isDown(game.input, "thrust")) { used.thrust = true; changed = true; }
   if (!used.back && isDown(game.input, "reverse")) { used.back = true; changed = true; }
+  if (!used.side && (isDown(game.input, "sidePort") || isDown(game.input, "sideStarboard"))) { used.side = true; changed = true; }
   if (!used.fire && isDown(game.input, "fire")) { used.fire = true; changed = true; }
   if (changed) emitTutorialControls(used.rotate, used.thrust, used.back, used.side, used.fire);
+  // side thrust is optional for completion — don't block the gate on a key the player may not try.
   if (used.rotate && used.thrust && used.back && used.fire) {
     if (game.tutorialActive && game.firstWaveHintStage === 1) {
       setFirstWaveHintStage(game, 2);
@@ -796,6 +799,7 @@ const updatePlaying = (game: Game, dt: number) => {
   game.particles.update(musicDt);
   game.popups = updatePopups(game.popups, dt);
   game.bassLightnings = updateBassLightnings(game.bassLightnings, dt);
+  game.driftBursts = updateDriftBursts(game.driftBursts, dt);
   tickPendingDriftBonuses(game);
   tickPendingRhythmBonuses(game);
   runCollisionPasses(game);

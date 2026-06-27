@@ -64,6 +64,9 @@ export const TutorialControlsHint = () => {
         <span className={`tch-ctrl${used.back ? " used" : ""}`}>
           <span className="key">↓</span> reverse
         </span>
+        <span className={`tch-ctrl${used.side ? " used" : ""}`}>
+          <span className="key">Z</span> <span className="key">X</span> side thrust
+        </span>
         <span className={`tch-ctrl${used.fire ? " used" : ""}`}>
           <span className="key">space</span> fire
         </span>

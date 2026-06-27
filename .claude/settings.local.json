@@ -7,7 +7,8 @@
       "Skill(run)",
       "Bash(npm run *)",
       "Bash(curl -s http://localhost:5173)",
-      "Bash(pkill *)"
+      "Bash(pkill *)",
+      "Workflow(deep-research)"
     ]
   }
 }

@@ -18,6 +18,7 @@ import { AlienBullet } from "./AlienBullet";
 import { v } from "./vec";
 import { Popup } from "./game/popups";
 import type { BassLightning } from "./game/bassLightning";
+import type { DriftBurst } from "./game/driftBurst";
 import { LaserBeam } from "./game/laserShot";
 import { BossBeam } from "./game/bossBeam";
 import { KilledSnapshot } from "./game/killSnapshot";
@@ -73,6 +74,9 @@ export class Game implements HudElements {
   // bass-echo arcs from a firing bassteroid to an on-rhythm kill — see
   //   game/bassLightning.ts for the trigger conditions and rendering.
   bassLightnings: BassLightning[] = [];
+  // one-shot "sound visualizer explosion" radiating from each on-beat drift-shot
+  //   hit, tier-coloured and tier-sized — see game/driftBurst.ts.
+  driftBursts: DriftBurst[] = [];
   // on-beat hits while a hover ring is locked queue a deferred rhythm bonus here. `amount` is
   //   the drift tier (+1/+2/+3 combo for tier 1/2/3); `tier` drives the popup's colour + label.
   //   Each tick fires (or cancels) the entries whose moment has come.

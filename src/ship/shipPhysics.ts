@@ -10,6 +10,48 @@ import { isDown } from "../game/controlBindings";
 
 const ENGINE_SOUNDS_ENABLED = false;
 
+// Flip to true to give every ship side thrust from the start, ignoring the
+// sideEngines powerup gate. Flip back to false to return it to an upgrade.
+// Same flag also pulls the sideEngines powerup from the drop pool (see
+// Canister.POWERUP_KINDS) so the two never disagree.
+export const SIDE_THRUST_ALWAYS_ON = true;
+
+// Drift-aim fine-control: hovering a Next Beat Target slows both rotation AND thrust so the player
+// can hold the lock and build drift tier. The slow deepens with the three nested hover zones (set
+// by the sim's hover-lock tick on slot 0): nearby approach ring (zoneEnterBeatTime) → central
+// target circle (hoverStartBeatTime) → first drift reward / 0.5s lock (completionBeatTime).
+// Rotation and thrust each have their own [nearby, center, locked] multiplier set so they can be
+// tuned apart.
+type DriftAimMults = { nearby: number; center: number; locked: number };
+const DRIFT_AIM_ROT_MULTS: DriftAimMults = { nearby: 1, center: 0.25, locked: 0.25 };
+const DRIFT_AIM_THRUST_MULTS: DriftAimMults = { nearby: 1, center: 0.25, locked: 0.25 };
+// ease toward the zone's target multiplier so crossing a boundary doesn't snap velocity.
+const DRIFT_AIM_EASE_SEC = 0.15;
+
+// deepest zone the slot-0 ring reports → its multiplier from the given set (1 when off-target
+// entirely). Zones nest, so check inner-first.
+const driftAimTargetMult = (ship: Ship, mults: DriftAimMults) => {
+  const ring = ship.hoverDotRingState;
+  if (ring.completionBeatTime !== null) return mults.locked;
+  if (ring.hoverStartBeatTime !== null) return mults.center;
+  if (ring.zoneEnterBeatTime !== null) return mults.nearby;
+  return 1;
+};
+
+// resolve this frame's eased multiplier for rotation / thrust respectively.
+const driftAimRotMult = (ship: Ship) => ship.driftAimRotMultEased;
+const driftAimThrustMult = (ship: Ship) => ship.driftAimThrustMultEased;
+
+// ease one value toward its target so feel stays smooth across boundaries.
+const easeDriftAim = (current: number, target: number, dt: number) =>
+  current + (target - current) * Math.min(1, dt / DRIFT_AIM_EASE_SEC);
+
+// step both eased multipliers once per frame from the current hover zone.
+const updateDriftAimSlow = (ship: Ship, dt: number) => {
+  ship.driftAimRotMultEased = easeDriftAim(ship.driftAimRotMultEased, driftAimTargetMult(ship, DRIFT_AIM_ROT_MULTS), dt);
+  ship.driftAimThrustMultEased = easeDriftAim(ship.driftAimThrustMultEased, driftAimTargetMult(ship, DRIFT_AIM_THRUST_MULTS), dt);
+};
+
 // Two-regime turning: inside the tap window the ship turns at a slow,
 // constant nudge rate, then the rate blends quickly up to the full turn
 // rate and holds steady there. With rotInertia the spin coasts on key
@@ -17,13 +59,15 @@ const ENGINE_SOUNDS_ENABLED = false;
 const updateTurning = (ship: Ship, input: IInput, dt: number) => {
   const dir = (isDown(input, "rotateRight") ? 1 : 0) - (isDown(input, "rotateLeft") ? 1 : 0);
   const precision = isDown(input, "precisionTurn") ? 0.2 : 1;
+  updateDriftAimSlow(ship, dt);
+  const driftAim = driftAimRotMult(ship);
   if (dir !== 0) {
     if (dir !== ship.rotHeldDir) ship.rotHoldTime = 0;
     ship.rotHoldTime += dt;
     const past = ship.rotHoldTime - ship.rotTapHoldTime;
     const blend = Math.min(1, Math.max(0, past / ship.rotRampTime));
     const rate = ship.rotTapRate + (ship.rotMaxSpeed - ship.rotTapRate) * blend;
-    ship.rotVel = dir * rate * precision;
+    ship.rotVel = dir * rate * precision * driftAim;
   } else {
     ship.rotHoldTime = 0;
     if (!ship.rotInertia) ship.rotVel = 0;
@@ -40,16 +84,24 @@ const updateThrustRamp = (ship: Ship, input: IInput, dt: number) => {
 };
 const thrustScale = (ship: Ship) => 0.02 + 0.98 * ship.thrustRamp;
 
+// Single acceleration path for every engine — push velocity along (heading + offset) with the
+// drift-aim slow baked in, so all movement honours the hover-zone multiplier identically. `ramped`
+// applies the forward/reverse tap-ramp; side thrust passes false to keep its instant full power.
+const applyThrust = (ship: Ship, headingOffset: number, ramped: boolean, dt: number, t: number) => {
+  const a = ship.thrustPower * (ramped ? thrustScale(ship) : 1) * driftAimThrustMult(ship) * dt;
+  const h = ship.heading + headingOffset;
+  ship.vel.x += Math.cos(h) * a;
+  ship.vel.y += Math.sin(h) * a;
+  ship.lastThrustActiveAt = t / 1000;
+};
+
 // thruster has to gate sound start/stop on the edge so the loop doesn't restart every frame.
 const updateForwardThrust = (ship: Ship, input: IInput, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasThrusting = ship.thrustOn;
   ship.thrustOn = isDown(input, "thrust");
   if (ship.thrustOn) {
-    const a = ship.thrustPower * thrustScale(ship) * dt;
-    ship.vel.x += Math.cos(ship.heading) * a;
-    ship.vel.y += Math.sin(ship.heading) * a;
+    applyThrust(ship, 0, true, dt, t);
     emitThrust(ship, particles, t);
-    ship.lastThrustActiveAt = t / 1000;
     if (ENGINE_SOUNDS_ENABLED && !wasThrusting) sound.play("thrust");
   } else if (wasThrusting) sound.stopThrust();
 };
@@ -59,39 +111,27 @@ const updateReverseThrust = (ship: Ship, input: IInput, particles: ParticleSyste
   const wasReversing = ship.reverseThrustOn;
   ship.reverseThrustOn = isDown(input, "reverse");
   if (ship.reverseThrustOn) {
-    const a = ship.thrustPower * thrustScale(ship) * dt;
-    const h = ship.heading + Math.PI;
-    ship.vel.x += Math.cos(h) * a;
-    ship.vel.y += Math.sin(h) * a;
+    applyThrust(ship, Math.PI, true, dt, t);
     emitReverseThrust(ship, particles, t);
-    ship.lastThrustActiveAt = t / 1000;
     if (ENGINE_SOUNDS_ENABLED && !wasReversing) sound.play("reverseThrust");
   } else if (wasReversing) sound.stopReverseThrust();
 };
 
 // Lateral thrust — port pushes left of heading, starboard pushes right.
-// Gated on the sideEngines powerup; bindings are empty by default so the
-// keys only do anything once the player has picked one up (and bound them).
-// Shares one audio loop that runs while either key is held.
+// Gated on the sideEngines powerup (unless SIDE_THRUST_ALWAYS_ON); bound to
+// z/x by default. Shares one audio loop that runs while either key is held.
 const updateSideThrust = (ship: Ship, input: IInput, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
+  const enabled = ship.sideEnginesActive || SIDE_THRUST_ALWAYS_ON;
   const wasActive = ship.portThrustOn || ship.starboardThrustOn;
-  ship.portThrustOn = ship.sideEnginesActive && isDown(input, "sidePort");
-  ship.starboardThrustOn = ship.sideEnginesActive && isDown(input, "sideStarboard");
+  ship.portThrustOn = enabled && isDown(input, "sidePort");
+  ship.starboardThrustOn = enabled && isDown(input, "sideStarboard");
   if (ship.portThrustOn) {
-    const a = ship.thrustPower * dt;
-    const h = ship.heading - Math.PI / 2;
-    ship.vel.x += Math.cos(h) * a;
-    ship.vel.y += Math.sin(h) * a;
+    applyThrust(ship, -Math.PI / 2, false, dt, t);
     emitSideThrust(ship, particles, t, "port");
-    ship.lastThrustActiveAt = t / 1000;
   }
   if (ship.starboardThrustOn) {
-    const a = ship.thrustPower * dt;
-    const h = ship.heading + Math.PI / 2;
-    ship.vel.x += Math.cos(h) * a;
-    ship.vel.y += Math.sin(h) * a;
+    applyThrust(ship, Math.PI / 2, false, dt, t);
     emitSideThrust(ship, particles, t, "starboard");
-    ship.lastThrustActiveAt = t / 1000;
   }
   const isActive = ship.portThrustOn || ship.starboardThrustOn;
   if (ENGINE_SOUNDS_ENABLED && isActive && !wasActive) sound.play("sideThrust");

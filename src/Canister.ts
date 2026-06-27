@@ -1,6 +1,7 @@
 import { Vec, v, mul, sub, len, rand, pick, TAU, addScaledMut, circleHit } from "./vec";
 import { ENTITY_CONFIG } from "./game/entityConfig";
 import { OCTAHEDRON_EDGES, projectOctahedron } from "./octahedron";
+import { SIDE_THRUST_ALWAYS_ON } from "./ship/shipPhysics";
 
 // Five powerup kinds, each with its own glyph so the player can read the
 // canister at a glance from across the screen. Keeping the list short
@@ -34,7 +35,10 @@ const POWERUP_GLYPH: Record<PowerupKind, string> = {
   lasershot: "B",
 };
 
-export const POWERUP_KINDS: PowerupKind[] = ["prong", "shield", "slow", "radar", "longshot", "sideEngines", "lasershot"];
+// sideEngines is dropped from the pool when side thrust is always-on (it would
+// be a no-op pickup); flip SIDE_THRUST_ALWAYS_ON back to false to restore it.
+export const POWERUP_KINDS: PowerupKind[] = (["prong", "shield", "slow", "radar", "longshot", "sideEngines", "lasershot"] as PowerupKind[])
+  .filter((k) => !(k === "sideEngines" && SIDE_THRUST_ALWAYS_ON));
 
 // warp-out plays a brief vortex flash before the canister vanishes so the player
 //   sees a deliberate departure (not just a soft offscreen fade) when they let a pod drift past.

@@ -43,9 +43,16 @@ const TIER_LABEL = FULL_HALO_TIER_THRESHOLDS.map((t) => `${t}x`);
 const fullHaloUrl = (song: FullHaloSong, layer: number) =>
   `/sounds/halo-music-full/${song}-l${layer}.mp3`;
 
-// Pixels of waveform per second of audio. Wide enough that a quarter-beat
-// (0.5s) is a comfortable drag target; the lane scrolls horizontally.
+// Default pixels of waveform per second of audio. Wide enough that a
+// quarter-beat (0.5s) is a comfortable drag target; the lane scrolls
+// horizontally. Live-adjustable by trackpad pinch (see pxPerSec state).
 const PX_PER_SEC = 90;
+const PX_PER_SEC_MIN = 20;
+const PX_PER_SEC_MAX = 800;
+// Resolution the peak envelope is sampled at — fixed and independent of zoom, so
+// pinching just re-maps existing peaks instead of re-scanning the buffer. High
+// enough to stay crisp when zoomed in past 1:1.
+const PEAK_PPS = 400;
 const LANE_HEIGHT = 44;
 const REF_LANE_HEIGHT = 30;
 // Left offset of the canvas content within each lane row: row px-1 (4) + the
@@ -57,16 +64,17 @@ const LABEL_GUTTER = 92;
 const WAVE_GAIN = 6;
 
 type WaveData = {
-  // Peak envelope: one [min,max] pair per pixel column across the whole track.
-  // Computed once per decoded buffer; redrawing on drag just re-blits with an
-  // x-shift so dragging stays smooth on a 2-minute track.
-  peaks: Float32Array; // interleaved min,max,min,max…
+  // Peak envelope at PEAK_PPS columns/sec (interleaved min,max per column).
+  // Sampled once per buffer at a fixed resolution; drawing maps screen-x → time
+  // → column, so zoom never re-scans the buffer.
+  peaks: Float32Array;
+  cols: number;       // number of [min,max] pairs
   durationS: number;
 };
 
-// Downsample a decoded buffer to a per-pixel-column peak envelope.
-function computePeaks(buf: AudioBuffer, pxPerSec: number): WaveData {
-  const cols = Math.max(1, Math.ceil(buf.duration * pxPerSec));
+// Downsample a decoded buffer to a fixed-resolution peak envelope (PEAK_PPS).
+function computePeaks(buf: AudioBuffer): WaveData {
+  const cols = Math.max(1, Math.ceil(buf.duration * PEAK_PPS));
   const peaks = new Float32Array(cols * 2);
   const ch0 = buf.getChannelData(0);
   const ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : ch0;
@@ -84,7 +92,7 @@ function computePeaks(buf: AudioBuffer, pxPerSec: number): WaveData {
     peaks[c * 2] = mn;
     peaks[c * 2 + 1] = mx;
   }
-  return { peaks, durationS: buf.duration };
+  return { peaks, cols, durationS: buf.duration };
 }
 
 async function decodeUrl(url: string): Promise<AudioBuffer | null> {
@@ -127,8 +135,22 @@ export const BeatSyncEditor = () => {
   );
   const [dirty, setDirty] = useState(false);
 
+  // Per-layer mute (editor-only). Independent of the combo tier: a muted layer
+  // stays silent even when its tier is active. Re-applied on play so toggles
+  // made while stopped take effect when playback starts.
+  const [muted, setMuted] = useState<boolean[]>(() => Array(6).fill(false));
+  const mutedRef = useRef<boolean[]>(Array(6).fill(false));
+  mutedRef.current = muted;
+
+  // Horizontal zoom (px per second), adjusted by trackpad pinch. Higher = more
+  // spread out. Clamped so the track stays navigable.
+  const [pxPerSec, setPxPerSec] = useState(PX_PER_SEC);
+  const pxPerSecRef = useRef(PX_PER_SEC);
+  pxPerSecRef.current = pxPerSec;
+
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
   const refCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const laneStackRef = useRef<HTMLDivElement | null>(null);
 
   // Decoded bgBeat one-shots, kept so the pulse can be scheduled as live audio
   // (not just drawn). The pulse rides the same 0.5s grid as the in-game beat,
@@ -144,8 +166,8 @@ export const BeatSyncEditor = () => {
   const rafRef = useRef<number | null>(null);
 
   const totalWidth = useMemo(
-    () => Math.ceil((def.durationS) * PX_PER_SEC),
-    [def.durationS],
+    () => Math.ceil(def.durationS * pxPerSec),
+    [def.durationS, pxPerSec],
   );
 
   // Load config offset, decode all six layers + the bgBeat reference.
@@ -164,7 +186,7 @@ export const BeatSyncEditor = () => {
         Array.from({ length: 6 }, (_, i) => decodeUrl(fullHaloUrl(song, i + 1))),
       );
       if (cancelled) return;
-      setWaves(bufs.map((b) => (b ? computePeaks(b, PX_PER_SEC) : null)));
+      setWaves(bufs.map((b) => (b ? computePeaks(b) : null)));
 
       // Reference lane: tile the bgBeat downbeat/offbeat onto the 0.5s grid for
       // the song's length, then envelope it. Downbeats (even slots) use the
@@ -185,7 +207,7 @@ export const BeatSyncEditor = () => {
           const n = Math.min(hd.length, len - s);
           for (let i = 0; i < n; i++) out[s + i] += hd[i];
         }
-        setRefWave(computePeaks(tile, PX_PER_SEC));
+        setRefWave(computePeaks(tile));
       }
       setLoaded(true);
     })();
@@ -220,19 +242,21 @@ export const BeatSyncEditor = () => {
 
     const mid = height / 2;
     if (wave) {
-      const cols = wave.peaks.length / 2;
-      // Offset in pixels; positive offset advances playback, i.e. shifts the
-      // content LEFT (later audio sits under the downbeat sooner). Per-lane so a
-      // cmd-dragged stem slides independently of the rest.
-      const shiftPx = Math.round(laneOffsetS * PX_PER_SEC);
+      const cols = wave.cols;
+      const dur = wave.durationS;
+      const pps = pxPerSecRef.current;
       // Amplify the envelope so quiet stems read clearly. Clamp to the lane so a
       // loud transient doesn't draw past the edge. (WAVE_GAIN is purely visual —
       // it never touches the audio.)
       const amp = (mid - 1) * WAVE_GAIN;
       ctx2d.fillStyle = dim ? color.replace(/0\.\d+\)$/, "0.18)") : color;
       for (let x = 0; x < w; x++) {
-        // Which source column shows at screen x, wrapped.
-        const c = (((x + shiftPx) % cols) + cols) % cols;
+        // Screen x → audio time (+offset, wrapped) → peak column. Positive
+        // offset advances playback (later audio sits under the downbeat sooner).
+        // Per-lane so a cmd-dragged stem slides independently of the rest.
+        let tSec = x / pps + laneOffsetS;
+        tSec = ((tSec % dur) + dur) % dur;
+        const c = Math.min(cols - 1, Math.floor(tSec * PEAK_PPS));
         const mn = wave.peaks[c * 2];
         const mx = wave.peaks[c * 2 + 1];
         const y0 = Math.max(0, mid - Math.min(mid - 1, mx * amp));
@@ -246,10 +270,12 @@ export const BeatSyncEditor = () => {
   // Beat grid: quarter lines every BEAT_GRID, heavier measure/downbeat lines
   // every BASS_MEASURE_LENGTH. This is the anchor mothlight must align to.
   const drawGrid = (ctx2d: CanvasRenderingContext2D, w: number, height: number) => {
-    const quarterPx = BEAT_GRID * PX_PER_SEC;
-    const measurePx = BASS_MEASURE_LENGTH * PX_PER_SEC;
-    for (let x = 0, i = 0; x <= w; x += quarterPx, i++) {
-      const isMeasure = Math.abs((x % measurePx)) < 0.5 || Math.abs((x % measurePx) - measurePx) < 0.5;
+    const pps = pxPerSecRef.current;
+    const quarterPx = BEAT_GRID * pps;
+    const measurePx = BASS_MEASURE_LENGTH * pps;
+    for (let x = 0; x <= w; x += quarterPx) {
+      const r = x % measurePx;
+      const isMeasure = r < 0.5 || r > measurePx - 0.5;
       ctx2d.strokeStyle = isMeasure ? "rgba(255,200,120,0.55)" : "rgba(106,215,255,0.16)";
       ctx2d.lineWidth = isMeasure ? 1.5 : 1;
       ctx2d.beginPath();
@@ -278,7 +304,7 @@ export const BeatSyncEditor = () => {
     // REF lane is the fixed grid anchor — never offset.
     drawLane(refCanvasRef.current, refWave, REF_LANE_HEIGHT, "rgba(255,200,120,0.85)", false, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waves, refWave, layerOffsets, totalWidth, previewCombo]);
+  }, [waves, refWave, layerOffsets, totalWidth, previewCombo, pxPerSec]);
 
   const wrapDur = (v: number) => {
     const dur = def.durationS;
@@ -319,7 +345,7 @@ export const BeatSyncEditor = () => {
     if (!d) return;
     // Drag RIGHT → content moves right → playback retreats → offset decreases.
     const dx = e.clientX - d.startX;
-    const deltaS = dx / PX_PER_SEC;
+    const deltaS = dx / pxPerSecRef.current;
     if (d.perLayer) {
       const next = [...layerOffsetsRef.current];
       next[d.lane] = wrapDur(d.start[d.lane] - deltaS);
@@ -415,7 +441,7 @@ export const BeatSyncEditor = () => {
   };
 
   // Cursor sweep — read the real audio-clock playhead each frame and place the
-  // overlay. x = wrapped elapsed (playhead − layer-0 offset) × PX_PER_SEC, which
+  // overlay. x = wrapped elapsed (playhead − layer-0 offset) × pxPerSec, which
   // lands the cursor over the content currently sounding (lanes draw content
   // shifted by their offset; the playhead tracks the layer-0/shared reference).
   const tickCursor = () => {
@@ -424,7 +450,7 @@ export const BeatSyncEditor = () => {
     if (p != null && el) {
       const dur = def.durationS;
       const elapsed = (((p - layerOffsetsRef.current[0]) % dur) + dur) % dur;
-      el.style.transform = `translateX(${elapsed * PX_PER_SEC}px)`;
+      el.style.transform = `translateX(${elapsed * pxPerSecRef.current}px)`;
       el.style.opacity = "1";
     } else if (el) {
       el.style.opacity = "0";
@@ -447,6 +473,23 @@ export const BeatSyncEditor = () => {
   // Tear the pulse + cursor down if the component unmounts mid-play.
   useEffect(() => () => { stopPulse(); stopCursor(); }, []);
 
+  // Trackpad pinch-to-zoom the horizontal scale. macOS reports a pinch as a
+  // wheel event with ctrlKey set; deltaY<0 = pinch out (zoom in). Non-passive so
+  // we can preventDefault and stop the browser from page-zooming. Plain
+  // (non-ctrl) wheel is left alone so vertical/horizontal scroll still works.
+  useEffect(() => {
+    const el = laneStackRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const factor = Math.exp(-e.deltaY * 0.01);
+      setPxPerSec((p) => Math.min(PX_PER_SEC_MAX, Math.max(PX_PER_SEC_MIN, p * factor)));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
   const play = async () => {
     sound.ensureContext();
     if (sound.ctx?.state === "suspended") await sound.ctx.resume();
@@ -455,6 +498,8 @@ export const BeatSyncEditor = () => {
     const now = sound.ctx ? sound.ctx.currentTime : 0;
     const measureAlignDelay = BASS_MEASURE_LENGTH - (now % BASS_MEASURE_LENGTH);
     await sound.startHaloFullMusic(song, previewCombo, measureAlignDelay, 0, null, true);
+    // Re-apply any mutes set while stopped (the fresh node starts all-unmuted).
+    mutedRef.current.forEach((m, i) => { if (m) sound.setHaloFullMusicLayerMute(i, true); });
     setPlaying(true);
     // Anchor the pulse to the same downbeat the song was scheduled on.
     startPulse(now + measureAlignDelay);
@@ -471,6 +516,24 @@ export const BeatSyncEditor = () => {
   const setCombo = (combo: number) => {
     setPreviewCombo(combo);
     if (playing) sound.setHaloFullMusicTier(combo);
+  };
+
+  const toggleMute = (i: number) => {
+    const next = [...mutedRef.current];
+    next[i] = !next[i];
+    setMuted(next);
+    mutedRef.current = next;
+    if (playing) sound.setHaloFullMusicLayerMute(i, next[i]);
+  };
+
+  // Solo = mute every other layer. Clicking solo on an already-solo'd layer
+  // (it's the only one unmuted) clears all mutes.
+  const soloLayer = (i: number) => {
+    const onlyThis = mutedRef.current.every((m, j) => (j === i ? !m : m));
+    const next = onlyThis ? Array(6).fill(false) : mutedRef.current.map((_, j) => j !== i);
+    setMuted(next);
+    mutedRef.current = next;
+    if (playing) next.forEach((m, j) => sound.setHaloFullMusicLayerMute(j, m));
   };
 
   const sharedOffset = layerOffsets[0];
@@ -544,7 +607,7 @@ export const BeatSyncEditor = () => {
       </div>
 
       {/* Scrollable lane stack. Reference pulse on top, then l1→l6. */}
-      <div className="overflow-x-auto rounded border border-[rgba(106,215,255,0.12)] bg-[rgba(4,8,14,0.6)]">
+      <div ref={laneStackRef} className="overflow-x-auto rounded border border-[rgba(106,215,255,0.12)] bg-[rgba(4,8,14,0.6)]">
         <div style={{ width: totalWidth + LABEL_GUTTER }} className="relative select-none">
           {/* Playhead — absolute over the lane stack, left-anchored past the
               label gutter; swept via transform off the audio clock. */}
@@ -559,10 +622,30 @@ export const BeatSyncEditor = () => {
           </div>
           {Array.from({ length: 6 }, (_, i) => {
             const nudged = Math.abs(layerOffsets[i] - layerOffsets[0]) > 1e-4;
+            const isMuted = muted[i];
             return (
-              <div key={i} className="flex items-center gap-2 px-1 py-0.5">
-                <span className="flex w-20 shrink-0 flex-col text-[10px] uppercase tracking-[0.14em] text-[#9bb5d6]">
-                  <span>{LAYER_SHORT[i]}</span>
+              <div key={i} className={"flex items-center gap-2 px-1 py-0.5 " + (isMuted ? "opacity-45" : "")}>
+                <span className="flex w-20 shrink-0 flex-col gap-0.5 text-[10px] uppercase tracking-[0.14em] text-[#9bb5d6]">
+                  <span className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleMute(i)}
+                      title={isMuted ? "unmute" : "mute"}
+                      className={
+                        "rounded border px-1 leading-none " +
+                        (isMuted
+                          ? "border-[rgba(255,120,120,0.6)] bg-[rgba(255,120,120,0.18)] text-[#ff9b9b]"
+                          : "border-[rgba(106,215,255,0.3)] text-[#6ad7ff]")
+                      }
+                    >M</button>
+                    <button
+                      type="button"
+                      onClick={() => soloLayer(i)}
+                      title="solo (mute all others)"
+                      className="rounded border border-[rgba(255,200,120,0.35)] px-1 leading-none text-[#ffd49b]"
+                    >S</button>
+                    <span>{LAYER_SHORT[i]}</span>
+                  </span>
                   <span className={"tabular-nums " + (nudged ? "text-[#ffd49b]" : "text-[#5a7290]")}>
                     {layerOffsets[i] >= 0 ? "+" : ""}{layerOffsets[i].toFixed(3)}
                   </span>
@@ -585,7 +668,9 @@ export const BeatSyncEditor = () => {
         Playback runs through the real in-game path (Sound.startHaloFullMusic, looped
         here so it cycles). The persisted offset feeds the game directly — flip
         USE_FULL_HALO_MUSIC back on in haloFullMusicConfig.ts to hear it in a run.
-        Layers above the selected tier are dimmed and silent.
+        Layers above the selected tier are dimmed and silent. <span className="text-[#9bb5d6]">M</span> mutes a
+        layer, <span className="text-[#9bb5d6]">S</span> solos it (mute/solo are editor-only, not saved). Pinch
+        the trackpad over the lanes to zoom the time scale.
       </p>
     </section>
   );

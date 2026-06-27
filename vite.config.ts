@@ -15,6 +15,7 @@ const cleanUrls = () => {
   const rewrite = (req: { url?: string }) => {
     if (req.url === "/sound") req.url = "/sound.html";
     else if (req.url === "/music") req.url = "/music.html";
+    else if (req.url === "/piano-roll") req.url = "/piano-roll.html";
   };
   return {
     name: "clean-urls",
@@ -278,6 +279,7 @@ export default defineConfig({
         main: resolve(__dirname, "index.html"),
         sound: resolve(__dirname, "sound.html"),
         music: resolve(__dirname, "music.html"),
+        "piano-roll": resolve(__dirname, "piano-roll.html"),
       },
     },
   },

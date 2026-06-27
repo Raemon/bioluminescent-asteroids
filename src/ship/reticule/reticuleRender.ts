@@ -64,6 +64,16 @@ const HOVER_PULSE_END_R = BULLET_HIT_RADIUS_ON_BEAT + 34;
 const HOVER_PULSE_LINE_WIDTH = 2;
 const HOVER_PULSE_HSL = "48, 100%, 70%";
 const HOVER_PULSE_PEAK_ALPHA = 0.8;
+// Tier-6 climax (the final tier): the hold pulse stops being "the same ring, wider/whiter" and
+// becomes a distinct radiant event — a thick incandescent leading ring trailed by a soft halo,
+// plus a slow on-the-downbeat bloom so reaching the top reads as "fully arrived / radiant".
+const HOVER_PULSE_FINAL_HSL = "45, 100%, 92%";        // near-white incandescent gold
+const HOVER_PULSE_FINAL_CORE_HSL = "0, 0%, 100%";     // pure-white hot core
+const HOVER_PULSE_FINAL_LINE_WIDTH = 3.5;
+const HOVER_PULSE_FINAL_PEAK_ALPHA = 1.0;
+// the halo ring trails the leading ring by this fraction of its travel — a soft wide afterglow.
+const HOVER_PULSE_FINAL_HALO_LAG = 0.22;
+const HOVER_PULSE_FINAL_HALO_WIDTH = 9;
 // module-scoped so the arrow and hover pulse can crossfade across frames.
 let arrowFade01 = 0;
 let hoverPulseFade01 = 0;
@@ -147,10 +157,12 @@ const HOVER_LOCK_WAVE_LINE_WIDTH = 2.8;
 const HOVER_FLARE_WARM_HSL = "48, 100%, 70%";
 
 // Drift-shot tiers: keep hovering past the basic lock to climb tiers, each one raising the
-// damage and rhythm-bonus multipliers (+1 per tier: 2× / 3× / 4× damage) and shifting the
-// lock visuals + hum stack. Hold time is measured from hover START (total), so index 0 == the
+// damage and rhythm-bonus multipliers (+1 per tier: 2× … 7× damage) and shifting the lock
+// visuals + hum stack. Hold time is measured from hover START (total), so index 0 == the
 // ring-fill time == the basic lock. Tier number returned is 1-based (0 = not yet locked).
-const DRIFT_TIER_HOLD_SEC = [HOVER_RING_FILL_SEC, 2.0, 8.0] as const;
+// Gaps widen as you climb (+2,+2,+4,+4,+6) so the top tiers are a real commitment. Each added
+// hum is a fresh chord tone so the stack RESOLVES as it grows: triad → add9 → 6/9 → 6/9+octave.
+const DRIFT_TIER_HOLD_SEC = [HOVER_RING_FILL_SEC, 2.5, 4.5, 8.5, 12.5, 18.5] as const;
 const DRIFT_TIER_MAX = DRIFT_TIER_HOLD_SEC.length;
 // elapsed = beatTime - hoverStartBeatTime. 0 below the first threshold, else the highest tier reached.
 const driftTierForElapsed = (elapsed: number): number => {
@@ -167,12 +179,15 @@ export const driftTierForRing = (ring: HoverLockReadState, beatTime: number): nu
   if (ring.completionBeatTime === null || ring.hoverStartBeatTime === null) return 0;
   return Math.max(1, driftTierForElapsed(beatTime - ring.hoverStartBeatTime));
 };
-// per-tier pulse colour: gold (basic) → the game's signature cyan → a hot magenta at the top,
-// walking across the existing UI palette so each tier reads as "deeper into rare territory".
-const DRIFT_TIER_PULSE_HSL = ["48, 100%, 70%", "195, 100%, 65%", "300, 100%, 68%"] as const;
+// per-tier pulse colour: gold → cyan → magenta → violet, then as the chord RESOLVES the light
+// blooms warm — rose-violet → near-white incandescent gold — so the final tiers read as "fully
+// radiant / arrived" rather than just more saturated hue.
+export const DRIFT_TIER_PULSE_HSL = ["48, 100%, 70%", "195, 100%, 65%", "300, 100%, 68%", "270, 100%, 75%", "320, 100%, 80%", "45, 100%, 92%"] as const;
 // higher tiers widen the pulse/soundwave circles so the escalation is legible at a glance.
-const DRIFT_TIER_WIDTH_MULT = [1.0, 1.35, 1.7] as const;
-const driftTierPulseHsl = (tier: number): string => DRIFT_TIER_PULSE_HSL[Math.max(0, Math.min(DRIFT_TIER_MAX - 1, tier - 1))];
+const DRIFT_TIER_WIDTH_MULT = [1.0, 1.35, 1.7, 2.05, 2.4, 2.8] as const;
+// shared so the drift-shot hit burst (driftBurst.ts) colours its soundwave explosion in the same
+// per-tier hue the lock pulse uses — the hit reads as that exact ring detonating outward.
+export const driftTierPulseHsl = (tier: number): string => DRIFT_TIER_PULSE_HSL[Math.max(0, Math.min(DRIFT_TIER_MAX - 1, tier - 1))];
 const driftTierWidthMult = (tier: number): number => DRIFT_TIER_WIDTH_MULT[Math.max(0, Math.min(DRIFT_TIER_MAX - 1, tier - 1))];
 
 // one-shot hint that surfaces the first time the player ever holds a hover long enough to
@@ -499,15 +514,62 @@ const paintReticuleArrow = (
   ctx.fill();
 };
 
+// Tier-6 climax pulse — the FINAL drift tier reads as a radiant event rather than just a wider,
+// whiter copy of the lower-tier ring. Three layered strokes ride the same per-beat expansion:
+//   • a soft wide HALO trailing the leading edge (the afterglow that makes it feel "lit"),
+//   • the incandescent white-gold LEADING ring (thick), and
+//   • a pure-white hot CORE hairline just inside it for the bright filament look.
+// A slow downbeat BLOOM lifts the whole thing brighter and slightly larger on the beat, so the
+// final tier visibly breathes light in time with the music. Painted under the caller's additive
+// composite, so overlapping the three strokes sums into a glow (no shadowBlur — house rule).
+const paintFinalHoverPulse = (
+  ctx: CanvasRenderingContext2D, center: Vec, phase: number, beatTime: number, beatGrid: number,
+  fade01: number,
+) => {
+  const endR = HOVER_PULSE_START_R + (HOVER_PULSE_END_R - HOVER_PULSE_START_R) * driftTierWidthMult(DRIFT_TIER_MAX);
+  // downbeat bloom: cosine swell peaking on the beat (1.0) and easing to a floor between beats,
+  // so the radiance pulses with the song instead of sitting at a constant brightness.
+  const bloom = cosineEnvelope(beatTime, beatGrid, 0.78, 1.0);
+  const fadeIn = Math.min(1, phase / 0.12);
+  const fadeOut = (1 - phase) * (1 - phase);
+  const env = fadeIn * fadeOut * fade01 * bloom;
+  const leadR = HOVER_PULSE_START_R + (endR - HOVER_PULSE_START_R) * phase;
+  ctx.setLineDash([]);
+  // 1) trailing halo — sits behind the leading edge, wide and soft, biggest contributor to the glow.
+  const haloR = HOVER_PULSE_START_R + (endR - HOVER_PULSE_START_R) * Math.max(0, phase - HOVER_PULSE_FINAL_HALO_LAG);
+  ctx.strokeStyle = `hsla(${HOVER_PULSE_FINAL_HSL}, ${0.35 * env})`;
+  ctx.lineWidth = HOVER_PULSE_FINAL_HALO_WIDTH * (0.85 + 0.3 * bloom);
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, haloR, 0, TAU);
+  ctx.stroke();
+  // 2) incandescent leading ring — the main bright body of the pulse.
+  ctx.strokeStyle = `hsla(${HOVER_PULSE_FINAL_HSL}, ${HOVER_PULSE_FINAL_PEAK_ALPHA * env})`;
+  ctx.lineWidth = HOVER_PULSE_FINAL_LINE_WIDTH * (0.9 + 0.25 * bloom);
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, leadR, 0, TAU);
+  ctx.stroke();
+  // 3) pure-white hot-core hairline just inside the leading ring — the bright filament.
+  ctx.strokeStyle = `hsla(${HOVER_PULSE_FINAL_CORE_HSL}, ${0.9 * env})`;
+  ctx.lineWidth = 1.25;
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, leadR - HOVER_PULSE_FINAL_LINE_WIDTH * 0.6, 0, TAU);
+  ctx.stroke();
+};
+
 // single ring expanding outward from the reticule, re-launched every beat — the lock-on pulse
 // shown while the reticule sits on a rhythm dot (replacing the directional arrow). Phase rides
-// the song grid so the pulse always lands on the beat.
+// the song grid so the pulse always lands on the beat. At the final drift tier the single ring
+// is replaced by the layered radiant climax (paintFinalHoverPulse).
 const paintHoverPulse = (
   ctx: CanvasRenderingContext2D, center: Vec, beatTime: number, beatGrid: number, fade01: number,
   tier: number = 0,
 ) => {
   if (fade01 <= 0 || beatGrid <= 0) return;
   const phase = ((beatTime % beatGrid) + beatGrid) % beatGrid / beatGrid;
+  if (tier >= DRIFT_TIER_MAX) {
+    paintFinalHoverPulse(ctx, center, phase, beatTime, beatGrid, fade01);
+    return;
+  }
   // tier (live, from total hold) tints the pulse gold → cyan → magenta and widens it, so the
   // "you're going deeper" escalation shows on the same circles the player is watching.
   const hsl = tier > 0 ? driftTierPulseHsl(tier) : HOVER_PULSE_HSL;
@@ -672,12 +734,20 @@ export const renderShipReticules = (
     // reticule is still in the tight hover radius — it drops the instant either gate opens.
     if (anyLocked && anyHover) sound.updateFirstDotHarmonyHum(beatPhase01, beatGrid);
     else sound.stopFirstDotHarmonyHum();
-    // tier-2 sub root (C3) and tier-3 bright fifth (G5) layer on as the player holds deeper.
-    // Gated on the live tier + still hovering, so they fade the moment the reticule slips off.
+    // each tier layers a fresh chord tone so the stack RESOLVES as the player holds deeper:
+    //   t2 sub root C3, t3 bright fifth G5, t4 major-9th D5 (→ Cadd9), t5 major-third E5 (→ full
+    //   bright C-major), t6 deep-root C2 (grounds the spread an octave below the sub root). Gated on
+    //   the live tier + still hovering, so they fade the moment the reticule slips off.
     if (anyHover && maxLiveTier >= 2) sound.updateFirstDotSubHum(beatPhase01, beatGrid);
     else sound.stopFirstDotSubHum();
     if (anyHover && maxLiveTier >= 3) sound.updateFirstDotShimmerHum(beatPhase01, beatGrid);
     else sound.stopFirstDotShimmerHum();
+    if (anyHover && maxLiveTier >= 4) sound.updateFirstDotNinthHum(beatPhase01, beatGrid);
+    else sound.stopFirstDotNinthHum();
+    if (anyHover && maxLiveTier >= 5) sound.updateFirstDotSixthHum(beatPhase01, beatGrid);
+    else sound.stopFirstDotSixthHum();
+    if (anyHover && maxLiveTier >= 6) sound.updateFirstDotHaloHum(beatPhase01, beatGrid);
+    else sound.stopFirstDotHaloHum();
   }
   // guidance overlay on the player's reticule: a chevron pointing at the nearest first-beat
   // rhythm dot, which swaps for an expanding lock pulse the moment the reticule grazes a dot.
