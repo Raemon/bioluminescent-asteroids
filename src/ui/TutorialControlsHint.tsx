@@ -1,14 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { TUTORIAL_CONTROLS, emptyTutorialControlsUsed, type TutorialControlsUsed } from "../game/controlBindings";
 
-// each key fades as the player uses it; whole hint fades once all keys are used
+// each key glyph fades as the player presses it; whole hint fades once all keys are used
 
-type Controls = { rotate: boolean; thrust: boolean; back: boolean; side: boolean; fire: boolean };
 const FADE_MS = 800;
 
 export const TutorialControlsHint = () => {
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [used, setUsed] = useState<Controls>({ rotate: false, thrust: false, back: false, side: false, fire: false });
+  const [used, setUsed] = useState<TutorialControlsUsed>(emptyTutorialControlsUsed);
   const timeoutsRef = useRef<number[]>([]);
 
   useEffect(() => {
@@ -22,7 +22,7 @@ export const TutorialControlsHint = () => {
     };
     const show = () => {
       clearAll();
-      setUsed({ rotate: false, thrust: false, back: false, side: false, fire: false });
+      setUsed(emptyTutorialControlsUsed());
       setMounted(true);
       schedule(() => setVisible(true), 32);
     };
@@ -37,7 +37,7 @@ export const TutorialControlsHint = () => {
     };
     const onShow = () => show();
     const onDismiss = () => hide();
-    const onControls = (e: Event) => setUsed((e as CustomEvent<Controls>).detail);
+    const onControls = (e: Event) => setUsed((e as CustomEvent<TutorialControlsUsed>).detail);
     window.addEventListener("first-wave-hint:stage", onStage as EventListener);
     window.addEventListener("controls-hint:show", onShow as EventListener);
     window.addEventListener("controls-hint:dismiss", onDismiss as EventListener);
@@ -55,21 +55,20 @@ export const TutorialControlsHint = () => {
   return (
     <div className={`tutorial-controls-hint${visible ? " visible" : ""}`}>
       <div className="tutorial-controls-hint__keys">
-        <span className={`tch-ctrl${used.rotate ? " used" : ""}`}>
-          <span className="key">←</span> <span className="key">→</span> rotate
-        </span>
-        <span className={`tch-ctrl${used.thrust ? " used" : ""}`}>
-          <span className="key">↑</span> thrust
-        </span>
-        <span className={`tch-ctrl${used.back ? " used" : ""}`}>
-          <span className="key">↓</span> reverse
-        </span>
-        <span className={`tch-ctrl${used.side ? " used" : ""}`}>
-          <span className="key">Z</span> <span className="key">X</span> side thrust
-        </span>
-        <span className={`tch-ctrl${used.fire ? " used" : ""}`}>
-          <span className="key">space</span> fire
-        </span>
+        {TUTORIAL_CONTROLS.map((ctrl) => {
+          const rowUsed = ctrl.keys.every((k) => used[k.action]);
+          return (
+            <span key={ctrl.label} className={`tch-ctrl${rowUsed ? " used" : ""}`}>
+              {ctrl.keys.map((k, i) => (
+                <Fragment key={k.action}>
+                  {i > 0 ? " " : ""}
+                  <span className={`key${used[k.action] ? " used" : ""}`}>{k.glyph}</span>
+                </Fragment>
+              ))}{" "}
+              {ctrl.label}
+            </span>
+          );
+        })}
       </div>
     </div>
   );

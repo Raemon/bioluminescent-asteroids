@@ -13,6 +13,7 @@ import { renderLasers, renderLaserChargeDots, renderLaserAmbientFlash } from "./
 import { renderBossBeams } from "./bossBeam";
 import { renderSlowMoTimerBar } from "./slowMoTimerBar";
 import { renderSpectrumVisualizer } from "./spectrumVisualizer";
+import { renderEdgeAidsTiled, renderEdgeAidLabel } from "./edgeAids";
 import { cosmeticRng } from "./rng";
 
 // shake is purely cosmetic; isolate its math so render() reads top-down.
@@ -125,24 +126,30 @@ const BULLET_GLOW_REACH = 12;
 const ALIEN_BULLET_GLOW_REACH = 6;
 
 // bodies must sit ON their own trails, so trails pass before any per-entity render call.
+// wrapAll: for the tiled edge-aid snapshot, wrap EVERY body (even ones that
+// don't wrap in gameplay — comets/aliens/canisters/parked gems) so the snapshot
+// is seam-complete and all objects cross tile borders smoothly.
 const paintEntityLayers = (
-  game: Game, focusedTarget: ReticuleTarget | null,
+  game: Game, focusedTarget: ReticuleTarget | null, wrapAll = false,
 ) => {
   const { ctx, w, h } = game;
+  // Wrap a body iff it normally wraps OR we're snapshotting for a tiled mode.
+  const maybeWrap = (pos: Vec, reach: number, wraps: boolean, draw: () => void) => {
+    if (wraps || wrapAll) drawWrapped(ctx, pos, reach, w, h, draw);
+    else draw();
+  };
   renderTrails(game, ctx);
-  for (const c of game.comets) c.render(ctx);
+  for (const c of game.comets) maybeWrap(c.pos, c.radius * BODY_GLOW_REACH, false, () => c.render(ctx));
+  // shards are tiny, brief explosion debris — not worth a seam twin.
   for (const s of game.shards) s.render(ctx);
   // bassteroids wear the ship's 4+/12+ combo halo — share the ship's eased
   // intensity + the live beat pulse so every halo on the field rides one rhythm.
   const comboHalo = { intensity: game.ship.comboHaloIntensity, beatPulse: currentBeatPulse(game) };
   for (const a of game.asteroids) drawWrapped(ctx, a.pos, a.radius * BODY_GLOW_REACH, w, h, () => a.render(ctx, game.time, comboHalo));
-  for (const c of game.canisters) c.render(ctx, game.time);
-  // only flung blades wrap; parked/drifting gems settle in place, so no twin.
-  for (const g of game.gems) {
-    if (g.fast) drawWrapped(ctx, g.pos, g.radius * BODY_GLOW_REACH, w, h, () => g.render(ctx, game.time));
-    else g.render(ctx, game.time);
-  }
-  for (const al of game.aliens) al.render(ctx, game.time);
+  for (const c of game.canisters) maybeWrap(c.pos, c.radius * BODY_GLOW_REACH, false, () => c.render(ctx, game.time));
+  // only flung blades wrap in gameplay; parked/drifting gems settle in place.
+  for (const g of game.gems) maybeWrap(g.pos, g.radius * BODY_GLOW_REACH, g.fast, () => g.render(ctx, game.time));
+  for (const al of game.aliens) maybeWrap(al.pos, al.radius * BODY_GLOW_REACH, false, () => al.render(ctx, game.time));
   for (const ab of game.alienBullets) drawWrapped(ctx, ab.pos, ab.radius * ALIEN_BULLET_GLOW_REACH, w, h, () => ab.render(ctx));
   renderBossBeams(ctx, game.bossBeams);
   for (const b of game.bullets) drawWrapped(ctx, b.pos, b.radius * BULLET_GLOW_REACH, w, h, () => b.render(ctx));
@@ -150,11 +157,15 @@ const paintEntityLayers = (
   // every wave body brightens on the beat then tapers over ~100ms (paints over the sprites above).
   const beatFlash = currentBeatFlash(game);
   if (beatFlash > 0) {
-    for (const a of game.asteroids) paintBeatFlash(ctx, a.pos, a.radius, beatFlash);
-    for (const c of game.comets) paintBeatFlash(ctx, c.pos, c.radius, beatFlash);
-    for (const al of game.aliens) paintBeatFlash(ctx, al.pos, al.radius, beatFlash);
-    for (const c of game.canisters) paintBeatFlash(ctx, c.pos, c.radius, beatFlash);
-    for (const g of game.gems) paintBeatFlash(ctx, g.pos, g.radius, beatFlash);
+    // flash rides each body; wrap it alongside the body so the glow doesn't get
+    // cropped from a twin at the seam in the tiled snapshot.
+    const flash = (pos: Vec, r: number) =>
+      maybeWrap(pos, r * BODY_GLOW_REACH, false, () => paintBeatFlash(ctx, pos, r, beatFlash));
+    for (const a of game.asteroids) flash(a.pos, a.radius);
+    for (const c of game.comets) flash(c.pos, c.radius);
+    for (const al of game.aliens) flash(al.pos, al.radius);
+    for (const c of game.canisters) flash(c.pos, c.radius);
+    for (const g of game.gems) flash(g.pos, g.radius);
   }
   if (focusedTarget) paintFocusGlow(ctx, focusedTarget);
   renderBassLightnings(ctx, game.bassLightnings, game.time * 0.001);
@@ -208,10 +219,14 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   renderPopups(ctx, game.popups);
 };
 
-// one entry point so main.ts doesn't see the layer ordering, and shake wraps the whole scene.
-export const renderGame = (game: Game) => {
+// Paint the full world scene (backdrop + background + entities + foreground +
+// world-space overlays) into the current ctx at the current transform. Factored
+// out of renderGame so the tiled edge-aid modes can paint it once to an
+// offscreen canvas and composite that snapshot into tiles. `shakeX/shakeY` are
+// passed in so a tiled snapshot can be taken without shake (tiles add their own
+// transforms) while the normal path keeps the shake.
+const paintScene = (game: Game, shakeX: number, shakeY: number, forSnapshot = false) => {
   const { ctx } = game;
-  const { shakeX, shakeY } = applyScreenShake(game);
   ctx.save();
   paintBackdrop(game);
   ctx.translate(shakeX, shakeY);
@@ -223,7 +238,7 @@ export const renderGame = (game: Game) => {
   const focusedTarget = pickCenterMostTargetForFocus(
     game.ship.pos, computeConeFrame(game.ship), game.w, game.h, targets,
   );
-  paintEntityLayers(game, focusedTarget);
+  paintEntityLayers(game, focusedTarget, forSnapshot);
   paintForeground(game, targets);
   // slow-mo countdown rail sits above the field so its beat ticks read clearly.
   renderSlowMoTimerBar(game);
@@ -231,8 +246,40 @@ export const renderGame = (game: Game) => {
   // even that so a bass drop still wins.
   renderLaserAmbientFlash(ctx, game);
   game.pulsar.renderShockwaveOverlay(ctx);
+  // For a tiled snapshot the visualizer halo must live in the snapshot so it
+  // scrolls + tiles with the pulsar it rings; the straight (off) path draws it
+  // after the scene as a screen-pinned overlay instead.
+  if (forSnapshot) renderSpectrumVisualizer(game);
   ctx.restore();
-  // Master-bus spectrum bar across the bottom — drawn last, outside the shake
-  // translate, so it stays pinned to the screen edge as an always-on overlay.
-  renderSpectrumVisualizer(game);
+};
+
+// The ship has no wrap-twin, so the tiled snapshot crops it at the world edge.
+// Redraw it whole on top at a caller-chosen offset/scale. The reticule is left
+// to the snapshot — it's gameplay UI tied to the live field, not a landmark.
+const paintShipOverlay = (game: Game, ox: number, oy: number, scale: number) => {
+  const { ctx } = game;
+  ctx.save();
+  ctx.translate(ox, oy);
+  ctx.scale(scale, scale);
+  game.ship.render(ctx, game.time, currentBeatPulse(game));
+  ctx.restore();
+};
+
+// one entry point so main.ts doesn't see the layer ordering, and shake wraps the whole scene.
+export const renderGame = (game: Game) => {
+  const { shakeX, shakeY } = applyScreenShake(game);
+  // The tiled edge-aid modes (2/3/4) take over the whole scene render; for those
+  // renderEdgeAidsTiled paints the scene itself (to an offscreen) and composites
+  // the tiles. "off" and every other state paint the scene straight.
+  const landmarks = { paintShip: paintShipOverlay };
+  const tiled = renderEdgeAidsTiled(game, paintScene, landmarks);
+  if (!tiled) {
+    paintScene(game, shakeX, shakeY);
+    // Master-bus spectrum halo — drawn after the scene as a screen-pinned
+    // overlay. Tiled modes draw it inside the snapshot instead (see paintScene)
+    // so it scrolls with the pulsar, so skip the pinned copy here.
+    renderSpectrumVisualizer(game);
+  }
+  // Always-on label of the active edge-aid prototype.
+  renderEdgeAidLabel(game);
 };

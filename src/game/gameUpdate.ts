@@ -46,7 +46,7 @@ import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderboardKeyRepeat } from "./scoreEntry";
 import { showGameOverIntro } from "./gameOverIntro";
-import { isDown, wasPressed } from "./controlBindings";
+import { isDown, wasPressed, TUTORIAL_CONTROL_ACTIONS } from "./controlBindings";
 import { tickLaserShot, FIRE_FLASH_DECAY } from "./laserShot";
 import { fireBossSweepBeam, tickBossBeams } from "./bossBeam";
 import { targetsForReticule } from "./gameRender";
@@ -627,20 +627,20 @@ const tickTutorialSpawn = (game: Game) => {
   if (game.asteroids.length === 0) spawnTutorialSmall(game);
 };
 
-// controls gate: tracks rotate/thrust/reverse/fire usage so the keys fade individually
-//   in the hint. Tutorial mode (stage 1) advances to stage 2 once all four are
-//   used; normal mode just dismisses the start-of-run hint.
+// controls gate: tracks per-key usage of the TUTORIAL_CONTROLS keys so each glyph
+//   fades the moment its own key is pressed. Tutorial mode (stage 1) advances to
+//   stage 2 once every key is used; normal mode just dismisses the start-of-run hint.
 const tickControlsGate = (game: Game) => {
   const used = game.tutorialControlsUsed;
   let changed = false;
-  if (!used.rotate && (isDown(game.input, "rotateLeft") || isDown(game.input, "rotateRight"))) { used.rotate = true; changed = true; }
-  if (!used.thrust && isDown(game.input, "thrust")) { used.thrust = true; changed = true; }
-  if (!used.back && isDown(game.input, "reverse")) { used.back = true; changed = true; }
-  if (!used.side && (isDown(game.input, "sidePort") || isDown(game.input, "sideStarboard"))) { used.side = true; changed = true; }
-  if (!used.fire && isDown(game.input, "fire")) { used.fire = true; changed = true; }
-  if (changed) emitTutorialControls(used.rotate, used.thrust, used.back, used.side, used.fire);
-  // side thrust is optional for completion — don't block the gate on a key the player may not try.
-  if (used.rotate && used.thrust && used.back && used.fire) {
+  for (const action of TUTORIAL_CONTROL_ACTIONS) {
+    if (!used[action] && isDown(game.input, action)) {
+      used[action] = true;
+      changed = true;
+    }
+  }
+  if (changed) emitTutorialControls(used);
+  if (TUTORIAL_CONTROL_ACTIONS.every((action) => used[action])) {
     if (game.tutorialActive && game.firstWaveHintStage === 1) {
       setFirstWaveHintStage(game, 2);
     } else if (game.controlsHintActive) {

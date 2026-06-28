@@ -56,6 +56,27 @@ export const ACTION_LABELS: Record<ControlAction, string> = {
   precisionTurn: "Precise turn (hold)",
 };
 
+// Canonical controls shown in the tutorial / start-of-run controls hint. One row per
+//   label; each key glyph in a row is bound to its own action and fades the moment
+//   that specific key is pressed. The whole pane retires once every key across every
+//   row has been used. Used both to render the pane and to gate its dismissal so the
+//   two can never drift apart.
+export type TutorialKey = { action: ControlAction; glyph: string };
+export type TutorialControl = { label: string; keys: TutorialKey[] };
+export const TUTORIAL_CONTROLS: TutorialControl[] = [
+  { label: "rotate", keys: [{ action: "rotateLeft", glyph: "←" }, { action: "rotateRight", glyph: "→" }] },
+  { label: "thrust", keys: [{ action: "thrust", glyph: "↑" }] },
+  { label: "reverse", keys: [{ action: "reverse", glyph: "↓" }] },
+  { label: "side thrust", keys: [{ action: "sidePort", glyph: "Z" }, { action: "sideStarboard", glyph: "X" }] },
+  { label: "fire", keys: [{ action: "fire", glyph: "space" }] },
+];
+// Flat list of every action shown in the pane, in display order.
+export const TUTORIAL_CONTROL_ACTIONS: ControlAction[] = TUTORIAL_CONTROLS.flatMap((c) => c.keys.map((k) => k.action));
+// Per-key usage; a key's glyph fades once its action is used, pane retires when all are.
+export type TutorialControlsUsed = Partial<Record<ControlAction, boolean>>;
+export const emptyTutorialControlsUsed = (): TutorialControlsUsed =>
+  Object.fromEntries(TUTORIAL_CONTROL_ACTIONS.map((a) => [a, false])) as TutorialControlsUsed;
+
 let cached: Bindings | null = null;
 
 const cloneDefaults = (): Bindings => ({

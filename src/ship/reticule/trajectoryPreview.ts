@@ -1,6 +1,7 @@
 import { Vec, TAU } from "../../vec";
 import { ConeFrame, clipRayToCone, targetIsInsideCone, toroidalDelta } from "./coneGeometry";
 import { RETICULE_DASH_HSL } from "./radarCone";
+import { TUTORIAL_CONTROL_ACTIONS, type TutorialControlsUsed } from "../../game/controlBindings";
 
 // shared bullet-overlap radius constant so trajectory dots and aim discs use the same hit reach.
 export const BULLET_HIT_RADIUS_ON_BEAT = 1.8 * 2.38 * 2.5;
@@ -123,9 +124,9 @@ const playerIsVeteran = (): boolean => {
   try { return localStorage.getItem(HOVER_ZONE_HINT_VETERAN_KEY) === "1"; }
   catch { return false; }
 };
-// gate the hint behind the same "all four core controls used" milestone that retires the
-// controls hint panel — we don't want to stack a second instructional overlay on top of the
-// first. gameUpdate emits "tutorial:controls" every time a key transitions to used.
+// gate the hint behind the same "all controls used" milestone that retires the controls
+// hint panel — we don't want to stack a second instructional overlay on top of the first.
+// gameUpdate emits "tutorial:controls" every time a key transitions to used.
 let allCoreControlsUsed = false;
 // also gate behind FirstWaveHint stage 4 ("Fire (and hit) on the beat") — the drift cue only
 // makes sense once the player has been taught the rhythm-hit loop it's optimizing for.
@@ -135,8 +136,8 @@ const HOVER_ZONE_HINT_REQUIRED_FIRST_WAVE_STAGE = 4;
 let fireAndHitStageReached = false;
 if (typeof window !== "undefined") {
   window.addEventListener("tutorial:controls", (e: Event) => {
-    const d = (e as CustomEvent<{ rotate: boolean; thrust: boolean; back: boolean; fire: boolean }>).detail;
-    if (d && d.rotate && d.thrust && d.back && d.fire) allCoreControlsUsed = true;
+    const d = (e as CustomEvent<TutorialControlsUsed>).detail;
+    if (d && TUTORIAL_CONTROL_ACTIONS.every((a) => d[a])) allCoreControlsUsed = true;
   });
   window.addEventListener("first-wave-hint:stage", (e: Event) => {
     const stage = (e as CustomEvent<{ stage: number }>).detail?.stage ?? 0;

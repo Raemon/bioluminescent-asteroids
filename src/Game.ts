@@ -33,7 +33,8 @@ import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
-import { VisualizerMode, VISUALIZER_MODES } from "./game/spectrumVisualizer";
+import { EdgeAidMode, EDGE_AID_MODES } from "./game/edgeAids";
+import { TutorialControlsUsed, emptyTutorialControlsUsed } from "./game/controlBindings";
 
 // re-export so existing external imports (Ship.ts) keep working without touching their imports.
 export { BEAT_GRID } from "./game/rhythmConstants";
@@ -217,9 +218,9 @@ export class Game implements HudElements {
   firstWaveHintStage: 0 | 1 | 2 | 3 | 4 | 5 | 6 = 0;
   firstWaveOnBeatFireCount = 0;
   // controls-phase (stage 1, and the normal-mode start-of-run controls hint) usage
-  //   tracker. In tutorial mode all four used → advance to stage 2; in normal mode
-  //   all four used → dismiss the hint.
-  tutorialControlsUsed: { rotate: boolean; thrust: boolean; back: boolean; side: boolean; fire: boolean } = { rotate: false, thrust: false, back: false, side: false, fire: false };
+  //   tracker. In tutorial mode all used → advance to stage 2; in normal mode all
+  //   used → dismiss the hint. Rows come from TUTORIAL_CONTROLS.
+  tutorialControlsUsed: TutorialControlsUsed = emptyTutorialControlsUsed();
   // True while the normal-mode start-of-run controls hint is visible. Tutorial mode
   //   uses firstWaveHintStage === 1 instead, since the stage already gates that hint.
   controlsHintActive = false;
@@ -306,8 +307,9 @@ export class Game implements HudElements {
   // ?debug=true in the URL forces debug-on from page load (handy for triaging
   // production issues where the player can't easily hit backtick on mobile).
   debugMode = new URLSearchParams(window.location.search).get("debug") === "true";
-  // Which spectrum-visualizer mode is active; switched live with number keys 1-5.
-  visualizerMode: VisualizerMode = "radial";
+  // Which edge-of-map legibility prototype is active; switched live with number
+  // keys 1-5 (1=off baseline). See game/edgeAids.ts.
+  edgeAidMode: EdgeAidMode = "off";
   // prevents a double-submit if the player mashes Enter while the POST is in flight.
   scoreSubmitState: "idle" | "submitting" | "submitted" = "idle";
   // lets the title screen after a game-over show a score-neighborhood (±5) around the
@@ -568,10 +570,10 @@ export class Game implements HudElements {
         this.debugMode = !this.debugMode;
         this.debugOverlayEl.classList.toggle("hidden", !this.debugMode);
       }
-      // Number keys 1-5 switch the spectrum visualizer mode live.
-      if (k >= "1" && k <= "5") {
-        const mode = VISUALIZER_MODES[Number(k) - 1];
-        if (mode) this.visualizerMode = mode;
+      // Number keys 1-4 switch the active edge-of-map legibility prototype live.
+      if (k >= "1" && k <= "4") {
+        const mode = EDGE_AID_MODES[Number(k) - 1];
+        if (mode) this.edgeAidMode = mode;
       }
     });
     showTitle(this);
