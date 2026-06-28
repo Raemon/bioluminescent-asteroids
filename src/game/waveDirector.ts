@@ -1,7 +1,7 @@
 import type { Game } from "../Game";
 import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, isBurstGem, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
 import { spawnGemSwarm } from "../Gem";
-import { spawnComet as spawnCometAtEdge, spawnMeteorShower } from "../Comet";
+import { spawnComet as spawnCometAtEdge, spawnMeteorShower, crossingLifetime } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
 import { rand, randInt, v, TAU } from "../vec";
@@ -199,6 +199,37 @@ const applyRhythmSpeed = (game: Game, vel: { x: number; y: number }, k = rhythmS
   vel.y *= k;
 };
 
+// World-space offset from playfield coords to the player's *visible* frame.
+//
+// The edge-spawn helpers place bodies relative to the 1920x1080 playfield
+// (off the playfield edges, aiming at the playfield centre). In the default
+// "scroll" camera the ship is locked to screen centre and the torus scrolls
+// around it, so the visible viewport is `ship.pos ± (w/2, h/2)` — NOT the
+// playfield rect. Wrapping bodies (asteroids, bullets) don't care: the world
+// tiles seamlessly so they enter from a real screen edge no matter where the
+// playfield edge landed. But non-wrapping bodies (comets, meteors, aliens) are
+// drawn once at their literal world position, so a playfield-edge spawn pops in
+// at whatever screen spot the camera happens to map it to — often the centre
+// seam — instead of sliding in from offscreen.
+//
+// Shifting those spawns (and their rhythm-encounter reference) by this offset
+// maps playfield-centre → ship.pos, so "just off the left playfield edge"
+// becomes "just off the left of what the player currently sees", and the body
+// crosses the visible screen and exits the far visible edge. Zero in the
+// non-scroll modes, where the playfield rect *is* the screen.
+const cameraWorldOffset = (game: Game): { x: number; y: number } => {
+  if (game.edgeAidMode !== "scroll") return { x: 0, y: 0 };
+  return { x: game.ship.pos.x - game.w / 2, y: game.ship.pos.y - game.h / 2 };
+};
+
+// The world point the player sees at screen centre — playfield centre shifted
+// into the visible frame. Used as the rhythm-encounter anchor for incoming
+// non-wrapping bodies so the engagement ring sits where the player actually is.
+const visibleCentre = (game: Game): { x: number; y: number } => {
+  const off = cameraWorldOffset(game);
+  return { x: game.w / 2 + off.x, y: game.h / 2 + off.y };
+};
+
 // shared retry helper keeps the "no rock on top of the ship" rule in one place.
 //   Every fresh spawn is rhythm-aligned post-roll so the player's first clean
 //   shot at the rock can land on a beat — see alignIncomingToRhythm. The
@@ -249,7 +280,19 @@ const spawnSolidCrystalSmall = (game: Game, claimed?: BeatClaimSet): Asteroid =>
 // the rhythm immediately. From there the alien advances through its own
 // fire pattern (see ALIEN_FIRE_PATTERN_BEATS in Alien.ts).
 export const spawnAlien = (game: Game, size: AlienSize) => {
-  const a = spawnAwayFromShip(() => spawnAlienAtEdge(game.w, game.h, size), game.ship.pos, 260, 6);
+  // Shift each edge-spawn into the visible frame (see cameraWorldOffset) BEFORE
+  // the away-from-ship distance check, so the alien flies in from a real
+  // offscreen edge and the "not on top of the ship" test runs in one frame.
+  const off = cameraWorldOffset(game);
+  const a = spawnAwayFromShip(
+    () => {
+      const al = spawnAlienAtEdge(game.w, game.h, size);
+      al.pos.x += off.x;
+      al.pos.y += off.y;
+      return al;
+    },
+    game.ship.pos, 260, 6,
+  );
   applyRhythmSpeed(game, a.vel);
   a.nextFireAt = Math.ceil((game.beatTime + 0.5) / BEAT_GRID) * BEAT_GRID;
   a.firePatternIndex = 0;
@@ -267,16 +310,20 @@ export const spawnAlien = (game: Game, size: AlienSize) => {
 // so the comet crosses the engagement ring on a beat means an on-rhythm
 // player can land the big payout on-beat without having to guess the comet's
 // individual phase.
-// ±15 % is enough wiggle room to absorb the small phase mismatch without
-// noticeably altering the comet's "slow celestial visitor" cadence.
+// The ±15% band is enough wiggle room to absorb the small phase mismatch
+// without noticeably altering the comet's chosen traversal speed.
 export const spawnComet = (game: Game) => {
   const c = spawnCometAtEdge(game.w, game.h);
-  c.lifetime = rand(CFG.comet.lifetime[0], CFG.comet.lifetime[1]);
+  // Slide the edge-spawn into the player's visible frame so the comet streaks
+  // in from a real offscreen edge and crosses the screen (see cameraWorldOffset).
+  const off = cameraWorldOffset(game);
+  c.pos.x += off.x;
+  c.pos.y += off.y;
   const cometEntryLead = 0.6;
   c.nextNoteBeatTime = Math.ceil((game.beatTime + cometEntryLead) / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
   const cometSpeed = Math.hypot(c.vel.x, c.vel.y);
   if (cometSpeed > 0) {
-    const centre = { x: game.w / 2, y: game.h / 2 };
+    const centre = visibleCentre(game);
     alignVelocityToRhythm(c.pos, c.vel, {
       refPos: centre,
       beatTime: game.beatTime,
@@ -286,6 +333,10 @@ export const spawnComet = (game: Game) => {
     });
   }
   applyRhythmSpeed(game, c.vel);
+  // Re-derive the on-screen lifetime from the FINAL speed (after rhythm
+  // alignment + the wave speed-up) so the comet drifts in, crosses once, and
+  // drifts off the far edge — matched to how fast it's actually moving.
+  c.lifetime = crossingLifetime(game.w, game.h, Math.hypot(c.vel.x, c.vel.y));
   game.comets.push(c);
   game.sound.startCometShimmer(c, c.pos);
 };
@@ -296,8 +347,17 @@ export const spawnComet = (game: Game) => {
 // played at the lead meteor's position.
 export const spawnMeteorShowerEvent = (game: Game, countOverride?: number) => {
   const meteors = spawnMeteorShower(game.w, game.h, countOverride);
+  // Shift the whole flock into the visible frame (see cameraWorldOffset) so it
+  // sweeps in from a real offscreen edge instead of popping in at the seam.
+  const off = cameraWorldOffset(game);
+  const k = rhythmSpeedMul(game);
   for (const m of meteors) {
-    applyRhythmSpeed(game, m.vel);
+    m.pos.x += off.x;
+    m.pos.y += off.y;
+    applyRhythmSpeed(game, m.vel, k);
+    // Keep the cross-and-leave lifetime matched to the sped-up velocity: a
+    // faster meteor crosses sooner, so it should fade out sooner too.
+    if (k !== 1) m.lifetime /= k;
     game.comets.push(m);
   }
   if (meteors.length > 0) game.sound.play("meteorShower", 1, meteors[0].pos);

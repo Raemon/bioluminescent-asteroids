@@ -105,10 +105,15 @@ export const ENTITY_CONFIG = {
     firstWave: 3,
     chancePerWave: 0.6,
     spawnWindow: [4, 16] as [number, number],
-    lifetime: [22, 30] as [number, number],
+    // lifetime is derived from the crossing distance at spawn (see
+    // crossingLifetime) so the comet drifts in, crosses once, and drifts out.
     hitRadius: 24,
     fadeIn: 1.6,
     fadeOut: 2.0,
+    // Multiplier on the base traversal speed. Above 1 the comet crosses the
+    // field faster so it's harder to babysit on-screen and farm the on-beat
+    // combo payout — you have to commit to the shot rather than herding it.
+    speedMult: 1.7,
   },
 
   // Rare flock of smaller, faster comets. Worth less each but many at once.

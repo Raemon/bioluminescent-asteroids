@@ -162,6 +162,16 @@ export class Comet {
   }
 }
 
+// Lifetime (seconds) for a body that should drift in from one screen edge,
+// cross, and drift back off the far side at the given speed — then be gone,
+// rather than wander and wrap around the torus. The travel target is a bit over
+// one screen-diagonal so it clears the far edge from any spawn point/heading;
+// the FADE_IN/FADE_OUT windows bracket the two ends so the streak eases on at
+// entry and off at exit. Callers compute this AFTER any rhythm speed adjustment
+// so the on-screen time matches the body's actual velocity.
+export const crossingLifetime = (w: number, h: number, speed: number): number =>
+  speed > 0 ? (Math.hypot(w, h) * 1.5) / speed : 24;
+
 // Spawn a comet drifting in from one edge across the screen. Velocity is
 // slow (≈ 1 screen-width per ~12 seconds) so the comet feels like a
 // distant celestial object rather than a fast-moving threat. The exact
@@ -182,13 +192,20 @@ export const spawnComet = (w: number, h: number): Comet => {
   const angle = Math.atan2(target.y - from.y, target.x - from.x);
   const traversalSeconds = rand(14, 18);
   const distance = Math.hypot(target.x - from.x, target.y - from.y) * 2.4;
-  const speed = distance / traversalSeconds;
+  // speedMult makes the comet harder to babysit on-screen for combo farming
+  // — see ENTITY_CONFIG.comet.speedMult.
+  const speed = (distance / traversalSeconds) * ENTITY_CONFIG.comet.speedMult;
   const vel = fromAngle(angle, speed);
 
   // Narrow band of cool hues (cyan → violet) keeps every comet feeling
   // like the same celestial visitor across runs.
   const hue = rand(180, 290);
-  return new Comet(from, vel, hue);
+  const c = new Comet(from, vel, hue);
+  // Live exactly long enough to drift in, cross, and drift back off the far
+  // side (see crossingLifetime). The caller re-derives this after any rhythm
+  // speed nudge so the on-screen time tracks the final velocity.
+  c.lifetime = crossingLifetime(w, h, speed);
+  return c;
 };
 
 // A meteor shower: several smaller, faster meteors streaking the same way
@@ -241,7 +258,12 @@ export const spawnMeteorShower = (w: number, h: number, countOverride?: number):
     );
     const m = new Comet(pos, { ...vel }, baseHue + rand(-8, 8), MS.scale);
     m.isMeteor = true;
-    m.lifetime = rand(MS.lifetime[0], MS.lifetime[1]);
+    // Cross-and-leave lifetime (see crossingLifetime), plus the time to cover
+    // this meteor's stagger lag so the trailing ones still fully clear the far
+    // edge rather than fading out mid-screen. Capped by MS.lifetime so a very
+    // slow/laggy member can't linger far longer than the shower's window.
+    const cross = crossingLifetime(w, h, speed) + (speed > 0 ? lag / speed : 0);
+    m.lifetime = Math.min(cross, MS.lifetime[1]);
     meteors.push(m);
   }
   return meteors;

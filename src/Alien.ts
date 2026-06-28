@@ -333,6 +333,15 @@ export class Alien {
   // Score awarded on kill.
   scoreValue: number;
   alive = true;
+  // Distance flown since spawn, and the threshold at which it despawns. The
+  // alien enters just off the visible edge and crosses the screen; once it has
+  // travelled past the far edge it's gone. Distance-based (not an off-screen
+  // box) because the scroll camera tiles the world, so there is no fixed
+  // off-screen region. spawnAlienAtEdge overwrites maxTravel from the screen
+  // size; the Infinity default keeps a directly-constructed alien (the sound
+  // page's looping demo) from auto-despawning.
+  traveled = 0;
+  maxTravel = Infinity;
   // Theremin-drone glow trail. Vibrato pulse mode lines up loosely with the
   // alien voice's amplitude LFO. See Trail.ts.
   trail: Trail;
@@ -363,7 +372,7 @@ export class Alien {
     this.trail = new Trail(this.hue, trailRadius, 0.26, "theremin", trailRate);
   }
 
-  update(dt: number, w: number, h: number) {
+  update(dt: number, _w: number, _h: number) {
     this.weavePhase += dt * this.weaveSpeed;
     // Bend the velocity vector slowly so the flight path arcs (and sometimes
     // loops) instead of going in a straight line. Rotate (vx, vy) by curveRate*dt.
@@ -380,13 +389,19 @@ export class Alien {
     const perpX = -Math.sin(heading);
     const perpY =  Math.cos(heading);
     const swayMag = Math.sin(this.weavePhase) * 42;
-    this.pos.x += (this.vel.x + perpX * swayMag) * dt;
-    this.pos.y += (this.vel.y + perpY * swayMag) * dt;
-    // No wrap — drift off the far side and despawn. Margin covers the sprite
-    // extent plus halo so it's fully out of view before we drop it.
-    const margin = this.radius * 2 + 40;
-    if (this.pos.x < -margin || this.pos.x > w + margin ||
-        this.pos.y < -margin || this.pos.y > h + margin) {
+    const stepX = (this.vel.x + perpX * swayMag) * dt;
+    const stepY = (this.vel.y + perpY * swayMag) * dt;
+    this.pos.x += stepX;
+    this.pos.y += stepY;
+    // No wrap — fly in from offscreen, cross the screen, then despawn once
+    // enough distance has been covered to clear the far edge. We despawn on
+    // distance *travelled* rather than an absolute off-screen box: under the
+    // locked-centre scroll camera the world tiles seamlessly around the ship,
+    // so there is no fixed off-screen region (a body's wrapped copy is always
+    // somewhere on screen). Spawned just off the visible edge and flying across,
+    // maxTravel (set from the screen diagonal) lands it past the opposite edge.
+    this.traveled += Math.hypot(stepX, stepY);
+    if (this.traveled > this.maxTravel) {
       this.alive = false;
     }
     // Nose follows the direction of travel, with a tiny weave-driven sway so
@@ -864,5 +879,10 @@ export const spawnAlienAtEdge = (w: number, h: number, size: AlienSize): Alien =
   const norm = Math.hypot(dx, dy);
   const [smin, smax] = SIZE_SPEED[size];
   const speed = rand(smin, smax);
-  return new Alien(pos, v((dx / norm) * speed, (dy / norm) * speed), size);
+  const alien = new Alien(pos, v((dx / norm) * speed, (dy / norm) * speed), size);
+  // Let it cross the full screen and clear the far edge before despawning. The
+  // diagonal is the worst-case crossing (corner to corner); the pad covers the
+  // sprite extent + the weave/arc lengthening the path. See Alien.update.
+  alien.maxTravel = Math.hypot(w, h) * 1.2;
+  return alien;
 };
