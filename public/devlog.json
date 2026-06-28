@@ -1,5 +1,54 @@
 [
   {
+    "id": "2026-06-28-3e16e87",
+    "date": "2026-06-28",
+    "title": "Drift bonuses, player profiles, and replay fixes",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Drift shots now reward tier-based damage multipliers with distinct popup colors showing your bonus.",
+          "The leaderboard now includes a personal profile view showing your top-50 runs across score, rhythm, wave, and recent categories.",
+          "After submitting a score, the leaderboard shows your rank in context with the scores around yours.",
+          "Bodies, bullets, and gems now render smoothly as they wrap across screen edges.",
+          "Tutorial controls now mention side thrust mechanics."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Replays now reproduce wave transitions, score drain, and bonus lives on the correct frames instead of desyncing after wave 1.",
+          "Replay beat timing is fully restored from the original run, so on-beat judgments match the recording frame-for-frame.",
+          "Ship respawn timing during replays now matches live play exactly, preventing drift after each death."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Mothlight Hour music layers updated with improved audio quality and a new full-length mix."
+        ]
+      }
+    ],
+    "commits": [
+      "3e16e87",
+      "35c14e0",
+      "f285e0e",
+      "ec461e4",
+      "d72464e",
+      "0c292de",
+      "973f5b8",
+      "9c64927",
+      "a21ee8f",
+      "3e6f8b1",
+      "bfadab2",
+      "7ab1931",
+      "b6940a7",
+      "c4349a2",
+      "6cbb07d",
+      "61e39c8"
+    ]
+  },
+  {
     "id": "2026-06-20-2d8db7d",
     "date": "2026-06-20",
     "title": "Gems, Laser Shot, Spectrum Visualizer & Rhythm Tuning",
