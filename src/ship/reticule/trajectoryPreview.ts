@@ -624,14 +624,38 @@ type DotWalkResult = {
   slotWithin75: boolean[];
 };
 
+// Scroll (locked-center) camera: when set, dot draw-positions are wrapped to the
+// nearest toroidal copy of THIS anchor (the ship/apex) rather than folded into
+// [0,w). Set per-frame around the reticule paint by gameRender; null in the
+// snapshot-tiled / non-scroll modes. Render-only — it shifts where dots draw,
+// never the proximity/lock math (which uses raw px,py), so it can't touch sim
+// determinism. See wrapToCanvas + setReticuleWrapAnchor.
+let reticuleWrapAnchor: { x: number; y: number } | null = null;
+export const setReticuleWrapAnchor = (anchor: { x: number; y: number } | null): void => {
+  reticuleWrapAnchor = anchor;
+};
+
 // the cone is computed in the apex's "virtual" frame (toroidalDelta-remapped), so dot
-// positions can land outside [0,w)×[0,h). Wrapping back into the canvas before painting makes
-// dots reappear on the opposite edge — matching how the actual target sprite wraps — so the
-// trajectory preview stays visible when the tracked object crosses a screen edge.
-const wrapToCanvas = (x: number, y: number, w: number, h: number): [number, number] => [
-  ((x % w) + w) % w,
-  ((y % h) + h) % h,
-];
+// positions can land outside [0,w)×[0,h). In the non-scroll camera, canvas == world, so we
+// fold them into [0,w) — dots reappear on the opposite edge, matching the wrapped target
+// sprite. In scroll mode the world is wrap-REPLICATED behind a camera translate that pins the
+// ship to centre, so instead we pick the dot's copy nearest the apex and let the camera place
+// it — folding to [0,w) there would fight the translate and make dots vanish near a seam.
+const wrapToCanvas = (x: number, y: number, w: number, h: number): [number, number] => {
+  if (reticuleWrapAnchor) {
+    const dx = ((x - reticuleWrapAnchor.x) % w + w * 1.5) % w - w / 2;
+    const dy = ((y - reticuleWrapAnchor.y) % h + h * 1.5) % h - h / 2;
+    return [reticuleWrapAnchor.x + dx, reticuleWrapAnchor.y + dy];
+  }
+  return [((x % w) + w) % w, ((y % h) + h) % h];
+};
+
+// Public wrapper for reticule-disc/ring/pulse/arrow draws, which live in the same
+// raw apex-relative space as the dots and must fold the same way at paint time.
+export const wrapReticuleVec = (p: Vec, w: number, h: number): Vec => {
+  const [x, y] = wrapToCanvas(p.x, p.y, w, h);
+  return { x, y };
+};
 
 // dots mark target position at successive beats — direct preview of where the player needs to aim.
 // in doubletime, an extra fainter dot is interleaved at each half-beat between the beat dots,

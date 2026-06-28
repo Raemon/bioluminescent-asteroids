@@ -1,9 +1,9 @@
 import type { Ship } from "../../Ship";
 import type { Sound } from "../../Sound";
-import { Vec, add, mul, fromAngle, wrap, TAU } from "../../vec";
+import { Vec, add, mul, fromAngle, TAU } from "../../vec";
 import { computeConeFrame } from "./coneGeometry";
 import { paintConeBackground, paintRangeArcs, RETICULE_DASH_HSL } from "./radarCone";
-import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost, expireHoverZoneHintIfHoverEnded, paintHoverZoneHint, nearestFirstBeatDot } from "./trajectoryPreview";
+import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost, expireHoverZoneHintIfHoverEnded, paintHoverZoneHint, nearestFirstBeatDot, wrapReticuleVec } from "./trajectoryPreview";
 import {
   reticuleOverlapsAnyTarget,
   paintAimDiscs,
@@ -263,15 +263,20 @@ export const computeAimCircle = (ship: Ship, beatGrid: number) => ({
   radius: ship.radius + 4 + ship.bulletSpeed * beatGrid,
 });
 
-// position where a shot fired with the given heading offset lands after `beatFraction` of a beat.
+// Where a shot fired with the given heading offset lands after `beatFraction` of a
+// beat, in RAW apex-relative world space (NOT folded into [0,w)). The trajectory
+// dots it's matched against live in the same raw space (apex + toroidalDelta), so
+// the Euclidean proximity/lock math only lines up if the reticule isn't
+// pre-wrapped — folding it here was the seam-crossing lock+visual dropout.
+// Draw-time folding is handled by wrapToCanvas (anchor-aware per camera).
 const computeReticulePosition = (
-  ship: Ship, beatGrid: number, w: number, h: number,
+  ship: Ship, beatGrid: number, _w: number, _h: number,
   headingOffset: number, beatFraction: number,
 ): Vec => {
   const dir = fromAngle(ship.heading + headingOffset, 1);
   const muzzle = add(ship.pos, mul(dir, ship.radius + 4));
   const bulletVel = add(mul(dir, ship.bulletSpeed), mul(ship.vel, 0.4));
-  return wrap(add(muzzle, mul(bulletVel, beatGrid * beatFraction)), w, h);
+  return add(muzzle, mul(bulletVel, beatGrid * beatFraction));
 };
 
 // effective bullet lifetime mirrors shipWeapons.launchBullet (and the post-fire superBoosted
@@ -666,11 +671,12 @@ export const renderShipReticules = (
   for (let i = 0; i < reticulePositions.length; i++) {
     const pos = reticulePositions[i];
     const onFirstBeatDot = fromTrajectory && i === primaryIndex;
+    // overlap test on the RAW position (toroidal-correct); only the draw folds.
     const overlaps = onFirstBeatDot
       ? true
       : reticuleOverlapsAnyTarget(pos, targets, w, h);
     const slot = slotByPosIndex[i];
-    paintAimDiscs(ctx, pos, baseHitAlpha, overlaps, onFirstBeatDot, tutorialHighlight, slot);
+    paintAimDiscs(ctx, wrapReticuleVec(pos, w, h), baseHitAlpha, overlaps, onFirstBeatDot, tutorialHighlight, slot);
   }
   // each slot's ring uses the softer proximity halo (>0 anywhere in the dot glow ramp) so the
   // player gets feedback the moment the reticule grazes the visible circle, not just on strict
@@ -712,7 +718,7 @@ export const renderShipReticules = (
     const hovering = proximity > 0 && ringPosIdx >= 0;
     // The hover-lock STATE MACHINE now runs in the sim (tickHoverLockState) so it's deterministic
     //   for replay; render only PAINTS the ring from the state the sim already set this frame.
-    paintHoverRingFromState(ringState, ctx, beatTime, beatGrid);
+    paintHoverRingFromState(ringState, ctx, beatTime, beatGrid, w, h);
     if (hovering) anyHover = true;
     if (ringState.completionBeatTime !== null) {
       anyLocked = true;
@@ -758,12 +764,14 @@ export const renderShipReticules = (
     : nearestFirstBeatDot(apex, frame, w, h, beatGrid, aimCircleCenter, primaryReticule, targets);
   stepReticuleGuidanceFades(beatTime, !anyHover && nearestDot !== null, anyHover);
   if (nearestDot !== null) {
+    // angle from RAW positions (both in apex space); only the draw anchor folds.
     lastArrowAngle = Math.atan2(nearestDot.y - primaryReticule.y, nearestDot.x - primaryReticule.x);
   }
+  const primaryReticuleDraw = wrapReticuleVec(primaryReticule, w, h);
   if (ARROW_ENABLED && arrowFade01 > 0) {
-    paintReticuleArrow(ctx, primaryReticule, lastArrowAngle, beatTime, beatGrid, arrowFade01);
+    paintReticuleArrow(ctx, primaryReticuleDraw, lastArrowAngle, beatTime, beatGrid, arrowFade01);
   }
-  paintHoverPulse(ctx, primaryReticule, beatTime, beatGrid, hoverPulseFade01, maxLiveTier);
+  paintHoverPulse(ctx, primaryReticuleDraw, beatTime, beatGrid, hoverPulseFade01, maxLiveTier);
   ctx.restore();
 };
 
@@ -957,18 +965,19 @@ const updateHoverRing = (
 //   the two paint branches of updateHoverRing (fade-out vs active fill) using only ring state.
 const paintHoverRingFromState = (
   ring: { hoverStartBeatTime: number | null; completionBeatTime: number | null; fadeOutStartTime: number | null; lastRingCenter: Vec | null },
-  ctx: CanvasRenderingContext2D, beatTime: number, beatGrid: number,
+  ctx: CanvasRenderingContext2D, beatTime: number, beatGrid: number, w: number, h: number,
 ): void => {
+  // lastRingCenter is stored in raw apex space (sim-owned); fold it for the draw.
   if (ring.fadeOutStartTime !== null) {
     if (ring.lastRingCenter !== null && ring.hoverStartBeatTime !== null) {
       const fadeT = Math.min(1, (beatTime - ring.fadeOutStartTime) / HOVER_DOT_FADEOUT_SEC);
       const elapsed = beatTime - ring.hoverStartBeatTime;
-      paintHoverDotRing(ctx, ring.lastRingCenter, elapsed, beatTime, beatGrid, 1 - fadeT);
+      paintHoverDotRing(ctx, wrapReticuleVec(ring.lastRingCenter, w, h), elapsed, beatTime, beatGrid, 1 - fadeT);
     }
     return;
   }
   if (ring.hoverStartBeatTime !== null && ring.lastRingCenter !== null) {
     const elapsed = beatTime - ring.hoverStartBeatTime;
-    paintHoverDotRing(ctx, ring.lastRingCenter, elapsed, beatTime, beatGrid);
+    paintHoverDotRing(ctx, wrapReticuleVec(ring.lastRingCenter, w, h), elapsed, beatTime, beatGrid);
   }
 };

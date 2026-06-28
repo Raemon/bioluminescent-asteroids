@@ -110,6 +110,17 @@ export class Game implements HudElements {
   h = 0;
   dpr = 1;
   time = 0;
+  // Render-only continuous camera offset for the locked-center scroll mode. The
+  // ship's gameplay position wraps every frame (wrapMut) so `w/2 - ship.pos`
+  // snaps by ±w at a seam crossing; the world layer hides that under `% w`, but
+  // the parallax layers (pulsar, starfield) scale the offset by <1 and a snap of
+  // `parallax·w` is NOT a multiple of w, so they jolt. We instead integrate the
+  // ship's toroidal frame-to-frame step into this accumulator, which never jumps,
+  // and drive every layer off it. See updateCamScroll + game/gameRender.ts.
+  camScrollX = 0;
+  camScrollY = 0;
+  lastShipPosX: number | null = null;
+  lastShipPosY: number | null = null;
   // shared bass-beat clock — bass voices, on-beat detection and the visual pulsar all read this one source.
   beatTime = 0;
   // last beatTime at which we resnapped to the music's authoritative

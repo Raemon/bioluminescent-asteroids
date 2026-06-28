@@ -6,8 +6,8 @@ import { renderTrails } from "./trailsRender";
 import { renderPopups } from "./popups";
 import { renderBassLightnings } from "./bassLightning";
 import { renderDriftBursts } from "./driftBurst";
-import { computeConeFrame } from "../ship/reticule/coneGeometry";
-import { pickCenterMostTargetForFocus, ReticuleTarget } from "../ship/reticule/trajectoryPreview";
+import { computeConeFrame, toroidalDelta } from "../ship/reticule/coneGeometry";
+import { pickCenterMostTargetForFocus, ReticuleTarget, setReticuleWrapAnchor } from "../ship/reticule/trajectoryPreview";
 import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
 import { renderLasers, renderLaserChargeDots, renderLaserAmbientFlash } from "./laserShot";
 import { renderBossBeams } from "./bossBeam";
@@ -268,6 +268,9 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
 // transforms) while the normal path keeps the shake.
 const paintScene = (game: Game, shakeX: number, shakeY: number, forSnapshot = false) => {
   const { ctx } = game;
+  // Non-scroll cameras draw the reticule at folded [0,w) canvas coords, so make
+  // sure no stale scroll-mode wrap anchor is left set from a prior frame.
+  setReticuleWrapAnchor(null);
   ctx.save();
   paintBackdrop(game);
   ctx.translate(shakeX, shakeY);
@@ -312,11 +315,50 @@ const paintScene = (game: Game, shakeX: number, shakeY: number, forSnapshot = fa
 // The pulsar slides slower than gameplay entities — a distant body, not at the
 // ship's depth (but still nearer than the bright stars at STARFIELD_PARALLAX).
 const PULSAR_PARALLAX = 0.62;
+
+// Advance the render-only continuous camera (Game.camScroll*). The ship's
+// gameplay position wraps each frame, so we can't difference it directly — we
+// take the step toroidally (a wrap reads as a small move, not a ±w jump) and
+// integrate it. Seeded to the exact `w/2 - ship.pos` on the first frame (and
+// after a resize/teleport, detected by an out-of-torus jump) so the camera is
+// pixel-identical to the old math except that it never snaps.
+const updateCamScroll = (game: Game) => {
+  const { w, h, ship } = game;
+  const seed = () => {
+    game.camScrollX = w / 2 - ship.pos.x;
+    game.camScrollY = h / 2 - ship.pos.y;
+  };
+  if (game.lastShipPosX === null || game.lastShipPosY === null) {
+    seed();
+  } else {
+    const [dx, dy] = toroidalDelta(ship.pos.x - game.lastShipPosX, ship.pos.y - game.lastShipPosY, w, h);
+    // A step larger than a wrapped frame's worth means a respawn/teleport, not
+    // motion — reseed rather than smear a huge slide across the field.
+    if (Math.hypot(dx, dy) > Math.min(w, h) * 0.25) seed();
+    else {
+      game.camScrollX -= dx;
+      game.camScrollY -= dy;
+    }
+  }
+  game.lastShipPosX = ship.pos.x;
+  game.lastShipPosY = ship.pos.y;
+};
+
 const paintScrollScene = (game: Game, shakeX: number, shakeY: number) => {
   const { ctx, w, h } = game;
-  // Camera offset that maps the ship's world position to screen centre.
+  // Exact camera offset that maps the ship's world position to screen centre.
+  // The world layer (`% w` inside tileCopies) and the foreground translate both
+  // need this exact so the pinned ship lands pixel-dead-centre.
   const camX = w / 2 - game.ship.pos.x;
   const camY = h / 2 - game.ship.pos.y;
+  // Continuous version for the SUB-1 parallax layers (pulsar + starfield). Those
+  // scale the offset by a fraction <1, so the per-frame ±w snap `camX` takes at a
+  // seam crossing becomes a `parallax·w` jolt that `% w` can't hide. camScroll
+  // integrates the ship's toroidal step instead, so it never snaps; it equals
+  // camX modulo w, so the layers land in the same place — just without the jump.
+  updateCamScroll(game);
+  const parallaxX = game.camScrollX;
+  const parallaxY = game.camScrollY;
 
   // Replicate `paint` at the <=4 wrap copies of a layer scrolled by (sx,sy) that
   // intersect the viewport. The torus is one screen wide/tall, so two copies per
@@ -345,7 +387,7 @@ const paintScrollScene = (game: Game, shakeX: number, shakeY: number) => {
   ctx.translate(shakeX, shakeY);
 
   // Background once; it applies its own per-layer parallax to the camera offset.
-  paintBackground(game, camX, camY);
+  paintBackground(game, parallaxX, parallaxY);
 
   const targets = targetsForReticule(game);
   const focusedTarget = pickCenterMostTargetForFocus(
@@ -356,7 +398,7 @@ const paintScrollScene = (game: Game, shakeX: number, shakeY: number) => {
   updateSpectrumVisualizer(game);
 
   // Pulsar layer at its own (slower) parallax, behind the entities.
-  tileCopies(camX * PULSAR_PARALLAX, camY * PULSAR_PARALLAX, () => paintPulsarLayer(game));
+  tileCopies(parallaxX * PULSAR_PARALLAX, parallaxY * PULSAR_PARALLAX, () => paintPulsarLayer(game));
 
   // World layer at the 1.0 wrap offsets. wrapMode "none": every copy is a live
   // full paint, so a body near the seam is drawn whole by the neighbouring copy
@@ -365,10 +407,14 @@ const paintScrollScene = (game: Game, shakeX: number, shakeY: number) => {
 
   // Screen-pinned foreground: ship is locked dead-centre, so translate the world
   // by the camera offset and the reticule/preview (drawn relative to ship.pos)
-  // land centred. These are painted once — no wrap copies.
+  // land centred. These are painted once — no wrap copies. The reticule's dot
+  // draw-positions must wrap to the ship's nearest toroidal copy (not fold into
+  // [0,w)) so they stay put across a seam under this translate, hence the anchor.
   ctx.save();
   ctx.translate(camX, camY);
+  setReticuleWrapAnchor(game.ship.pos);
   paintForeground(game, targets);
+  setReticuleWrapAnchor(null);
   ctx.restore();
 
   // Glass overlays (slow-mo rail, laser wash) sit on the screen, not the world,
