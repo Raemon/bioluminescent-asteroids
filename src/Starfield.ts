@@ -1,5 +1,18 @@
 import { cosmeticRand as rand, TAU } from "./vec";
 
+// Per-layer parallax: the fraction of the camera's world-scroll each background
+// layer moves by. Farther things move less (≈0 = at infinity, 1 = locked to the
+// world like gameplay entities). Depth-ordered so the field reads as real space:
+// nebula sits deepest, bright foreground stars drift fastest of the star layers,
+// and the pulsar (handled in gameRender) is nearer still.
+export const STARFIELD_PARALLAX = {
+  nebula: 0.06,
+  dust: 0.16,
+  starBase: 0.2, // per-star scaled up by depth on top of this
+  starDepth: 0.22,
+  bright: 0.5,
+} as const;
+
 type Star = {
   x: number;
   y: number;
@@ -8,6 +21,18 @@ type Star = {
   twinklePhase: number;
   twinkleSpeed: number;
   depth: number;
+};
+
+// A handful of prominent near stars — bigger, brighter, with a cross-glint and
+// the strongest star-layer parallax. They read as foreground accents that slide
+// noticeably against the deep field as the camera moves.
+type BrightStar = {
+  x: number;
+  y: number;
+  size: number;
+  hue: number;
+  twinklePhase: number;
+  twinkleSpeed: number;
 };
 
 // Tiny static background stars — no twinkle, no halo, no per-frame
@@ -39,6 +64,7 @@ export class Starfield {
   stars: Star[] = [];
   dust: DustStar[] = [];
   nebula: NebulaBlob[] = [];
+  bright: BrightStar[] = [];
   w: number;
   h: number;
   // Pre-rendered nebula + Milky-Way band layer, baked tileable.
@@ -183,7 +209,24 @@ export class Starfield {
         radius: rand(220, 460),
         // warmer hues in the band (200-260), cooler/violet drifting off it
         hue: onBand ? rand(210, 265) : rand(250, 300),
-        alpha: rand(0.03, 0.07),
+        // barely-there — the coloured clouds are a faint tint in the black, not
+        // a wash. (Gradient stacks additively over the band glow.)
+        alpha: rand(0.003, 0.0075),
+      });
+    }
+
+    // A few prominent near stars — foreground accents with the strongest
+    // star-layer parallax, scattered clear of each other so they read as
+    // distinct landmarks rather than a cluster.
+    const brightCount = 7;
+    for (let i = 0; i < brightCount; i++) {
+      this.bright.push({
+        x: rand(0, w),
+        y: rand(0, h),
+        size: rand(1.6, 2.8),
+        hue: rand(195, 235),
+        twinklePhase: rand(0, TAU),
+        twinkleSpeed: rand(0.25, 0.9),
       });
     }
   }
@@ -276,6 +319,7 @@ export class Starfield {
     this.stars = [];
     this.dust = [];
     this.nebula = [];
+    this.bright = [];
     this.generate();
     this.buildNebulaSprite();
     this.buildDustSprite();
@@ -345,44 +389,94 @@ export class Starfield {
     ctx.restore();
   }
 
-  // Locked-center scroll: tile the baked sprites under a 1:1 scroll, then scatter
-  // the live twinkling stars wrapped across the same scroll so they sparkle.
-  private renderScrolling(ctx: CanvasRenderingContext2D, t: number, sx: number, sy: number) {
-    const driftX = Math.sin(t * 0.0003) * 20;
-    const driftY = Math.cos(t * 0.00025) * 20;
-    if (this.nebulaSprite) this.blitTiled(ctx, this.nebulaSprite, sx + driftX, sy + driftY);
-    if (this.dustSprite) this.blitTiled(ctx, this.dustSprite, sx, sy);
-
+  // Place a star at its on-screen wrapped copy and run `paint(px, py)` for the
+  // single copy that lands on screen. Each layer scrolls by its own parallax
+  // fraction of the camera offset, so deeper layers slide past slower; the wrap
+  // period stays w/h so every layer still tiles seamlessly.
+  private wrapStar(
+    x: number, y: number, sx: number, sy: number, pad: number,
+    paint: (px: number, py: number) => void,
+  ) {
     const { w, h } = this;
     let ox = sx % w;
     if (ox > 0) ox -= w;
     let oy = sy % h;
     if (oy > 0) oy -= h;
+    for (let i = 0; i < 2; i++) {
+      for (let j = 0; j < 2; j++) {
+        const px = x + ox + i * w;
+        const py = y + oy + j * h;
+        if (px < -pad || px > w + pad || py < -pad || py > h + pad) continue;
+        paint(px, py);
+      }
+    }
+  }
+
+  // Locked-center scroll: each layer tiles under its OWN parallax-scaled scroll
+  // (deeper = slower) so the field reads as real depth. The baked sprites blit
+  // tiled; the live twinkling + bright stars scatter wrapped across their scroll.
+  private renderScrolling(ctx: CanvasRenderingContext2D, t: number, sx: number, sy: number) {
+    const P = STARFIELD_PARALLAX;
+    const driftX = Math.sin(t * 0.0003) * 20;
+    const driftY = Math.cos(t * 0.00025) * 20;
+    if (this.nebulaSprite) this.blitTiled(ctx, this.nebulaSprite, sx * P.nebula + driftX, sy * P.nebula + driftY);
+    if (this.dustSprite) this.blitTiled(ctx, this.dustSprite, sx * P.dust, sy * P.dust);
+
     for (const star of this.stars) {
       const twinkle = 0.5 + 0.5 * Math.sin(t * 0.001 * star.twinkleSpeed + star.twinklePhase);
       const alpha = 0.13 + 0.32 * twinkle * star.depth;
       const size = star.size * (0.7 + 0.3 * twinkle);
-      ctx.fillStyle = `hsla(${star.hue}, 80%, 85%, ${alpha})`;
+      // closer (higher depth) twinkles parallax faster than the deep field
+      const p = P.starBase + P.starDepth * star.depth;
       const bigHalo = star.size > 1.3;
-      for (let i = 0; i < 2; i++) {
-        for (let j = 0; j < 2; j++) {
-          const sxp = star.x + ox + i * w;
-          const syp = star.y + oy + j * h;
-          // only the copy that lands on screen is worth drawing
-          if (sxp < -4 || sxp > w + 4 || syp < -4 || syp > h + 4) continue;
+      this.wrapStar(star.x, star.y, sx * p, sy * p, 4, (px, py) => {
+        ctx.fillStyle = `hsla(${star.hue}, 80%, 85%, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(px, py, size, 0, TAU);
+        ctx.fill();
+        if (bigHalo) {
+          ctx.fillStyle = `hsla(${star.hue}, 80%, 85%, ${alpha * 0.4})`;
           ctx.beginPath();
-          ctx.arc(sxp, syp, size, 0, TAU);
+          ctx.arc(px, py, size * 3, 0, TAU);
           ctx.fill();
-          if (bigHalo) {
-            ctx.fillStyle = `hsla(${star.hue}, 80%, 85%, ${alpha * 0.4})`;
-            ctx.beginPath();
-            ctx.arc(sxp, syp, size * 3, 0, TAU);
-            ctx.fill();
-            ctx.fillStyle = `hsla(${star.hue}, 80%, 85%, ${alpha})`;
-          }
         }
-      }
+      });
     }
+
+    for (const b of this.bright) this.paintBrightStar(ctx, b, t, sx * P.bright, sy * P.bright);
+  }
+
+  // A prominent near star: bright core + soft radial halo + a faint 4-point
+  // diffraction glint, the way a real bright star blooms through a lens. Slow
+  // breath in brightness so it shimmers without strobing. sx/sy are this layer's
+  // already-parallax-scaled scroll; pass 0,0 to pin it (the non-scroll dolly).
+  private paintBrightStar(ctx: CanvasRenderingContext2D, b: BrightStar, t: number, sx: number, sy: number) {
+    const breath = 0.6 + 0.4 * Math.sin(t * 0.001 * b.twinkleSpeed + b.twinklePhase);
+    const core = b.size * (0.85 + 0.15 * breath);
+    const haloR = core * 7;
+    const a = 0.5 + 0.4 * breath;
+    this.wrapStar(b.x, b.y, sx, sy, haloR, (px, py) => {
+      // soft halo
+      const g = ctx.createRadialGradient(px, py, 0, px, py, haloR);
+      g.addColorStop(0, `hsla(${b.hue}, 75%, 90%, ${0.22 * a})`);
+      g.addColorStop(0.35, `hsla(${b.hue}, 80%, 80%, ${0.07 * a})`);
+      g.addColorStop(1, `hsla(${b.hue}, 80%, 80%, 0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(px - haloR, py - haloR, haloR * 2, haloR * 2);
+      // diffraction glint — four thin tapering spikes
+      const spike = haloR * 0.9;
+      ctx.strokeStyle = `hsla(${b.hue}, 70%, 92%, ${0.16 * a})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px - spike, py); ctx.lineTo(px + spike, py);
+      ctx.moveTo(px, py - spike); ctx.lineTo(px, py + spike);
+      ctx.stroke();
+      // bright core
+      ctx.fillStyle = `hsla(${b.hue}, 60%, 96%, ${0.95 * a})`;
+      ctx.beginPath();
+      ctx.arc(px, py, core, 0, TAU);
+      ctx.fill();
+    });
   }
 
   // Legacy parallax twinkles: each star fans outward from the focal point with
@@ -411,5 +505,7 @@ export class Starfield {
         ctx.fill();
       }
     }
+    // Bright near stars pinned in place — the non-scroll modes don't scroll the field.
+    for (const b of this.bright) this.paintBrightStar(ctx, b, t, 0, 0);
   }
 }

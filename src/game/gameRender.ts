@@ -138,8 +138,12 @@ const ALIEN_BULLET_GLOW_REACH = 6;
 type WrapMode = "gameplay" | "all" | "none";
 
 // bodies must sit ON their own trails, so trails pass before any per-entity render call.
+// pulsar: draw the pulsar + its shockwave ring inline (behind/above the
+// entities). The scroll camera draws the pulsar on its OWN parallax layer (it's
+// a distant body that should slide slower than gameplay entities), so it passes
+// pulsar=false and paints paintPulsarLayer separately.
 const paintEntityLayers = (
-  game: Game, focusedTarget: ReticuleTarget | null, wrapMode: WrapMode = "gameplay",
+  game: Game, focusedTarget: ReticuleTarget | null, wrapMode: WrapMode = "gameplay", pulsar = true,
 ) => {
   const { ctx, w, h } = game;
   // Wrap a body per the camera's wrap mode (see WrapMode).
@@ -152,10 +156,9 @@ const paintEntityLayers = (
   // internal twin when the layer is externally replicated.
   const wrapBody = (pos: Vec, reach: number, draw: () => void) =>
     wrapMode === "none" ? draw() : drawWrapped(ctx, pos, reach, w, h, draw);
-  // The pulsar is a world-positioned landmark; it sits behind the entities (it
-  // used to ride with the starfield as the second background layer) but in front
-  // of the starfield, so it scrolls + wraps with the torus like any other body.
-  game.pulsar.render(ctx);
+  // The pulsar sits behind the entities (it used to ride with the starfield as
+  // the second background layer) but in front of the starfield.
+  if (pulsar) game.pulsar.render(ctx);
   renderTrails(game, ctx);
   for (const c of game.comets) maybeWrap(c.pos, c.radius * BODY_GLOW_REACH, false, () => c.render(ctx));
   // shards are tiny, brief explosion debris — not worth a seam twin.
@@ -189,12 +192,24 @@ const paintEntityLayers = (
   renderBassLightnings(ctx, game.bassLightnings, game.time * 0.001);
   renderDriftBursts(ctx, game.driftBursts, game.time * 0.001);
   game.particles.render(ctx);
-  // The bass-drop shockwave ring is a world-anchored overlay radiating from the
-  // pulsar, so it lives in the world layer and wraps with the field.
-  game.pulsar.renderShockwaveOverlay(ctx);
+  // The bass-drop shockwave ring radiates from the pulsar, so it rides the
+  // pulsar (inline here for non-scroll modes; the scroll camera draws it on the
+  // pulsar's parallax layer via paintPulsarLayer).
+  if (pulsar) game.pulsar.renderShockwaveOverlay(ctx);
   // Popups (combo / pickup / score) anchor at the world spot they describe (a hit
   // location, the ship), so they scroll + wrap with the world, not the glass.
   renderPopups(ctx, game.popups);
+};
+
+// The pulsar's own layer: the planet + shockwave ring + spectrum halo, drawn
+// together so they share one parallax depth. The scroll camera replicates this
+// at the pulsar-parallax offsets (slower than the 1.0 entity layer) so the
+// pulsar reads as a distant body the closer field slides past.
+const paintPulsarLayer = (game: Game) => {
+  const { ctx } = game;
+  game.pulsar.render(ctx);
+  game.pulsar.renderShockwaveOverlay(ctx);
+  paintSpectrumVisualizer(game);
 };
 
 // reticule reads every visible target on the field; gather them once not repeatedly.
@@ -287,29 +302,49 @@ const paintScene = (game: Game, shakeX: number, shakeY: number, forSnapshot = fa
 // clipping is structurally impossible and no per-effect bookkeeping is needed.
 //
 // Layering (deepest first):
-//   • backdrop + background — painted ONCE, scrolled with the camera so the
-//     starfield stays behind everything and never tiles in front of an effect
-//   • world layer (pulsar, entities, effects, popups) — painted at each wrap
-//     copy so bodies straddling the seam appear whole on both sides
-//   • screen-pinned foreground (ship at centre, reticule, slow-mo bar, halo)
+//   • backdrop + background — painted ONCE, scrolled with per-layer parallax so
+//     the starfield stays behind everything and never tiles in front of an effect
+//   • pulsar layer (pulsar + shockwave ring + spectrum halo) — replicated at its
+//     OWN parallax (slower than entities), so it reads as a distant body
+//   • world layer (entities, effects, popups) — replicated at the 1.0 wrap
+//     offsets so bodies straddling the seam appear whole on both sides
+//   • screen-pinned foreground (ship at centre, reticule, slow-mo bar)
+// The pulsar slides slower than gameplay entities — a distant body, not at the
+// ship's depth (but still nearer than the bright stars at STARFIELD_PARALLAX).
+const PULSAR_PARALLAX = 0.62;
 const paintScrollScene = (game: Game, shakeX: number, shakeY: number) => {
   const { ctx, w, h } = game;
-  // Camera offset that maps the ship's world position to screen centre. The
-  // torus is exactly one screen wide/tall, so the viewport straddles one seam on
-  // each axis — wrap each offset into (-w,0] / (-h,0] and the two copies per axis
-  // ({0} and {+w}) cover the screen. That's <=4 world copies total.
+  // Camera offset that maps the ship's world position to screen centre.
   const camX = w / 2 - game.ship.pos.x;
   const camY = h / 2 - game.ship.pos.y;
-  let ox = camX % w;
-  if (ox > 0) ox -= w;
-  let oy = camY % h;
-  if (oy > 0) oy -= h;
+
+  // Replicate `paint` at the <=4 wrap copies of a layer scrolled by (sx,sy) that
+  // intersect the viewport. The torus is one screen wide/tall, so two copies per
+  // axis cover it; skip any copy fully off-screen (ship exactly on a seam).
+  const tileCopies = (sx: number, sy: number, paint: () => void) => {
+    let ox = sx % w;
+    if (ox > 0) ox -= w;
+    let oy = sy % h;
+    if (oy > 0) oy -= h;
+    for (let i = 0; i < 2; i++) {
+      const cx = ox + i * w;
+      if (cx >= w || cx + w <= 0) continue;
+      for (let j = 0; j < 2; j++) {
+        const cy = oy + j * h;
+        if (cy >= h || cy + h <= 0) continue;
+        ctx.save();
+        ctx.translate(cx, cy);
+        paint();
+        ctx.restore();
+      }
+    }
+  };
 
   ctx.save();
   paintBackdrop(game);
   ctx.translate(shakeX, shakeY);
 
-  // Background once, scrolled 1:1 with the camera (it tiles seamlessly itself).
+  // Background once; it applies its own per-layer parallax to the camera offset.
   paintBackground(game, camX, camY);
 
   const targets = targetsForReticule(game);
@@ -317,29 +352,16 @@ const paintScrollScene = (game: Game, shakeX: number, shakeY: number) => {
     game.ship.pos, computeConeFrame(game.ship), game.w, game.h, targets,
   );
 
-  // The spectrum ring rings the pulsar, so it wraps with the world layer — but
-  // its band state must advance exactly once, not per copy.
+  // Spectrum band state advances exactly once, before any copy paints it.
   updateSpectrumVisualizer(game);
 
-  // World layer at each wrap copy. wrapMode "none": every copy is a live full
-  // paint, so a body near the seam is drawn whole by the neighbouring copy — the
-  // per-body twin would double-draw it. Skip a copy that lies fully off-screen
-  // (only happens when the ship sits exactly on a seam multiple), so the common
-  // case still pays for the two copies it needs per axis, not a wasted fourth.
-  for (let i = 0; i < 2; i++) {
-    const cx = ox + i * w;
-    if (cx >= w || cx + w <= 0) continue;
-    for (let j = 0; j < 2; j++) {
-      const cy = oy + j * h;
-      if (cy >= h || cy + h <= 0) continue;
-      ctx.save();
-      ctx.translate(cx, cy);
-      paintEntityLayers(game, focusedTarget, "none");
-      // Pulsar ring rides this copy so it follows the wrapped pulsar it encircles.
-      paintSpectrumVisualizer(game);
-      ctx.restore();
-    }
-  }
+  // Pulsar layer at its own (slower) parallax, behind the entities.
+  tileCopies(camX * PULSAR_PARALLAX, camY * PULSAR_PARALLAX, () => paintPulsarLayer(game));
+
+  // World layer at the 1.0 wrap offsets. wrapMode "none": every copy is a live
+  // full paint, so a body near the seam is drawn whole by the neighbouring copy
+  // (the per-body twin would double-draw it).
+  tileCopies(camX, camY, () => paintEntityLayers(game, focusedTarget, "none", false));
 
   // Screen-pinned foreground: ship is locked dead-centre, so translate the world
   // by the camera offset and the reticule/preview (drawn relative to ship.pos)
@@ -351,7 +373,7 @@ const paintScrollScene = (game: Game, shakeX: number, shakeY: number) => {
 
   // Glass overlays (slow-mo rail, laser wash) sit on the screen, not the world,
   // so they're drawn once in screen space. The spectrum halo already rode the
-  // world layer above (it rings the wrapped pulsar).
+  // pulsar layer above (it rings the wrapped pulsar).
   renderSlowMoTimerBar(game);
   renderLaserAmbientFlash(ctx, game);
   ctx.restore();
