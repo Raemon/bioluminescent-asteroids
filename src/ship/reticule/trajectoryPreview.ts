@@ -5,6 +5,13 @@ import { RETICULE_DASH_HSL } from "./radarCone";
 // shared bullet-overlap radius constant so trajectory dots and aim discs use the same hit reach.
 export const BULLET_HIT_RADIUS_ON_BEAT = 1.8 * 2.38 * 2.5;
 export const BULLET_HIT_RADIUS_OFF_BEAT = 1.8 * 2.5;
+// The REAL on-beat collision reach — matches Bullet.hitRadius() for an on-beat bullet
+// (effectiveRadius 1.8×2.38 × headGlowRadiusMul 10 × GLOW_VISIBLE_FRACTION 0.6). This is much
+// larger than the cosmetic BULLET_HIT_RADIUS_ON_BEAT disc above, and it's what the collision pass
+// actually tests against. We pull each on-beat aim dot one of these toward the ship so the bullet's
+// leading EDGE (not its center) meets the target surface ON the beat; otherwise the oversized hitbox
+// connects ~one bullet-reach early — before the beat — and the impact-window gate rejects the hit.
+export const BULLET_COLLISION_RADIUS_ON_BEAT = 1.8 * 2.38 * 10 * 0.6;
 
 // top-level toggles for individual trajectory-preview overlays — flip to false to hide an
 // element without ripping out its code. Useful while tuning the visual language.
@@ -636,7 +643,7 @@ const drawBeatDotsAlongRay = (
   entryFlashBoost: number, beatPulseBoost: number, focusBoost: number,
   w: number, h: number, doubletime: boolean, tutorialHighlight: boolean, focused: boolean,
   beatTime: number, beatGrid: number, hoverZoneEnterBySlot: Array<number | null>,
-  firstDotOverride: [number, number] | null,
+  onBeatDotOverrides: Array<[number, number] | null>,
   firstDotSecondary: [number, number] | null,
 ): DotWalkResult => {
   let overlapsReticule = false;
@@ -671,11 +678,14 @@ const drawBeatDotsAlongRay = (
     if (sK > sMax && !isFirstBeatDot) continue;
     if (sK < sMin && !isFirstBeatDot) continue;
     const halfBeat = isHalfBeatK(k);
-    // the first on-beat dot is pushed one beat past the leading edge (not one beat from the center)
-    // so aiming at it clears the body and lands on the beat. All other dots stay on the trail.
-    const useOverride = firstDotOverride !== null && !halfBeat && drawnOnBeatDots === 0;
-    const px = useOverride ? firstDotOverride[0] : rawStartX + ux * sK;
-    const py = useOverride ? firstDotOverride[1] : rawStartY + uy * sK;
+    // each on-beat dot uses its slot's pulled-back aim point (override index = how many on-beat dots
+    // drawn so far, i.e. this dot's 0-based slot). Half-beat dots and out-of-range trail dots stay on
+    // the raw velocity trail.
+    const slotOverride = !halfBeat && drawnOnBeatDots < onBeatDotOverrides.length
+      ? onBeatDotOverrides[drawnOnBeatDots]
+      : null;
+    const px = slotOverride ? slotOverride[0] : rawStartX + ux * sK;
+    const py = slotOverride ? slotOverride[1] : rawStartY + uy * sK;
     const [drawX, drawY] = wrapToCanvas(px, py, w, h);
     if (halfBeat) {
       if (drawnHalfBeatDots === 0) {
@@ -810,43 +820,67 @@ const paintOnRhythmSpot = (
 // player's position. Returns null for a stationary target (no travel direction).
 const computeFirstDotEdge = (
   cx: number, cy: number, velX: number, velY: number, radius: number, beatGrid: number,
+  beatsAhead: number = 1,
 ): [number, number] | null => {
   const speed = Math.hypot(velX, velY);
   if (speed < 1e-6) return null;
   const ux = velX / speed;
   const uy = velY / speed;
-  const reach = radius + speed * beatGrid;
+  const reach = radius + speed * beatGrid * beatsAhead;
   return [cx + ux * reach, cy + uy * reach];
 };
 
-// the 'player' first beat dot: the point on the target's predicted body surface that faces the
-// player (C_future - r·D̂, D̂ = aimCenter→C_future). Marks the spot a bullet must reach to hit ON
-// the beat from the player's current position — but it swings as the player moves. Returns null on
-// degenerate geometry (no separation between aim center and future center).
+// the 'player' on-beat dot: the point on the target's predicted body surface that faces the player
+// (C_future at `beatsAhead` beats), then pulled a further `edgePull` toward the aim center along the
+// same D̂. With edgePull = the real on-beat collision radius, a bullet whose center lands here at the
+// beat has its leading EDGE on the surface at the beat → a clean on-beat hit (without the pull the
+// oversized hitbox connects ~one bullet-reach before the beat). Swings as the player moves. Returns
+// null on degenerate geometry (no separation between aim center and future center).
 const computeFirstDotPlayer = (
   cx: number, cy: number, velX: number, velY: number, radius: number,
   aimCenterX: number, aimCenterY: number, beatGrid: number,
+  beatsAhead: number = 1, edgePull: number = 0,
 ): [number, number] | null => {
-  const futureX = cx + velX * beatGrid;
-  const futureY = cy + velY * beatGrid;
+  const futureX = cx + velX * beatGrid * beatsAhead;
+  const futureY = cy + velY * beatGrid * beatsAhead;
   const dx = futureX - aimCenterX;
   const dy = futureY - aimCenterY;
   const dist = Math.hypot(dx, dy);
   if (dist <= 1e-6) return null;
-  return [futureX - (dx / dist) * radius, futureY - (dy / dist) * radius];
+  const pull = radius + edgePull;
+  return [futureX - (dx / dist) * pull, futureY - (dy / dist) * pull];
 };
 
-// resolve the primary (interactive) first-dot position + an optional secondary marker, per
-// FIRST_BEAT_DOT_MODE. In 'both' the edge dot is primary so proximity/lock-on isn't doubled.
-const computeFirstDotOverride = (
+// primary (interactive) aim-dot position for the on-beat dot `beatsAhead` beats out, per
+// FIRST_BEAT_DOT_MODE. player/both pull the surface point one real bullet-reach toward the ship so
+// the locked shot lands ON the beat; edge keeps the velocity-trail lead. Shared by the per-slot
+// override builder and the guidance arrow so every consumer agrees on dot placement.
+const computeOnBeatDotPrimary = (
   cx: number, cy: number, velX: number, velY: number, radius: number,
-  aimCenterX: number, aimCenterY: number, beatGrid: number,
-): { primary: [number, number] | null; secondary: [number, number] | null } => {
-  const edge = computeFirstDotEdge(cx, cy, velX, velY, radius, beatGrid);
-  const player = computeFirstDotPlayer(cx, cy, velX, velY, radius, aimCenterX, aimCenterY, beatGrid);
-  if (firstDotModeIs("player")) return { primary: player, secondary: null };
-  if (firstDotModeIs("both")) return { primary: edge, secondary: player };
-  return { primary: edge, secondary: null };
+  aimCenterX: number, aimCenterY: number, beatGrid: number, beatsAhead: number,
+): [number, number] | null => {
+  if (firstDotModeIs("edge")) return computeFirstDotEdge(cx, cy, velX, velY, radius, beatGrid, beatsAhead);
+  return computeFirstDotPlayer(
+    cx, cy, velX, velY, radius, aimCenterX, aimCenterY, beatGrid, beatsAhead, BULLET_COLLISION_RADIUS_ON_BEAT,
+  );
+};
+
+// one primary override per reachable slot (index 0 = 1-beat dot, 1 = 2-beat, ...), plus the optional
+// dimmed secondary marker for the first dot in 'both' mode. EVERY on-beat lock dot gets the same
+// surface-minus-bullet-reach pull, so a locked shot at any slot lands on the beat — previously only
+// the 1-beat dot was corrected, so deeper (multi-beat) drift locks landed early.
+const computeOnBeatDotOverrides = (
+  cx: number, cy: number, velX: number, velY: number, radius: number,
+  aimCenterX: number, aimCenterY: number, beatGrid: number, slotCount: number,
+): { primaries: Array<[number, number] | null>; secondary: [number, number] | null } => {
+  const primaries: Array<[number, number] | null> = [];
+  for (let slot = 1; slot <= slotCount; slot++) {
+    primaries.push(computeOnBeatDotPrimary(cx, cy, velX, velY, radius, aimCenterX, aimCenterY, beatGrid, slot));
+  }
+  const secondary = firstDotModeIs("both")
+    ? computeFirstDotPlayer(cx, cy, velX, velY, radius, aimCenterX, aimCenterY, beatGrid, 1, BULLET_COLLISION_RADIUS_ON_BEAT)
+    : null;
+  return { primaries, secondary };
 };
 
 type OnBeatAim = { x: number; y: number; reachable: boolean; willHitOnBeat: boolean };
@@ -934,11 +968,12 @@ const paintTrajectoryFromSnapshot = (
   const [aimCenterX, aimCenterY] = remapReticuleToTarget(ctx.apex, ctx.aimCircleCenter, ctx.w, ctx.h);
   const dotStep = speed * ctx.beatGrid;
   const dotOffset = -(r + edgePad);
-  // relocate the first on-beat dot off the raw trail per FIRST_BEAT_DOT_MODE (edge / player /
-  // both). `primary` is the interactive dot the draw loop uses for proximity + lock-on; in 'both'
-  // mode `secondary` is the dimmed player-relative marker. null entries leave the dot on the trail.
-  const { primary: firstDotOverride, secondary: firstDotSecondary } = computeFirstDotOverride(
-    cx, cy, snap.velX, snap.velY, r, aimCenterX, aimCenterY, ctx.beatGrid,
+  // relocate EVERY on-beat dot off the raw trail per FIRST_BEAT_DOT_MODE (edge / player / both).
+  // `primaries[slot]` is the interactive dot the draw loop uses for proximity + lock-on; in 'both'
+  // mode `secondary` is the dimmed player-relative marker for the first dot. null entries leave the
+  // dot on the trail.
+  const { primaries: onBeatDotOverrides, secondary: firstDotSecondary } = computeOnBeatDotOverrides(
+    cx, cy, snap.velX, snap.velY, r, aimCenterX, aimCenterY, ctx.beatGrid, ctx.reticulesBySlot.length,
   );
   if (c) {
     c.save();
@@ -956,7 +991,7 @@ const paintTrajectoryFromSnapshot = (
     c, rawStartX, rawStartY, ux, uy, reticulesBySlot,
     sMin, sMax, dotStep, dotOffset, entryFlashBoost, beatPulseBoost, focusBoost,
     ctx.w, ctx.h, ctx.doubletime, ctx.tutorialHighlight, showOnRhythmSpot,
-    ctx.beatTime, ctx.beatGrid, ctx.hoverZoneEnterBySlot, firstDotOverride, firstDotSecondary,
+    ctx.beatTime, ctx.beatGrid, ctx.hoverZoneEnterBySlot, onBeatDotOverrides, firstDotSecondary,
   );
   if (c && SHOW_ON_RHYTHM_RETICULE && showOnRhythmSpot) {
     const aim = computeOnBeatAim(
@@ -1109,8 +1144,8 @@ export const nearestFirstBeatDot = (
     if (!targetInCone && !rayInCone) continue;
     const cx = apex.x + dx;
     const cy = apex.y + dy;
-    // arrow tracks the primary (interactive) dot the draw loop uses, per FIRST_BEAT_DOT_MODE.
-    const { primary } = computeFirstDotOverride(cx, cy, t.vel.x, t.vel.y, tr, aimX, aimY, beatGrid);
+    // arrow tracks the primary (interactive) 1-beat dot the draw loop uses, per FIRST_BEAT_DOT_MODE.
+    const primary = computeOnBeatDotPrimary(cx, cy, t.vel.x, t.vel.y, tr, aimX, aimY, beatGrid, 1);
     const dotX = primary ? primary[0] : cx + t.vel.x * beatGrid;
     const dotY = primary ? primary[1] : cy + t.vel.y * beatGrid;
     const [drawX, drawY] = wrapToCanvas(dotX, dotY, w, h);

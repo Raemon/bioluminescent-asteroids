@@ -7,6 +7,7 @@ import { Sound } from "../Sound";
 import { emitThrust, emitReverseThrust, emitSideThrust } from "./shipParticles";
 import { fireBullets } from "./shipWeapons";
 import { isDown } from "../game/controlBindings";
+import { BEAT_GRID } from "../game/rhythmConstants";
 
 const ENGINE_SOUNDS_ENABLED = false;
 
@@ -18,8 +19,10 @@ export const SIDE_THRUST_ALWAYS_ON = true;
 
 // Drift-aim fine-control: hovering a Next Beat Target slows both rotation AND thrust so the player
 // can hold the lock and build drift tier. The slow deepens with the three nested hover zones (set
-// by the sim's hover-lock tick on slot 0): nearby approach ring (zoneEnterBeatTime) → central
-// target circle (hoverStartBeatTime) → first drift reward / 0.5s lock (completionBeatTime).
+// by the sim's hover-lock tick): nearby approach ring (zoneEnterBeatTime) → central target circle
+// (hoverStartBeatTime) → first drift reward / 0.5s lock (completionBeatTime). Any hovered slot
+// engages the slow (slot = beat distance: 0 = 1-beat, 1 = 2-beat, ...); the rotation slow is then
+// scaled by the hovered target's actual on-screen distance (see driftAimRotDistFactor).
 // Rotation and thrust each have their own [nearby, center, locked] multiplier set so they can be
 // tuned apart.
 type DriftAimMults = { nearby: number; center: number; locked: number };
@@ -27,14 +30,59 @@ const DRIFT_AIM_ROT_MULTS: DriftAimMults = { nearby: 1, center: 0.25, locked: 0.
 const DRIFT_AIM_THRUST_MULTS: DriftAimMults = { nearby: 1, center: 0.25, locked: 0.25 };
 // ease toward the zone's target multiplier so crossing a boundary doesn't snap velocity.
 const DRIFT_AIM_EASE_SEC = 0.15;
+// Rotation swings the reticule a tangential distance of (aim distance × angular speed), so a target
+// twice as far sweeps twice as fast under the same turn rate. To hold the reticule's on-screen sweep
+// roughly constant regardless of how far the hovered target is, the center/locked rotation slow is
+// scaled by (reference distance / actual distance): the 1-beat target (≈ refDist) keeps full slow,
+// a 2-beat target halves it, a 3-beat thirds it — derived continuously from the real distance rather
+// than the slot index. The reference is the 1-beat reticule distance (bulletSpeed × one beat). Capped
+// at 1 so a closer-than-reference target never *speeds up* rotation. Thrust is unaffected (it moves
+// the ship, not the reticule sweep), and the nearby approach zone keeps its full multiplier.
+const driftAimRotDistFactor = (ship: Ship, ringCenter: { x: number; y: number }) => {
+  const refDist = ship.bulletSpeed * BEAT_GRID;
+  const dist = Math.hypot(ringCenter.x - ship.pos.x, ringCenter.y - ship.pos.y);
+  if (dist <= refDist || refDist <= 0) return 1;
+  return refDist / dist;
+};
 
-// deepest zone the slot-0 ring reports → its multiplier from the given set (1 when off-target
-// entirely). Zones nest, so check inner-first.
-const driftAimTargetMult = (ship: Ship, mults: DriftAimMults) => {
-  const ring = ship.hoverDotRingState;
-  if (ring.completionBeatTime !== null) return mults.locked;
-  if (ring.hoverStartBeatTime !== null) return mults.center;
-  if (ring.zoneEnterBeatTime !== null) return mults.nearby;
+// zone level of one ring: 3 locked, 2 center, 1 nearby, 0 off-target. Zones nest → check inner-first.
+const ringZoneLevel = (ring: Ship["hoverDotRingStates"][number]) => {
+  if (ring.completionBeatTime !== null) return 3;
+  if (ring.hoverStartBeatTime !== null) return 2;
+  if (ring.zoneEnterBeatTime !== null) return 1;
+  return 0;
+};
+
+// the deepest-engaged hovered ring across all beat-distance slots: its zone level + the ring center
+// (world-space target position) so callers can read the actual aim distance. The reticule sits over
+// at most one target, but each slot tracks its own ring, so pick whichever is furthest in.
+const deepestHoveredRing = (ship: Ship) => {
+  let best: { zone: number; center: { x: number; y: number } | null } = { zone: 0, center: null };
+  for (const ring of ship.hoverDotRingStates) {
+    const zone = ringZoneLevel(ring);
+    if (zone > best.zone) best = { zone, center: ring.lastRingCenter };
+  }
+  return best;
+};
+
+// target rotation multiplier from the deepest hovered zone, with the center/locked slow scaled down
+// by actual aim distance so farther targets turn proportionally slower (nearby keeps full strength).
+const driftAimRotTargetMult = (ship: Ship) => {
+  const { zone, center } = deepestHoveredRing(ship);
+  if (zone >= 2) {
+    const base = DRIFT_AIM_ROT_MULTS[zone === 3 ? "locked" : "center"];
+    return center ? base * driftAimRotDistFactor(ship, center) : base;
+  }
+  if (zone === 1) return DRIFT_AIM_ROT_MULTS.nearby;
+  return 1;
+};
+
+// target thrust multiplier from the deepest hovered zone (no distance scaling — thrust moves the ship).
+const driftAimThrustTargetMult = (ship: Ship) => {
+  const zone = deepestHoveredRing(ship).zone;
+  if (zone === 3) return DRIFT_AIM_THRUST_MULTS.locked;
+  if (zone === 2) return DRIFT_AIM_THRUST_MULTS.center;
+  if (zone === 1) return DRIFT_AIM_THRUST_MULTS.nearby;
   return 1;
 };
 
@@ -48,8 +96,8 @@ const easeDriftAim = (current: number, target: number, dt: number) =>
 
 // step both eased multipliers once per frame from the current hover zone.
 const updateDriftAimSlow = (ship: Ship, dt: number) => {
-  ship.driftAimRotMultEased = easeDriftAim(ship.driftAimRotMultEased, driftAimTargetMult(ship, DRIFT_AIM_ROT_MULTS), dt);
-  ship.driftAimThrustMultEased = easeDriftAim(ship.driftAimThrustMultEased, driftAimTargetMult(ship, DRIFT_AIM_THRUST_MULTS), dt);
+  ship.driftAimRotMultEased = easeDriftAim(ship.driftAimRotMultEased, driftAimRotTargetMult(ship), dt);
+  ship.driftAimThrustMultEased = easeDriftAim(ship.driftAimThrustMultEased, driftAimThrustTargetMult(ship), dt);
 };
 
 // Two-regime turning: inside the tap window the ship turns at a slow,
