@@ -1,5 +1,34 @@
 [
   {
+    "id": "2026-06-28-19529a9",
+    "date": "2026-06-28",
+    "title": "Comets and aliens now warp out through departure portals",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Comets that time out now dive through a swirling departure portal instead of fading away.",
+          "Aliens that cross the screen now warp out through a portal instead of vanishing off the edge.",
+          "Warping-out comets and aliens are intangible — bullets and the ship no longer interact with them.",
+          "Background ecliptic stars now orbit the pulsar's tilted plane alongside the planets, giving the sky more depth."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Aliens now appear in dark blood-red instead of deep violet.",
+          "Comets now spawn from the visible screen edge and move faster, making them harder to farm for on-beat combos.",
+          "Drift Shot combo now shows two staged numbers climbing one step at a time; the damage multiplier label only reappears when you beat your best tier for the run.",
+          "Alien bullets no longer time out — they persist until they hit or are otherwise cleared."
+        ]
+      }
+    ],
+    "commits": [
+      "19529a9",
+      "7ddf486"
+    ]
+  },
+  {
     "id": "2026-06-28-5095c7b",
     "date": "2026-06-28",
     "title": "Richer starfield and new scroll camera mode",
