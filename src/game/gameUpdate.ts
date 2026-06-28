@@ -38,9 +38,10 @@ import { renderKilledRow, stopParade } from "./killedParade";
 import { recordHighlightFrame } from "./highlightTimeline";
 import { tryStartHighlightClip, tickHighlightGameOverInput, beginHighlightLoop, tickHighlightLoop } from "./highlightReplay";
 import { snapshotShipKill } from "./killSnapshot";
-import { updatePopups, popupDriftBonus } from "./popups";
+import { updatePopups, popupDriftBonus, popupDriftCombo } from "./popups";
 import { updateBassLightnings } from "./bassLightning";
 import { updateDriftBursts } from "./driftBurst";
+import { updateWormholes, spawnWormhole } from "./wormhole";
 import { tickPendingRhythmBonuses } from "./rhythmBonus";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
@@ -646,6 +647,11 @@ const tickControlsGate = (game: Game) => {
     } else if (game.controlsHintActive) {
       game.controlsHintActive = false;
       window.dispatchEvent(new CustomEvent("controls-hint:dismiss"));
+      // A first combo loss during the pane deferred its hint to here.
+      if (game.rhythmLossHintPending) {
+        game.rhythmLossHintPending = false;
+        window.dispatchEvent(new CustomEvent("rhythm-loss-hint:show"));
+      }
     }
   }
 };
@@ -800,6 +806,9 @@ const updatePlaying = (game: Game, dt: number) => {
   game.popups = updatePopups(game.popups, dt);
   game.bassLightnings = updateBassLightnings(game.bassLightnings, dt);
   game.driftBursts = updateDriftBursts(game.driftBursts, dt);
+  // musicDt (not dt) so the portal opens/closes in lockstep with the body's
+  // dive, which also runs on musicDt — under slow-mo both stretch together.
+  game.wormholes = updateWormholes(game.wormholes, musicDt);
   tickPendingDriftBonuses(game);
   tickPendingRhythmBonuses(game);
   runCollisionPasses(game);
@@ -853,9 +862,11 @@ const captureOrAssertCheckpoint = (game: Game) => {
   game.recorder.captureCheckpoint(checkpointState(game));
 };
 
-// Drift Shot queue: on-beat hits made under a fully-locked first-dot hover ring
-//   schedule a +1-rhythm reward for 1 beat later. If the streak broke before the
-//   moment arrives, drop the entry — the bonus is tied to a live streak.
+// Drift Shot queue: on-beat hits made under a fully-locked hover ring schedule a +1-rhythm
+//   reward for 1 beat later. If the streak broke before the moment arrives, drop the entry —
+//   the bonus is tied to a live streak. The hit itself already showed the first combo number
+//   (C+1, popupDriftCombo); this fires the second (C+2), staged a beat later and offset to the
+//   lower-right so the player reads the streak climbing one step at a time.
 const tickPendingDriftBonuses = (game: Game) => {
   if (game.pendingDriftBonuses.length === 0) return;
   const keep: typeof game.pendingDriftBonuses = [];
@@ -868,8 +879,12 @@ const tickPendingDriftBonuses = (game: Game) => {
     game.driftBonusesThisWave += 1;
     syncComboHud(game);
     game.sound.playComboChime(game.beatCombo, entry.pos);
+    // second staged combo number, offset down-right of the first so both steps read in rhythm.
+    game.popups.push(popupDriftCombo(entry.pos, game.beatCombo, true));
+    // DRIFT SHOT label rides this beat too; show the tier-coloured "N× DAMAGE" subtitle only on
+    //   a new game-best multiplier (and force the first-of-run label so the player learns it).
     const firstOfRun = !game.hasShownDriftShotLabel;
-    game.popups.push(popupDriftBonus(entry.pos, entry.tier, firstOfRun));
+    game.popups.push(popupDriftBonus(entry.pos, entry.tier, entry.showDamageMult || firstOfRun));
     if (firstOfRun) game.hasShownDriftShotLabel = true;
   }
   game.pendingDriftBonuses = keep;
@@ -1023,11 +1038,13 @@ const tickBulletReticuleCrossings = (game: Game) => {
 //   Ship stays on wall-clock dt (updated earlier) so player reactions feel responsive.
 const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   for (const c of game.comets) c.update(musicDt, game.w, game.h);
+  spawnPendingWormholes(game, game.comets);
   pruneDeadComets(game);
   for (const a of game.asteroids) a.update(musicDt, game.w, game.h);
   // defensive prune; no asteroid kind currently clears alive on its own.
   compactInPlace(game.asteroids, (a) => a.alive);
   for (const al of game.aliens) al.update(musicDt, game.w, game.h);
+  spawnPendingWormholes(game, game.aliens);
   pruneOffscreenAliens(game);
   tickAlienFire(game);
   tickBossRhythm(game);
@@ -1084,6 +1101,28 @@ const updatePositionalAudio = (game: Game) => {
   for (const c of game.comets) if (!c.isMeteor) game.sound.updateCometShimmer(c, c.pos);
 };
 
+// A comet that times out / an alien that flies past the far edge flags
+// needsWormhole the frame it begins warping out (the body owns the suck-in; this
+// spawns the portal it dives into). Anchor the portal at the body's warp-start
+// position so the mouth gapes where the dive began. Called right after each
+// entity's update loop with that array; the flag is consumed once.
+type WarpingBody = {
+  needsWormhole: boolean;
+  warpStartX: number;
+  warpStartY: number;
+  radius: number;
+  warpHeading: number;
+};
+const spawnPendingWormholes = (game: Game, bodies: WarpingBody[]) => {
+  for (const e of bodies) {
+    if (!e.needsWormhole) continue;
+    e.needsWormhole = false;
+    spawnWormhole(
+      game.wormholes, { x: e.warpStartX, y: e.warpStartY }, e.radius, e.warpHeading,
+    );
+  }
+};
+
 // pruning is a separate pass so we don't mutate game.comets mid-iteration of the update loop.
 const pruneDeadComets = (game: Game) => {
   const survivingComets = [];
@@ -1110,6 +1149,7 @@ const pruneOffscreenAliens = (game: Game) => {
 const tickAlienFire = (game: Game) => {
   if (game.aliens.length === 0) return;
   for (const a of game.aliens) {
+    if (a.warpT !== null) continue; // warping out — done fighting, just leaving
     while (game.beatTime >= a.nextFireAt) fireOneAlienShot(game, a);
   }
 };

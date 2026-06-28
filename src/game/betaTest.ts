@@ -309,6 +309,7 @@ const startBetaWave = (game: Game) => {
   game.firedOffBeatSinceLastBeat = false;
   game.slowMoTimer = 0;
   game.hasLostComboEver = false;
+  game.rhythmLossHintPending = false;
 
   game.bullets = [];
   game.popups = [];

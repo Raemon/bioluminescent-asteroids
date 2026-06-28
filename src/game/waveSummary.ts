@@ -85,7 +85,15 @@ type SummaryEls = {
   bonusValueEl: HTMLElement;
   scoreValueEl: HTMLElement;
   extraLifeEl: HTMLElement;
+  extraLifeValueEl: HTMLElement;
 };
+
+// The "Next ship" line runs its own fade animation (ws-extra-life-flash, a
+//   quick fade-in then fast fade-out) timed to start with the panel fade-out,
+//   so it blooms in as the rest of the summary leaves and is gone before the
+//   panel finishes fading. Nested inside the panel, so the panel fade dims it
+//   too — that's intended.
+const EXTRA_LIFE_REVEAL_DELAY_MS = HOLD_BEFORE_FADE_MS;
 
 let activeTimers: number[] = [];
 
@@ -109,7 +117,7 @@ const buildPanel = (): SummaryEls => {
       <div class="ws-row ws-drift"><span class="ws-label">Drift Shot</span> <span class="ws-value" data-row="drift"></span></div>
       <div class="ws-row ws-bonus"><span class="ws-label">Bonus</span> <span class="ws-value" data-row="bonus"></span></div>
       <div class="ws-row ws-score"><span class="ws-label">Score</span> <span class="ws-value" data-row="score"></span></div>
-      <div class="ws-extra-life" data-row="extra-life"></div>
+      <div class="ws-row ws-extra-life" data-row="extra-life"><span class="ws-label">Next ship</span> <span class="ws-value" data-row="extra-life-value"></span></div>
     `;
     document.body.appendChild(root);
   }
@@ -120,6 +128,7 @@ const buildPanel = (): SummaryEls => {
     bonusValueEl: root.querySelector<HTMLElement>('[data-row="bonus"]')!,
     scoreValueEl: root.querySelector<HTMLElement>('[data-row="score"]')!,
     extraLifeEl: root.querySelector<HTMLElement>('[data-row="extra-life"]')!,
+    extraLifeValueEl: root.querySelector<HTMLElement>('[data-row="extra-life-value"]')!,
   };
 };
 
@@ -199,7 +208,7 @@ export const showWaveSummary = (
 ) => {
   cancelActiveTimers();
   const bonus = (maxRhythm + finalRhythm + driftBonuses) * 100;
-  const { root, rows, bonusValueEl, scoreValueEl, extraLifeEl } = buildPanel();
+  const { root, rows, bonusValueEl, scoreValueEl, extraLifeEl, extraLifeValueEl } = buildPanel();
   // Score the sim clock will drain the bonus on top of; the cosmetic numbers
   //   read game.score against this so the panel mirrors the real payout.
   const startScore = game.score;
@@ -219,17 +228,22 @@ export const showWaveSummary = (
   //   the panel reappears, ready for the staggered entrance.
   for (const row of rows) row.classList.remove("in");
   extraLifeEl.classList.remove("in");
-  extraLifeEl.textContent = "";
+  extraLifeValueEl.textContent = "";
   void root.offsetWidth;
   root.classList.remove("fade-out");
   void root.offsetWidth;
 
-  // Fade the next-bonus-life teaser in once the score has finished settling, so
-  //   the threshold reads against the just-paid score (a drain may have crossed
-  //   it and pushed nextBonusLifeScore forward).
-  const revealExtraLife = () => {
-    extraLifeEl.textContent = `Additional ship at ${formatScore(game.nextBonusLifeScore)}`;
-    extraLifeEl.classList.add("in");
+  // Reveal the next-bonus-life teaser only after the score has finished settling
+  //   (so the threshold reads against the just-paid score) AND the panel has
+  //   begun its fade-out, so the line blooms in as the rest of the summary
+  //   leaves. The reveal itself is deferred by EXTRA_LIFE_REVEAL_DELAY_MS;
+  //   capturing the threshold text happens at reveal time for the same reason.
+  const scheduleExtraLifeReveal = () => {
+    const id = window.setTimeout(() => {
+      extraLifeValueEl.textContent = formatScore(game.nextBonusLifeScore);
+      extraLifeEl.classList.add("in");
+    }, EXTRA_LIFE_REVEAL_DELAY_MS);
+    activeTimers.push(id);
   };
 
   // One row per beat, each with a paired sound.
@@ -249,7 +263,7 @@ export const showWaveSummary = (
   const drainStartMs = FIRST_ROW_DELAY_MS + rows.length * BEAT_MS + PAUSE_BEFORE_DRAIN_MS;
   const startDrain = window.setTimeout(() => {
     if (bonus <= 0) {
-      revealExtraLife();
+      scheduleExtraLifeReveal();
       scheduleFadeOut(root);
       return;
     }
@@ -292,7 +306,7 @@ export const showWaveSummary = (
         //   the still-ringing G-major pad — root + fifth of C resolves the
         //   phrase to the game's tonal anchor instead of clanging.
         game.sound.play("chime", CHIME_C6);
-        revealExtraLife();
+        scheduleExtraLifeReveal();
         scheduleFadeOut(root);
       }
     };

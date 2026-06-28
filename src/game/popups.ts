@@ -3,6 +3,8 @@
 import { Vec, cosmeticRand as rand } from "../vec";
 import { PowerupKind, POWERUP_HUE } from "../Canister";
 import { formatScore } from "./formatScore";
+import { driftTierPulseHsl } from "../ship/reticule/reticuleRender";
+import { BEAT_GRID } from "./rhythmConstants";
 
 // one shape powers combo/pickup/debug overlays so all three share the tick + render loop.
 export type Popup = {
@@ -64,10 +66,42 @@ export const popupCombo = (pos: Vec, multiplier: number): Popup => ({
   holdUntil: 0, fadeGain: 1.4,
 });
 
-// +1-beat reward for landing an on-beat hit while the first-dot hover ring is locked.
+// The two staged combo numbers a drift shot shows: the first ("Nx") rides the hit itself (the
+//   on-beat bump that already landed), the second ("N+1x") fires one beat later when the drift
+//   rhythm bonus applies — offset down-right of the first so the player reads the streak climbing
+//   one step at a time. Same gold combo styling as popupCombo so they read as combo readouts.
+const DRIFT_COMBO_FILL = "#ffd86a";
+const DRIFT_COMBO_SHADOW = "rgba(255, 200, 80, 0.85)";
+export const popupDriftCombo = (pos: Vec, combo: number, second: boolean): Popup => {
+  // second number sits to the lower-right of the first.
+  const ox = second ? 26 : 0;
+  const oy = second ? 8 : -6;
+  // The first number holds full opacity through the beat-gap so it's still solid when the
+  //   second pops in, then fades over the same span as the second — both clear together.
+  //   Its life spans the gap plus the fade; holdUntil is the fraction (final-life ratio) over
+  //   which it fades, so hold-full lasts the first BEAT_GRID and the fade fills the rest.
+  const life = second ? COMBO_POPUP_LIFE : BEAT_GRID + COMBO_POPUP_LIFE;
+  const holdUntil = second ? 0 : COMBO_POPUP_LIFE / (BEAT_GRID + COMBO_POPUP_LIFE);
+  return {
+    pos: { x: pos.x + ox, y: pos.y + oy },
+    vel: { x: rand(-10, 10) + (second ? 14 : 0), y: -70 },
+    life,
+    maxLife: life,
+    text: `x${combo}`,
+    font: "600 22px 'Space Grotesk', system-ui, sans-serif",
+    fill: DRIFT_COMBO_FILL,
+    shadowColor: DRIFT_COMBO_SHADOW,
+    decayX: 0.94, decayY: 0.94,
+    popPeak: 0.375, popDuration: 0.15,
+    holdUntil, fadeGain: 1.4,
+  };
+};
+
+// +1-beat reward for landing an on-beat hit while a hover ring is locked.
 //   The label always reads in the End-of-Wave summary's light blue (#9be8ff) so "DRIFT SHOT"
-//   is instantly recognizable regardless of tier. withSubtitle adds the "N× DAMAGE" line —
-//   shown the first time per run so the player learns the worth without nagging after.
+//   is instantly recognizable regardless of tier. withSubtitle adds the "N× DAMAGE" line,
+//   coloured to match the tier's drift-animation hue — shown on a new run-best multiplier so
+//   each escalation announces its worth without nagging on repeats.
 const DRIFT_POPUP_FILL = "#9be8ff";
 const DRIFT_POPUP_SHADOW = "rgba(120, 220, 255, 0.7)";
 export const popupDriftBonus = (pos: Vec, tier = 1, withSubtitle = false): Popup => {
@@ -75,7 +109,10 @@ export const popupDriftBonus = (pos: Vec, tier = 1, withSubtitle = false): Popup
   const subFont = "600 13px 'Space Grotesk', system-ui, sans-serif";
   const fill = DRIFT_POPUP_FILL;
   const shadow = DRIFT_POPUP_SHADOW;
-  const dmgMult = tier + 1; // tier 1/2/3 → 2×/3×/4× damage
+  const dmgMult = tier + 1; // tier 1..6 → 2×..7× damage
+  // match the damage line to the colour the drift lock/animation reached for this tier.
+  const dmgFill = `hsl(${driftTierPulseHsl(tier)})`;
+  const dmgShadow = `hsla(${driftTierPulseHsl(tier)}, 0.85)`;
   const life = withSubtitle ? 1.6 : COMBO_POPUP_LIFE;
   return {
     pos: { x: pos.x, y: pos.y - 18 },
@@ -95,8 +132,8 @@ export const popupDriftBonus = (pos: Vec, tier = 1, withSubtitle = false): Popup
       ctx.shadowColor = shadow;
       ctx.fillText("DRIFT SHOT", 0, -8);
       ctx.font = subFont;
-      ctx.fillStyle = "#ffd86a";
-      ctx.shadowColor = "rgba(255, 200, 80, 0.85)";
+      ctx.fillStyle = dmgFill;
+      ctx.shadowColor = dmgShadow;
       ctx.fillText(`${dmgMult}× DAMAGE`, 0, 12);
     } : undefined,
   };

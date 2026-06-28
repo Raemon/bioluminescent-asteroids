@@ -113,7 +113,10 @@ export const loseCombo = (game: Game, sourcePos?: Vec, reason: "fire" | "hit" = 
     // FirstWaveHint owns the screen while a stage is up, so suppress then.
     // killEffects fires `rhythm-loss-hint:dismiss` on the next on-beat hit.
     if (!game.hasLostComboEver && game.firstWaveHintStage === 0) {
-      window.dispatchEvent(new CustomEvent("rhythm-loss-hint:show"));
+      // If the start-of-run controls pane is still up, defer the hint instead of
+      //   stacking it on top — tickControlsGate fires it once the pane dismisses.
+      if (game.controlsHintActive) game.rhythmLossHintPending = true;
+      else window.dispatchEvent(new CustomEvent("rhythm-loss-hint:show"));
     }
     game.hasLostComboEver = true;
   }

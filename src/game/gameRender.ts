@@ -6,6 +6,7 @@ import { renderTrails } from "./trailsRender";
 import { renderPopups } from "./popups";
 import { renderBassLightnings } from "./bassLightning";
 import { renderDriftBursts } from "./driftBurst";
+import { renderWormholes } from "./wormhole";
 import { computeConeFrame, toroidalDelta } from "../ship/reticule/coneGeometry";
 import { pickCenterMostTargetForFocus, ReticuleTarget, setReticuleWrapAnchor } from "../ship/reticule/trajectoryPreview";
 import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
@@ -160,6 +161,9 @@ const paintEntityLayers = (
   // the second background layer) but in front of the starfield.
   if (pulsar) game.pulsar.render(ctx);
   renderTrails(game, ctx);
+  // Departure portals sit behind the comet/alien bodies so a warping-out body
+  // dives into the visible mouth and shrinks down the throat in front of it.
+  renderWormholes(ctx, game.wormholes, game.time * 0.001);
   for (const c of game.comets) maybeWrap(c.pos, c.radius * BODY_GLOW_REACH, false, () => c.render(ctx));
   // shards are tiny, brief explosion debris — not worth a seam twin.
   for (const s of game.shards) s.render(ctx);
@@ -183,8 +187,10 @@ const paintEntityLayers = (
     const flash = (pos: Vec, r: number) =>
       maybeWrap(pos, r * BODY_GLOW_REACH, false, () => paintBeatFlash(ctx, pos, r, beatFlash));
     for (const a of game.asteroids) flash(a.pos, a.radius);
-    for (const c of game.comets) flash(c.pos, c.radius);
-    for (const al of game.aliens) flash(al.pos, al.radius);
+    // warping-out comets/aliens skip the beat-flash — a full-size flash disc
+    // would detach from the shrinking body diving down the portal throat.
+    for (const c of game.comets) if (c.warpT === null) flash(c.pos, c.radius);
+    for (const al of game.aliens) if (al.warpT === null) flash(al.pos, al.radius);
     for (const c of game.canisters) flash(c.pos, c.radius);
     for (const g of game.gems) flash(g.pos, g.radius);
   }
@@ -222,8 +228,9 @@ export const targetsForReticule = (game: Game) => [
   // Skip intangible rocks — a dormant boss and a phased-out warble both pass
   // bullets through, so the reticule shouldn't promise a hit on them.
   ...game.asteroids.filter((a) => !(a.isBoss() && a.bossPhase === "dormant") && !a.isPhasedOut()),
-  ...game.comets,
-  ...game.aliens,
+  // Warping-out comets/aliens are intangible and leaving — don't lock them.
+  ...game.comets.filter((c) => c.warpT === null),
+  ...game.aliens.filter((a) => a.warpT === null),
   ...game.canisters,
   // Moving gems (the fan a burst gold asteroid throws off) are real rhythm
   // targets, so give them trajectory lines + a first-beat dot like any rock.
@@ -313,7 +320,9 @@ const paintScene = (game: Game, shakeX: number, shakeY: number, forSnapshot = fa
 //     offsets so bodies straddling the seam appear whole on both sides
 //   • screen-pinned foreground (ship at centre, reticule, slow-mo bar)
 // The pulsar slides slower than gameplay entities — a distant body, not at the
-// ship's depth (but still nearer than the bright stars at STARFIELD_PARALLAX).
+// ship's depth (but nearer than the twinkling star layers at STARFIELD_PARALLAX).
+// The nearest foreground accents (ecliptic stars) ride the pulsar's own focal
+// transform, orbiting the shared ecliptic alongside the planets.
 const PULSAR_PARALLAX = 0.62;
 
 // Advance the render-only continuous camera (Game.camScroll*). The ship's

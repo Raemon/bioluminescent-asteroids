@@ -29,12 +29,19 @@ export class Ship {
   rotVel = 0; // current angular velocity
   rotHoldTime = 0; // how long the turn key has been held
   rotHeldDir = 0; // turn direction last frame; reset ramp on flip
-  // Drift-aim: hovering a Next Beat Target slows turn + thrust, deeper the closer you are
-  // (nearby ring → central circle → first drift lock). Rotation and thrust have separate eased
-  // multipliers so they can be tuned apart; each eases toward its zone target so crossing a
-  // boundary doesn't snap velocity.
-  driftAimRotMultEased = 1;
-  driftAimThrustMultEased = 1;
+  // Drift-aim: an input (turn / thrust / reverse / each side engine) that BEGINS while hovering a
+  // Next Beat Target starts slowed, then ramps back to full speed as you keep holding it. Inputs
+  // already in flight before the hover are untouched. Each input captures its own start-slow on the
+  // press edge (1 = no slow) and tracks how long it's been held so the ramp can unwind it.
+  driftSlowRot = 1;
+  driftSlowThrust = 1;
+  driftSlowReverse = 1;
+  driftSlowPort = 1;
+  driftSlowStarboard = 1;
+  driftHoldThrust = 0;
+  driftHoldReverse = 0;
+  driftHoldPort = 0;
+  driftHoldStarboard = 0;
   thrustPower = 420;
   thrustRamp = 0;
   // drag is 0 so the ship coasts; thrust + retro are the only velocity inputs (Newtonian feel).

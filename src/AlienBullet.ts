@@ -14,15 +14,6 @@ const SIZE_BULLET_RADIUS: Record<AlienSize, number> = {
   small: 7.2,
 };
 
-// Beats of flight time before the bullet expires. Small fires only once every
-// 4 beats, so its bullet flies longer to compensate — the threat is sparse but
-// covers more of the field per shot.
-const SIZE_BULLET_LIFE_BEATS: Record<AlienSize, number> = {
-  big: 3,
-  medium: 3,
-  small: 5,
-};
-
 export class AlienBullet {
   pos: Vec;
   vel: Vec;
@@ -68,7 +59,10 @@ export class AlienBullet {
       this.maxLife = BEAT_GRID * 8;
     } else {
       this.radius = SIZE_BULLET_RADIUS[size];
-      this.maxLife = BEAT_GRID * SIZE_BULLET_LIFE_BEATS[size];
+      // Alien bullets never time out — they keep flying (wrapping around the
+      // field) until they hit the player or are otherwise consumed. maxLife
+      // stays Infinity so the life-based prune in gameUpdate never drops them.
+      this.maxLife = Infinity;
     }
     this.life = this.maxLife;
   }
@@ -199,9 +193,9 @@ export class AlienBullet {
       waist = r * 0.6;
       tail = r * 1.2;
     }
-    // Darker violet outline halo behind the bright core gives the stinger
+    // Dark blood-red outline halo behind the brighter core gives the stinger
     // a faint shadow so it stays legible on bright backgrounds.
-    ctx.fillStyle = `hsla(${headHue}, 90%, 55%, 0.85)`;
+    ctx.fillStyle = `hsla(${headHue}, 95%, 32%, 0.9)`;
     ctx.beginPath();
     ctx.moveTo(len, 0);
     ctx.lineTo(0, -waist);
@@ -210,9 +204,10 @@ export class AlienBullet {
     ctx.lineTo(0, waist);
     ctx.closePath();
     ctx.fill();
-    // Bright inner stinger — same shape, pulled in slightly so the violet
-    // edge frames the white core.
-    ctx.fillStyle = `hsla(${headHue + 40}, 100%, 96%, 1)`;
+    // Inner stinger — same shape, pulled in slightly so the dark edge frames
+    // a hotter crimson core. Kept saturated-red rather than white so the bolt
+    // reads as blood-red, not a generic bright tracer.
+    ctx.fillStyle = `hsla(${headHue + 6}, 100%, 55%, 1)`;
     ctx.beginPath();
     ctx.moveTo(len * 0.88, 0);
     ctx.lineTo(0, -waist * 0.7);

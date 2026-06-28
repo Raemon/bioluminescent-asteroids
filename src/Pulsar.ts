@@ -42,6 +42,22 @@ type Planet = {
   lightDrop: number;
 };
 
+// Distant foreground "stars" — really just planets seen from much farther out.
+// They share the planets' tilted ecliptic and orbital drift (same orbitPoint),
+// so the whole sky reads as one coherent system rather than a parallax slab
+// sliding past. Each gets its own angle/speed/radius/brightness so they don't
+// move in lockstep.
+type EclipticStar = {
+  baseAngle: number;
+  angularSpeed: number;
+  baseRadiusFrac: number;
+  size: number;
+  hue: number;
+  brightness: number; // per-star alpha scalar (0..1) so brightness varies
+  twinklePhase: number;
+  twinkleSpeed: number;
+};
+
 export class Pulsar {
   w: number;
   h: number;
@@ -95,6 +111,7 @@ export class Pulsar {
   // any extra plumbing on the call site.
   lastBeatIndex = -1;
   planets: Planet[];
+  eclipticStars: EclipticStar[] = [];
 
   // Shockwave state machine. The pulsar occasionally (driven by the game,
   // roughly once every 5 waves) vibrates in place, flashes white-hot, then
@@ -184,6 +201,8 @@ export class Pulsar {
         lightDrop: 2,
       },
     ];
+
+    this.generateEclipticStars();
 
     // Build the (u, v) basis orthogonal to rotAxis. Cross rotAxis with the
     // world-z reference vector; if rotAxis happens to be near-parallel to
@@ -340,6 +359,104 @@ export class Pulsar {
     return Math.min(0.78, (this.displayWaveLevel - 1) * 0.06);
   }
 
+  // Build the distant ecliptic stars. Uses the cosmetic RNG so it never
+  // perturbs the gameplay stream's draw count (replays re-sim from input;
+  // an extra gameplay draw here would desync them). They sit farther out than
+  // the two planets and drift at the slow planet's speed give-or-take 20%.
+  private generateEclipticStars() {
+    const cr = (min: number, max: number) => min + cosmeticRng() * (max - min);
+    const count = 7;
+    this.eclipticStars = [];
+    for (let i = 0; i < count; i++) {
+      const size = cr(1.6, 2.8);
+      this.eclipticStars.push({
+        baseAngle: cr(0, TAU),
+        angularSpeed: 0.005 * cr(0.8, 1.2),
+        baseRadiusFrac: cr(0.55, 1.1),
+        size,
+        hue: cr(195, 235),
+        // bigger reads as nearer/brighter; keep within the old bright-star range
+        brightness: 0.6 + 0.4 * ((size - 1.6) / 1.2),
+        twinklePhase: cr(0, TAU),
+        twinkleSpeed: cr(0.25, 0.9),
+      });
+    }
+  }
+
+  // Screen-space angle of the shared ecliptic plane: perpendicular to the
+  // pulsar's flare axis (beamAngle = atan2(rotAxis.y, rotAxis.x)), so the two
+  // bright flares poke out symmetrically above and below the plane the planets
+  // and ecliptic stars travel along. visualizerAnchor() exposes the same
+  // beamAngle the spectrum visualizer aligns its flares to.
+  eclipticTilt(): number {
+    return Math.atan2(this.rotAxis.y, this.rotAxis.x) + Math.PI / 2;
+  }
+
+  // Place an orbiting body (planet or ecliptic star) at its current screen
+  // position: an ellipse on the tilted ecliptic, rolled around the pulsar
+  // focal so it shares the camera rotation. `angle` already folds in the
+  // body's own angularSpeed*driftT. Single source of truth for the render
+  // loop, the ecliptic stars, and bossPlanetPos() so the boss asteroid spawns
+  // exactly where the planet was drawn. The camera (focal + roll) is passed in
+  // so callers compute it once per frame — cameraView() consumes the cosmetic
+  // RNG during a shock vibration, so calling it once-per-body would jitter the
+  // shudder pattern.
+  private orbitPoint(
+    angle: number, baseRadiusFrac: number, approach: number, cam: { focalX: number; focalY: number; roll: number },
+  ): { x: number; y: number } {
+    const minDim = Math.min(this.w, this.h);
+    const radiusFrac = baseRadiusFrac * (1 - approach * 0.55);
+    const u = Math.cos(angle) * radiusFrac * minDim; // along the ecliptic (major)
+    const v = Math.sin(angle) * radiusFrac * minDim * 0.6; // out-of-plane (minor)
+    const tilt = this.eclipticTilt();
+    const cosE = Math.cos(tilt);
+    const sinE = Math.sin(tilt);
+    const orbitX = u * cosE - v * sinE; // rotate ellipse onto the flare-⟂ plane
+    const orbitY = u * sinE + v * cosE;
+    const relX = this.w / 2 + orbitX - cam.focalX;
+    const relY = this.h / 2 + orbitY - cam.focalY;
+    const cosR = Math.cos(cam.roll);
+    const sinR = Math.sin(cam.roll);
+    return {
+      x: cam.focalX + relX * cosR - relY * sinR,
+      y: cam.focalY + relX * sinR + relY * cosR,
+    };
+  }
+
+  // A distant ecliptic star: bright core + soft radial halo + a faint 4-point
+  // diffraction glint, with a slow brightness breath so it shimmers without
+  // strobing. Per-star `brightness` scales the whole thing so the field varies.
+  // Radial-gradient halo (never shadowBlur). driftT (seconds) drives the breath.
+  private paintEclipticStar(ctx: CanvasRenderingContext2D, star: EclipticStar, px: number, py: number) {
+    const breath = 0.6 + 0.4 * Math.sin(this.driftT * star.twinkleSpeed + star.twinklePhase);
+    const core = star.size * (0.85 + 0.15 * breath);
+    const haloR = core * 7;
+    const a = (0.5 + 0.4 * breath) * star.brightness;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    // soft halo
+    const g = ctx.createRadialGradient(px, py, 0, px, py, haloR);
+    g.addColorStop(0, `hsla(${star.hue}, 75%, 90%, ${0.22 * a})`);
+    g.addColorStop(0.35, `hsla(${star.hue}, 80%, 80%, ${0.07 * a})`);
+    g.addColorStop(1, `hsla(${star.hue}, 80%, 80%, 0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(px - haloR, py - haloR, haloR * 2, haloR * 2);
+    // diffraction glint — four thin tapering spikes
+    const spike = haloR * 0.9;
+    ctx.strokeStyle = `hsla(${star.hue}, 70%, 92%, ${0.16 * a})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(px - spike, py); ctx.lineTo(px + spike, py);
+    ctx.moveTo(px, py - spike); ctx.lineTo(px, py + spike);
+    ctx.stroke();
+    // bright core
+    ctx.fillStyle = `hsla(${star.hue}, 60%, 96%, ${0.95 * a})`;
+    ctx.beginPath();
+    ctx.arc(px, py, core, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
   // Current pulsar size in pixels. Grows linearly with the approach factor;
   // the per-frame pulse adds a small further bump.
   private currentRadius(): number {
@@ -420,8 +537,6 @@ export class Pulsar {
 
   render(ctx: CanvasRenderingContext2D) {
     const approach = this.approach();
-    const cx = this.w / 2;
-    const cy = this.h / 2;
     const minDim = Math.min(this.w, this.h);
     const { x: ppx, y: ppy } = this.pulsarPos();
     const r = this.currentRadius();
@@ -609,6 +724,23 @@ export class Pulsar {
 
     ctx.restore();
 
+    // Shared camera for all orbiting bodies: focal = pulsar's already-computed
+    // screen pos, roll = same continuous tilt cameraView() derives. Built once
+    // here (not via cameraView() per body) so we don't re-run pulsarPos() — it
+    // consumes the cosmetic RNG during a shock vibration.
+    const cam = { focalX: ppx, focalY: ppy, roll: approach * 0.14 };
+
+    // Distant ecliptic stars — drawn before the planets so the big silhouettes
+    // occlude them. They orbit the same tilted ecliptic (orbitPoint) as the
+    // planets, so the whole sky reads as one coherent system.
+    for (const star of this.eclipticStars) {
+      const angle = star.baseAngle + this.driftT * star.angularSpeed;
+      const { x: px, y: py } = this.orbitPoint(angle, star.baseRadiusFrac, approach, cam);
+      // off-screen orbiters cost nothing — skip with a generous margin for the halo
+      if (px < -120 || px > this.w + 120 || py < -120 || py > this.h + 120) continue;
+      this.paintEclipticStar(ctx, star, px, py);
+    }
+
     // Planets — drawn AFTER the pulsar so they occlude it. Iterated back-
     // to-front: planets[1] is the smaller / farther one and goes down first,
     // planets[0] is the larger / closer one and goes on top so the two
@@ -616,25 +748,15 @@ export class Pulsar {
     // Camera roll applied to all background planets so their orbits rotate
     // with the rest of the scene — sells "this is one coherent camera view"
     // rather than each layer floating independently.
-    const { roll: cameraRoll } = this.cameraView();
     for (let pi = this.planets.length - 1; pi >= 0; pi--) {
       const planet = this.planets[pi];
       const isBossPlanet = pi === 0;
       if (isBossPlanet && (this.bossPlanetState === "active" || this.bossPlanetState === "defeated")) continue;
 
-      const radiusFrac = planet.baseRadiusFrac * (1 - approach * 0.55);
+      // Position the planet on the shared tilted ecliptic, rolled around the
+      // pulsar focal so planet and starfield share the camera rotation.
       const angle = planet.baseAngle + this.driftT * planet.angularSpeed;
-      // Position the planet on its orbit (around screen center, slightly
-      // elliptical), then roll the resulting point around the pulsar as the
-      // shared camera focal so the planet and the starfield share rotation.
-      const orbitX = Math.cos(angle) * radiusFrac * minDim;
-      const orbitY = Math.sin(angle) * radiusFrac * minDim * 0.6;
-      const cosR = Math.cos(cameraRoll);
-      const sinR = Math.sin(cameraRoll);
-      const relX = cx + orbitX - ppx;
-      const relY = cy + orbitY - ppy;
-      const px = ppx + relX * cosR - relY * sinR;
-      const py = ppy + relX * sinR + relY * cosR;
+      const { x: px, y: py } = this.orbitPoint(angle, planet.baseRadiusFrac, approach, cam);
       let size: number;
       let colorApproach: number;
       if (isBossPlanet) {
@@ -1060,24 +1182,10 @@ export class Pulsar {
   // rather than a fresh object teleporting in.
   bossPlanetPos(): { x: number; y: number } {
     const planet = this.planets[0];
-    const approach = this.approach();
-    const radiusFrac = planet.baseRadiusFrac * (1 - approach * 0.55);
+    // Same orbitPoint the planet render uses (shared tilted ecliptic + camera
+    // roll), so the boss asteroid spawns exactly where the player saw the planet.
     const angle = planet.baseAngle + this.driftT * planet.angularSpeed;
-    const minDim = Math.min(this.w, this.h);
-    // Match the rendered position: roll the orbit point around the pulsar's
-    // screen position (same camera transform the planet render uses), so the
-    // boss asteroid spawns exactly where the player saw the planet.
-    const { focalX, focalY, roll } = this.cameraView();
-    const orbitX = Math.cos(angle) * radiusFrac * minDim;
-    const orbitY = Math.sin(angle) * radiusFrac * minDim * 0.6;
-    const relX = this.w / 2 + orbitX - focalX;
-    const relY = this.h / 2 + orbitY - focalY;
-    const cosR = Math.cos(roll);
-    const sinR = Math.sin(roll);
-    return {
-      x: focalX + relX * cosR - relY * sinR,
-      y: focalY + relX * sinR + relY * cosR,
-    };
+    return this.orbitPoint(angle, planet.baseRadiusFrac, this.approach(), this.cameraView());
   }
 
   // Subtle Ceres-like silhouette for the boss planetoid. At small sizes the

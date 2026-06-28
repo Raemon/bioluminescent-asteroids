@@ -395,20 +395,26 @@ const buildBassteroidShape = (kind: "bassA" | "bassB" | "bassC" | "bassD"): Bass
       ],
     };
   }
+  // Tower is a gothic comms-spire, read top→bottom: a faceted crown beacon, a
+  // tapering twin-step shaft (narrow neck over a wider mast), a flared buttress
+  // base, and two angled outrigger fins braced off the mast. The stepped taper
+  // gives a ziggurat-spire profile instead of a plain box stack; the fins add
+  // the cross-bracing read of a transmission mast. Split-tree indices below
+  // depend on this order: 0 crown, 1 neck, 2 mast, 3 base, 4/5 fins.
   return {
     modules: [
-      { vertices: [v(-0.55, 0.98), v(0.55, 0.98), v(0.32, 0.55), v(-0.32, 0.55)] },
-      rect(-0.38, 0.0, 0.38, 0.55),
-      rect(-0.28, -0.5, 0.28, 0.0),
-      { vertices: [v(-0.28, -0.5), v(0, -0.95), v(0.28, -0.5)] },
-      { vertices: [v(-0.38, 0.1), v(-0.72, 0.32), v(-0.38, 0.4)] },
-      { vertices: [v(0.38, 0.1), v(0.72, 0.32), v(0.38, 0.4)] },
+      { vertices: [v(-0.18, -0.5), v(0, -0.98), v(0.18, -0.5), v(0.1, -0.36), v(-0.1, -0.36)] },
+      { vertices: [v(-0.16, -0.5), v(0.16, -0.5), v(0.26, -0.04), v(-0.26, -0.04)] },
+      { vertices: [v(-0.3, -0.04), v(0.3, -0.04), v(0.42, 0.5), v(-0.42, 0.5)] },
+      { vertices: [v(-0.5, 0.5), v(0.5, 0.5), v(0.66, 0.98), v(-0.66, 0.98)] },
+      { vertices: [v(-0.3, 0.04), v(-0.78, 0.2), v(-0.6, 0.46), v(-0.36, 0.36)] },
+      { vertices: [v(0.3, 0.04), v(0.78, 0.2), v(0.6, 0.46), v(0.36, 0.36)] },
     ],
     lights: [
-      { pos: v(-0.28, 0.78), size: 0.06 },
-      { pos: v(0.28, 0.78), size: 0.06 },
-      { pos: v(0, 0.28), size: 0.05 },
-      { pos: v(0, -0.78), size: 0.06 },
+      { pos: v(0, -0.64), size: 0.07 },
+      { pos: v(-0.2, 0.16), size: 0.05 },
+      { pos: v(0.2, 0.16), size: 0.05 },
+      { pos: v(0, 0.78), size: 0.06 },
     ],
   };
 };
@@ -544,18 +550,19 @@ const BASS_SPLIT_TREES: Record<"bassA" | "bassB" | "bassC" | "bassD", BassSplitT
       },
     ],
   },
-  // Tower: vertical stack — cockpit(0) / mid(1) / lower(2) / nose(3), wings(4,5)
-  // bolt onto the mid block. Split cockpit+mid+wings (upper) vs lower+nose
-  // (engine), so the wings ride with the mid block they actually touch.
+  // Tower: gothic spire — crown(0) / neck(1) / mast(2) / base(3), fins(4,5)
+  // bolt onto the mast. Split crown+neck (the spire) vs mast+base+fins (the
+  // body), so the fins ride with the mast they actually touch. The spire
+  // medium carries a sliver bridging the neck stub to the crown.
   bassD: {
     mediums: [
       {
-        fragment: frag("bassD", [0, 1, 4, 5], [0, 1, 2]),
-        smalls: [frag("bassD", [0], [0, 1]), frag("bassD", [1, 4, 5], [2])],
+        fragment: frag("bassD", [0, 1], [0], [rect(-0.16, -0.5, 0.16, -0.2)]),
+        smalls: [frag("bassD", [0], [0]), frag("bassD", [1], [], [rect(-0.16, -0.5, 0.16, -0.2)])],
       },
       {
-        fragment: frag("bassD", [2, 3], [3]),
-        smalls: [frag("bassD", [2], []), frag("bassD", [3], [3])],
+        fragment: frag("bassD", [2, 3, 4, 5], [1, 2, 3]),
+        smalls: [frag("bassD", [2, 4, 5], [1, 2]), frag("bassD", [3], [3])],
       },
     ],
   },

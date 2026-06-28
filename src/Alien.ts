@@ -3,6 +3,7 @@ import { AlienBullet } from "./AlienBullet";
 import { Trail } from "./Trail";
 import { rng, cosmeticRng } from "./game/rng";
 import { ENTITY_CONFIG } from "./game/entityConfig";
+import { WARP_OUT_DURATION, warpAnchorOffset } from "./game/wormhole";
 
 // Three sizes, each with its own role in the rhythm:
 //   "big"    : 4 HP, fires every other beat (every 2× BEAT_GRID).
@@ -24,12 +25,12 @@ const SIZE_SPEED = ENTITY_CONFIG.alien.speed;
 const SIZE_BULLET_SPEED = ENTITY_CONFIG.alien.bulletSpeed;
 
 const SIZE_HUE: Record<AlienSize, number> = {
-  // Deep-purple manta family — all three sizes sit in the same violet band so
-  // they read as the same species. Big is the deepest violet, small drifts
-  // a touch pinker, medium sits between them.
-  big: 278,
-  medium: 285,
-  small: 292,
+  // Dark blood-red manta family — all three sizes sit in the same crimson band
+  // so they read as the same species. Big sits deepest, small drifts a touch
+  // warmer toward orange-red, medium sits between them.
+  big: 356,
+  medium: 0,
+  small: 6,
 };
 
 // Per-size firing pattern: gaps (in BEAT_GRID units) between consecutive
@@ -342,6 +343,17 @@ export class Alien {
   // page's looping demo) from auto-despawning.
   traveled = 0;
   maxTravel = Infinity;
+  // Warp-out: an alien that reaches maxTravel dives through a departure portal
+  // instead of vanishing off the far edge. warpT runs 0→1 over
+  // WARP_OUT_DURATION; while it does, the body slides toward warpAnchor (the
+  // portal's vanishing point), shrinks and spins down the throat, then is gone.
+  // needsWormhole tells the Game to spawn exactly one portal. null = not warping.
+  warpT: number | null = null;
+  warpAnchorX = 0;
+  warpAnchorY = 0;
+  warpStartX = 0;
+  warpStartY = 0;
+  needsWormhole = false;
   // Theremin-drone glow trail. Vibrato pulse mode lines up loosely with the
   // alien voice's amplitude LFO. See Trail.ts.
   trail: Trail;
@@ -372,7 +384,43 @@ export class Alien {
     this.trail = new Trail(this.hue, trailRadius, 0.26, "theremin", trailRate);
   }
 
+  // Begin diving through a departure portal. Freezes the dive path: the body
+  // travels from here to warpAnchor (the portal's vanishing point, offset up the
+  // heading's tilt axis — matching wormhole.ts's throat spark). Called once when
+  // the alien reaches maxTravel.
+  private beginWarpOut() {
+    this.warpT = 0;
+    this.needsWormhole = true;
+    this.warpStartX = this.pos.x;
+    this.warpStartY = this.pos.y;
+    const off = warpAnchorOffset(this.radius, Math.atan2(this.vel.y, this.vel.x));
+    this.warpAnchorX = this.pos.x + off.dx;
+    this.warpAnchorY = this.pos.y + off.dy;
+  }
+
+  // Heading the portal aligns to — the alien's flight direction.
+  get warpHeading(): number {
+    return Math.atan2(this.vel.y, this.vel.x);
+  }
+
   update(dt: number, _w: number, _h: number) {
+    // Once warping out, run the dive instead of normal flight: ease the body
+    // into the portal mouth and end it when it's fully swallowed.
+    if (this.warpT !== null) {
+      this.warpT += dt / WARP_OUT_DURATION;
+      if (this.warpT >= 1) {
+        this.alive = false;
+        return;
+      }
+      this.weavePhase += dt * this.weaveSpeed;
+      const k = Math.min(1, this.warpT);
+      const ease = k * k;
+      this.pos.x = this.warpStartX + (this.warpAnchorX - this.warpStartX) * ease;
+      this.pos.y = this.warpStartY + (this.warpAnchorY - this.warpStartY) * ease;
+      this.trail.update(dt, this.pos.x, this.pos.y);
+      if (this.flashAmount > 0) this.flashAmount = Math.max(0, this.flashAmount - dt * 4);
+      return;
+    }
     this.weavePhase += dt * this.weaveSpeed;
     // Bend the velocity vector slowly so the flight path arcs (and sometimes
     // loops) instead of going in a straight line. Rotate (vx, vy) by curveRate*dt.
@@ -402,7 +450,7 @@ export class Alien {
     // maxTravel (set from the screen diagonal) lands it past the opposite edge.
     this.traveled += Math.hypot(stepX, stepY);
     if (this.traveled > this.maxTravel) {
-      this.alive = false;
+      this.beginWarpOut();
     }
     // Nose follows the direction of travel, with a tiny weave-driven sway so
     // the silhouette breathes instead of locking rigidly to the velocity.
@@ -447,6 +495,9 @@ export class Alien {
   }
 
   collidesWith(point: Vec, pointRadius: number): boolean {
+    // A warping-out alien is intangible — it's diving through its portal, no
+    // longer a target or a threat, so neither bullets nor the ship interact.
+    if (this.warpT !== null) return false;
     // 0.9 — tight circle so glancing shots miss the spindly limbs.
     return circleHit(this.pos, this.radius * 0.9, point, pointRadius);
   }
@@ -524,9 +575,9 @@ export class Alien {
     //    so the silhouette fill rides on top of it.
     sctx.globalCompositeOperation = "lighter";
     const underglow = sctx.createRadialGradient(0, 0, r * 0.1, 0, 0, r * 1.1);
-    underglow.addColorStop(0, `hsla(${baseHue + 6}, 90%, 40%, 0.55)`);
-    underglow.addColorStop(0.55, `hsla(${baseHue}, 80%, 28%, 0.35)`);
-    underglow.addColorStop(1, `hsla(${baseHue - 6}, 70%, 18%, 0)`);
+    underglow.addColorStop(0, `hsla(${baseHue + 6}, 95%, 26%, 0.55)`);
+    underglow.addColorStop(0.55, `hsla(${baseHue}, 90%, 18%, 0.35)`);
+    underglow.addColorStop(1, `hsla(${baseHue - 6}, 80%, 10%, 0)`);
     sctx.fillStyle = underglow;
     sctx.fillRect(-extent, -extent, sizePx, sizePx);
 
@@ -537,9 +588,9 @@ export class Alien {
     sctx.globalCompositeOperation = "source-over";
     this.traceBody(sctx);
     const bodyFill = sctx.createLinearGradient(0, -r, 0, r);
-    bodyFill.addColorStop(0, `hsla(${baseHue + 4}, 75%, 32%, 0.96)`);
-    bodyFill.addColorStop(0.5, `hsla(${baseHue - 2}, 80%, 14%, 0.98)`);
-    bodyFill.addColorStop(1, `hsla(${baseHue + 4}, 75%, 32%, 0.96)`);
+    bodyFill.addColorStop(0, `hsla(${baseHue + 4}, 85%, 20%, 0.96)`);
+    bodyFill.addColorStop(0.5, `hsla(${baseHue - 2}, 90%, 8%, 0.98)`);
+    bodyFill.addColorStop(1, `hsla(${baseHue + 4}, 85%, 20%, 0.96)`);
     sctx.fillStyle = bodyFill;
     sctx.fill();
 
@@ -548,13 +599,13 @@ export class Alien {
     //    sway as a separate stroke on top.
     if (shape.tail) {
       this.traceTail(sctx, 0);
-      sctx.fillStyle = `hsla(${baseHue - 4}, 80%, 14%, 0.95)`;
+      sctx.fillStyle = `hsla(${baseHue - 4}, 90%, 8%, 0.95)`;
       sctx.fill();
     }
 
     // 4. Cephalic horns — small filled triangles flanking the nose. Same
     //    body-fill language so they read as part of the same creature.
-    sctx.fillStyle = `hsla(${baseHue + 4}, 78%, 24%, 0.95)`;
+    sctx.fillStyle = `hsla(${baseHue + 4}, 88%, 14%, 0.95)`;
     for (const horn of shape.horns) {
       sctx.beginPath();
       sctx.moveTo(horn.tip.x * r, horn.tip.y * r);
@@ -593,7 +644,7 @@ export class Alien {
     // Bright edge-light along one side of each seam (slightly offset toward
     // the leading edge so the wing reads as a faceted plate catching light).
     sctx.globalCompositeOperation = "lighter";
-    sctx.strokeStyle = `hsla(${baseHue + 20}, 100%, 75%, 0.32)`;
+    sctx.strokeStyle = `hsla(${baseHue + 8}, 100%, 55%, 0.32)`;
     sctx.lineWidth = 0.7;
     for (const facet of shape.facets) {
       const dx = facet.end.x - facet.start.x;
@@ -617,7 +668,7 @@ export class Alien {
 
     // Ribs — kinked polylines drawn as glowing structural seams.
     sctx.globalCompositeOperation = "lighter";
-    sctx.strokeStyle = `hsla(${baseHue + 18}, 100%, 70%, 0.55)`;
+    sctx.strokeStyle = `hsla(${baseHue + 6}, 100%, 50%, 0.55)`;
     sctx.lineWidth = 1.2;
     sctx.lineCap = "round";
     sctx.lineJoin = "round";
@@ -644,7 +695,7 @@ export class Alien {
     //    fill (drawn earlier in source-over) covers the rear stroke so only
     //    the forward arc reads as the highlight.
     sctx.globalCompositeOperation = "lighter";
-    sctx.strokeStyle = `hsla(${baseHue + 24}, 100%, 78%, 0.85)`;
+    sctx.strokeStyle = `hsla(${baseHue + 8}, 100%, 58%, 0.85)`;
     sctx.lineWidth = 1.4;
     this.traceBody(sctx);
     sctx.stroke();
@@ -677,7 +728,7 @@ export class Alien {
     sctx.fillStyle = `hsla(${baseHue - 10}, 80%, 4%, 0.95)`;
     tracePoly(shape.cockpit.vertices);
     sctx.fill();
-    sctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 80%, 0.75)`;
+    sctx.strokeStyle = `hsla(${baseHue + 10}, 100%, 62%, 0.75)`;
     sctx.lineWidth = 0.8;
     sctx.lineJoin = "miter";
     sctx.stroke();
@@ -692,8 +743,8 @@ export class Alien {
     gcx = (gcx / shape.cockpit.vertices.length) * r;
     gcy = (gcy / shape.cockpit.vertices.length) * r;
     const cockpitGlow = sctx.createRadialGradient(gcx, gcy, 0, gcx, gcy, r * 0.2);
-    cockpitGlow.addColorStop(0, `hsla(${baseHue + 20}, 100%, 75%, 0.7)`);
-    cockpitGlow.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
+    cockpitGlow.addColorStop(0, `hsla(${baseHue + 8}, 100%, 55%, 0.7)`);
+    cockpitGlow.addColorStop(1, `hsla(${baseHue}, 100%, 45%, 0)`);
     sctx.fillStyle = cockpitGlow;
     sctx.fillRect(-extent, -extent, sizePx, sizePx);
     sctx.restore();
@@ -706,6 +757,16 @@ export class Alien {
     const shape = this.shape;
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
+    // While warping out, shrink the whole body toward the throat and spin it in
+    // (pos already eases toward the anchor in update). A brief swell as it
+    // crosses the rim, then squeeze to nothing — same dive as the comet head.
+    if (this.warpT !== null) {
+      const k = Math.min(1, this.warpT);
+      const warpScale = (1 + 0.18 * Math.sin(k * Math.PI)) * (1 - k * k);
+      if (warpScale < 0.02) { ctx.restore(); return; }
+      ctx.rotate(k * 5);
+      ctx.scale(warpScale, warpScale);
+    }
     ctx.rotate(this.rotation);
     ctx.globalCompositeOperation = "lighter";
 
@@ -718,9 +779,9 @@ export class Alien {
     ctx.save();
     ctx.scale(haloRadiusX / haloRadiusY, 1);
     const halo = ctx.createRadialGradient(0, 0, r * 0.2, 0, 0, haloRadiusY);
-    halo.addColorStop(0, `hsla(${baseHue}, 100%, 65%, ${haloAlpha})`);
-    halo.addColorStop(0.55, `hsla(${baseHue + 10}, 100%, 55%, ${haloAlpha * 0.35})`);
-    halo.addColorStop(1, `hsla(${baseHue}, 100%, 60%, 0)`);
+    halo.addColorStop(0, `hsla(${baseHue}, 100%, 45%, ${haloAlpha})`);
+    halo.addColorStop(0.55, `hsla(${baseHue + 4}, 100%, 38%, ${haloAlpha * 0.35})`);
+    halo.addColorStop(1, `hsla(${baseHue}, 100%, 42%, 0)`);
     ctx.fillStyle = halo;
     ctx.beginPath();
     ctx.arc(0, 0, haloRadiusY, 0, TAU);
@@ -737,9 +798,9 @@ export class Alien {
       const wakeLen = r * (0.45 + 0.18 * wakePulse);
       const wakeRad = r * 0.16;
       const wg = ctx.createRadialGradient(wx - wakeLen * 0.4, wy, 0, wx - wakeLen * 0.4, wy, wakeLen);
-      wg.addColorStop(0, `hsla(${baseHue + 14}, 100%, 70%, ${0.45 * wakePulse})`);
-      wg.addColorStop(0.55, `hsla(${baseHue}, 100%, 55%, ${0.2 * wakePulse})`);
-      wg.addColorStop(1, `hsla(${baseHue}, 100%, 50%, 0)`);
+      wg.addColorStop(0, `hsla(${baseHue + 6}, 100%, 48%, ${0.45 * wakePulse})`);
+      wg.addColorStop(0.55, `hsla(${baseHue}, 100%, 40%, ${0.2 * wakePulse})`);
+      wg.addColorStop(1, `hsla(${baseHue}, 100%, 38%, 0)`);
       ctx.fillStyle = wg;
       ctx.beginPath();
       ctx.ellipse(wx - wakeLen * 0.4, wy, wakeLen, wakeRad, 0, 0, TAU);
@@ -766,7 +827,7 @@ export class Alien {
       const tri = Math.max(0, 1 - Math.abs(phase - 0.5) * 2.4);
       const pulse = tri * (0.5 + 0.6 * this.fireFlash) + this.fireFlash * 0.25;
       if (pulse <= 0.02) continue;
-      ctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 85%, ${Math.min(1, pulse * 0.85)})`;
+      ctx.strokeStyle = `hsla(${baseHue + 12}, 100%, 62%, ${Math.min(1, pulse * 0.85)})`;
       ctx.lineWidth = 1.6;
       ctx.beginPath();
       ctx.moveTo(rib.start.x * r, -rib.start.y * r);
@@ -786,7 +847,7 @@ export class Alien {
     // baked sprite. Uses the same weave phase as the rest of the body.
     if (shape.tail) {
       ctx.save();
-      ctx.strokeStyle = `hsla(${baseHue + 20}, 100%, 75%, 0.4)`;
+      ctx.strokeStyle = `hsla(${baseHue + 8}, 100%, 52%, 0.4)`;
       ctx.lineWidth = 1.2;
       this.traceTail(ctx, this.weavePhase * 1.4);
       ctx.stroke();

@@ -17,19 +17,23 @@ const ENGINE_SOUNDS_ENABLED = false;
 // Canister.POWERUP_KINDS) so the two never disagree.
 export const SIDE_THRUST_ALWAYS_ON = true;
 
-// Drift-aim fine-control: hovering a Next Beat Target slows both rotation AND thrust so the player
-// can hold the lock and build drift tier. The slow deepens with the three nested hover zones (set
-// by the sim's hover-lock tick): nearby approach ring (zoneEnterBeatTime) → central target circle
-// (hoverStartBeatTime) → first drift reward / 0.5s lock (completionBeatTime). Any hovered slot
-// engages the slow (slot = beat distance: 0 = 1-beat, 1 = 2-beat, ...); the rotation slow is then
-// scaled by the hovered target's actual on-screen distance (see driftAimRotDistFactor).
+// Drift-aim fine-control: an input that BEGINS while the reticule is hovering a Next Beat Target
+// starts slowed, then ramps back to full speed as you keep holding it. Inputs already in flight
+// before the hover are untouched, so the slow never gets in the way of normal manoeuvring — it only
+// gives a deliberate "settle onto the target" press an initial soft start.
+//   - The slow is captured once on each input's press edge (driftSlowRot/Thrust/Reverse/Port/Star).
+//   - While held, it ramps back to 1 over DRIFT_AIM_RAMP_SEC (so a hold > that is full speed).
+//   - The captured value comes from the deepest hovered zone: center/locked slow, nearby = none.
 // Rotation and thrust each have their own [nearby, center, locked] multiplier set so they can be
 // tuned apart.
 type DriftAimMults = { nearby: number; center: number; locked: number };
 const DRIFT_AIM_ROT_MULTS: DriftAimMults = { nearby: 1, center: 0.25, locked: 0.25 };
 const DRIFT_AIM_THRUST_MULTS: DriftAimMults = { nearby: 1, center: 0.25, locked: 0.25 };
-// ease toward the zone's target multiplier so crossing a boundary doesn't snap velocity.
-const DRIFT_AIM_EASE_SEC = 0.15;
+// how long a held input takes to ramp its captured drift-slow back up to full speed.
+const DRIFT_AIM_RAMP_SEC = 0.15;
+// when true, a turn whose frame step would carry the heading PAST a hovered target snaps exactly
+// onto it (once) instead of overshooting; the key still turns freely on the next frame.
+const DRIFT_AIM_SNAP = true;
 // Rotation swings the reticule a tangential distance of (aim distance × angular speed), so a target
 // twice as far sweeps twice as fast under the same turn rate. To hold the reticule's on-screen sweep
 // roughly constant regardless of how far the hovered target is, the center/locked rotation slow is
@@ -65,9 +69,9 @@ const deepestHoveredRing = (ship: Ship) => {
   return best;
 };
 
-// target rotation multiplier from the deepest hovered zone, with the center/locked slow scaled down
-// by actual aim distance so farther targets turn proportionally slower (nearby keeps full strength).
-const driftAimRotTargetMult = (ship: Ship) => {
+// slow to capture for a freshly-pressed ROTATION input: center/locked zone slow scaled by aim
+// distance (nearby = none, no hover = none). 1 means "no slow".
+const captureRotSlow = (ship: Ship) => {
   const { zone, center } = deepestHoveredRing(ship);
   if (zone >= 2) {
     const base = DRIFT_AIM_ROT_MULTS[zone === 3 ? "locked" : "center"];
@@ -77,8 +81,9 @@ const driftAimRotTargetMult = (ship: Ship) => {
   return 1;
 };
 
-// target thrust multiplier from the deepest hovered zone (no distance scaling — thrust moves the ship).
-const driftAimThrustTargetMult = (ship: Ship) => {
+// slow to capture for a freshly-pressed THRUST-family input (no distance scaling — thrust moves the
+// ship, not the reticule sweep). 1 means "no slow".
+const captureThrustSlow = (ship: Ship) => {
   const zone = deepestHoveredRing(ship).zone;
   if (zone === 3) return DRIFT_AIM_THRUST_MULTS.locked;
   if (zone === 2) return DRIFT_AIM_THRUST_MULTS.center;
@@ -86,18 +91,36 @@ const driftAimThrustTargetMult = (ship: Ship) => {
   return 1;
 };
 
-// resolve this frame's eased multiplier for rotation / thrust respectively.
-const driftAimRotMult = (ship: Ship) => ship.driftAimRotMultEased;
-const driftAimThrustMult = (ship: Ship) => ship.driftAimThrustMultEased;
+// ramp a captured slow back toward 1 (full speed) given how long the input has been held: at hold=0
+// it's the raw captured value, at hold>=DRIFT_AIM_RAMP_SEC it's a full 1.
+const rampedSlow = (captured: number, heldSec: number) => {
+  const t = Math.min(1, heldSec / DRIFT_AIM_RAMP_SEC);
+  return captured + (1 - captured) * t;
+};
 
-// ease one value toward its target so feel stays smooth across boundaries.
-const easeDriftAim = (current: number, target: number, dt: number) =>
-  current + (target - current) * Math.min(1, dt / DRIFT_AIM_EASE_SEC);
+// shortest signed angle delta from a to b, in (-π, π].
+const angleDelta = (a: number, b: number) => {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
+};
 
-// step both eased multipliers once per frame from the current hover zone.
-const updateDriftAimSlow = (ship: Ship, dt: number) => {
-  ship.driftAimRotMultEased = easeDriftAim(ship.driftAimRotMultEased, driftAimRotTargetMult(ship), dt);
-  ship.driftAimThrustMultEased = easeDriftAim(ship.driftAimThrustMultEased, driftAimThrustTargetMult(ship), dt);
+// if a hovered target lies between this frame's heading and where rotVel*dt would carry it, snap the
+// heading exactly onto the target and report it. Snap-once: rotVel is left intact, so the next held
+// frame turns freely on past. Returns true if it snapped (caller skips the normal heading advance).
+const trySnapToTarget = (ship: Ship, dt: number): boolean => {
+  if (!DRIFT_AIM_SNAP || ship.rotVel === 0) return false;
+  const center = deepestHoveredRing(ship).center;
+  if (!center) return false;
+  const targetHeading = Math.atan2(center.y - ship.pos.y, center.x - ship.pos.x);
+  const toTarget = angleDelta(ship.heading, targetHeading);
+  const step = ship.rotVel * dt;
+  // only snap when turning toward the target and this step would reach or pass it.
+  if (Math.sign(step) !== Math.sign(toTarget)) return false;
+  if (Math.abs(step) < Math.abs(toTarget)) return false;
+  ship.heading = targetHeading;
+  return true;
 };
 
 // Two-regime turning: inside the tap window the ship turns at a slow,
@@ -107,21 +130,26 @@ const updateDriftAimSlow = (ship: Ship, dt: number) => {
 const updateTurning = (ship: Ship, input: IInput, dt: number) => {
   const dir = (isDown(input, "rotateRight") ? 1 : 0) - (isDown(input, "rotateLeft") ? 1 : 0);
   const precision = isDown(input, "precisionTurn") ? 0.2 : 1;
-  updateDriftAimSlow(ship, dt);
-  const driftAim = driftAimRotMult(ship);
   if (dir !== 0) {
-    if (dir !== ship.rotHeldDir) ship.rotHoldTime = 0;
+    // press edge (start, or direction flip): reset the hold clock and capture this turn's drift-slow
+    // from the currently-hovered zone. A turn begun off-target captures 1 (no slow).
+    if (dir !== ship.rotHeldDir) {
+      ship.rotHoldTime = 0;
+      ship.driftSlowRot = captureRotSlow(ship);
+    }
     ship.rotHoldTime += dt;
     const past = ship.rotHoldTime - ship.rotTapHoldTime;
     const blend = Math.min(1, Math.max(0, past / ship.rotRampTime));
     const rate = ship.rotTapRate + (ship.rotMaxSpeed - ship.rotTapRate) * blend;
+    const driftAim = rampedSlow(ship.driftSlowRot, ship.rotHoldTime);
     ship.rotVel = dir * rate * precision * driftAim;
   } else {
     ship.rotHoldTime = 0;
+    ship.driftSlowRot = 1;
     if (!ship.rotInertia) ship.rotVel = 0;
   }
   ship.rotHeldDir = dir;
-  ship.heading += ship.rotVel * dt;
+  if (!trySnapToTarget(ship, dt)) ship.heading += ship.rotVel * dt;
 };
 
 // tap-to-nudge feel; thrust ramps in over ~0.15s so a tap barely budges and a hold accelerates fully.
@@ -132,23 +160,42 @@ const updateThrustRamp = (ship: Ship, input: IInput, dt: number) => {
 };
 const thrustScale = (ship: Ship) => 0.02 + 0.98 * ship.thrustRamp;
 
-// Single acceleration path for every engine — push velocity along (heading + offset) with the
-// drift-aim slow baked in, so all movement honours the hover-zone multiplier identically. `ramped`
-// applies the forward/reverse tap-ramp; side thrust passes false to keep its instant full power.
-const applyThrust = (ship: Ship, headingOffset: number, ramped: boolean, dt: number, t: number) => {
-  const a = ship.thrustPower * (ramped ? thrustScale(ship) : 1) * driftAimThrustMult(ship) * dt;
+// Single acceleration path for every engine — push velocity along (heading + offset) with this
+// engine's drift-slow baked in. `ramped` applies the forward/reverse tap-ramp; side thrust passes
+// false to keep its instant full power. `driftSlow` is the engine's already-ramped drift-aim slow
+// (1 = none) so each engine honours only the slow captured on its own press edge.
+const applyThrust = (ship: Ship, headingOffset: number, ramped: boolean, driftSlow: number, dt: number, t: number) => {
+  const a = ship.thrustPower * (ramped ? thrustScale(ship) : 1) * driftSlow * dt;
   const h = ship.heading + headingOffset;
   ship.vel.x += Math.cos(h) * a;
   ship.vel.y += Math.sin(h) * a;
   ship.lastThrustActiveAt = t / 1000;
 };
 
+// advance one engine's drift-slow for this frame: capture from the hovered zone on the press edge
+// (was off, now on), otherwise ramp the held slow back toward full. Returns the slow to apply now.
+const tickEngineDriftSlow = (
+  ship: Ship, on: boolean, was: boolean,
+  getHold: () => number, setHold: (v: number) => void,
+  getSlow: () => number, setSlow: (v: number) => void, dt: number,
+) => {
+  if (!on) { setHold(0); setSlow(1); return 1; }
+  if (!was) { setHold(0); setSlow(captureThrustSlow(ship)); }
+  setHold(getHold() + dt);
+  return rampedSlow(getSlow(), getHold());
+};
+
 // thruster has to gate sound start/stop on the edge so the loop doesn't restart every frame.
 const updateForwardThrust = (ship: Ship, input: IInput, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasThrusting = ship.thrustOn;
   ship.thrustOn = isDown(input, "thrust");
+  const slow = tickEngineDriftSlow(
+    ship, ship.thrustOn, wasThrusting,
+    () => ship.driftHoldThrust, v => (ship.driftHoldThrust = v),
+    () => ship.driftSlowThrust, v => (ship.driftSlowThrust = v), dt,
+  );
   if (ship.thrustOn) {
-    applyThrust(ship, 0, true, dt, t);
+    applyThrust(ship, 0, true, slow, dt, t);
     emitThrust(ship, particles, t);
     if (ENGINE_SOUNDS_ENABLED && !wasThrusting) sound.play("thrust");
   } else if (wasThrusting) sound.stopThrust();
@@ -158,8 +205,13 @@ const updateForwardThrust = (ship: Ship, input: IInput, particles: ParticleSyste
 const updateReverseThrust = (ship: Ship, input: IInput, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasReversing = ship.reverseThrustOn;
   ship.reverseThrustOn = isDown(input, "reverse");
+  const slow = tickEngineDriftSlow(
+    ship, ship.reverseThrustOn, wasReversing,
+    () => ship.driftHoldReverse, v => (ship.driftHoldReverse = v),
+    () => ship.driftSlowReverse, v => (ship.driftSlowReverse = v), dt,
+  );
   if (ship.reverseThrustOn) {
-    applyThrust(ship, Math.PI, true, dt, t);
+    applyThrust(ship, Math.PI, true, slow, dt, t);
     emitReverseThrust(ship, particles, t);
     if (ENGINE_SOUNDS_ENABLED && !wasReversing) sound.play("reverseThrust");
   } else if (wasReversing) sound.stopReverseThrust();
@@ -171,14 +223,26 @@ const updateReverseThrust = (ship: Ship, input: IInput, particles: ParticleSyste
 const updateSideThrust = (ship: Ship, input: IInput, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const enabled = ship.sideEnginesActive || SIDE_THRUST_ALWAYS_ON;
   const wasActive = ship.portThrustOn || ship.starboardThrustOn;
+  const wasPort = ship.portThrustOn;
+  const wasStarboard = ship.starboardThrustOn;
   ship.portThrustOn = enabled && isDown(input, "sidePort");
   ship.starboardThrustOn = enabled && isDown(input, "sideStarboard");
+  const portSlow = tickEngineDriftSlow(
+    ship, ship.portThrustOn, wasPort,
+    () => ship.driftHoldPort, v => (ship.driftHoldPort = v),
+    () => ship.driftSlowPort, v => (ship.driftSlowPort = v), dt,
+  );
+  const starboardSlow = tickEngineDriftSlow(
+    ship, ship.starboardThrustOn, wasStarboard,
+    () => ship.driftHoldStarboard, v => (ship.driftHoldStarboard = v),
+    () => ship.driftSlowStarboard, v => (ship.driftSlowStarboard = v), dt,
+  );
   if (ship.portThrustOn) {
-    applyThrust(ship, -Math.PI / 2, false, dt, t);
+    applyThrust(ship, -Math.PI / 2, false, portSlow, dt, t);
     emitSideThrust(ship, particles, t, "port");
   }
   if (ship.starboardThrustOn) {
-    applyThrust(ship, Math.PI / 2, false, dt, t);
+    applyThrust(ship, Math.PI / 2, false, starboardSlow, dt, t);
     emitSideThrust(ship, particles, t, "starboard");
   }
   const isActive = ship.portThrustOn || ship.starboardThrustOn;

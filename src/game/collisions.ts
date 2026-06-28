@@ -13,12 +13,12 @@ import {
   spawnCanisterFromGem,
 } from "../Gem";
 import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebaseBeatEval } from "./rhythmGate";
-import { BEAT_GRID } from "./rhythmConstants";
+import { BEAT_GRID, DRIFT_RHYTHM_BONUS } from "./rhythmConstants";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGemPickup, emitBounceSparks, emitAlienBulletPop } from "./particleBursts";
 import { spawnDriftBurst } from "./driftBurst";
-import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage } from "./popups";
+import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage, popupDriftCombo } from "./popups";
 import { checkBonusLife } from "./bonusLife";
 import {
   applyHitToCombo,
@@ -440,15 +440,21 @@ export const crackGemForCanister = (game: Game, g: Gem) => {
   checkBonusLife(game);
 };
 
-// Drift-locked on-beat crack: same pending-bonus pattern as asteroid drift shots — queues a
-// +1 combo bump one beat later (cancelled if the streak breaks in the meantime) and plays the
-// drift-shot fanfare immediately so the reward reads at the hit, not just at the popup.
+// Drift-locked on-beat crack: same pending-bonus pattern as asteroid drift shots — the on-beat
+// crack already bumped combo +1, and this queues one more a beat later (capped at +1 regardless
+// of tier; cancelled if the streak breaks). Stages the same two combo numbers + tier-coloured
+// damage subtitle, and plays the drift-shot fanfare immediately so the reward reads at the hit.
 const queueDriftBonusForGem = (game: Game, g: Gem, tier: number) => {
+  const dmgMult = tier + 1;
+  const newBest = dmgMult > game.bestDriftDamageMultShown;
+  if (newBest) game.bestDriftDamageMultShown = dmgMult;
+  game.popups.push(popupDriftCombo(g.pos, game.beatCombo, false));
   game.pendingDriftBonuses.push({
     fireAt: game.perceivedBeatTime + BEAT_GRID,
     pos: { x: g.pos.x, y: g.pos.y },
-    amount: tier,
+    amount: DRIFT_RHYTHM_BONUS,
     tier,
+    showDamageMult: newBest,
   });
   game.sound.playDriftShotHit(tier);
   spawnDriftBurst(game, g.pos.x, g.pos.y, tier);

@@ -19,6 +19,7 @@ import { v } from "./vec";
 import { Popup } from "./game/popups";
 import type { BassLightning } from "./game/bassLightning";
 import type { DriftBurst } from "./game/driftBurst";
+import type { Wormhole } from "./game/wormhole";
 import { LaserBeam } from "./game/laserShot";
 import { BossBeam } from "./game/bossBeam";
 import { KilledSnapshot } from "./game/killSnapshot";
@@ -78,10 +79,19 @@ export class Game implements HudElements {
   // one-shot "sound visualizer explosion" radiating from each on-beat drift-shot
   //   hit, tier-coloured and tier-sized — see game/driftBurst.ts.
   driftBursts: DriftBurst[] = [];
-  // on-beat hits while a hover ring is locked queue a deferred rhythm bonus here. `amount` is
-  //   the drift tier (+1/+2/+3 combo for tier 1/2/3); `tier` drives the popup's colour + label.
+  // 3D departure portals: comets that time out and aliens that fly off the far
+  //   edge warp out THROUGH one of these instead of fading/vanishing. The body's
+  //   suck-in lives on the entity; this holds the portal visual — see
+  //   game/wormhole.ts.
+  wormholes: Wormhole[] = [];
+  // on-beat hits while a hover ring is locked queue a deferred rhythm bonus here. `amount` is the
+  //   flat +1 combo added a beat later (tier no longer scales rhythm); `tier` drives the popup's
+  //   colour + the damage-mult readout; `showDamageMult` is set when this hit beat the run's prior
+  //   best multiplier, so the deferred popup surfaces the tier-coloured "N× DAMAGE" line.
   //   Each tick fires (or cancels) the entries whose moment has come.
-  pendingDriftBonuses: Array<{ fireAt: number; pos: { x: number; y: number }; amount: number; tier: number }> = [];
+  pendingDriftBonuses: Array<{
+    fireAt: number; pos: { x: number; y: number }; amount: number; tier: number; showDamageMult: boolean;
+  }> = [];
   // rhythm-hit pairing for the Rapid Rhythm / Twin Shot bonuses (game/rhythmBonus.ts):
   //   beat center of the latest combo-incrementing hit (-1 = none since last break),
   //   how many such hits landed on that beat, and where the last one struck.
@@ -194,6 +204,10 @@ export class Game implements HudElements {
   // first Drift Shot of a run gets a "2× DAMAGE" subtitle on the popup so the
   //   player learns what it's worth; later ones show just the label.
   hasShownDriftShotLabel = false;
+  // highest drift-shot damage multiplier the run has surfaced so far. A drift hit only re-shows
+  //   the "N× DAMAGE" line when it beats this, so an escalation announces itself but a repeat of
+  //   a tier you've already seen stays quiet. Reset per run alongside hasShownDriftShotLabel.
+  bestDriftDamageMultShown = 0;
   // latched on off-beat fire so the punishment can land at the next beat closure (not retroactive).
   firedOffBeatSinceLastBeat = false;
   // first-ever meaningful combo loss in a run gets a labeled popup so the player learns the mechanic.
@@ -235,6 +249,9 @@ export class Game implements HudElements {
   // True while the normal-mode start-of-run controls hint is visible. Tutorial mode
   //   uses firstWaveHintStage === 1 instead, since the stage already gates that hint.
   controlsHintActive = false;
+  // A first combo loss that landed while the controls pane was still up defers the
+  //   "fire (and hit) on the beat" hint to here; it fires once the pane dismisses.
+  rhythmLossHintPending = false;
   // stage-2 sub-line ("Use your targeting tools to help") is gated on the
   //   player landing three on-beat hits after stage 2 opens. The diamond
   //   row under stage 2's main line fills one pip per hit, and the sub-line

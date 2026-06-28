@@ -60,16 +60,45 @@ let lastAudio: number | null = null;
 const FPS_WINDOW_MS = 500;
 let fpsWindowStart = last;
 let fpsFrames = 0;
+// ── TEMP perf probe (remove me) ──────────────────────────────────────────────
+// Logs only on a slow frame (>20ms) so it's near-zero cost otherwise. Tells us,
+// when a stutter hits: how long the frame took, which clock drove dt (audio vs
+// perf.now), the raw audio-clock gap (to catch audio-context hitches that the
+// sim-clock coupling turns into gameplay stutter), and what's actually on
+// screen — so we can see whether anything from the suspected commit is present.
+const SLOW_FRAME_MS = 20;
+let probePrevNow = last;
+// ─────────────────────────────────────────────────────────────────────────────
 const tick = (now: number) => {
   const audioNow = game.sound.runningAudioTime();
   // 50ms clamp guards physics from a huge step after a stall/background, on either clock.
-  const dt = audioNow !== null && lastAudio !== null && audioNow > lastAudio
-    ? Math.min(audioNow - lastAudio, 0.05)
+  const usedAudioClock = audioNow !== null && lastAudio !== null && audioNow > lastAudio;
+  const dt = usedAudioClock
+    ? Math.min(audioNow! - lastAudio!, 0.05)
     : Math.min((now - last) / 1000, 0.05);
+  // TEMP perf probe: audio-clock gap this frame (NaN if audio not running yet).
+  const audioGap = usedAudioClock ? audioNow! - lastAudio! : NaN;
   lastAudio = audioNow;
   last = now;
+  const probeUpdateStart = performance.now();
   game.update(dt);
+  const probeRenderStart = performance.now();
   game.render();
+  // ── TEMP perf probe (remove me) ──
+  const probeEnd = performance.now();
+  const frameMs = probeEnd - probePrevNow;
+  if (frameMs > SLOW_FRAME_MS) {
+    console.log(
+      `[lag] frame=${frameMs.toFixed(1)}ms ` +
+      `update=${(probeRenderStart - probeUpdateStart).toFixed(1)} ` +
+      `render=${(probeEnd - probeRenderStart).toFixed(1)} ` +
+      `clock=${usedAudioClock ? "audio" : "perf"} audioGap=${(audioGap * 1000).toFixed(1)}ms | ` +
+      `wave=${game.wave} ast=${game.asteroids.length} comet=${game.comets.length} ` +
+      `alien=${game.aliens.length} bul=${game.bullets.length} shard=${game.shards.length}`,
+    );
+  }
+  probePrevNow = probeEnd;
+  // ─────────────────────────────────
   fpsFrames++;
   const windowElapsed = now - fpsWindowStart;
   if (windowElapsed >= FPS_WINDOW_MS) {

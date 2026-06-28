@@ -11,13 +11,13 @@ import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
 import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
-import { popupCombo, popupScore } from "./popups";
+import { popupCombo, popupScore, popupDriftCombo } from "./popups";
 import { resonanceBonus } from "./resonanceBonus";
 import { trackRhythmComboHit } from "./rhythmBonus";
 import { triggerBassLightning } from "./bassLightning";
 import { spawnDriftBurst } from "./driftBurst";
 import { checkBonusLife } from "./bonusLife";
-import { BEAT_GRID } from "./rhythmConstants";
+import { BEAT_GRID, DRIFT_RHYTHM_BONUS } from "./rhythmConstants";
 import {
   emitExplosion,
   emitCrackParticles,
@@ -108,6 +108,9 @@ export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) =
     // Dismiss the post-rhythm-loss "fire and hit on the beat" hint as soon as
     // the player lands one — reaching here means an on-beat fire was followed
     // by an on-beat hit. The component no-ops if it's not currently visible.
+    // Also cancel a hint still deferred behind the controls pane: the player
+    //   already demonstrated the skill, so the lesson is moot.
+    game.rhythmLossHintPending = false;
     window.dispatchEvent(new CustomEvent("rhythm-loss-hint:dismiss"));
     // grid just halved (quarters→eighths) at the 32x sparkle threshold; resync the evaluator
     // so the freshly-uncovered odd eighths don't all close in a burst on the next frame.
@@ -161,15 +164,27 @@ const awardScoreForKill = (
     scoreEarned = Math.round((scoreEarned + resonanceBonus(game)) * multiplier);
     game.sound.play("comboSparkle", 1, hitPos);
     game.sound.playComboChime(multiplier, hitPos);
-    if (multiplier >= 2) game.popups.push(popupCombo(hitPos, multiplier));
-    // Drift Shot: on-beat hit by a bullet fired while a hover ring was locked queues a +tier
-    //   rhythm reward 1 beat later (tier 1/2/3 → +1/+2/+3). Cancelled if the streak breaks.
+    // A drift shot shows its own staged combo numbers (popupDriftCombo, below), so suppress the
+    //   generic combo popup for it — otherwise the hit-point combo reads twice.
+    if (multiplier >= 2 && driftTier === 0) game.popups.push(popupCombo(hitPos, multiplier));
+    // Drift Shot: on-beat hit by a bullet fired while a hover ring was locked queues a +1
+    //   rhythm reward 1 beat later — the on-beat hit already bumped combo +1, so the drift's
+    //   extra +1 lands the streak at +2 total over the pre-shot value, regardless of tier.
+    //   Tier no longer scales rhythm (it scales damage only). Cancelled if the streak breaks.
     if (driftTier > 0) {
+      // The on-beat hit already incremented beatCombo, so it now reads C+1; the drift bonus
+      //   adds one more a beat later. Stage both so the player watches the streak build.
+      const comboAfterHit = game.beatCombo;
+      const dmgMult = driftTier + 1;
+      const newBest = dmgMult > game.bestDriftDamageMultShown;
+      if (newBest) game.bestDriftDamageMultShown = dmgMult;
+      game.popups.push(popupDriftCombo(hitPos, comboAfterHit, false));
       game.pendingDriftBonuses.push({
         fireAt: game.perceivedBeatTime + BEAT_GRID,
         pos: { x: hitPos.x, y: hitPos.y },
-        amount: driftTier,
+        amount: DRIFT_RHYTHM_BONUS,
         tier: driftTier,
+        showDamageMult: newBest,
       });
       // celebratory fanfare on top of the standard on-beat sparkle/chime —
       // tier scales the sub-boom so the top tier lands with real low-end weight.

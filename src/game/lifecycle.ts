@@ -526,6 +526,7 @@ const resetRunTimers = (game: Game) => {
   game.waveStartRhythm = 0;
   game.driftBonusesThisWave = 0;
   game.hasShownDriftShotLabel = false;
+  game.bestDriftDamageMultShown = 0;
   game.firedOffBeatSinceLastBeat = false;
   game.pendingDriftBonuses = [];
   game.pendingRhythmBonuses = [];
@@ -540,6 +541,7 @@ const resetRunTimers = (game: Game) => {
   game.tutorialHoverDone = false;
   game.tutorialFireHitDone = false;
   game.controlsHintActive = false;
+  game.rhythmLossHintPending = false;
   game.beatIntensityRamp = null;
   game.hasSpawnedFirstLevel = false;
   game.replayDyingTimer = null;

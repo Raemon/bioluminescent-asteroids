@@ -2,6 +2,7 @@ import { Vec, v, fromAngle, rand, randInt, TAU, addScaledMut, circleHit } from "
 import { Trail } from "./Trail";
 import { rng } from "./game/rng";
 import { ENTITY_CONFIG } from "./game/entityConfig";
+import { WARP_OUT_DURATION, warpAnchorOffset } from "./game/wormhole";
 
 // Ethereal background event that wanders across the field over ~25-40 seconds
 // playing a slow melodic phrase locked to the bass-beat grid. Doesn't collide
@@ -19,6 +20,21 @@ export class Comet {
   vel: Vec;
   age = 0;
   alive = true;
+  // Warp-out: instead of fading off at end-of-life, the comet dives through a
+  // departure portal. warpT runs 0→1 over WARP_OUT_DURATION; while it does, the
+  // head slides toward warpAnchor (the portal's vanishing point) and shrinks. At
+  // warpT >= 1 the comet is gone. warpAnchor/warpStart are captured the instant
+  // warp-out begins so the dive path is fixed even though pos keeps drifting.
+  // game.spawnsWormhole reads `warping` once to spawn the portal — see
+  // tickWorldEntities. null warpT = not warping yet.
+  warpT: number | null = null;
+  warpAnchorX = 0;
+  warpAnchorY = 0;
+  warpStartX = 0;
+  warpStartY = 0;
+  // Set true on the first frame warp-out begins so the Game spawns exactly one
+  // portal for this comet, then cleared.
+  needsWormhole = false;
   // Trail of past positions for the streak. Newest at index 0.
   trail: { pos: Vec; age: number }[] = [];
   // The current step in the melody. Advanced by the Game on each BEAT_GRID
@@ -73,6 +89,9 @@ export class Comet {
   }
 
   collidesWith(p: Vec, r: number): boolean {
+    // A comet diving into its departure portal is intangible — it's leaving, not
+    // a target, so a late bullet can't "kill" it for score mid-warp.
+    if (this.warpT !== null) return false;
     return circleHit(this.pos, this.radius, p, r);
   }
 
@@ -86,7 +105,43 @@ export class Comet {
     return Math.min(inT, outT);
   }
 
+  // Begin diving through a departure portal. Snapshots the dive path: the head
+  // travels from here to warpAnchor, the portal's vanishing point, which sits
+  // off the current position along the heading's tilt-up axis (matching where
+  // wormhole.ts paints the throat spark). Called once at end-of-life.
+  private beginWarpOut() {
+    this.warpT = 0;
+    this.needsWormhole = true;
+    this.warpStartX = this.pos.x;
+    this.warpStartY = this.pos.y;
+    const off = warpAnchorOffset(this.radius, Math.atan2(this.vel.y, this.vel.x));
+    this.warpAnchorX = this.pos.x + off.dx;
+    this.warpAnchorY = this.pos.y + off.dy;
+  }
+
+  // Heading the portal aligns to — frozen at warp start via the velocity.
+  get warpHeading(): number {
+    return Math.atan2(this.vel.y, this.vel.x);
+  }
+
   update(dt: number, _w: number, _h: number) {
+    // Once warping out, run the dive instead of normal drift: move pos itself
+    // (eased toward the anchor) so the beat-flash and shimmer audio that key off
+    // pos follow the head into the throat, not the spot the dive began.
+    if (this.warpT !== null) {
+      this.age += dt;
+      this.warpT += dt / WARP_OUT_DURATION;
+      if (this.warpT >= 1) {
+        this.alive = false;
+        return;
+      }
+      const ease = Math.min(1, this.warpT) ** 2; // accelerate into the throat
+      this.pos.x = this.warpStartX + (this.warpAnchorX - this.warpStartX) * ease;
+      this.pos.y = this.warpStartY + (this.warpAnchorY - this.warpStartY) * ease;
+      this.glowTrail.update(dt, this.pos.x, this.pos.y);
+      for (const t of this.trail) t.age += dt;
+      return;
+    }
     this.age += dt;
     addScaledMut(this.pos, this.vel, dt);
     this.glowTrail.update(dt, this.pos.x, this.pos.y);
@@ -101,27 +156,44 @@ export class Comet {
       this.trail.pop();
     }
 
-    // Die once the lifetime runs out OR when we drift well off-screen. The
-    // FADE_OUT window in brightness() means the visible streak has already
-    // faded by the time we mark alive=false.
+    // At end-of-life, warp out through a portal rather than just fading off.
+    // Meteors are a brief flock with their own dramatic entrance — they keep the
+    // plain fade so a whole shower doesn't bloom a field of portals at once.
     if (this.age >= this.lifetime) {
-      this.alive = false;
+      if (this.isMeteor) this.alive = false;
+      else this.beginWarpOut();
       return;
     }
   }
 
   render(ctx: CanvasRenderingContext2D) {
-    const b = this.brightness();
+    // While warping out the head dives down the portal throat (pos already eased
+    // toward the anchor in update) and the streak is suppressed — a trail to the
+    // diving head would smear across the mouth. Otherwise the normal streak.
+    const warping = this.warpT !== null;
+    const b = warping ? 1 : this.brightness();
     if (b <= 0) return;
+
+    // During warp the head shrinks on top of its eased pos — a brief swell as it
+    // crosses the rim, then pinch to a point, with a spin spiralling the core in.
+    const hx = this.pos.x;
+    const hy = this.pos.y;
+    let warpScale = 1;
+    let warpSpin = 0;
+    if (warping) {
+      const k = Math.min(1, this.warpT!);
+      warpScale = (1 + 0.25 * Math.sin(k * Math.PI)) * (1 - k * k);
+      warpSpin = k * 6;
+    }
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
 
     // Tail: gradient of soft strokes from the current head back through the
     // recorded positions. Each segment fades with age so the trail tapers
-    // to nothing rather than ending in a hard edge.
+    // to nothing rather than ending in a hard edge. Skipped while warping.
     const TAIL_LIFE = 1.1;
-    for (let i = 0; i < this.trail.length - 1; i++) {
+    if (!warping) for (let i = 0; i < this.trail.length - 1; i++) {
       const a = this.trail[i];
       const c = this.trail[i + 1];
       const aT = 1 - a.age / TAIL_LIFE;
@@ -140,22 +212,23 @@ export class Comet {
     // Head bloom — soft halo that pulses subtly with the melody step so the
     // visual feels coupled to the audio. Pulse amplitude is gentle (±15%)
     // because the bass kit already supplies the strong rhythmic accents.
-    const pulse = 0.85 + 0.15 * Math.sin(this.noteIndex * 1.3 + this.age * 2);
-    const radius = 26 * pulse * this.scale;
-    const halo = ctx.createRadialGradient(this.pos.x, this.pos.y, 0, this.pos.x, this.pos.y, radius * 2.6);
+    const pulse = 0.85 + 0.15 * Math.sin(this.noteIndex * 1.3 + this.age * 2 + warpSpin);
+    const radius = 26 * pulse * this.scale * warpScale;
+    if (radius < 0.5) { ctx.restore(); return; }
+    const halo = ctx.createRadialGradient(hx, hy, 0, hx, hy, radius * 2.6);
     halo.addColorStop(0, `hsla(${this.hue}, 100%, 92%, ${(0.85 * b).toFixed(3)})`);
     halo.addColorStop(0.4, `hsla(${this.hue}, 95%, 80%, ${(0.35 * b).toFixed(3)})`);
     halo.addColorStop(1, `hsla(${this.hue}, 95%, 60%, 0)`);
     ctx.fillStyle = halo;
     ctx.beginPath();
-    ctx.arc(this.pos.x, this.pos.y, radius * 2.6, 0, TAU);
+    ctx.arc(hx, hy, radius * 2.6, 0, TAU);
     ctx.fill();
 
     // Bright pin-prick at the head — sells the "burning ice" core. Pure
     // white centre so the hue reads as bloom around a hot point.
     ctx.fillStyle = `rgba(255, 255, 255, ${(0.95 * b).toFixed(3)})`;
     ctx.beginPath();
-    ctx.arc(this.pos.x, this.pos.y, radius * 0.32, 0, TAU);
+    ctx.arc(hx, hy, radius * 0.32, 0, TAU);
     ctx.fill();
 
     ctx.restore();
