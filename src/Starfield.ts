@@ -1,4 +1,4 @@
-import { rand } from "./vec";
+import { cosmeticRand as rand, TAU } from "./vec";
 
 type Star = {
   x: number;
@@ -27,102 +27,245 @@ type NebulaBlob = {
   radius: number;
   hue: number;
   alpha: number;
-  driftX: number;
-  driftY: number;
 };
 
+// The starfield is a toroidal backdrop: it bakes one w×h sprite that tiles
+// seamlessly so the locked-center scroll camera can scroll it 1:1 with the world
+// and repeat it across the viewport with no seam. Every baked feature (nebula
+// blob, dust star, Milky-Way puff) is drawn WRAPPED — also painted at the
+// neighbour offsets it overhangs — so anything crossing an edge reappears on the
+// opposite edge and the tile joins itself cleanly.
 export class Starfield {
   stars: Star[] = [];
   dust: DustStar[] = [];
   nebula: NebulaBlob[] = [];
   w: number;
   h: number;
-  // Pre-rendered nebula layer. The nebula barely moves (a slow ±40px drift),
-  // so baking it once and translating the whole canvas per frame is visually
-  // indistinguishable from per-frame rebuilds at a fraction of the cost.
+  // Pre-rendered nebula + Milky-Way band layer, baked tileable.
   nebulaSprite: HTMLCanvasElement | null = null;
-  // Pre-rendered dust-star layer. Dense, faint, static — bakes once so the
-  // sub-pixel-level field is free at draw time.
+  // Pre-rendered dust-star layer (dense, faint, static), baked tileable.
   dustSprite: HTMLCanvasElement | null = null;
+
+  // Diagonal galactic band: where it crosses the cell and how wide its falloff
+  // is. The band is a soft glow stripe with denser dust along it. Built from the
+  // cell's own size so it always spans corner-to-corner and wraps with the tile.
+  private bandAngle = 0;
+  private bandOffset = 0; // perpendicular shift of the band centre, in px
 
   constructor(w: number, h: number) {
     this.w = w;
     this.h = h;
-    const starCount = Math.floor((w * h) / 2400);
-    for (let i = 0; i < starCount; i++) {
-      this.stars.push({
-        x: rand(0, w),
-        y: rand(0, h),
-        size: rand(0.3, 2.0),
-        hue: rand(180, 260),
-        twinklePhase: rand(0, Math.PI * 2),
-        twinkleSpeed: rand(0.4, 2.0),
-        depth: rand(0.2, 1.0),
-      });
-    }
-    // Dense field of pin-prick stars. ~10x the count of the twinkling layer
-    // so unlit planet silhouettes show as voids against texture rather than
-    // floating in featureless black.
-    const dustCount = Math.floor((w * h) / 240);
-    for (let i = 0; i < dustCount; i++) {
-      this.dust.push({
-        x: rand(0, w),
-        y: rand(0, h),
-        size: rand(0.25, 0.7),
-        hue: rand(180, 260),
-        alpha: rand(0.18, 0.55),
-      });
-    }
-    const nebulaBlobsByLocation = [
-      { x: w * 0.2, y: h * 0.3 },
-      { x: w * 0.75, y: h * 0.7 },
-      { x: w * 0.5, y: h * 0.5 },
-      { x: w * 0.85, y: h * 0.2 },
-      { x: w * 0.15, y: h * 0.85 },
-    ];
-    for (const loc of nebulaBlobsByLocation) {
-      this.nebula.push({
-        x: loc.x,
-        y: loc.y,
-        radius: rand(180, 380),
-        hue: rand(200, 290),
-        alpha: rand(0.03, 0.08),
-        driftX: rand(-3, 3),
-        driftY: rand(-3, 3),
-      });
-    }
+    this.generate();
     this.buildNebulaSprite();
     this.buildDustSprite();
   }
 
+  // Signed perpendicular distance from a point to the band centre-line, taken
+  // toroidally so the nearest wrapped image of the line wins. Drives both the
+  // band glow falloff and the along-band dust-density boost.
+  private bandDistance(x: number, y: number): number {
+    const nx = Math.sin(this.bandAngle);
+    const ny = -Math.cos(this.bandAngle);
+    // Raw perpendicular distance to the infinite line through the cell centre.
+    const cx = this.w / 2;
+    const cy = this.h / 2;
+    const raw = (x - cx) * nx + (y - cy) * ny - this.bandOffset;
+    // The band repeats every cell along its normal (it's a wrapped diagonal), so
+    // fold the distance into the nearest period so points near an edge read as
+    // close to the band's wrapped image.
+    const period = Math.abs(this.w * nx) + Math.abs(this.h * ny);
+    let d = raw % period;
+    if (d > period / 2) d -= period;
+    if (d < -period / 2) d += period;
+    return d;
+  }
+
+  private generate() {
+    const { w, h } = this;
+    // A diagonal band that leans up-right, offset off-centre so it doesn't cut
+    // the field in half symmetrically.
+    this.bandAngle = rand(-0.7, -0.45);
+    this.bandOffset = rand(-h * 0.12, h * 0.12);
+    const bandHalfWidth = h * 0.28;
+
+    // Twinkling stars — the closest layer, drawn live. Denser near the band.
+    const starCount = Math.floor((w * h) / 2400);
+    for (let i = 0; i < starCount; i++) {
+      const x = rand(0, w);
+      const y = rand(0, h);
+      // Bias extra stars onto the band: keep most, but reroll some off-band ones
+      // toward it so the band reads as a faint over-density of pinpricks.
+      const onBand = 1 - Math.min(1, Math.abs(this.bandDistance(x, y)) / bandHalfWidth);
+      this.stars.push({
+        x,
+        y,
+        size: rand(0.3, 2.0),
+        hue: rand(180, 260),
+        twinklePhase: rand(0, TAU),
+        twinkleSpeed: rand(0.4, 2.0),
+        depth: rand(0.2, 1.0),
+      });
+      // Drop a second, fainter star on the band for the density gradient.
+      if (onBand > 0.45 && rand(0, 1) < onBand * 0.6) {
+        this.stars.push({
+          x: x + rand(-30, 30),
+          y: y + rand(-30, 30),
+          size: rand(0.3, 1.2),
+          hue: rand(200, 250),
+          twinklePhase: rand(0, TAU),
+          twinkleSpeed: rand(0.4, 2.0),
+          depth: rand(0.2, 0.6),
+        });
+      }
+    }
+
+    // Dense pin-prick dust. Base field everywhere, plus a strong over-density
+    // concentrated along the band so the "milky" lane reads as packed stars.
+    const dustCount = Math.floor((w * h) / 240);
+    for (let i = 0; i < dustCount; i++) {
+      const x = rand(0, w);
+      const y = rand(0, h);
+      const onBand = 1 - Math.min(1, Math.abs(this.bandDistance(x, y)) / bandHalfWidth);
+      this.dust.push({
+        x,
+        y,
+        size: rand(0.25, 0.7),
+        hue: rand(180, 260),
+        // a touch warmer/brighter inside the lane, but only a whisper of a boost
+        alpha: rand(0.18, 0.55) * (0.85 + 0.25 * onBand),
+      });
+    }
+    // Extra dust sprinkled only inside the lane for a clear density gradient.
+    const bandDust = Math.floor(dustCount * 0.18);
+    for (let i = 0; i < bandDust; i++) {
+      // Sample a point biased toward the band centre.
+      const along = rand(0, w);
+      const perp = (rand(-1, 1) ** 3) * bandHalfWidth; // cubic → clusters at centre
+      const nx = Math.sin(this.bandAngle);
+      const ny = -Math.cos(this.bandAngle);
+      const cx = w / 2;
+      const cy = h / 2;
+      // March `along` down the band axis, offset `perp` along its normal.
+      const ax = Math.cos(this.bandAngle);
+      const ay = Math.sin(this.bandAngle);
+      const x = cx + (along - w / 2) * ax + (perp + this.bandOffset) * nx;
+      const y = cy + (along - w / 2) * ay + (perp + this.bandOffset) * ny;
+      this.dust.push({
+        x: ((x % w) + w) % w,
+        y: ((y % h) + h) % h,
+        size: rand(0.25, 0.6),
+        hue: rand(200, 250),
+        alpha: rand(0.12, 0.4),
+      });
+    }
+
+    // Coloured nebula blobs scattered across the cell, a few biased onto the band.
+    const blobCount = 6;
+    for (let i = 0; i < blobCount; i++) {
+      const onBand = i < 3;
+      let x: number, y: number;
+      if (onBand) {
+        const along = rand(0, w);
+        const perp = rand(-bandHalfWidth * 0.7, bandHalfWidth * 0.7);
+        const nx = Math.sin(this.bandAngle);
+        const ny = -Math.cos(this.bandAngle);
+        const ax = Math.cos(this.bandAngle);
+        const ay = Math.sin(this.bandAngle);
+        x = w / 2 + (along - w / 2) * ax + (perp + this.bandOffset) * nx;
+        y = h / 2 + (along - w / 2) * ay + (perp + this.bandOffset) * ny;
+      } else {
+        x = rand(0, w);
+        y = rand(0, h);
+      }
+      this.nebula.push({
+        x: ((x % w) + w) % w,
+        y: ((y % h) + h) % h,
+        radius: rand(220, 460),
+        // warmer hues in the band (200-260), cooler/violet drifting off it
+        hue: onBand ? rand(210, 265) : rand(250, 300),
+        alpha: rand(0.03, 0.07),
+      });
+    }
+  }
+
+  // Draw `paint(ox, oy)` at the base position and at every neighbour offset the
+  // feature overhangs, so a feature crossing an edge reappears opposite and the
+  // baked sprite tiles seamlessly.
+  private wrapDraw(x: number, y: number, reach: number, paint: (ox: number, oy: number) => void) {
+    const { w, h } = this;
+    const dxs = x < reach ? [0, w] : x > w - reach ? [0, -w] : [0];
+    const dys = y < reach ? [0, h] : y > h - reach ? [0, -h] : [0];
+    for (const dx of dxs) for (const dy of dys) paint(dx, dy);
+  }
+
   buildNebulaSprite() {
+    const { w, h } = this;
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.floor(this.w));
-    canvas.height = Math.max(1, Math.floor(this.h));
+    canvas.width = Math.max(1, Math.floor(w));
+    canvas.height = Math.max(1, Math.floor(h));
     const ctx = canvas.getContext("2d")!;
     ctx.globalCompositeOperation = "lighter";
-    for (const nebulaBlob of this.nebula) {
-      const grad = ctx.createRadialGradient(nebulaBlob.x, nebulaBlob.y, 0, nebulaBlob.x, nebulaBlob.y, nebulaBlob.radius);
-      grad.addColorStop(0, `hsla(${nebulaBlob.hue}, 90%, 60%, ${nebulaBlob.alpha})`);
-      grad.addColorStop(0.5, `hsla(${nebulaBlob.hue + 20}, 80%, 50%, ${nebulaBlob.alpha * 0.4})`);
-      grad.addColorStop(1, `hsla(${nebulaBlob.hue}, 90%, 60%, 0)`);
-      ctx.fillStyle = grad;
-      ctx.fillRect(nebulaBlob.x - nebulaBlob.radius, nebulaBlob.y - nebulaBlob.radius, nebulaBlob.radius * 2, nebulaBlob.radius * 2);
+
+    // 1. Milky-Way band glow — a soft luminous lane along the diagonal, built
+    //    from overlapping radial puffs marched down the band axis (each wrapped),
+    //    so the glow is continuous and tiles with the cell.
+    const bandHalfWidth = h * 0.26;
+    const ax = Math.cos(this.bandAngle);
+    const ay = Math.sin(this.bandAngle);
+    const nx = Math.sin(this.bandAngle);
+    const ny = -Math.cos(this.bandAngle);
+    const cx = w / 2;
+    const cy = h / 2;
+    const span = Math.hypot(w, h);
+    const step = 46;
+    for (let s = -span; s <= span; s += step) {
+      // gentle waver so the lane isn't a ruler-straight stripe
+      const waver = Math.sin(s * 0.004) * bandHalfWidth * 0.18;
+      const px = cx + s * ax + (this.bandOffset + waver) * nx;
+      const py = cy + s * ay + (this.bandOffset + waver) * ny;
+      const wx = ((px % w) + w) % w;
+      const wy = ((py % h) + h) % h;
+      const r = bandHalfWidth * rand(0.85, 1.15);
+      this.wrapDraw(wx, wy, r, (ox, oy) => {
+        const g = ctx.createRadialGradient(wx + ox, wy + oy, 0, wx + ox, wy + oy, r);
+        // barely-there warm-cream core fading to nothing — the diffuse galactic
+        // glow should read as a whisper, not a stripe (puffs stack additively).
+        g.addColorStop(0, "hsla(40, 45%, 80%, 0.003)");
+        g.addColorStop(0.5, "hsla(220, 60%, 60%, 0.002)");
+        g.addColorStop(1, "hsla(220, 60%, 60%, 0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(wx + ox - r, wy + oy - r, r * 2, r * 2);
+      });
+    }
+
+    // 2. Coloured nebula blobs on top, each wrapped so it tiles.
+    for (const b of this.nebula) {
+      this.wrapDraw(b.x, b.y, b.radius, (ox, oy) => {
+        const g = ctx.createRadialGradient(b.x + ox, b.y + oy, 0, b.x + ox, b.y + oy, b.radius);
+        g.addColorStop(0, `hsla(${b.hue}, 90%, 62%, ${b.alpha})`);
+        g.addColorStop(0.5, `hsla(${b.hue + 20}, 80%, 52%, ${b.alpha * 0.4})`);
+        g.addColorStop(1, `hsla(${b.hue}, 90%, 62%, 0)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(b.x + ox - b.radius, b.y + oy - b.radius, b.radius * 2, b.radius * 2);
+      });
     }
     this.nebulaSprite = canvas;
   }
 
   buildDustSprite() {
+    const { w, h } = this;
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.floor(this.w));
-    canvas.height = Math.max(1, Math.floor(this.h));
+    canvas.width = Math.max(1, Math.floor(w));
+    canvas.height = Math.max(1, Math.floor(h));
     const ctx = canvas.getContext("2d")!;
     ctx.globalCompositeOperation = "lighter";
     for (const d of this.dust) {
-      ctx.fillStyle = `hsla(${d.hue}, 70%, 88%, ${d.alpha})`;
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
-      ctx.fill();
+      this.wrapDraw(d.x, d.y, d.size + 1, (ox, oy) => {
+        ctx.fillStyle = `hsla(${d.hue}, 70%, 88%, ${d.alpha})`;
+        ctx.beginPath();
+        ctx.arc(d.x + ox, d.y + oy, d.size, 0, TAU);
+        ctx.fill();
+      });
     }
     this.dustSprite = canvas;
   }
@@ -130,82 +273,143 @@ export class Starfield {
   resize(w: number, h: number) {
     this.w = w;
     this.h = h;
+    this.stars = [];
+    this.dust = [];
+    this.nebula = [];
+    this.generate();
     this.buildNebulaSprite();
     this.buildDustSprite();
   }
 
+  // Blit a tileable sprite to cover the whole screen, scrolled by (sx,sy). The
+  // sprite is exactly one world cell (w×h), so two copies per axis cover any
+  // scroll offset — the seamless bake means the joins are invisible.
+  private blitTiled(ctx: CanvasRenderingContext2D, sprite: HTMLCanvasElement, sx: number, sy: number) {
+    const { w, h } = this;
+    let ox = sx % w;
+    if (ox > 0) ox -= w;
+    let oy = sy % h;
+    if (oy > 0) oy -= h;
+    for (let i = 0; i < 2; i++) {
+      for (let j = 0; j < 2; j++) ctx.drawImage(sprite, ox + i * w, oy + j * h);
+    }
+  }
+
   // camera is optional so the starfield still renders fine in isolation
-  // (tests, splash screens). When supplied, the field rolls around the
-  // pulsar's focal point and the closer (lower-depth) twinkling stars fan
-  // outward from it as approach grows, so the whole scene reads as one
-  // coherent camera dolly rather than a static backdrop behind a moving
-  // pulsar. The pre-baked dust + nebula sprites get a single shared rolled-
-  // and-zoomed transform (uniform parallax for the deepest layer); the
-  // twinkling stars are repositioned per-star so their parallax scales by
-  // depth.
+  // (tests, splash screens). scrollX/scrollY (locked-center mode) shift the whole
+  // field 1:1 with the world and tile it seamlessly so the stars feel anchored to
+  // the torus. When no scroll is given the legacy parallax/roll dolly is used
+  // (the non-scroll edge-aid modes), where the closer twinkling stars fan outward
+  // from the pulsar's focal point as approach grows.
   render(
     ctx: CanvasRenderingContext2D,
     t: number,
     camera?: { focalX: number; focalY: number; roll: number; approach: number },
+    scrollX = 0,
+    scrollY = 0,
   ) {
+    const scrolling = scrollX !== 0 || scrollY !== 0;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
+
+    if (scrolling) {
+      this.renderScrolling(ctx, t, scrollX, scrollY);
+      ctx.restore();
+      return;
+    }
 
     const focalX = camera ? camera.focalX : this.w / 2;
     const focalY = camera ? camera.focalY : this.h / 2;
     const roll = camera ? camera.roll : 0;
     const approach = camera ? camera.approach : 0;
-    // Deepest layers (nebula, dust) move the least — a small uniform zoom
-    // outward from the focal point so they still feel attached to the
-    // camera but don't streak past.
     const farZoom = 1 + 0.06 * approach;
     const cosR = Math.cos(roll);
     const sinR = Math.sin(roll);
+    const driftX = Math.sin(t * 0.0003) * 20;
+    const driftY = Math.cos(t * 0.00025) * 20;
 
-    if (this.nebulaSprite) {
-      const driftX = Math.sin(t * 0.0003) * 20;
-      const driftY = Math.cos(t * 0.00025) * 20;
+    for (const sprite of [this.nebulaSprite, this.dustSprite]) {
+      if (!sprite) continue;
       ctx.save();
       ctx.translate(focalX, focalY);
       ctx.rotate(roll);
       ctx.scale(farZoom, farZoom);
-      ctx.translate(-focalX + driftX, -focalY + driftY);
-      ctx.drawImage(this.nebulaSprite, 0, 0);
-      ctx.restore();
-    }
-    if (this.dustSprite) {
-      ctx.save();
-      ctx.translate(focalX, focalY);
-      ctx.rotate(roll);
-      ctx.scale(farZoom, farZoom);
-      ctx.translate(-focalX, -focalY);
-      ctx.drawImage(this.dustSprite, 0, 0);
+      const dx = sprite === this.nebulaSprite ? driftX : 0;
+      const dy = sprite === this.nebulaSprite ? driftY : 0;
+      ctx.translate(-focalX + dx, -focalY + dy);
+      ctx.drawImage(sprite, 0, 0);
       ctx.restore();
     }
 
-    for (const starInField of this.stars) {
-      const twinkle = 0.5 + 0.5 * Math.sin(t * 0.001 * starInField.twinkleSpeed + starInField.twinklePhase);
-      const alpha = 0.13 + 0.32 * twinkle * starInField.depth;
-      const size = starInField.size * (0.7 + 0.3 * twinkle);
-      // Per-star parallax: closer (lower depth) stars fan outward from the
-      // focal point faster. Combined with the camera roll, the field reads
-      // as a real 3D dolly toward the pulsar.
-      const parallax = 1 + approach * (0.42 - 0.32 * starInField.depth);
-      const rx = (starInField.x - focalX) * parallax;
-      const ry = (starInField.y - focalY) * parallax;
+    this.renderTwinkles(ctx, t, focalX, focalY, approach, cosR, sinR);
+    ctx.restore();
+  }
+
+  // Locked-center scroll: tile the baked sprites under a 1:1 scroll, then scatter
+  // the live twinkling stars wrapped across the same scroll so they sparkle.
+  private renderScrolling(ctx: CanvasRenderingContext2D, t: number, sx: number, sy: number) {
+    const driftX = Math.sin(t * 0.0003) * 20;
+    const driftY = Math.cos(t * 0.00025) * 20;
+    if (this.nebulaSprite) this.blitTiled(ctx, this.nebulaSprite, sx + driftX, sy + driftY);
+    if (this.dustSprite) this.blitTiled(ctx, this.dustSprite, sx, sy);
+
+    const { w, h } = this;
+    let ox = sx % w;
+    if (ox > 0) ox -= w;
+    let oy = sy % h;
+    if (oy > 0) oy -= h;
+    for (const star of this.stars) {
+      const twinkle = 0.5 + 0.5 * Math.sin(t * 0.001 * star.twinkleSpeed + star.twinklePhase);
+      const alpha = 0.13 + 0.32 * twinkle * star.depth;
+      const size = star.size * (0.7 + 0.3 * twinkle);
+      ctx.fillStyle = `hsla(${star.hue}, 80%, 85%, ${alpha})`;
+      const bigHalo = star.size > 1.3;
+      for (let i = 0; i < 2; i++) {
+        for (let j = 0; j < 2; j++) {
+          const sxp = star.x + ox + i * w;
+          const syp = star.y + oy + j * h;
+          // only the copy that lands on screen is worth drawing
+          if (sxp < -4 || sxp > w + 4 || syp < -4 || syp > h + 4) continue;
+          ctx.beginPath();
+          ctx.arc(sxp, syp, size, 0, TAU);
+          ctx.fill();
+          if (bigHalo) {
+            ctx.fillStyle = `hsla(${star.hue}, 80%, 85%, ${alpha * 0.4})`;
+            ctx.beginPath();
+            ctx.arc(sxp, syp, size * 3, 0, TAU);
+            ctx.fill();
+            ctx.fillStyle = `hsla(${star.hue}, 80%, 85%, ${alpha})`;
+          }
+        }
+      }
+    }
+  }
+
+  // Legacy parallax twinkles: each star fans outward from the focal point with
+  // depth, rolled with the camera — the non-scroll edge-aid modes' dolly feel.
+  private renderTwinkles(
+    ctx: CanvasRenderingContext2D, t: number,
+    focalX: number, focalY: number, approach: number, cosR: number, sinR: number,
+  ) {
+    for (const star of this.stars) {
+      const twinkle = 0.5 + 0.5 * Math.sin(t * 0.001 * star.twinkleSpeed + star.twinklePhase);
+      const alpha = 0.13 + 0.32 * twinkle * star.depth;
+      const size = star.size * (0.7 + 0.3 * twinkle);
+      const parallax = 1 + approach * (0.42 - 0.32 * star.depth);
+      const rx = (star.x - focalX) * parallax;
+      const ry = (star.y - focalY) * parallax;
       const sx = focalX + rx * cosR - ry * sinR;
       const sy = focalY + rx * sinR + ry * cosR;
-      ctx.fillStyle = `hsla(${starInField.hue}, 80%, 85%, ${alpha})`;
+      ctx.fillStyle = `hsla(${star.hue}, 80%, 85%, ${alpha})`;
       ctx.beginPath();
-      ctx.arc(sx, sy, size, 0, Math.PI * 2);
+      ctx.arc(sx, sy, size, 0, TAU);
       ctx.fill();
-      if (starInField.size > 1.3) {
-        ctx.fillStyle = `hsla(${starInField.hue}, 80%, 85%, ${alpha * 0.4})`;
+      if (star.size > 1.3) {
+        ctx.fillStyle = `hsla(${star.hue}, 80%, 85%, ${alpha * 0.4})`;
         ctx.beginPath();
-        ctx.arc(sx, sy, size * 3, 0, Math.PI * 2);
+        ctx.arc(sx, sy, size * 3, 0, TAU);
         ctx.fill();
       }
     }
-    ctx.restore();
   }
 }

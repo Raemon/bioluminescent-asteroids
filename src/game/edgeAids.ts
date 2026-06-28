@@ -88,12 +88,11 @@ export const renderEdgeAidsTiled = (
     case "tiled2x2":
       drawTiled2x2(game, paint, landmarks);
       return true;
-    case "scroll":
-      drawScroll(game, paint, landmarks);
-      return true;
     case "tiled3x3":
       drawTiled3x3(game, paint);
       return true;
+    // "scroll" is the default camera and is handled directly by renderGame
+    // (live wrap-replicated paint, no snapshot); it never reaches here.
     default:
       return false;
   }
@@ -138,29 +137,6 @@ const drawTiled2x2 = (game: Game, paint: PaintScene, landmarks: LandmarkPainters
   ctx.lineTo(w, hh);
   ctx.stroke();
   ctx.restore();
-};
-
-const drawScroll = (game: Game, paint: PaintScene, landmarks: LandmarkPainters) => {
-  const snap = snapshotScene(game, paint);
-  const { ctx, w, h } = game;
-  // Shift the world so the ship's real position lands at screen center.
-  const cox = w / 2 - game.ship.pos.x;
-  const coy = h / 2 - game.ship.pos.y;
-  // Normalize each offset into (-w,0] / (-h,0], then tile 3 copies forward so
-  // the span [ox, ox+3w) fully covers [0,w) for any ship position.
-  let ox = cox % w;
-  if (ox > 0) ox -= w;
-  let oy = coy % h;
-  if (oy > 0) oy -= h;
-  for (let i = 0; i < 3; i++) {
-    for (let j = 0; j < 3; j++) {
-      blit(ctx, snap, ox + i * w, oy + j * h, w, h);
-    }
-  }
-  // The pulsar lives in the snapshot, so it scrolls + wraps with the field as a
-  // world-anchored landmark — no separate overlay (that would pin it to screen).
-  // Only the ship is redrawn, whole at exact center (the snapshot crops it).
-  landmarks.paintShip(game, cox, coy, 1);
 };
 
 // Center copy fills this fraction of the screen; the rest is the sliver border.

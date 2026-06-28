@@ -307,9 +307,10 @@ export class Game implements HudElements {
   // ?debug=true in the URL forces debug-on from page load (handy for triaging
   // production issues where the player can't easily hit backtick on mobile).
   debugMode = new URLSearchParams(window.location.search).get("debug") === "true";
-  // Which edge-of-map legibility prototype is active; switched live with number
-  // keys 1-5 (1=off baseline). See game/edgeAids.ts.
-  edgeAidMode: EdgeAidMode = "off";
+  // Which edge-of-map camera is active; switched live with number keys 1-4.
+  // "scroll" (locked-center) is the default — the ship is pinned to screen
+  // centre and the torus scrolls + wraps around it. See game/edgeAids.ts.
+  edgeAidMode: EdgeAidMode = "scroll";
   // prevents a double-submit if the player mashes Enter while the POST is in flight.
   scoreSubmitState: "idle" | "submitting" | "submitted" = "idle";
   // lets the title screen after a game-over show a score-neighborhood (±5) around the

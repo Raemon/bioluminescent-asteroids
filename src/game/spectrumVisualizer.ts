@@ -184,12 +184,25 @@ const drawRadial = (game: Game) => {
   }
 };
 
-export const renderSpectrumVisualizer = (game: Game) => {
+// Advance the spectrum bands from the live audio. Mutates module state, so it
+// must run exactly ONCE per frame — call it before any paint, never per wrap copy.
+export const updateSpectrumVisualizer = (game: Game) => {
   const bins = game.sound.readSpectrum();
   buildBarBands(bins ? bins.length : 256);
   updateBands(bins);
+};
 
+// Paint the pulsar ring at the current transform (reads no live audio — pure
+// draw from the bands updateSpectrumVisualizer set). The scroll camera calls
+// this inside the wrapped world layer so the ring follows the wrapped pulsar.
+export const paintSpectrumVisualizer = (game: Game) => {
   game.ctx.save();
   drawRadial(game);
   game.ctx.restore();
+};
+
+// Convenience for the non-scroll paths: update + paint once at screen space.
+export const renderSpectrumVisualizer = (game: Game) => {
+  updateSpectrumVisualizer(game);
+  paintSpectrumVisualizer(game);
 };
