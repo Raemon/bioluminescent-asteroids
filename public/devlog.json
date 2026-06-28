@@ -1,5 +1,34 @@
 [
   {
+    "id": "2026-06-28-5095c7b",
+    "date": "2026-06-28",
+    "title": "Richer starfield and new scroll camera mode",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "The default camera now locks your ship to screen center and scrolls the entire arena around you, so you are never near a hard edge.",
+          "Two additional experimental camera views (2×2 tiled and 3×3 silhouette-edge) can be switched live with number keys 1–4; an on-screen label shows the active mode.",
+          "The starfield now features a diagonal Milky Way band with denser star clusters, nebula clouds, and a handful of prominent bright foreground stars with diffraction glints.",
+          "Background layers (nebula, dust, star field) each scroll at their own parallax depth, giving the arena a clear sense of 3D space."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Starfield and parallax layers no longer jolt or snap when the ship crosses a wrap seam.",
+          "Tutorial control-hint glyphs now fade individually the moment each specific key is pressed, rather than all at once."
+        ]
+      }
+    ],
+    "commits": [
+      "5095c7b",
+      "2637d76",
+      "e986602",
+      "a3fec8a"
+    ]
+  },
+  {
     "id": "2026-06-28-3e16e87",
     "date": "2026-06-28",
     "title": "Drift bonuses, player profiles, and replay fixes",
