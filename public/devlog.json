@@ -1,5 +1,41 @@
 [
   {
+    "id": "2026-06-29-fb61fd3",
+    "date": "2026-06-29",
+    "title": "Torus Ring, Super-Laser, and Farshot rename",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "A new Torus Ring enemy appears in later waves: a mechanical ring that splits into orbiting arc fragments when destroyed.",
+          "Flying through the energy threads between torus arc fragments charges a one-shot super-laser that fires a screen-spanning beam.",
+          "The laser upgrade now shows a dash-mark reticule along the firing line for each reachable charge tier.",
+          "Alien bullets now time out after a fixed duration instead of flying forever."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Bullets now inherit the ship's full velocity, so projectiles and the laser reticule aim accurately while moving."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "The 'Longshot' powerup has been renamed to 'Farshot'.",
+          "Slow-motion duration has been halved for tighter gameplay pacing.",
+          "Ship velocity is now capped at max speed for more controlled movement."
+        ]
+      }
+    ],
+    "commits": [
+      "fb61fd3",
+      "dd10a86",
+      "bad20c1",
+      "a577fec"
+    ]
+  },
+  {
     "id": "2026-06-28-19529a9",
     "date": "2026-06-28",
     "title": "Comets and aliens now warp out through departure portals",
