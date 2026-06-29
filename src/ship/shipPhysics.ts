@@ -11,6 +11,10 @@ import { BEAT_GRID } from "../game/rhythmConstants";
 
 const ENGINE_SOUNDS_ENABLED = false;
 
+// Flip to true to cap the ship's velocity at ship.maxSpeed; false lets
+// Newtonian drift accelerate without limit.
+const TOP_SPEED_ENABLED = false;
+
 // Flip to true to give every ship side thrust from the start, ignoring the
 // sideEngines powerup gate. Flip back to false to return it to an upgrade.
 // Same flag also pulls the sideEngines powerup from the drop pool (see
@@ -279,7 +283,7 @@ const easeComboHaloIntensity = (ship: Ship, dt: number) => {
 const integrateMotion = (ship: Ship, dt: number, w: number, h: number) => {
   scaleMut(ship.vel, 1 - ship.drag * dt);
   const speed = Math.hypot(ship.vel.x, ship.vel.y);
-  if (speed > ship.maxSpeed) scaleMut(ship.vel, ship.maxSpeed / speed);
+  if (TOP_SPEED_ENABLED && speed > ship.maxSpeed) scaleMut(ship.vel, ship.maxSpeed / speed);
   addScaledMut(ship.pos, ship.vel, dt);
   wrapMut(ship.pos, w, h);
 };

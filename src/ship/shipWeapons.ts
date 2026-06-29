@@ -22,11 +22,13 @@ const PIERCE_RANGE_MULT = 2;
 // longshot extends bullet range 1.5x so a shot reaches further than the 1-beat reticule.
 const LONGSHOT_RANGE_MULT = 1.5;
 
-// bullet inherits a fraction of ship velocity so muzzle output reads as physical, not portaled.
+// bullet inherits the ship's full velocity so muzzle output reads as physical, not portaled —
+// a fast ship throws its shots downrange faster. computeAimCircle/computeReticulePosition use the
+// same full inheritance so the reticule and trajectory dots track where shots actually land.
 const launchBullet = (ship: Ship, headingOffset: number, pierce: boolean, longshot: boolean): Bullet => {
   const dir = fromAngle(ship.heading + headingOffset, 1);
   const muzzle = add(ship.pos, mul(dir, ship.radius + 4));
-  const vel = add(mul(dir, ship.bulletSpeed), mul(ship.vel, 0.4));
+  const vel = add(mul(dir, ship.bulletSpeed), ship.vel);
   let life = ship.bulletLife;
   if (pierce) life *= PIERCE_RANGE_MULT;
   if (longshot) life *= LONGSHOT_RANGE_MULT;
