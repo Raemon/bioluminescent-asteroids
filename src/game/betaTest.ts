@@ -104,7 +104,7 @@ const POWERUP_LABELS: Record<PowerupKind, string> = {
   shield: "Shield",
   slow: "Slow-Mo",
   radar: "Radar",
-  longshot: "Longshot",
+  longshot: "Farshot",
   sideEngines: "Side Engines",
   lasershot: "Laser",
 };

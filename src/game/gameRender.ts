@@ -11,6 +11,7 @@ import { computeConeFrame, toroidalDelta } from "../ship/reticule/coneGeometry";
 import { pickCenterMostTargetForFocus, ReticuleTarget, setReticuleWrapAnchor } from "../ship/reticule/trajectoryPreview";
 import { renderShipTrajectoryPreview } from "../ship/shipTrajectoryPreview";
 import { renderLasers, renderLaserChargeDots, renderLaserAmbientFlash } from "./laserShot";
+import { renderLaserReticule } from "../ship/reticule/laserReticule";
 import { renderBossBeams } from "./bossBeam";
 import { renderSlowMoTimerBar } from "./slowMoTimerBar";
 import { renderSpectrumVisualizer, updateSpectrumVisualizer, paintSpectrumVisualizer } from "./spectrumVisualizer";
@@ -264,6 +265,7 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   // without advancing game.time).
   renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.time / 1000, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
+  renderLaserReticule(ctx, game, game.beatTime);
   renderLaserChargeDots(ctx, game, game.beatTime);
 };
 

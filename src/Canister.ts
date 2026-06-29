@@ -30,9 +30,9 @@ const POWERUP_GLYPH: Record<PowerupKind, string> = {
   shield: "S",
   slow: "Z",
   radar: "X",
-  longshot: "L",
+  longshot: "F",
   sideEngines: "E",
-  lasershot: "B",
+  lasershot: "L",
 };
 
 // sideEngines is dropped from the pool when side thrust is always-on (it would

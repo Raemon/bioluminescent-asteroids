@@ -186,6 +186,22 @@ const computeBeamLength = (ship: Ship, superBoosted: boolean, dots: number): num
   return ship.bulletSpeed * effectiveBulletLife(ship, superBoosted) * LASER_BASE_RANGE_MULT * dotMult;
 };
 
+// Beam reach for each charge tier the current combo can reach, shortest first
+// (0 dots → maxLaserDots). The laser reticule paints a dash mark at the end of
+// each, so the player previews how far each charge level shoots — and the marks
+// push outward when Farshot / combo-superboost extend range. Single source of
+// truth for "how far the beam reaches": shares computeBeamLength with fireLaser.
+export const reachableBeamLengths = (game: Game): number[] => {
+  const ship = game.ship;
+  const superBoosted = game.beatCombo >= 12;
+  const maxDots = maxLaserDots(game);
+  const lengths: number[] = [];
+  for (let dots = 0; dots <= maxDots; dots++) {
+    lengths.push(computeBeamLength(ship, superBoosted, dots));
+  }
+  return lengths;
+};
+
 // Eases laserChargeGlow toward target with frame-rate-independent decay.
 const approachGlow = (current: number, target: number, dt: number): number => {
   const k = 1 - Math.exp(-CHARGE_GLOW_RATE * Math.max(0, dt));

@@ -628,6 +628,10 @@ export const renderShipReticules = (
   hoverProbes: ReadonlyArray<ReticuleHoverProbe> = [],
 ) => {
   if (!ship.alive) return;
+  // The bullet sight (circular aim disc + trajectory previews + drift-hover) has no
+  // meaning under the laser, which fires a straight beam — gameRender draws the
+  // laser's own dash-line reticule (renderLaserReticule) instead.
+  if (ship.lasershotActive) return;
   const { positions: reticulePositions, primaryIndex, slotPositionIndices } = computeReticulePositions(ship, beatGrid, w, h, doubletime, superBoosted);
   // trajectory preview anchors on the "shoot now to hit next beat" spot. primaryIndex always
   // exists now (anchors on the first prong offset under prong), but keep the fallback for safety.

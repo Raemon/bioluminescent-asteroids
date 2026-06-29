@@ -74,7 +74,7 @@ export const Hud = () => (
           <circle cx="12" cy="21" r="1.2" fill="currentColor" stroke="none" />
         </svg>
       </Powerup>
-      <Powerup kind="longshot" title="Longshot — double bullet range, second reticule 2 beats out">
+      <Powerup kind="longshot" title="Farshot — double bullet range, second reticule 2 beats out">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="5" cy="12" r="2" />
           <circle cx="17" cy="12" r="2" />
