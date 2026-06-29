@@ -6557,11 +6557,61 @@ export const tickTorusGroup = (group: TorusGroup, dt: number, w: number, h: numb
 // before ticking — otherwise a 4-fragment ring would advance its phase 4× per
 // frame. Call after the per-asteroid update() pass, before collision.
 export const tickTorusGroups = (asteroids: Asteroid[], dt: number, w: number, h: number) => {
+  const groups = collectTorusGroups(asteroids);
+  if (groups) for (const g of groups) tickTorusGroup(g, dt, w, h);
+};
+
+const collectTorusGroups = (asteroids: Asteroid[]): Set<TorusGroup> | null => {
   let groups: Set<TorusGroup> | null = null;
   for (const a of asteroids) {
     if (a.torusGroup) (groups ??= new Set()).add(a.torusGroup);
   }
-  if (groups) for (const g of groups) tickTorusGroup(g, dt, w, h);
+  return groups;
+};
+
+// Does the point (px,py) within `reach` touch any energy thread strung between a
+// torus group's adjacent fragments? Threads follow the phantom-ring arc between
+// neighbouring fragments (the same path renderTorusThread paints), so we sample
+// a few points along each gap arc and test distance. Used to charge the ship's
+// super-laser when it flies through a thread. The flicker is purely cosmetic —
+// the thread is "there" for gameplay the whole time two fragments span a gap.
+export const shipTouchingTorusThread = (
+  asteroids: Asteroid[], px: number, py: number, reach: number,
+): boolean => {
+  const groups = collectTorusGroups(asteroids);
+  if (!groups) return false;
+  const reachSq = reach * reach;
+  for (const g of groups) {
+    const living = g.members.filter((m) => m.alive);
+    if (living.length < 2) continue;
+    // Order fragments by their current ring angle so neighbours are adjacent.
+    const byAngle = living
+      .map((m) => ({ m, ang: m.torusSlot + g.phase, span: m.torusArcSpan }))
+      .sort((a, b) => a.ang - b.ang);
+    for (let i = 0; i < byAngle.length; i++) {
+      const cur = byAngle[i];
+      const nxt = byAngle[(i + 1) % byAngle.length];
+      // Arc gap from cur's leading edge to nxt's trailing edge (wrap on last).
+      const a0 = cur.ang + cur.span * 0.5;
+      let a1 = nxt.ang - nxt.span * 0.5;
+      while (a1 <= a0) a1 += TAU;
+      // Broad cull: if the point is nowhere near the ring radius, skip.
+      const dxc = px - g.center.x;
+      const dyc = py - g.center.y;
+      const distFromCenter = Math.hypot(dxc, dyc);
+      if (Math.abs(distFromCenter - g.ringRadius) > reach + g.ringRadius * 0.12) continue;
+      const steps = 8;
+      for (let s = 0; s <= steps; s++) {
+        const ang = a0 + (a1 - a0) * (s / steps);
+        const tx = g.center.x + Math.cos(ang) * g.ringRadius;
+        const ty = g.center.y + Math.sin(ang) * g.ringRadius;
+        const dx = px - tx;
+        const dy = py - ty;
+        if (dx * dx + dy * dy <= reachSq) return true;
+      }
+    }
+  }
+  return false;
 };
 
 // Drop the boss directly at the screen position the looming planetoid was

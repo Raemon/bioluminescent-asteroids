@@ -95,6 +95,16 @@ export class Ship {
   //   once per hold — cleared when the player releases and re-presses.
   laserChargeFailedThisHold = false;
 
+  // Super-laser charge — gained by flying the ship through the flickering energy
+  //   thread strung between a broken torus ring's orbiting fragments. While
+  //   charged, the NEXT shot fires a screen-spanning super-laser instead of a
+  //   normal bullet (works without the lasershot upgrade); firing consumes it.
+  //   See game/torusCharge.ts (detect + fire) and shipPhysics.updateFireTrigger.
+  superLaserCharged = false;
+  // 0→1 aura ramp for the crackling-energy charge glow around the hull. Eases
+  //   up while charged, snaps toward 0 once spent. Cosmetic only.
+  superLaserChargeGlow = 0;
+
   // discrete halo tier 0/1/2; intensity eases toward this target for a smooth visual response.
   comboHaloTier = 0;
   comboHaloIntensity = 0;

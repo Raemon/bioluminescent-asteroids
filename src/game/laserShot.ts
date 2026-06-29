@@ -106,6 +106,11 @@ export class LaserBeam {
   // Angular offset from the ship's heading. Prong fires one beam per offset, each
   // fanned out like the bullet prong fan; 0 for the lone straight-ahead beam.
   headingOffset: number;
+  // The torus-charge super beam: a screen-spanning bolt fired by spending a
+  // super-laser charge (flying through a torus ring's energy thread), distinct
+  // from the held-charge lasershot upgrade. Renders far beefier than the top
+  // charge tier and pierces everything in its path. See fireSuperLaser.
+  isSuper = false;
 
   constructor(ship: Ship, length: number, damage: number, dots: number, game: Game, headingOffset = 0) {
     this.ship = ship;
@@ -213,6 +218,10 @@ const approachGlow = (current: number, target: number, dt: number): number => {
 // while the upgrade is active.
 export const tickLaserShot = (game: Game, dt: number) => {
   const ship = game.ship;
+  // A banked torus super-laser charge takes priority over the held-charge
+  // upgrade — defer this frame so the fire press spends the super charge (see
+  // tickSuperLaserFire) instead of starting a held charge.
+  if (ship.superLaserCharged) return;
   if (!ship.alive) {
     game.sound.stopLaserCharge();
     game.laserChargeGlow = approachGlow(game.laserChargeGlow, 0, dt);
@@ -289,6 +298,38 @@ const fireLaser = (game: Game, ship: Ship, dots: number) => {
   game.shake = Math.min(game.shake + 0.12 + dots * 0.12, 1.4);
   // Big white pop on release, scaled by charge; the buildup glow ends here.
   game.laserFireFlash = Math.min(1, 0.4 + dots * 0.2);
+  game.laserChargeGlow = 0;
+};
+
+// Damage dealt by a torus-charge super-laser. Well above a full held charge
+// (32) so a single super beam shears clean through a screen-line of rocks and
+// bites deep into armoured kinds.
+export const SUPER_LASER_DAMAGE = 40;
+
+// Fire the screen-spanning super-laser the ship banked by flying through a torus
+// ring's energy thread. Unlike the held-charge lasershot, this is a one-shot
+// expendable available to ANY ship (no upgrade required) — the caller consumes
+// ship.superLaserCharged. The beam spans the screen diagonal so it reaches the
+// far edge from anywhere, pierces everything (eligible = all targets), and
+// renders at a beefed-up tier via the `super` flag. Prong fans extra beams.
+export const fireSuperLaser = (game: Game, ship: Ship) => {
+  // Span the screen so the bolt always reaches the far edge regardless of where
+  // the ship sits. (Camera is scroll-locked, so the visible frame is ~w×h.)
+  const length = Math.hypot(game.w, game.h);
+  const firedOnBeat = isInBeatWindow(game, game.perceivedBeatTime);
+  if (firedOnBeat) registerOnBeatFire(game);
+  else registerOffBeatFire(game);
+  for (const offset of prongOffsets(ship.prongCount)) {
+    // Top dot tier so it inherits all the high-charge render layers, plus the
+    // `super` flag pushes thickness/aura past the normal ceiling.
+    const beam = new LaserBeam(ship, length, SUPER_LASER_DAMAGE, LASER_MAX_DOTS, game, offset);
+    beam.isSuper = true;
+    beam.firedOnBeat = firedOnBeat;
+    game.lasers.push(beam);
+  }
+  game.sound.playLaserShot(SUPER_LASER_DAMAGE, LASER_MAX_DOTS);
+  game.shake = Math.min(game.shake + 0.7, 1.6);
+  game.laserFireFlash = 1;
   game.laserChargeGlow = 0;
 };
 
@@ -616,15 +657,21 @@ export const renderLasers = (ctx: CanvasRenderingContext2D, lasers: LaserBeam[])
     // would saturate and render the top tiers identically.
     const tier = beam.dots / LASER_MAX_DOTS;
     // Width driver scaled so the visible beam roughly fills its hit swath: the
-    // gameplay half-width sets the floor, charge thickens it further.
-    const w = 1 + beam.dots + beamHalfWidth(beam.dots) * 0.4;
+    // gameplay half-width sets the floor, charge thickens it further. The super
+    // beam (torus-charge bolt) blows past the normal ceiling so it reads as a
+    // categorically bigger weapon than a maxed held charge.
+    const superMul = beam.isSuper ? 2.4 : 1;
+    const w = (1 + beam.dots + beamHalfWidth(beam.dots) * 0.4) * superMul;
 
     // A stroke that tapers to nothing over the far end of the beam, so the tip
-    // dissolves instead of stopping flat.
+    // dissolves instead of stopping flat. The super beam holds full brightness
+    // most of its run before the tip dissolves, so a screen-spanning bolt stays
+    // solid edge to edge rather than fading out halfway.
     const fadingStroke = (rgb: string, peak: number, width: number) => {
       const grad = ctx.createLinearGradient(beam.origin.x, beam.origin.y, ex, ey);
       grad.addColorStop(0, `rgba(${rgb}, ${peak.toFixed(3)})`);
-      grad.addColorStop(0.6, `rgba(${rgb}, ${(peak * 0.7).toFixed(3)})`);
+      // Super beam stays bright nearly to the tip; normal beams taper sooner.
+      grad.addColorStop(beam.isSuper ? 0.85 : 0.6, `rgba(${rgb}, ${(peak * (beam.isSuper ? 0.92 : 0.7)).toFixed(3)})`);
       grad.addColorStop(1, `rgba(${rgb}, 0)`);
       ctx.strokeStyle = grad;
       ctx.lineWidth = width;
@@ -634,10 +681,16 @@ export const renderLasers = (ctx: CanvasRenderingContext2D, lasers: LaserBeam[])
       ctx.stroke();
     };
 
+    // Super beam wears an extra colossal halo + a hot magenta-white edge so it
+    // reads as a different class of weapon from the cyan held-charge laser.
+    if (beam.isSuper) {
+      fadingStroke("180, 230, 255", 0.16 * alpha, 40 + w * 9);
+      fadingStroke("210, 180, 255", 0.22 * alpha, 18 + w * 5);
+    }
     // Outermost diffuse aura — very wide, very soft. Only meaningful at higher
     // tiers; gives a charged shot a "this beam is bending the air" presence.
     if (beam.dots >= 1) {
-      fadingStroke("140, 200, 255", 0.12 * alpha * tier, 22 + w * 7);
+      fadingStroke("140, 200, 255", 0.12 * alpha * (beam.isSuper ? 1 : tier), 22 + w * 7);
     }
     // Outer glow — wide, soft, cyan-tinged. Wider at higher tiers.
     fadingStroke("120, 220, 255", 0.28 * alpha, 12 + w * 4);
@@ -647,7 +700,7 @@ export const renderLasers = (ctx: CanvasRenderingContext2D, lasers: LaserBeam[])
     fadingStroke("255, 255, 255", alpha, 2.2 + w * 0.7);
     // Hot white-blue inner sliver — only on high-charge shots, sells the heat.
     if (beam.dots >= 2) {
-      fadingStroke("255, 255, 255", alpha * 0.85, 1 + tier * 1.2);
+      fadingStroke("255, 255, 255", alpha * 0.85, 1 + tier * 1.2 + (beam.isSuper ? 2.5 : 0));
     }
 
     // Crackle arcs — jagged offshoots branching off the core, in the same

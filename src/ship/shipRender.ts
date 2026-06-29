@@ -5,6 +5,7 @@ import { cosmeticRng as rng } from "../game/rng";
 import { POWERUP_HUE } from "../Canister";
 import { renderComboHalo } from "./shipComboHalo";
 import { haloVertices } from "./shipHitbox";
+import { buildJaggedBolt, strokePolyline } from "../game/bassLightning";
 
 const invulnFlicker = (ship: Ship, t: number): number =>
   ship.invuln > 0 ? 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(t * 0.025)) : 1;
@@ -137,6 +138,52 @@ const paintShieldRing = (ctx: CanvasRenderingContext2D, ship: Ship, beatPulse: n
   ctx.stroke();
 };
 
+// Crackling energy aura while a torus super-laser charge is banked. Drawn in
+// the ship-local frame (origin = ship pos): a pulsing additive glow ring plus a
+// few electric arcs writhing around the hull, in the torus ring's steel-cyan, so
+// the player reads "the next shot is loaded". Intensity rides
+// ship.superLaserChargeGlow (0→1 ramp). All cosmetic — no shadowBlur, no
+// gameplay state. The fixed jag tables keep the arcs stable frame-to-frame while
+// buildJaggedBolt's time term animates the writhe.
+const CHARGE_JAGS = [0, 3, -4, 5, -3, 4, -5, 3, -2, 0];
+const paintSuperLaserCharge = (ctx: CanvasRenderingContext2D, ship: Ship, t: number) => {
+  const glow = ship.superLaserChargeGlow;
+  if (glow <= 0.01) return;
+  const H = 196; // torus steel-cyan
+  const tSec = t * 0.004;
+  const pulse = 0.7 + 0.3 * Math.sin(t * 0.012);
+  const a = glow * pulse;
+  const R = ship.radius;
+  ctx.globalCompositeOperation = "lighter";
+  // Soft charged halo around the hull.
+  const haloR = R * 2.6;
+  const halo = ctx.createRadialGradient(0, 0, R * 0.6, 0, 0, haloR);
+  halo.addColorStop(0, `hsla(${H}, 100%, 75%, ${(0.28 * a).toFixed(3)})`);
+  halo.addColorStop(0.5, `hsla(${H + 10}, 100%, 65%, ${(0.12 * a).toFixed(3)})`);
+  halo.addColorStop(1, `hsla(${H}, 100%, 60%, 0)`);
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(0, 0, haloR, 0, TAU);
+  ctx.fill();
+  // A ring of writhing arcs around the hull — each spans a short chord of an
+  // orbiting circle, animated by buildJaggedBolt's time term.
+  const boltCount = 5;
+  for (let i = 0; i < boltCount; i++) {
+    const base = (i / boltCount) * TAU + tSec * 0.6;
+    const r0 = R * 1.3;
+    const r1 = R * 2.1;
+    const a0 = base;
+    const a1 = base + 1.1;
+    const sx = Math.cos(a0) * r0;
+    const sy = Math.sin(a0) * r0;
+    const ex = Math.cos(a1) * r1;
+    const ey = Math.sin(a1) * r1;
+    const pts = buildJaggedBolt(sx, sy, ex, ey, CHARGE_JAGS, i * 1.7, tSec * 6 + i, 0);
+    strokePolyline(ctx, pts, 2.4, `hsla(${H}, 100%, 70%, ${(0.22 * a).toFixed(3)})`);
+    strokePolyline(ctx, pts, 1, `hsla(${H + 25}, 100%, 90%, ${(0.7 * a).toFixed(3)})`);
+  }
+};
+
 // cosmetic on-beat scale-up — draws the eye to the rhythm, hitbox unchanged
 const applyBeatScale = (ctx: CanvasRenderingContext2D, beatPulse: number) => {
   if (beatPulse <= 0) return;
@@ -153,6 +200,7 @@ export const renderShipBody = (ctx: CanvasRenderingContext2D, ship: Ship, t: num
   applyBeatScale(ctx, beatPulse);
   ctx.globalCompositeOperation = "lighter";
   renderComboHalo(ctx, ship, beatPulse);
+  paintSuperLaserCharge(ctx, ship, t);
   paintShipHull(ctx, verts, invuln, beatPulse);
   paintThrustFlame(ctx, ship);
   paintRetroFlares(ctx, ship);

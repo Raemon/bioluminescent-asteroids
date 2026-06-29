@@ -49,6 +49,7 @@ import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderbo
 import { showGameOverIntro } from "./gameOverIntro";
 import { isDown, wasPressed, TUTORIAL_CONTROL_ACTIONS } from "./controlBindings";
 import { tickLaserShot, FIRE_FLASH_DECAY } from "./laserShot";
+import { tickTorusCharge, tickSuperLaserFire } from "./torusCharge";
 import { fireBossSweepBeam, tickBossBeams } from "./bossBeam";
 import { targetsForReticule } from "./gameRender";
 import { driftTierForRing } from "../ship/reticule/reticuleRender";
@@ -757,6 +758,10 @@ const updatePlaying = (game: Game, dt: number) => {
   const bulletsBeforeShipUpdate = game.bullets.length;
   game.ship.setCombo(game.beatCombo);
   syncHaloAmbient(game);
+  // Bank a super-laser charge if the ship is flying through a torus ring's
+  // energy thread — must run before ship.update so the charge is set before the
+  // fire trigger reads it this frame.
+  tickTorusCharge(game, dt);
   game.ship.update(dt, game.input, game.particles, game.bullets, game.w, game.h, game.time, game.sound);
   // Debug instrumentation: capture ship state right after physics tick so the
   //   recorded snapshot reflects the exact state the replay should reproduce.
@@ -764,6 +769,7 @@ const updatePlaying = (game: Game, dt: number) => {
   game.recorder?.captureShip(game.ship, game.input);
   game.replayPlayer?.checkShipAgainstRecording(game.ship);
   tickLaserShot(game, dt);
+  tickSuperLaserFire(game);
   const rawMusicDt = tickSlowMoTimer(game, dt);
   // music slows with gameplay so beat+music stay locked through slow-mo.
   if (dt > 0) {

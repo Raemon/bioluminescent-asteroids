@@ -695,6 +695,9 @@ export const killShip = (game: Game) => {
   game.sound.play("death");
   emitShipDebris(game.particles, game.ship.pos);
   game.ship.alive = false;
+  // A held super-laser charge doesn't survive death.
+  game.ship.superLaserCharged = false;
+  game.ship.superLaserChargeGlow = 0;
   game.lives -= 1;
   // During replay we render the death but never flip to "dying"/gameover — the
   //   scrubber stays in control. We still mirror the death→respawn lifecycle so

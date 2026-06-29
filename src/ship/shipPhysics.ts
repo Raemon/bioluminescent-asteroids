@@ -255,6 +255,10 @@ const updateSideThrust = (ship: Ship, input: IInput, particles: ParticleSystem, 
 // driven by game/laserShot.ts.tickLaserShot — gate the bullet path off entirely here.
 const updateFireTrigger = (ship: Ship, input: IInput, bullets: Bullet[]) => {
   if (ship.lasershotActive) return;
+  // A banked super-laser charge replaces the next shot with a screen-spanning
+  // bolt. The bullet path is suppressed here; the game-level tickSuperLaserFire
+  // owns the actual fire (it needs game state the ship module can't see).
+  if (ship.superLaserCharged) return;
   if (!isDown(input, "fire")) return;
   if (ship.fireCooldown > 0) return;
   fireBullets(ship, bullets);
