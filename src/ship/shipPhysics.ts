@@ -7,6 +7,7 @@ import { Sound } from "../Sound";
 import { emitThrust, emitReverseThrust, emitSideThrust } from "./shipParticles";
 import { fireBullets } from "./shipWeapons";
 import { isDown } from "../game/controlBindings";
+import { FUEL_MODE_ENABLED, FUEL_THRUST_DRAIN, FUEL_SIDE_DRAIN, FUEL_RECHARGE, FUEL_SHIELD_HOLD_DRAIN } from "../game/fuel";
 import { BEAT_GRID } from "../game/rhythmConstants";
 
 const ENGINE_SOUNDS_ENABLED = false;
@@ -164,6 +165,37 @@ const updateThrustRamp = (ship: Ship, input: IInput, dt: number) => {
 };
 const thrustScale = (ship: Ship) => 0.02 + 0.98 * ship.thrustRamp;
 
+// Fuel Mode gate: an engine can only fire if there's fuel left (always true when
+// fuel mode is off). Each engine calls this before committing to thrust this frame.
+const hasFuel = (ship: Ship) => !FUEL_MODE_ENABLED || ship.fuel > 0;
+
+// Spend fuel for one frame of an engine running at `drainPerSec`, floored at 0.
+// No-op when fuel mode is off.
+const drainFuel = (ship: Ship, drainPerSec: number, dt: number) => {
+  if (!FUEL_MODE_ENABLED) return;
+  ship.fuel = Math.max(0, ship.fuel - drainPerSec * dt);
+};
+
+// Trickle fuel back toward full each frame the player isn't thrusting, so a held
+// engine running on fumes can't recharge a sliver and limp on forever — once
+// empty it stays empty until the keys are released.
+const rechargeFuel = (ship: Ship, dt: number) => {
+  if (!FUEL_MODE_ENABLED || ship.fuel >= ship.maxFuel) return;
+  const thrusting = ship.thrustOn || ship.reverseThrustOn || ship.portThrustOn || ship.starboardThrustOn;
+  // A held laser charge or a raised shield is an active drain too — don't trickle back against it.
+  if (thrusting || ship.laserChargeActive || ship.shieldActive) return;
+  ship.fuel = Math.min(ship.maxFuel, ship.fuel + FUEL_RECHARGE * dt);
+};
+
+// Held shield: up only while the shield key is held and there's fuel to burn.
+//   Recomputed every frame (not a latch) so an empty tank instantly drops the
+//   guard. Raising it sips fuel pre-emptively; ramming a rock costs extra at the
+//   impact site (handleSingleShipAsteroidImpact in collisions.ts).
+const updateShield = (ship: Ship, input: IInput, dt: number) => {
+  ship.shieldActive = isDown(input, "shield") && hasFuel(ship);
+  if (ship.shieldActive) drainFuel(ship, FUEL_SHIELD_HOLD_DRAIN, dt);
+};
+
 // Single acceleration path for every engine — push velocity along (heading + offset) with this
 // engine's drift-slow baked in. `ramped` applies the forward/reverse tap-ramp; side thrust passes
 // false to keep its instant full power. `driftSlow` is the engine's already-ramped drift-aim slow
@@ -192,7 +224,7 @@ const tickEngineDriftSlow = (
 // thruster has to gate sound start/stop on the edge so the loop doesn't restart every frame.
 const updateForwardThrust = (ship: Ship, input: IInput, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasThrusting = ship.thrustOn;
-  ship.thrustOn = isDown(input, "thrust");
+  ship.thrustOn = isDown(input, "thrust") && hasFuel(ship);
   const slow = tickEngineDriftSlow(
     ship, ship.thrustOn, wasThrusting,
     () => ship.driftHoldThrust, v => (ship.driftHoldThrust = v),
@@ -200,6 +232,7 @@ const updateForwardThrust = (ship: Ship, input: IInput, particles: ParticleSyste
   );
   if (ship.thrustOn) {
     applyThrust(ship, 0, true, slow, dt, t);
+    drainFuel(ship, FUEL_THRUST_DRAIN, dt);
     emitThrust(ship, particles, t);
     if (ENGINE_SOUNDS_ENABLED && !wasThrusting) sound.play("thrust");
   } else if (wasThrusting) sound.stopThrust();
@@ -208,7 +241,7 @@ const updateForwardThrust = (ship: Ship, input: IInput, particles: ParticleSyste
 // retro-thrust mirrors forward thrust with its own audio loop and front-vented jet flames.
 const updateReverseThrust = (ship: Ship, input: IInput, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
   const wasReversing = ship.reverseThrustOn;
-  ship.reverseThrustOn = isDown(input, "reverse");
+  ship.reverseThrustOn = isDown(input, "reverse") && hasFuel(ship);
   const slow = tickEngineDriftSlow(
     ship, ship.reverseThrustOn, wasReversing,
     () => ship.driftHoldReverse, v => (ship.driftHoldReverse = v),
@@ -216,6 +249,7 @@ const updateReverseThrust = (ship: Ship, input: IInput, particles: ParticleSyste
   );
   if (ship.reverseThrustOn) {
     applyThrust(ship, Math.PI, true, slow, dt, t);
+    drainFuel(ship, FUEL_THRUST_DRAIN, dt);
     emitReverseThrust(ship, particles, t);
     if (ENGINE_SOUNDS_ENABLED && !wasReversing) sound.play("reverseThrust");
   } else if (wasReversing) sound.stopReverseThrust();
@@ -225,7 +259,7 @@ const updateReverseThrust = (ship: Ship, input: IInput, particles: ParticleSyste
 // Gated on the sideEngines powerup (unless SIDE_THRUST_ALWAYS_ON); bound to
 // z/x by default. Shares one audio loop that runs while either key is held.
 const updateSideThrust = (ship: Ship, input: IInput, particles: ParticleSystem, sound: Sound, dt: number, t: number) => {
-  const enabled = ship.sideEnginesActive || SIDE_THRUST_ALWAYS_ON;
+  const enabled = (ship.sideEnginesActive || SIDE_THRUST_ALWAYS_ON) && hasFuel(ship);
   const wasActive = ship.portThrustOn || ship.starboardThrustOn;
   const wasPort = ship.portThrustOn;
   const wasStarboard = ship.starboardThrustOn;
@@ -243,10 +277,12 @@ const updateSideThrust = (ship: Ship, input: IInput, particles: ParticleSystem, 
   );
   if (ship.portThrustOn) {
     applyThrust(ship, -Math.PI / 2, false, portSlow, dt, t);
+    drainFuel(ship, FUEL_SIDE_DRAIN, dt);
     emitSideThrust(ship, particles, t, "port");
   }
   if (ship.starboardThrustOn) {
     applyThrust(ship, Math.PI / 2, false, starboardSlow, dt, t);
+    drainFuel(ship, FUEL_SIDE_DRAIN, dt);
     emitSideThrust(ship, particles, t, "starboard");
   }
   const isActive = ship.portThrustOn || ship.starboardThrustOn;
@@ -303,6 +339,8 @@ export const tickShip = (
   updateForwardThrust(ship, input, particles, sound, dt, t);
   updateReverseThrust(ship, input, particles, sound, dt, t);
   updateSideThrust(ship, input, particles, sound, dt, t);
+  updateShield(ship, input, dt);
+  rechargeFuel(ship, dt);
   updateFireTrigger(ship, input, bullets);
   integrateMotion(ship, dt, w, h);
 };

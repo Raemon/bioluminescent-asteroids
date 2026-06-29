@@ -2,6 +2,7 @@ import type { Game } from "../Game";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { displayWave } from "./waveDirector";
 import { formatScore, formatScorePadded } from "./formatScore";
+import { FUEL_MODE_ENABLED } from "./fuel";
 
 // cache the DOM handles once so per-frame syncs don't repeat document.getElementById calls.
 export type HudElements = {
@@ -31,6 +32,8 @@ export type HudElements = {
 // Cached references for the powerup slot row; resolved once at boot.
 const powerupSlots: Record<string, HTMLElement> = {};
 let slowProgressEl: HTMLElement | null = null;
+let fuelEl: HTMLElement | null = null;
+let fuelFillEl: HTMLElement | null = null;
 
 // single one-time DOM lookup means a missing element fails loudly at boot, not mid-game.
 export const bindHudElements = (): HudElements => {
@@ -40,6 +43,10 @@ export const bindHudElements = (): HudElements => {
     if (kind) powerupSlots[kind] = el;
   });
   slowProgressEl = powerupSlots.slow?.querySelector<HTMLElement>(".powerup-progress") ?? null;
+  fuelEl = document.getElementById("fuel");
+  fuelFillEl = document.getElementById("fuel-fill");
+  // Reveal the fuel bar once at boot when fuel mode is on; it stays hidden otherwise.
+  if (FUEL_MODE_ENABLED) fuelEl?.classList.remove("hidden");
   return {
     scoreEl: document.getElementById("score")!,
     scoreFlashEl: document.getElementById("score-flash")!,
@@ -120,6 +127,18 @@ export const syncHud = (game: Game) => {
   game.livesEl.innerHTML = lifeSpans.join("");
   syncComboHud(game);
   syncPowerupHud(game);
+  syncFuelHud(game);
+};
+
+// Fuel reserve bar — width tracks the reserve, colour shifts amber under a third
+// and red when fully dry. No-op (and the bar stays hidden) when fuel mode is off.
+const FUEL_LOW_FRACTION = 0.33;
+export const syncFuelHud = (game: Game) => {
+  if (!FUEL_MODE_ENABLED || !fuelFillEl) return;
+  const frac = Math.max(0, Math.min(1, game.ship.fuel / game.ship.maxFuel));
+  fuelFillEl.style.width = `${frac * 100}%`;
+  fuelFillEl.classList.toggle("empty", frac <= 0.001);
+  fuelFillEl.classList.toggle("low", frac > 0.001 && frac < FUEL_LOW_FRACTION);
 };
 
 // persistent flags drive on/off; slow-mo also shows a bottom-up timer bar of remaining duration.
@@ -127,7 +146,6 @@ export const syncPowerupHud = (game: Game) => {
   setSlotActive("prong", game.ship.prongActive);
   setSlotActive("rapid", game.ship.rapidActive);
   setSlotActive("pierce", game.ship.pierceActive);
-  setSlotActive("shield", game.ship.shieldActive);
   setSlotActive("radar", game.ship.radarActive);
   setSlotActive("longshot", game.ship.longshotActive);
   const slowOn = game.slowMoTimer > 0;

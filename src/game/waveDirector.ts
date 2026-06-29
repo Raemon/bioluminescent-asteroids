@@ -55,7 +55,7 @@ const spawnSpeedRange = (a: Asteroid): [number, number] => {
 const alignIncomingToRhythm = (game: Game, a: Asteroid, claimed?: BeatClaimSet) => {
   if (a.isBoss()) return;
   const range = spawnSpeedRange(a);
-  const centre = { x: game.w / 2, y: game.h / 2 };
+  const centre = visibleCentre(game);
   alignVelocityToRhythm(a.pos, a.vel, {
     refPos: centre,
     beatTime: game.beatTime,
@@ -213,12 +213,14 @@ const applyRhythmSpeed = (game: Game, vel: { x: number; y: number }, k = rhythmS
 // (off the playfield edges, aiming at the playfield centre). In the default
 // "scroll" camera the ship is locked to screen centre and the torus scrolls
 // around it, so the visible viewport is `ship.pos ± (w/2, h/2)` — NOT the
-// playfield rect. Wrapping bodies (asteroids, bullets) don't care: the world
-// tiles seamlessly so they enter from a real screen edge no matter where the
-// playfield edge landed. But non-wrapping bodies (comets, meteors, aliens) are
-// drawn once at their literal world position, so a playfield-edge spawn pops in
-// at whatever screen spot the camera happens to map it to — often the centre
-// seam — instead of sliding in from offscreen.
+// playfield rect. Wrapping fixes the seam, NOT where on screen a playfield-edge
+// spawn first appears: the visible window is one playfield-sized tile, so a rock
+// at playfield-edge wraps to ship-dependent on-screen spot — often mid-field —
+// the moment the ship drifts off centre. So wrapping bodies (asteroids, gems)
+// need this offset for a clean *first* entrance just as much as non-wrapping
+// ones (comets, meteors, aliens), which are drawn once at their literal world
+// position. Either way, without the shift a spawn pops in at whatever screen
+// spot the camera maps it to instead of sliding in from offscreen.
 //
 // Shifting those spawns (and their rhythm-encounter reference) by this offset
 // maps playfield-centre → ship.pos, so "just off the left playfield edge"
@@ -250,7 +252,17 @@ const spawnAsteroidAway = (
   size?: AsteroidSize,
   claimed?: BeatClaimSet,
 ) => {
-  const a = spawnAwayFromShip(() => spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size), game.ship.pos, minDist);
+  // Shift each edge-spawn into the visible frame (see cameraWorldOffset) so the
+  // rock slides in from a real offscreen edge under the scroll camera, not the
+  // playfield-rect edge that wraps to some on-screen spot. The away-from-ship
+  // check then runs against the shifted position.
+  const off = cameraWorldOffset(game);
+  const a = spawnAwayFromShip(() => {
+    const r = spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size);
+    r.pos.x += off.x;
+    r.pos.y += off.y;
+    return r;
+  }, game.ship.pos, minDist);
   // Heavy solid crystals drift slower; pre-scale before alignment so even a
   //   no-candidate fallback keeps the ponderous speed. The aligner works in
   //   the matching slowed band (see spawnSpeedRange), so a successful match
@@ -386,8 +398,13 @@ export const spawnGemSwarmEvent = (game: Game, countOverride?: number) => {
   const count = countOverride ?? randInt(cfg.count[0], cfg.count[1]);
   const gems = spawnGemSwarm(game.w, game.h, count);
   const claimed = newBeatClaimSet();
-  const centre = { x: game.w / 2, y: game.h / 2 };
+  // Same camera shift as wave rocks: enter from the visible edge, cross the
+  // player at screen centre (see cameraWorldOffset / spawnAsteroidAway).
+  const off = cameraWorldOffset(game);
+  const centre = visibleCentre(game);
   for (const g of gems) {
+    g.pos.x += off.x;
+    g.pos.y += off.y;
     const speed = Math.hypot(g.vel.x, g.vel.y);
     alignVelocityToRhythm(g.pos, g.vel, {
       refPos: centre,
@@ -433,6 +450,7 @@ export const spawnWave = (game: Game) => {
   game.asteroids = [];
   game.canisters = [];
   game.gems = [];
+  game.fuelOrbs = [];
   game.waveEvents = newWaveEventSchedule();
   game.waveElapsed = 0;
 

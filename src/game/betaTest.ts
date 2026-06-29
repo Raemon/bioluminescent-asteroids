@@ -45,7 +45,6 @@ const applyPowerup = (game: Game, kind: PowerupKind) => {
   if (kind === "prong") game.ship.prongCount += 1;
   else if (kind === "rapid") game.ship.rapidActive = true;
   else if (kind === "pierce") game.ship.pierceActive = true;
-  else if (kind === "shield") game.ship.shieldActive = true;
   else if (kind === "radar") game.ship.radarActive = true;
   else if (kind === "longshot") game.ship.longshotActive = true;
   else if (kind === "sideEngines") game.ship.sideEnginesActive = true;
@@ -319,6 +318,7 @@ const startBetaWave = (game: Game) => {
   game.bassLightnings = [];
   game.shards = [];
   game.canisters = [];
+  game.fuelOrbs = [];
   game.killedSnapshots = [];
   game.killTally = {};
   game.aliens = [];

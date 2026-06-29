@@ -13,6 +13,7 @@ export type ControlAction =
   | "sidePort"
   | "sideStarboard"
   | "fire"
+  | "shield"
   | "pause";
 
 export type Bindings = Record<ControlAction, string[]>;
@@ -29,6 +30,7 @@ export const DEFAULT_BINDINGS: Bindings = {
   sidePort: ["z"],
   sideStarboard: ["x"],
   fire: [" "],
+  shield: ["alt"],
   pause: ["escape"],
 };
 
@@ -40,6 +42,7 @@ export const ACTION_ORDER: ControlAction[] = [
   "sidePort",
   "fire",
   "sideStarboard",
+  "shield",
   "pause",
   "precisionTurn",
 ];
@@ -52,6 +55,7 @@ export const ACTION_LABELS: Record<ControlAction, string> = {
   sidePort: "Side thrust ←",
   sideStarboard: "Side thrust →",
   fire: "Fire",
+  shield: "Shield (hold)",
   pause: "Pause",
   precisionTurn: "Precise turn (hold)",
 };
@@ -88,6 +92,7 @@ const cloneDefaults = (): Bindings => ({
   sidePort: [...DEFAULT_BINDINGS.sidePort],
   sideStarboard: [...DEFAULT_BINDINGS.sideStarboard],
   fire: [...DEFAULT_BINDINGS.fire],
+  shield: [...DEFAULT_BINDINGS.shield],
   pause: [...DEFAULT_BINDINGS.pause],
 });
 

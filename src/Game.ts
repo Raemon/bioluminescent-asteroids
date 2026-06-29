@@ -12,6 +12,7 @@ import type { MusicLayer } from "./musicConfig";
 import type { HaloMusicVariation } from "./Sound";
 import { Canister } from "./Canister";
 import { Gem } from "./Gem";
+import { FuelOrb } from "./FuelOrb";
 import { Comet } from "./Comet";
 import { Alien, AlienSize } from "./Alien";
 import { AlienBullet } from "./AlienBullet";
@@ -261,6 +262,9 @@ export class Game implements HudElements {
 
   canisters: Canister[] = [];
   gems: Gem[] = [];
+  // Fuel Mode consolation drops — orbs left by gold ore that cracked open without
+  // an upgrade. Fly through one to refill the reserve. See game/fuel.ts.
+  fuelOrbs: FuelOrb[] = [];
   comets: Comet[] = [];
   aliens: Alien[] = [];
   alienBullets: AlienBullet[] = [];

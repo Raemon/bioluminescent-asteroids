@@ -167,6 +167,7 @@ export const showTitle = (game: Game) => {
   game.asteroids = [];
   game.canisters = [];
   game.gems = [];
+  game.fuelOrbs = [];
   stopAllPersistentAudio(game);
   game.aliens = [];
   game.alienBullets = [];
@@ -560,6 +561,7 @@ const resetRunCollections = (game: Game) => {
   game.shards = [];
   game.canisters = [];
   game.gems = [];
+  game.fuelOrbs = [];
   game.killedSnapshots = [];
   game.killTally = {};
   stopParade(game);

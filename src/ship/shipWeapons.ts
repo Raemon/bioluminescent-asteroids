@@ -48,12 +48,12 @@ export const fireBullets = (ship: Ship, bullets: Bullet[]) => {
   }
 };
 
-// powerup flags are simple bool latches; shield is one-shot, the rest persist for the run.
+// powerup flags are simple bool latches that persist for the run. Shield is no
+//   longer here — it's a held, fuel-burning ability (see shipPhysics), not a pickup.
 export const applyPowerup = (ship: Ship, kind: PowerupKind) => {
   if (kind === "prong") ship.prongCount += 1;
   else if (kind === "rapid") ship.rapidActive = true;
   else if (kind === "pierce") ship.pierceActive = true;
-  else if (kind === "shield") ship.shieldActive = true;
   else if (kind === "radar") ship.radarActive = true;
   else if (kind === "longshot") ship.longshotActive = true;
   else if (kind === "sideEngines") ship.sideEnginesActive = true;

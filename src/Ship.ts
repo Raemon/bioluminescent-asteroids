@@ -4,6 +4,7 @@ import { ParticleSystem } from "./Particle";
 import { Bullet } from "./Bullet";
 import { Sound } from "./Sound";
 import { PowerupKind } from "./Canister";
+import { FUEL_MAX } from "./game/fuel";
 import { BEAT_GRID } from "./game/rhythmConstants";
 import { haloVertices, hitDistanceToward } from "./ship/shipHitbox";
 import { tickShip } from "./ship/shipPhysics";
@@ -44,6 +45,10 @@ export class Ship {
   driftHoldStarboard = 0;
   thrustPower = 420;
   thrustRamp = 0;
+  // Fuel Mode reserve (see game/fuel.ts). Thrusting drains it; it trickles back
+  // and fuel orbs refill it. Starts full; ignored entirely when fuel mode is off.
+  fuel = FUEL_MAX;
+  maxFuel = FUEL_MAX;
   // drag is 0 so the ship coasts; thrust + retro are the only velocity inputs (Newtonian feel).
   drag = 0;
   maxSpeed = 460;
@@ -74,12 +79,15 @@ export class Ship {
   fireRate = BEAT_GRID;
   bulletSpeed = 620;
   bulletLife = 0.85;
-  // prong/rapid/pierce/radar/longshot persist for the run; shield is one-shot.
+  // prong/rapid/pierce/radar/longshot persist for the run.
   // prongCount stacks: each upgrade adds one more prong (and one more bullet).
   prongCount = 0;
   get prongActive() { return this.prongCount > 0; }
   rapidActive = false;
   pierceActive = false;
+  // Held shield: true only on frames the player holds the shield key with fuel
+  //   left. Recomputed every frame in shipPhysics — not a latch — so the
+  //   collision handlers must never write it (it'd be overwritten next tick).
   shieldActive = false;
   radarActive = false;
   longshotActive = false;

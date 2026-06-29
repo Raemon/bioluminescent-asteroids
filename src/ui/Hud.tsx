@@ -26,6 +26,12 @@ export const Hud = () => (
       <div id="lives">
         <span /><span /><span />
       </div>
+      <div id="fuel" className="hidden">
+        <span id="fuel-label">fuel</span>
+        <div id="fuel-bar">
+          <div id="fuel-fill" />
+        </div>
+      </div>
       <div id="score-block">
         <div id="score-row">
           <div id="score">0</div>
@@ -53,12 +59,6 @@ export const Hud = () => (
           <circle cx="8" cy="12" r="2.5" />
           <circle cx="16" cy="12" r="2.5" />
           <path d="M2 12 L22 12 M19 9 L22 12 L19 15" />
-        </svg>
-      </Powerup>
-      <Powerup kind="shield" title="Shield — absorbs one hit">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 3 L20 6 L20 12 Q20 17 12 21 Q4 17 4 12 L4 6 Z" />
-          <path d="M12 8 L12 16 M8 12 L16 12" opacity="0.6" />
         </svg>
       </Powerup>
       <Powerup kind="slow" title="Slow-Mo — time dilation" withProgress>

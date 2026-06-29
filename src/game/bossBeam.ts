@@ -2,6 +2,7 @@ import type { Game } from "../Game";
 import type { Asteroid } from "../Asteroid";
 import { killShip } from "./lifecycle";
 import { popShield } from "./collisions";
+import { FUEL_SHIELD_ABSORB, spendShipFuel } from "./fuel";
 import { BEAT_GRID } from "./rhythmConstants";
 
 // The boss eye's primary weapon. The eye emits a sustained energy beam that
@@ -122,7 +123,7 @@ export const tickBossBeams = (game: Game, dt: number) => {
     if (vulnerable && !shipHit && beam.hitsShip(game)) {
       shipHit = true;
       if (game.ship.shieldActive) {
-        game.ship.shieldActive = false;
+        spendShipFuel(game.ship, FUEL_SHIELD_ABSORB);
         game.ship.invuln = 0.8;
         popShield(game);
       } else {

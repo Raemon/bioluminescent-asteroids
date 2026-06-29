@@ -1,19 +1,24 @@
 import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut, sub, mul, len, fromAngle, circleHit, wrapMut } from "./vec";
 import { Canister, POWERUP_KINDS } from "./Canister";
 import { ENTITY_CONFIG } from "./game/entityConfig";
-import { OCTAHEDRON_EDGES, projectOctahedron } from "./octahedron";
+import { cosmeticRng } from "./game/rng";
+
+// Sprite-shaping jitter draws from the COSMETIC stream — buildSprite runs lazily
+// inside render(), so pulling from the gameplay rng there would desync replays.
+const crand = (min: number, max: number) => min + cosmeticRng() * (max - min);
 
 // Re-exports so existing imports (collisions.ts, etc.) keep working — the
 // authoritative numbers live in entityConfig.
 export const GEM_UPGRADE_CHANCE = ENTITY_CONFIG.asteroidWithGem.upgradeChance;
 export const GEM_REVEAL_SCORE = ENTITY_CONFIG.asteroidWithGem.revealScore;
 
-// A standalone collectible left behind by a "asteroidWithGem" asteroid's death.
-// The asteroid's blurred interior was the visual tease — this is the payoff,
-// a sharply-rendered six-sided gold gem that drifts where the rock died until
-// the player flies through it. Slow drift inherits a fraction of the parent
-// asteroid's velocity so the gem reads as "ejected from the explosion", not
-// "teleported in". After a long lifetime it dims and warps out.
+// A standalone target left behind by a "asteroidWithGem" asteroid's death — a
+// chunk of gold-bearing ore: a lumpy stone with raw gold veins and nuggets
+// shot through it, NOT a clean cut gem you'd obviously scoop up. It's a rhythm
+// target (shoot on-beat to crack it open), so it deliberately reads as "rock
+// with treasure inside" rather than "free pickup". It drifts where the rock
+// died, inheriting a fraction of the parent's velocity so it reads as "ejected
+// from the explosion", then dims and warps out after a long lifetime.
 
 export const GEM_SCORE = ENTITY_CONFIG.asteroidWithGem.pickupScore;
 
@@ -40,25 +45,20 @@ export class Gem {
   parkTarget: Vec | null = null;
   parkAge = 0;
   private parkOrigin: Vec | null = null;
-  // 3D-ish tumble axes mirror the canister so the gem reads as a real
-  // rotating object rather than a flat icon.
-  rotX: number;
-  rotY: number;
-  rotZ: number;
-  rotSpeedX: number;
-  rotSpeedY: number;
-  rotSpeedZ: number;
+  // Lazy slow tumble, like an asteroid chunk — the ore body is a prebaked sprite
+  // (built once on first render) and this just spins it in 2D.
+  rot: number;
+  rotSpeed: number;
+  // Prebaked ore-rock sprite + its half-extent (radius incl. a little glow pad).
+  private sprite: HTMLCanvasElement | null = null;
+  private spriteHalf = 0;
 
   constructor(pos: Vec, vel: Vec) {
     this.pos = pos;
     this.vel = vel;
     this.hue = 46;
-    this.rotX = rand(0, TAU);
-    this.rotY = rand(0, TAU);
-    this.rotZ = rand(0, TAU);
-    this.rotSpeedX = rand(-1.6, 1.6);
-    this.rotSpeedY = rand(-1.6, 1.6);
-    this.rotSpeedZ = rand(-1.0, 1.0);
+    this.rot = crand(0, TAU);
+    this.rotSpeed = crand(-0.7, 0.7);
   }
 
   // Glide this gem from its current spot to `target`, arriving at age `arriveAge`
@@ -72,9 +72,7 @@ export class Gem {
 
   update(dt: number, w: number, h: number) {
     this.age += dt;
-    this.rotX += this.rotSpeedX * dt;
-    this.rotY += this.rotSpeedY * dt;
-    this.rotZ += this.rotSpeedZ * dt;
+    this.rot += this.rotSpeed * dt;
     if (this.parkTarget && this.parkOrigin) {
       // Smoothstep glide from the death site to the solved aim-ring spot over
       // one beat, then hold. Eased so the gem decelerates into its park.
@@ -112,77 +110,214 @@ export class Gem {
   }
 
   render(ctx: CanvasRenderingContext2D, t: number) {
+    if (!this.sprite) this.buildSprite();
     const time = t * 0.001;
     const fade = this.fadeAlpha(time);
-    const pulse = 0.78 + 0.22 * Math.sin(time * 2.4 + this.age * 1.7);
+    // gold veins catch the light as the rock turns — a slow, low-contrast
+    // glint so the ore reads as "valuable" without flashing like a pickup pod.
+    const glint = 0.5 + 0.5 * Math.sin(time * 1.6 + this.age * 0.9);
 
     ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-
-    // Soft halo so the gem reads from a distance without overwhelming the
-    // playfield. Wider than the gem itself so the eye picks it up in
-    // peripheral vision.
-    const haloRadius = this.radius * 3.4;
-    const halo = ctx.createRadialGradient(this.pos.x, this.pos.y, 0, this.pos.x, this.pos.y, haloRadius);
-    halo.addColorStop(0, `hsla(${this.hue}, 95%, 65%, ${0.45 * pulse * fade})`);
-    halo.addColorStop(0.5, `hsla(${this.hue - 6}, 90%, 55%, ${0.15 * pulse * fade})`);
-    halo.addColorStop(1, `hsla(${this.hue}, 90%, 55%, 0)`);
-    ctx.fillStyle = halo;
-    ctx.beginPath();
-    ctx.arc(this.pos.x, this.pos.y, haloRadius, 0, TAU);
-    ctx.fill();
-
-    // 3D octahedron wireframe matching the canister approach (familiar
-    // structure for the player's eye) but tinted gold and slightly larger
-    // so the gem reads as "more important than a pod".
-    const r = this.radius * 1.15;
-    const projected = projectOctahedron(this.rotX, this.rotY, this.rotZ, r);
-
     ctx.translate(this.pos.x, this.pos.y);
+    ctx.rotate(this.rot);
 
-    // Solid gold facets first (filled triangles from each pole to each
-    // equator vertex), then bright wireframe over the top. Filling the
-    // facets is what makes the gem read as a *gem* and not a wireframe pod.
-    const equator = [2, 3, 4, 5];
-    const poles = [0, 1];
-    const facetFill = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 1.1);
-    facetFill.addColorStop(0, `hsla(${this.hue + 10}, 100%, 78%, ${0.55 * fade})`);
-    facetFill.addColorStop(0.6, `hsla(${this.hue}, 95%, 55%, ${0.4 * fade})`);
-    facetFill.addColorStop(1, `hsla(${this.hue - 10}, 90%, 40%, ${0.18 * fade})`);
-    ctx.fillStyle = facetFill;
-    for (const poleIdx of poles) {
-      for (let e = 0; e < equator.length; e++) {
-        const a = projected[poleIdx];
-        const b = projected[equator[e]];
-        const c = projected[equator[(e + 1) % equator.length]];
-        // Backface cull via average z: facets facing away dim.
-        const avgZ = (a.z + b.z + c.z) / 3;
-        if (avgZ < -r * 0.4) continue;
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.lineTo(c.x, c.y);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
+    // The lit ore body (stone + baked gold veins) — solid, not additive.
+    ctx.globalAlpha = fade;
+    ctx.drawImage(this.sprite!, -this.spriteHalf, -this.spriteHalf);
+    ctx.globalAlpha = 1;
 
-    // Wireframe edges over the facets — same octahedron as the canister so
-    // the tumble reads consistently across both kinds of pickup.
-    ctx.lineWidth = 1.5;
-    for (const [a, b] of OCTAHEDRON_EDGES) {
-      const va = projected[a];
-      const vb = projected[b];
-      const depth = (va.z + vb.z) * 0.5;
-      const depthAlpha = 0.55 + 0.45 * ((depth + r) / (2 * r));
-      ctx.strokeStyle = `hsla(${this.hue + 20}, 100%, 82%, ${(0.95 * pulse * depthAlpha * fade).toFixed(3)})`;
-      ctx.beginPath();
-      ctx.moveTo(va.x, va.y);
-      ctx.lineTo(vb.x, vb.y);
-      ctx.stroke();
-    }
+    // A faint additive ore-glint over the veins only, keyed to the same baked
+    // sprite so the gold seams shimmer in place rather than the whole rock
+    // glowing — kept low-alpha so it never reads as a pickup halo.
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.22 * glint * fade;
+    ctx.drawImage(this.veinSprite!, -this.spriteHalf, -this.spriteHalf);
+    ctx.globalAlpha = 1;
 
     ctx.restore();
+  }
+
+  // Veins-only sprite (gold seams on transparent), reused as the additive glint
+  // overlay so the shimmer lands exactly on the ore and nowhere else.
+  private veinSprite: HTMLCanvasElement | null = null;
+
+  // Prebake the ore rock once: a lumpy harmonic-noise stone with an offset
+  // upper-left light, a dark/bright two-stroke rim, and raw gold veins + nuggets
+  // shot through a clipped interior. Static appearance → drawn once, then just
+  // rotated/faded per frame (no per-frame gradients).
+  private buildSprite() {
+    const H = this.hue;
+    const r = this.radius * 1.25; // body extent in the sprite, incl. lumps
+    const pad = 4;
+    const half = r + pad;
+    const size = Math.ceil(half * 2);
+    this.spriteHalf = half;
+
+    // Deterministic-enough lumpy outline (sampled at draw time, baked once).
+    const harmonics = [
+      { freq: 2, amp: crand(0.1, 0.18), phase: crand(0, TAU) },
+      { freq: 3, amp: crand(0.06, 0.12), phase: crand(0, TAU) },
+      { freq: 5, amp: crand(0.04, 0.08), phase: crand(0, TAU) },
+      { freq: 7, amp: crand(0.02, 0.05), phase: crand(0, TAU) },
+    ];
+    const radiusAt = (ang: number) => {
+      let m = 1;
+      for (const h of harmonics) m += h.amp * Math.cos(ang * h.freq + h.phase);
+      return this.radius * Math.max(0.7, Math.min(1.3, m));
+    };
+    const SAMPLES = 36;
+    const rimPath = (c: CanvasRenderingContext2D) => {
+      c.beginPath();
+      for (let i = 0; i <= SAMPLES; i++) {
+        const ang = (i / SAMPLES) * TAU;
+        const rr = radiusAt(ang);
+        const x = Math.cos(ang) * rr;
+        const y = Math.sin(ang) * rr;
+        if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
+      }
+      c.closePath();
+    };
+
+    this.sprite = this.paintBody(size, half, H, rimPath, harmonics);
+    this.veinSprite = this.paintVeins(size, half, H, rimPath, harmonics);
+  }
+
+  // Stone body + clipped interior detail + gold ore + two-stroke rim.
+  private paintBody(
+    size: number, half: number, H: number,
+    rimPath: (c: CanvasRenderingContext2D) => void,
+    harmonics: Array<{ freq: number; amp: number; phase: number }>,
+  ): HTMLCanvasElement {
+    const cv = document.createElement("canvas");
+    cv.width = size; cv.height = size;
+    const c = cv.getContext("2d")!;
+    c.translate(half, half);
+    const R = this.radius;
+
+    // Stone body: warm golden-tan ore (halfway between a grey rock and a pure
+    // gold gem) with an offset upper-left hot-spot and a deep terminator on the
+    // lower-right that drifts cool so the lit side reads as bright metal-bearing
+    // stone, not flat dirt.
+    const body = c.createRadialGradient(-R * 0.4, -R * 0.45, R * 0.1, 0, 0, R * 1.35);
+    body.addColorStop(0, "hsl(44, 52%, 56%)");
+    body.addColorStop(0.55, "hsl(38, 44%, 34%)");
+    body.addColorStop(1, "hsl(30, 30%, 13%)");
+    c.fillStyle = body;
+    rimPath(c);
+    c.fill();
+
+    // Interior detail clipped to the silhouette: mottled grain + a couple of
+    // pits (bright up-left lip, dark down-right floor) to sell the stone.
+    c.save();
+    rimPath(c);
+    c.clip();
+    for (let i = 0; i < 10; i++) {
+      const ang = harmonics[i % harmonics.length].phase + i * 1.7;
+      const d = R * (0.15 + 0.6 * ((i * 0.137) % 1));
+      const x = Math.cos(ang) * d, y = Math.sin(ang) * d;
+      const blotR = R * (0.12 + 0.1 * ((i * 0.31) % 1));
+      const dark = i % 2 === 0;
+      const g = c.createRadialGradient(x, y, 0, x, y, blotR);
+      g.addColorStop(0, dark ? "hsla(34, 30%, 16%, 0.45)" : "hsla(46, 48%, 66%, 0.42)");
+      g.addColorStop(1, "hsla(40, 40%, 34%, 0)");
+      c.fillStyle = g;
+      c.beginPath();
+      c.arc(x, y, blotR, 0, TAU);
+      c.fill();
+    }
+    // Gold ore: a few raw veins (jagged hairlines) + scattered nuggets, lit
+    // from the upper-left so the metal reads as embedded, not painted on.
+    this.paintOreInto(c, R, H);
+    c.restore();
+
+    // Two-stroke rim: dark outer occlusion contact + thin bright inner catch.
+    c.globalCompositeOperation = "source-over";
+    c.lineJoin = "round";
+    c.lineWidth = 3;
+    c.strokeStyle = "hsla(34, 35%, 6%, 0.9)";
+    rimPath(c);
+    c.stroke();
+    c.lineWidth = 1.2;
+    c.strokeStyle = "hsla(45, 55%, 70%, 0.75)";
+    rimPath(c);
+    c.stroke();
+    return cv;
+  }
+
+  // Paint the gold ore (veins + nuggets) into an already-clipped context.
+  // Shared by the body bake and the veins-only glint sprite so they line up.
+  private paintOreInto(c: CanvasRenderingContext2D, R: number, H: number) {
+    // Veins: jagged seams crossing the rock, each a bright gold core over a
+    // slightly darker, wider underlay so the seam has body. A few extra seams
+    // (over the original grey-ore look) push it back toward the pure-gem feel
+    // it grew out of.
+    const veinCount = 4;
+    for (let i = 0; i < veinCount; i++) {
+      const baseAng = (i / veinCount) * TAU + (i * 0.9);
+      const steps = 5;
+      const pts: Array<[number, number]> = [];
+      let px = Math.cos(baseAng) * R * 0.9;
+      let py = Math.sin(baseAng) * R * 0.9;
+      const dir = baseAng + Math.PI + ((i % 2) ? 0.5 : -0.5);
+      for (let s = 0; s <= steps; s++) {
+        pts.push([px, py]);
+        const jitter = (s % 2 ? 0.6 : -0.5) * 0.7;
+        const a = dir + jitter;
+        const step = R * 0.42;
+        px += Math.cos(a) * step;
+        py += Math.sin(a) * step;
+      }
+      const drawSeam = (w: number, color: string) => {
+        c.lineWidth = w;
+        c.lineCap = "round";
+        c.lineJoin = "round";
+        c.strokeStyle = color;
+        c.beginPath();
+        for (let s = 0; s < pts.length; s++) {
+          if (s === 0) c.moveTo(pts[s][0], pts[s][1]);
+          else c.lineTo(pts[s][0], pts[s][1]);
+        }
+        c.stroke();
+      };
+      drawSeam(R * 0.26, `hsla(${H - 6}, 80%, 34%, 0.85)`);
+      drawSeam(R * 0.13, `hsla(${H + 4}, 98%, 62%, 0.96)`);
+      drawSeam(R * 0.05, `hsla(${H + 14}, 100%, 85%, 0.97)`);
+    }
+    // Nuggets: small gold blobs with an upper-left specular and a darker base.
+    const nuggetCount = 7;
+    for (let i = 0; i < nuggetCount; i++) {
+      const ang = i * 2.3 + 0.6;
+      const d = R * (0.2 + 0.55 * ((i * 0.27) % 1));
+      const x = Math.cos(ang) * d, y = Math.sin(ang) * d;
+      const nr = R * (0.1 + 0.08 * ((i * 0.41) % 1));
+      const g = c.createRadialGradient(x - nr * 0.4, y - nr * 0.4, 0, x, y, nr);
+      g.addColorStop(0, `hsla(${H + 16}, 100%, 85%, 0.98)`);
+      g.addColorStop(0.5, `hsla(${H + 2}, 95%, 58%, 0.95)`);
+      g.addColorStop(1, `hsla(${H - 12}, 80%, 30%, 0.9)`);
+      c.fillStyle = g;
+      c.beginPath();
+      c.arc(x, y, nr, 0, TAU);
+      c.fill();
+    }
+  }
+
+  // Veins-only sprite: same ore on transparent, clipped to the body, used as
+  // the subtle additive glint overlay.
+  private paintVeins(
+    size: number, half: number, H: number,
+    rimPath: (c: CanvasRenderingContext2D) => void,
+    _harmonics: Array<{ freq: number; amp: number; phase: number }>,
+  ): HTMLCanvasElement {
+    const cv = document.createElement("canvas");
+    cv.width = size; cv.height = size;
+    const c = cv.getContext("2d")!;
+    c.translate(half, half);
+    c.save();
+    rimPath(c);
+    c.clip();
+    this.paintOreInto(c, this.radius, H);
+    c.restore();
+    return cv;
   }
 }
 

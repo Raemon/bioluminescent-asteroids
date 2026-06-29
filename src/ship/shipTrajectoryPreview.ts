@@ -1,6 +1,5 @@
 import type { Ship } from "../Ship";
-import { wrap } from "../vec";
-import { computeBeatPulseBoost, SHOW_SHIP_TRAJECTORY } from "./reticule/trajectoryPreview";
+import { computeBeatPulseBoost, SHOW_SHIP_TRAJECTORY, wrapReticuleVec } from "./reticule/trajectoryPreview";
 
 // ship's forecast chevrons — successive-beat positions if velocity holds.
 // Shares the cyan hull hue so it reads as "your" trajectory.
@@ -54,7 +53,10 @@ export const renderShipTrajectoryPreview = (
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   for (let k = 1; k <= SHIP_TRAJECTORY_BEAT_COUNT; k++) {
-    const pos = wrap({
+    // wrap to the ship's nearest toroidal copy (camera-aware) so a chevron just
+    // ahead of the ship stays just ahead of it across a world seam, instead of
+    // folding to the opposite screen edge under the scroll camera's translate.
+    const pos = wrapReticuleVec({
       x: ship.pos.x + ship.vel.x * beatGrid * k,
       y: ship.pos.y + ship.vel.y * beatGrid * k,
     }, w, h);

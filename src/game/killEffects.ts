@@ -353,6 +353,23 @@ export const onAsteroidKilledByRam = (game: Game, a: Asteroid, shipVel: Vec): As
   return finishAsteroidKillCore(game, a, shipVel, false, 0, 0);
 };
 
+// Shield ram: the raised shield shatters the rock outright (any HP). Scored and
+//   combo'd like a bullet kill — an on-beat plow-through pays score × combo with
+//   the full sparkle/chime — but anchored at the rock itself since there's no
+//   bullet. The combo bump (or off-beat break) is applied by the caller via
+//   applyHitToCombo *before* this runs, so game.beatCombo is already current.
+export const onAsteroidKilledByShieldRam = (
+  game: Game, a: Asteroid, shipVel: Vec, isOnBeatHit: boolean,
+): Asteroid[] => {
+  const scoreEarned = awardScoreForKill(game, a.pos, a.scoreValue(), isOnBeatHit);
+  const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
+  if (isOnBeatHit) triggerBassLightning(game, a.pos, a);
+  if (a.isBass()) game.sound.play("bassHit", 1, a.pos);
+  game.sound.play(hitSoundFor(a), 1, a.pos);
+  if (a.isBass()) game.sound.play("bassEcho", 1, a.pos);
+  return finishAsteroidKillCore(game, a, shipVel, isOnBeatHit, scoreEarned, comboAtKill);
+};
+
 // bassteroids take multiple hits to kill; chip points keep the player rewarded for
 // every rhythm-good hit along the way, not just the kill shot.
 const bassChipScore = (a: Asteroid): number => Math.max(1, Math.round(a.scoreValue() / 4));

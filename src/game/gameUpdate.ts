@@ -30,10 +30,11 @@ import {
   handleCanisterPickups,
   handleCanisterShots,
   handleGems,
+  handleFuelOrbPickups,
   expireGem,
 } from "./collisions";
 import { requestStart, showTitle, togglePause, respawn, setFirstWaveHintStage, setFirstWaveHintSubVisible, emitFirstWaveHintProgress, emitFirstWaveHintRhythmProgress, emitTutorialHoverProgress, emitTutorialControls, emitGameState, finalizeRecorder, restartReplayWorld } from "./lifecycle";
-import { syncHud, syncPowerupHud, syncComboHud } from "./hud";
+import { syncHud, syncPowerupHud, syncComboHud, syncFuelHud } from "./hud";
 import { renderKilledRow, stopParade } from "./killedParade";
 import { recordHighlightFrame } from "./highlightTimeline";
 import { tryStartHighlightClip, tickHighlightGameOverInput, beginHighlightLoop, tickHighlightLoop } from "./highlightReplay";
@@ -821,6 +822,7 @@ const updatePlaying = (game: Game, dt: number) => {
   evaluateClosedBeats(game);
   recordHighlightFrame(game);
   syncPowerupHud(game);
+  syncFuelHud(game);
   if (game.asteroids.length === 0 && !game.betaMode && !game.waveTransitioning && !game.tutorialActive) advanceWave(game);
   tickHoverLock(game);
   captureOrAssertCheckpoint(game);
@@ -1086,6 +1088,8 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
     if (wasAlive && !g.alive) expireGem(game, g);
   }
   compactInPlace(game.gems, (g) => g.alive);
+  for (const o of game.fuelOrbs) o.update(musicDt, game.w, game.h);
+  compactInPlace(game.fuelOrbs, (o) => o.alive);
   updatePositionalAudio(game);
 };
 
@@ -1269,6 +1273,7 @@ const runCollisionPasses = (game: Game) => {
   handleCanisterPickups(game);
   handleCanisterShots(game);
   handleGems(game);
+  handleFuelOrbPickups(game);
 };
 
 // Fade "Wave N" into the centre of the screen so it picks up directly from

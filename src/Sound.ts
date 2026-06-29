@@ -1116,18 +1116,61 @@ export class Sound {
         break;
       }
       case "bassKick": {
-        const kick = wire(new Tone.MembraneSynth({ pitchDecay: 0.04, octaves: 4, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.32, sustain: 0, release: 0.3 }, volume: -4 }), 1, 0.18);
-        kick.triggerAttackRelease(65.4 * pitchRatio, "16n", 0, 0.95);
+        // Tuned 808-style kick on C2: a long pitch sweep gives the body a
+        // round "dunk", and a tight bandpassed-noise click at t=0 gives the
+        // attack a hard transient — so it punches rather than reading as the
+        // soft sub-thump of bgBeat/fireBeat. A sub-octave sine adds weight
+        // under the body without muddying the click.
+        const kick = wire(new Tone.MembraneSynth({ pitchDecay: 0.09, octaves: 6, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.34 }, volume: -3 }), 1, 0.16);
+        kick.triggerAttackRelease(65.4 * pitchRatio, "16n", 0, 1.0);
+        const kickSub = new Tone.Oscillator({ type: "sine", frequency: 32.7 * pitchRatio }).start(0);
+        const kickSubEnv = new Tone.Gain(0);
+        kickSub.connect(kickSubEnv);
+        kickSubEnv.connect(toneMaster);
+        kickSubEnv.gain.setValueAtTime(0.0001, 0);
+        kickSubEnv.gain.linearRampToValueAtTime(0.32, 0.004);
+        kickSubEnv.gain.exponentialRampToValueAtTime(0.0001, 0.18);
+        kickSub.stop(0.2);
+        const click = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.0004, decay: 0.012, sustain: 0, release: 0.02 } });
+        const clickFilter = new Tone.Filter({ type: "bandpass", frequency: 2600, Q: 1.1 });
+        const clickGain = new Tone.Gain(0.22);
+        click.connect(clickFilter); clickFilter.connect(clickGain);
+        clickGain.connect(toneMaster); clickGain.connect(reverbSend);
+        click.triggerAttackRelease(0.012, 0);
         break;
       }
       case "bassBoom": {
-        const boom = wire(new Tone.MembraneSynth({ pitchDecay: 0.08, octaves: 5, oscillator: { type: "sine" }, envelope: { attack: 0.002, decay: 0.42, sustain: 0, release: 0.4 }, volume: -4 }), 1, 0.18);
-        boom.triggerAttackRelease(87.3 * pitchRatio, "8n", 0, 0.9);
+        // Cavernous detonation on F2: the sine body sweeps slowly downward
+        // for a falling "whoomph", an F1 sub layer fattens the floor, and a
+        // bandpassed-noise "stone clack" gives a gritty attack — so it reads
+        // as a heavy impact, clearly distinct from the tight punch of the
+        // kick and the soft thump of the basic beat.
+        const boom = wire(new Tone.MembraneSynth({ pitchDecay: 0.16, octaves: 7, oscillator: { type: "sine" }, envelope: { attack: 0.003, decay: 0.55, sustain: 0, release: 0.5 }, volume: -3 }), 1, 0.22);
+        boom.triggerAttackRelease(87.3 * pitchRatio, "8n", 0, 0.95);
+        const boomSub = new Tone.Oscillator({ type: "sine", frequency: 43.65 * pitchRatio }).start(0);
+        const boomSubEnv = new Tone.Gain(0);
+        boomSub.connect(boomSubEnv);
+        boomSubEnv.connect(toneMaster);
+        boomSubEnv.gain.setValueAtTime(0.0001, 0);
+        boomSubEnv.gain.linearRampToValueAtTime(0.45, 0.006);
+        boomSubEnv.gain.exponentialRampToValueAtTime(0.0001, 0.4);
+        boomSub.stop(0.44);
+        const clack = new Tone.NoiseSynth({ noise: { type: "brown" }, envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.06 } });
+        const clackFilter = new Tone.Filter({ type: "bandpass", frequency: 320, Q: 0.9 });
+        const clackGain = new Tone.Gain(0.4);
+        clack.connect(clackFilter); clackFilter.connect(clackGain);
+        clackGain.connect(toneMaster); clackGain.connect(reverbSend);
+        clack.triggerAttackRelease(0.05, 0);
         break;
       }
       case "bassPluck": {
-        const pluck = wire(new Tone.MonoSynth({ oscillator: { type: "sawtooth" }, filter: { Q: 6, type: "lowpass", rolloff: -24 }, envelope: { attack: 0.005, decay: 0.18, sustain: 0, release: 0.25 }, filterEnvelope: { attack: 0.005, decay: 0.18, sustain: 0.1, release: 0.3, baseFrequency: 90, octaves: 3 }, volume: -8 }), 1, 0.18);
-        pluck.triggerAttackRelease(98 * pitchRatio, "8n", 0, 0.85);
+        // Rubber-band twang on G2: a resonant lowpass that snaps wide open
+        // then clamps shut gives a vocal "bwong", and a quick downward pitch
+        // bend on the resonant peak reads as a string being plucked and
+        // released. The higher filter Q and wider sweep push it well past a
+        // plain saw blip so it stays a distinct voice, not a beat.
+        const pluck = wire(new Tone.MonoSynth({ oscillator: { type: "sawtooth" }, filter: { Q: 9, type: "lowpass", rolloff: -24 }, envelope: { attack: 0.004, decay: 0.22, sustain: 0, release: 0.28 }, filterEnvelope: { attack: 0.004, decay: 0.22, sustain: 0.08, release: 0.32, baseFrequency: 70, octaves: 4.2 }, volume: -7 }), 1, 0.18);
+        pluck.triggerAttackRelease(98 * pitchRatio, "8n", 0, 0.9);
         break;
       }
       case "bassSnap": {
@@ -5859,7 +5902,8 @@ export class Sound {
     this.playBaked("waveClear", 1);
   }
 
-  // Deep punchy kick on C2. Sine sweep + a tiny click for definition.
+  // Tuned 808 kick on C2: deep pitch-swept body + sub-octave weight + a hard
+  // bandpassed-noise click, so it punches instead of reading as a soft thump.
   // `pitchRatio` scales the tonal sweep so split-children of a bassteroid
   // can sound a fourth/octave below the parent (see Game.bassPitchRatio).
   private playBassKick(pitchRatio = 1) {
@@ -5884,8 +5928,9 @@ export class Sound {
     this.playBaked("bassSnap", pitchRatio);
   }
 
-  // Plucked sub-bass at G2 with a closing lowpass filter — distinct timbre
-  // from the kick so the two layer rather than mask each other.
+  // Rubber-band twang at G2: a high-Q lowpass snaps open then clamps shut
+  // for a vocal "bwong" — distinct timbre from the kick so the two layer
+  // rather than mask each other.
   private playBassPluck(pitchRatio = 1) {
     this.playBaked("bassPluck", pitchRatio);
   }
@@ -6286,12 +6331,14 @@ export class Sound {
   private laserShotBufferLen(tier: number): number {
     const chg = tier / 4;
     // Longest tail: the final echo. Mirror the echo schedule below — the last
-    // of (2 + tier) rolls starts latest and is the longest.
-    const echoes = 2 + tier;
+    // roll starts latest and is the longest.
+    const echoes = 2 + Math.round(tier * 1.5);
     const lastDelay = (echoes - 1) * (0.13 + chg * 0.05);
     const lastLen = (0.7 + chg * 1.1) * (1 + (echoes - 1) * 0.12);
-    const chordLen = 0.7 + chg * 1.3;
-    return Math.max(lastDelay + lastLen, chordLen) + 0.2;
+    const chordLen = 0.9 + chg * 1.7;
+    // Horn swell blooms late and rings out past the chord — mirror its schedule.
+    const hornTail = (0.06 + chg * 0.05) + chordLen * (0.9 + chg * 0.4);
+    return Math.max(lastDelay + lastLen, chordLen, hornTail) + 0.2;
   }
 
   // Builds the THUNDERCLAP synth graph for one charge tier into `ctx`, summed
@@ -6345,15 +6392,19 @@ export class Sound {
     // pitch-bend) as it booms. Lower voices always present; the major third and
     // bright upper octave fade in with charge so a full charge is a fuller, more
     // resolved chord. All slightly detuned for width/power.
-    const chordLen = 0.7 + chg * 1.3;
-    // C2, G2, C3, E3, G3, C4 — root-heavy at the bottom, brightening up top.
+    const chordLen = 0.9 + chg * 1.7;
+    // C1, C2, G2, C3, E3, G3, C4 — a deep C-major "voice of god" voicing now
+    // rooted an octave lower (C1 fundamental) so the boom has a true sub floor,
+    // brightening up top. In key with the C-rooted bass field, so the shot lands
+    // as a musical chord-hit rather than just noise.
     const voices: Array<{ hz: number; type: OscillatorType; peak: number; bend: number }> = [
-      { hz: 65.41,  type: "sawtooth", peak: 0.26,                  bend: 0.84 }, // C2
-      { hz: 98.00,  type: "sawtooth", peak: 0.18,                  bend: 0.86 }, // G2
-      { hz: 130.81, type: "triangle", peak: 0.20,                  bend: 0.88 }, // C3
-      { hz: 164.81, type: "triangle", peak: 0.10 + chg * 0.10,     bend: 0.90 }, // E3 (major 3rd — grows w/ charge)
-      { hz: 196.00, type: "triangle", peak: 0.06 + chg * 0.06,     bend: 0.90 }, // G3
-      { hz: 261.63, type: "sine",     peak: chg * 0.10,            bend: 0.92 }, // C4 (top sparkle — charge only)
+      { hz: 32.70,  type: "sine",     peak: 0.30 + chg * 0.14,     bend: 0.88 }, // C1 (sub fundamental)
+      { hz: 65.41,  type: "sawtooth", peak: 0.28,                  bend: 0.84 }, // C2
+      { hz: 98.00,  type: "sawtooth", peak: 0.20,                  bend: 0.86 }, // G2
+      { hz: 130.81, type: "triangle", peak: 0.22,                  bend: 0.88 }, // C3
+      { hz: 164.81, type: "triangle", peak: 0.11 + chg * 0.12,     bend: 0.90 }, // E3 (major 3rd — grows w/ charge)
+      { hz: 196.00, type: "triangle", peak: 0.07 + chg * 0.08,     bend: 0.90 }, // G3
+      { hz: 261.63, type: "sine",     peak: chg * 0.12,            bend: 0.92 }, // C4 (top sparkle — charge only)
     ];
     for (const vc of voices) {
       if (vc.peak <= 0.0001) continue;
@@ -6378,11 +6429,12 @@ export class Sound {
     }
 
     // --- Sub detonation: a sine whose pitch collapses into infrasonic territory
-    // — the gut-punch under the clap. Deeper and longer with charge. Routes
-    // through the saturator too so it stays glued to the chord.
-    const subStart = 120 - chg * 35;
-    const subEnd = 33 - chg * 5;
-    const subLen = 0.45 + chg * 0.7;
+    // — the gut-punch under the clap. Deeper, louder, and longer with charge.
+    // Routes through the saturator too so it stays glued to the chord. The end
+    // pitch lands near C1 (32.7Hz) so even the sub resolves in key.
+    const subStart = 130 - chg * 40;
+    const subEnd = 32.7 - chg * 4;
+    const subLen = 0.55 + chg * 0.9;
     {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -6390,12 +6442,39 @@ export class Sound {
       osc.frequency.setValueAtTime(subStart, 0);
       osc.frequency.exponentialRampToValueAtTime(subEnd, subLen * 0.7);
       gain.gain.setValueAtTime(0.0001, 0);
-      gain.gain.exponentialRampToValueAtTime(0.6 + chg * 0.3, 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.72 + chg * 0.34, 0.006);
       gain.gain.exponentialRampToValueAtTime(0.0001, subLen);
       osc.connect(gain);
       gain.connect(shaper);
       osc.start(0);
       osc.stop(subLen + 0.05);
+    }
+
+    // --- Triumphant horn swell: a G2→C3 sine-pair that BLOOMS a beat late and
+    // resolves the dominant up to the tonic — the "voice of god" answering the
+    // clap. Quiet at a tap, swelling to a clear cinematic resolve at full charge,
+    // so a maxed shot ends on a satisfying musical note rather than just decay.
+    {
+      const swellLen = chordLen * (0.9 + chg * 0.4);
+      const swellDelay = 0.06 + chg * 0.05;
+      const swellPeak = 0.05 + chg * 0.16;
+      for (const det of [-4, 5]) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        // G2 → C3: dominant resolving up to the tonic.
+        osc.frequency.setValueAtTime(98.0, swellDelay);
+        osc.frequency.exponentialRampToValueAtTime(130.81, swellDelay + swellLen * 0.55);
+        osc.detune.value = det;
+        gain.gain.setValueAtTime(0.0001, swellDelay);
+        // Slow swell-in (not a transient) so it reads as a sustained horn, not a pluck.
+        gain.gain.exponentialRampToValueAtTime(swellPeak, swellDelay + swellLen * 0.4);
+        gain.gain.exponentialRampToValueAtTime(0.0001, swellDelay + swellLen);
+        osc.connect(gain);
+        gain.connect(shaper);
+        osc.start(swellDelay);
+        osc.stop(swellDelay + swellLen + 0.05);
+      }
     }
 
     // --- Thunder crack: the bright transient that gives the clap its "snap".
@@ -6447,7 +6526,7 @@ export class Sound {
     // the low end like real thunder rolling across the sky. Two rolls at a tap,
     // up to six at full charge — this is what makes a big shot genuinely
     // thunderous rather than a single hit.
-    const echoes = 2 + tier;
+    const echoes = 2 + Math.round(tier * 1.5);
     for (let e = 0; e < echoes; e++) {
       const delay = e * (0.13 + chg * 0.05);
       const rollLen = (0.7 + chg * 1.1) * (1 + e * 0.12);
@@ -6539,23 +6618,44 @@ export class Sound {
   }
 
   // Per-dot charge tick — fires when a new charge dot appears in front of the
-  // ship during a hold. Walks up a C major triad (C3 → E3 → G3) so the three
-  // dots together arpeggiate a chord, and a higher dot sounds "more charged".
-  // Each dot has a sub layer + body + filtered noise sparkle so the tick lands
-  // with weight rather than just a bright pluck.
+  // ship during a hold. Walks up a C major chord that RESOLVES UP AN OCTAVE on
+  // the 4th dot (C3 → E3 → G3 → C4) so a full charge lands on the tonic and
+  // feels "topped off". Each dot has a sub layer + body + filtered noise sparkle
+  // for weight, plus a rising capacitor whine (below) that climbs with the dot
+  // so the build feels tense and audibly "winding up".
   playLaserCharge(dotIndex: number) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    // C major triad an octave lower than the original — deeper, more "charging
-    // capacitor" than "music box". Dropped two octaves vs. the prior C5/E5/G5.
-    const triad = [130.81, 164.81, 196.00]; // C3, E3, G3
+    // C-major resolving climb: root, third, fifth, octave. The 4th dot lands on
+    // C4 (the octave) so a maxed charge resolves rather than dangling on the 5th.
+    const triad = [130.81, 164.81, 196.00, 261.63]; // C3, E3, G3, C4
     const idx = Math.max(0, Math.min(triad.length - 1, dotIndex - 1));
     const hz = triad[idx];
     const tail = 0.32 + idx * 0.04;
-    // Each successive dot gets slightly louder + brighter so the build is felt.
-    const tierBoost = 0.85 + idx * 0.18;
+    // Each successive dot gets louder + brighter so the build is felt.
+    const tierBoost = 0.9 + idx * 0.22;
+
+    // Rising capacitor whine — a quick upward sine sweep on each dot that starts
+    // higher every tier, so the stack of ticks reads as a winding-up generator.
+    // Short, bright, sits above the chord; sells "energy gathering" between dots.
+    {
+      const whine = this.ctx.createOscillator();
+      const whineGain = this.ctx.createGain();
+      whine.type = "sine";
+      const wStart = hz * 2;
+      const wEnd = hz * (3 + idx * 0.5);
+      whine.frequency.setValueAtTime(wStart, t);
+      whine.frequency.exponentialRampToValueAtTime(wEnd, t + tail * 0.8);
+      whineGain.gain.setValueAtTime(0.0001, t);
+      whineGain.gain.exponentialRampToValueAtTime(0.04 * tierBoost, t + 0.02);
+      whineGain.gain.exponentialRampToValueAtTime(0.0001, t + tail * 0.9);
+      whine.connect(whineGain);
+      whineGain.connect(this.master);
+      whine.start(t);
+      whine.stop(t + tail + 0.04);
+    }
 
     // Sub layer — sine at the root octave below for the felt depth.
     const sub = this.ctx.createOscillator();

@@ -175,6 +175,7 @@ const paintEntityLayers = (
   for (const c of game.canisters) maybeWrap(c.pos, c.radius * BODY_GLOW_REACH, false, () => c.render(ctx, game.time));
   // only flung blades wrap in gameplay; parked/drifting gems settle in place.
   for (const g of game.gems) maybeWrap(g.pos, g.radius * BODY_GLOW_REACH, g.fast, () => g.render(ctx, game.time));
+  for (const o of game.fuelOrbs) maybeWrap(o.pos, o.radius * BODY_GLOW_REACH, false, () => o.render(ctx, game.time));
   for (const al of game.aliens) maybeWrap(al.pos, al.radius * BODY_GLOW_REACH, false, () => al.render(ctx, game.time));
   for (const ab of game.alienBullets) wrapBody(ab.pos, ab.radius * ALIEN_BULLET_GLOW_REACH, () => ab.render(ctx));
   renderBossBeams(ctx, game.bossBeams);

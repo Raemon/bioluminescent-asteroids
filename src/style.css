@@ -198,26 +198,20 @@ html:has(#sound-root), body:has(> #sound-root) {
   z-index: 5;
 }
 
+/* Pinned to the far-right of the HUD, just inboard of the volume slider, so
+   the slot row never overlaps the fuel bar / score on the left. */
 #powerups {
   position: absolute;
-  left: 50%;
+  right: 220px;
   top: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-/* On narrow screens the absolutely-centered powerups would overlap the
-   left/right HUD groups. Fall back to inline flow so the flexbox
-   space-between pushes them clear. */
-@media (max-width: 900px) {
-  #powerups {
-    position: static;
-    transform: none;
-  }
-}
-
+/* Slots stay out of the layout until the player actually earns the upgrade —
+   no half-opacity placeholder row. .active reveals them (see below). */
 .powerup-slot {
   position: relative;
   width: 34px;
@@ -225,7 +219,7 @@ html:has(#sound-root), body:has(> #sound-root) {
   border-radius: 8px;
   border: 1px solid rgba(106, 215, 255, 0.12);
   background: rgba(8, 16, 36, 0.35);
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: center;
   opacity: 0.32;
@@ -255,6 +249,7 @@ html:has(#sound-root), body:has(> #sound-root) {
 .powerup-slot[data-kind="sideEngines"]{ color: hsl(25, 95%, 70%); }
 
 .powerup-slot.active {
+  display: flex;
   opacity: 1;
   background: rgba(8, 16, 36, 0.55);
   border-color: currentColor;
@@ -273,6 +268,57 @@ html:has(#sound-root), body:has(> #sound-root) {
   0%   { transform: scale(1); }
   45%  { transform: scale(1.22); }
   100% { transform: scale(1); }
+}
+
+/* Fuel Mode reserve bar (hidden unless fuel mode is on). Sits in hud-left next
+   to the score; fill width tracks the reserve and JS swaps its colour as it
+   runs low. */
+#fuel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#fuel.hidden {
+  display: none;
+}
+
+#fuel-label {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: #6ad7ff;
+  opacity: 0.8;
+}
+
+#fuel-bar {
+  position: relative;
+  width: 120px;
+  height: 6px;
+  background: rgba(106, 215, 255, 0.1);
+  border: 1px solid rgba(106, 215, 255, 0.22);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#fuel-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  background: linear-gradient(90deg, rgba(70, 220, 255, 0.55), #46dcff);
+  box-shadow: 0 0 8px rgba(70, 220, 255, 0.6);
+  transition: width 0.1s linear, background 0.25s linear, box-shadow 0.25s linear;
+}
+
+#fuel-fill.low {
+  background: linear-gradient(90deg, rgba(255, 180, 70, 0.55), #ffb446);
+  box-shadow: 0 0 8px rgba(255, 180, 70, 0.6);
+}
+
+#fuel-fill.empty {
+  background: linear-gradient(90deg, rgba(255, 90, 90, 0.6), #ff5a5a);
+  box-shadow: 0 0 9px rgba(255, 90, 90, 0.7);
 }
 
 /* Slow-mo progress bar fills the slot bottom-up while the timer counts down. */

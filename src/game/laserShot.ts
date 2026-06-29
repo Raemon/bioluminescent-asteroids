@@ -26,12 +26,19 @@ import type { Gem } from "../Gem";
 import type { Canister } from "../Canister";
 import { syncHud } from "./hud";
 import { prongOffsets } from "../ship/shipWeapons";
+import { FUEL_LASER_CHARGE_DRAIN, laserFireFuelCost, spendShipFuel } from "./fuel";
+import { emitLaserImpact } from "./particleBursts";
 
-// Absolute charge-dot ceiling (one per beat held). Damage doubles per dot from
-// a base of 2, so dots 0..4 deal 2, 4, 8, 16, 32 — a full charge melts large
-// rocks and bites deep into a boss core. The dots a player can actually REACH
-// is gated by rhythm via maxLaserDots().
+// Absolute charge-dot ceiling (one per beat held). The dots a player can
+// actually REACH is gated by rhythm via maxLaserDots().
 export const LASER_MAX_DOTS = 4;
+
+// Damage by charge dots. Starts heavier than a bullet even at 0 dots, then ramps
+// hard so a full charge is a screen-clearing payoff: 5, 11, 24, 52, 110 across
+// 0..4 dots. (Base 5, roughly ×2.2 per dot — steeper than the old ×2 from 2.)
+// Single source of truth so the gem-crack gate, sound gain, and fire all agree.
+export const laserDamage = (dots: number): number =>
+  Math.round(5 * Math.pow(2.2, Math.min(dots, LASER_MAX_DOTS)));
 
 // The rhythm-gated cap on reachable charge dots. Higher combo unlocks deeper
 // charge tiers, so a long beam is something rhythm earns.
@@ -63,10 +70,11 @@ export const FIRE_FLASH_DECAY = 0.18;
 // Perpendicular jag amplitude (px) for the crackle arcs.
 const LASER_JAG_AMPLITUDE = 7;
 
-// Half-width (px) of the beam's hit swath by dot count — a charged beam sweeps
-// wider so it catches targets the centre line would miss. The renderer's
-// visible core/glow is sized to roughly match this.
-const beamHalfWidth = (dots: number): number => dots * 6;
+// Half-width (px) of the beam's hit swath by dot count — wider even at a tap so
+// the laser feels like a beam rather than a thread, then escalating faster per
+// dot (quadratic growth on top of a per-dot floor) so a full charge sweeps a
+// genuinely fat lane that catches a whole cluster. 0..4 dots → 7, 16, 29, 46, 67.
+const beamHalfWidth = (dots: number): number => 7 + dots * 7 + dots * dots * 2;
 
 // Flat hit allowance on top of the target surface, mirroring the generosity a
 // bullet's hitRadius() gives its collision test. Without it the beam's centre
@@ -133,7 +141,7 @@ export class LaserBeam {
     for (const group of laserTargetGroups(game)) {
       for (const target of group.list()) this.eligible.add(target);
     }
-    if (dots >= 2) {
+    if (dots >= 1) {
       const n = 14;
       for (let i = 0; i < n; i++) this.jags.push((rng() * 2 - 1) * LASER_JAG_AMPLITUDE);
     }
@@ -251,6 +259,10 @@ export const tickLaserShot = (game: Game, dt: number) => {
       game.laserChargeGlow = approachGlow(game.laserChargeGlow, 0, dt);
       return;
     }
+    // Holding the charge sips fuel — a slow drain that competes with thrust for
+    // the reserve, so parking on a max charge isn't free. The release toll in
+    // fireLaser stacks on top of this.
+    spendShipFuel(ship, FUEL_LASER_CHARGE_DRAIN * dt);
     // Per-dot charge tick — discrete C-chord pluck accent on each new dot, plus
     // a step-up of the sustained crackle/chord bed so the build is felt.
     const dots = laserDotCount(ship, game.beatTime, maxLaserDots(game));
@@ -278,7 +290,11 @@ export const tickLaserShot = (game: Game, dt: number) => {
 };
 
 const fireLaser = (game: Game, ship: Ship, dots: number) => {
-  const damage = 2 << dots;
+  // Per-shot fuel toll, scaling with charge — an uncharged tap is near-free, a
+  // maxed beam takes a real bite. Spent on release (the charge sip was paid
+  // while holding); never blocks the shot, just drains whatever's left.
+  spendShipFuel(ship, laserFireFuelCost(dots));
+  const damage = laserDamage(dots);
   const superBoosted = game.beatCombo >= 12;
   const length = computeBeamLength(ship, superBoosted, dots);
   // Fire timing primes/latches rhythm exactly like a bullet (shared with the
@@ -295,16 +311,22 @@ const fireLaser = (game: Game, ship: Ship, dots: number) => {
     game.lasers.push(beam);
   }
   game.sound.playLaserShot(damage, dots);
-  game.shake = Math.min(game.shake + 0.12 + dots * 0.12, 1.4);
+  game.shake = Math.min(game.shake + 0.22 + dots * 0.2, 1.6);
   // Big white pop on release, scaled by charge; the buildup glow ends here.
-  game.laserFireFlash = Math.min(1, 0.4 + dots * 0.2);
+  game.laserFireFlash = Math.min(1, 0.5 + dots * 0.22);
+  // Muzzle discharge — a forward gout of plasma blasting off the barrel on
+  // release, so a charged shot recoils visibly out of the ship, not just a flash.
+  const tier = dots / LASER_MAX_DOTS;
+  const fwd = fromAngle(ship.heading, 1);
+  const muzzle = muzzleOf(ship);
+  emitLaserImpact(game.particles, muzzle, { x: -fwd.x, y: -fwd.y }, 0.5 + tier * 0.5);
   game.laserChargeGlow = 0;
 };
 
 // Damage dealt by a torus-charge super-laser. Well above a full held charge
-// (32) so a single super beam shears clean through a screen-line of rocks and
+// (110) so a single super beam shears clean through a screen-line of rocks and
 // bites deep into armoured kinds.
-export const SUPER_LASER_DAMAGE = 40;
+export const SUPER_LASER_DAMAGE = 150;
 
 // Fire the screen-spanning super-laser the ship banked by flying through a torus
 // ring's energy thread. Unlike the held-charge lasershot, this is a one-shot
@@ -462,6 +484,9 @@ const applyBeamToGroup = (game: Game, beam: LaserBeam, dir: Vec, group: LaserTar
       surviving.push(target); continue;
     }
     beam.alreadyHit.add(target);
+    // Hot beam-strike gout at the contact point, on top of the target's own
+    // kill/crack burst — sells the laser as a heavier hit than a bullet.
+    emitLaserImpact(game.particles, closest, dir, beam.dots / LASER_MAX_DOTS);
     const fakeBullet = makeFakeBullet(closest, dir, beam.firedOnBeat);
     for (const remaining of group.onHit(game, target, beam, dir, fakeBullet)) {
       surviving.push(remaining);
@@ -526,7 +551,7 @@ export const renderLaserChargeDots = (
   if (!ship.lasershotActive) return;
   if (!ship.laserChargeActive) return;
   const dots = laserDotCount(ship, beatTime, maxLaserDots(game));
-  if (dots <= 0) return;
+  const maxDots = maxLaserDots(game);
   const dir = fromAngle(ship.heading, 1);
   const perp = { x: -dir.y, y: dir.x };
   // First dot sits a bit past the muzzle; subsequent dots step outward.
@@ -534,6 +559,62 @@ export const renderLaserChargeDots = (
   const dotGap = 14;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
+
+  // Gathering-energy aura around the ship — drawn from the instant charging
+  // begins (even before the first dot) so the buildup reads as continuously
+  // sucking power in, then swelling and tightening as each dot lands. `charge`
+  // ramps 0..1 across the reachable dots; the partial progress toward the NEXT
+  // dot keeps it climbing smoothly between beats rather than stepping.
+  {
+    const nextDotFrac = Math.min(1, Math.max(0,
+      (beatTime - (ship.laserChargeStartBeatTime + dots * BEAT_GRID)) / BEAT_GRID));
+    const charge = Math.min(1, (dots + nextDotFrac) / Math.max(1, maxDots));
+    const cx = ship.pos.x;
+    const cy = ship.pos.y;
+    // Breathing ring of in-rushing light: a wide soft disc that pulses fast and
+    // brightens with charge. Rotating inflow streaks ride on top.
+    const auraPulse = 0.6 + 0.4 * Math.sin(beatTime * 16);
+    const auraR = ship.radius * (2.6 + charge * 2.2);
+    const auraA = (0.06 + charge * 0.18) * auraPulse;
+    const aura = ctx.createRadialGradient(cx, cy, ship.radius * 0.6, cx, cy, auraR);
+    aura.addColorStop(0, `rgba(180, 240, 255, ${(auraA * 0.9).toFixed(3)})`);
+    aura.addColorStop(0.6, `rgba(120, 210, 255, ${(auraA * 0.5).toFixed(3)})`);
+    aura.addColorStop(1, "rgba(90, 180, 255, 0)");
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(cx, cy, auraR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // In-rushing streaks — short comet-lines spiralling INWARD toward the ship,
+    // the "drawing power in" cue. Count + speed climb with charge.
+    const streaks = 5 + Math.round(charge * 9);
+    for (let s = 0; s < streaks; s++) {
+      const baseAng = (s / streaks) * Math.PI * 2 + beatTime * (1.2 + charge * 1.5);
+      // Each streak's radius oscillates inward over a short cycle (the inflow).
+      const phase = (beatTime * (1.6 + charge) + s * 0.7) % 1;
+      const rOuter = auraR * (1 - phase) + ship.radius * 1.3 * phase;
+      const rInner = rOuter - (6 + charge * 14);
+      const ox = cx + Math.cos(baseAng) * rOuter;
+      const oy = cy + Math.sin(baseAng) * rOuter;
+      const ix = cx + Math.cos(baseAng) * rInner;
+      const iy = cy + Math.sin(baseAng) * rInner;
+      const sa = (0.25 + charge * 0.4) * (1 - phase);
+      ctx.strokeStyle = `rgba(210, 245, 255, ${sa.toFixed(3)})`;
+      ctx.lineWidth = 1 + charge * 1.4;
+      ctx.beginPath();
+      ctx.moveTo(ox, oy);
+      ctx.lineTo(ix, iy);
+      ctx.stroke();
+    }
+
+    // Tight bright corona hugging the hull — intensifies sharply near full charge
+    // so a maxed buildup looks ready to burst.
+    if (charge > 0.05) {
+      drawGlow(ctx, cx, cy, ship.radius * (1.4 + charge * 0.8), 195, 0.12 + charge * 0.4);
+    }
+  }
+
+  if (dots <= 0) { ctx.restore(); return; }
 
   // Connecting thread — a wobbling line from the muzzle through every armed dot.
   // Reads as "energy being routed forward". Brighter as more dots accumulate.
@@ -687,31 +768,44 @@ export const renderLasers = (ctx: CanvasRenderingContext2D, lasers: LaserBeam[])
       fadingStroke("180, 230, 255", 0.16 * alpha, 40 + w * 9);
       fadingStroke("210, 180, 255", 0.22 * alpha, 18 + w * 5);
     }
-    // Outermost diffuse aura — very wide, very soft. Only meaningful at higher
-    // tiers; gives a charged shot a "this beam is bending the air" presence.
-    if (beam.dots >= 1) {
-      fadingStroke("140, 200, 255", 0.12 * alpha * (beam.isSuper ? 1 : tier), 22 + w * 7);
-    }
+    // Outermost diffuse aura — wide and soft, now present even at a tap (a faint
+    // floor + charge ramp) so the smallest beam still reads as "bending the air".
+    fadingStroke("140, 200, 255", (0.1 + 0.14 * tier) * alpha, 26 + w * 8);
     // Outer glow — wide, soft, cyan-tinged. Wider at higher tiers.
-    fadingStroke("120, 220, 255", 0.28 * alpha, 12 + w * 4);
+    fadingStroke("120, 220, 255", 0.34 * alpha, 14 + w * 5);
     // Mid layer — brighter, narrower.
-    fadingStroke("180, 240, 255", 0.55 * alpha, 5 + w * 1.8);
+    fadingStroke("180, 240, 255", 0.62 * alpha, 6 + w * 2.1);
     // Core — near-white, hot.
-    fadingStroke("255, 255, 255", alpha, 2.2 + w * 0.7);
-    // Hot white-blue inner sliver — only on high-charge shots, sells the heat.
-    if (beam.dots >= 2) {
-      fadingStroke("255, 255, 255", alpha * 0.85, 1 + tier * 1.2 + (beam.isSuper ? 2.5 : 0));
+    fadingStroke("255, 255, 255", alpha, 2.6 + w * 0.85);
+    // Hot white inner sliver — now on every shot so the beam always has a blazing
+    // centre line; grows with charge for the high-tier "plasma lance" look.
+    fadingStroke("255, 255, 255", Math.min(1, alpha * 1.0), 1 + tier * 2.2 + (beam.isSuper ? 3 : 0));
+
+    // Energy throb — a fast bright pulse riding the core so the beam looks alive
+    // and surging rather than a static painted line. Brightest right after fire.
+    {
+      const throb = 0.5 + 0.5 * Math.sin((1 - t) * 40 + beam.seed * 6);
+      fadingStroke("220, 250, 255", alpha * 0.5 * throb * (1 - ageFrac), 2 + w * 1.2);
     }
 
     // Crackle arcs — jagged offshoots branching off the core, in the same
-    // oscilloscope dialect as bass lightning. Only on high-charge shots.
-    if (beam.dots >= 2 && beam.jags.length > 0) {
+    // oscilloscope dialect as bass lightning. Now from the first charged dot so
+    // even a small charge spits lightning; denser/brighter at higher tiers.
+    if (beam.dots >= 1 && beam.jags.length > 0) {
       const tSec = (1 - t) * 6 + beam.seed;
       const pts = buildJaggedBolt(
         beam.origin.x, beam.origin.y, ex, ey, beam.jags, beam.seed, tSec, 6,
       );
-      strokePolyline(ctx, pts, 3 + tier * 2, `rgba(150, 230, 255, ${(0.18 * alpha).toFixed(3)})`);
-      strokePolyline(ctx, pts, 1.2, `rgba(230, 250, 255, ${(0.6 * alpha).toFixed(3)})`);
+      strokePolyline(ctx, pts, 3 + tier * 3, `rgba(150, 230, 255, ${(0.2 * alpha).toFixed(3)})`);
+      strokePolyline(ctx, pts, 1.4, `rgba(235, 250, 255, ${(0.7 * alpha).toFixed(3)})`);
+      // Second, independently-seeded arc on high charge so the beam writhes with
+      // a tangle of lightning rather than a single jag.
+      if (beam.dots >= 3) {
+        const pts2 = buildJaggedBolt(
+          beam.origin.x, beam.origin.y, ex, ey, beam.jags, beam.seed + 2.3, tSec * 1.3, 6,
+        );
+        strokePolyline(ctx, pts2, 1.2, `rgba(200, 240, 255, ${(0.5 * alpha).toFixed(3)})`);
+      }
     }
 
     // Muzzle burst — bright circular flash at the origin, dims fast over life.
@@ -774,7 +868,7 @@ export const renderLasers = (ctx: CanvasRenderingContext2D, lasers: LaserBeam[])
 // buildup adds a faint cyan glow that grows while holding; the fire flash
 // pops bright on release and decays fast. Drawn above the entity layers.
 export const renderLaserAmbientFlash = (ctx: CanvasRenderingContext2D, game: Game) => {
-  const a = game.laserChargeGlow * 0.06 + game.laserFireFlash * 0.22;
+  const a = game.laserChargeGlow * 0.09 + game.laserFireFlash * 0.3;
   if (a <= 0.001) return;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";

@@ -12,11 +12,13 @@ import {
   GEM_REVEAL_SCORE,
   spawnCanisterFromGem,
 } from "../Gem";
+import { FuelOrb, spawnFuelOrbAt } from "../FuelOrb";
+import { FUEL_MODE_ENABLED, FUEL_ORB_RESTORE, FUEL_SHIELD_ABSORB, shieldImpactFuelCost, spendShipFuel } from "./fuel";
 import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebaseBeatEval } from "./rhythmGate";
 import { BEAT_GRID, DRIFT_RHYTHM_BONUS } from "./rhythmConstants";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
-import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGemPickup, emitBounceSparks, emitAlienBulletPop } from "./particleBursts";
+import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGemPickup, emitFuelOrbPickup, emitBounceSparks, emitAlienBulletPop } from "./particleBursts";
 import { spawnDriftBurst } from "./driftBurst";
 import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage, popupDriftCombo } from "./popups";
 import { checkBonusLife } from "./bonusLife";
@@ -24,6 +26,7 @@ import {
   applyHitToCombo,
   onAsteroidKilledByBullet,
   onAsteroidKilledByRam,
+  onAsteroidKilledByShieldRam,
   onAsteroidCrackedByBullet,
   onAsteroidCrackedByRam,
   onAlienKilled,
@@ -150,7 +153,8 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
   return null;
 };
 
-// ramming kill skips score/combo (not a rhythm hit) but still loses shield/life unless invuln.
+// A bare ram is lethal; with the shield held it plows through (see
+//   handleSingleShipAsteroidImpact). One impact per frame — the break caps it.
 const handleShipAsteroidCollisions = (game: Game) => {
   if (!game.ship.alive || game.ship.invuln > 0) return;
   for (let i = 0; i < game.asteroids.length; i++) {
@@ -173,6 +177,10 @@ export const shipAsteroidHit = (game: Game, a: Asteroid): boolean => {
 
 // encapsulates the in-place splice when a ram kills, so the outer loop stays a simple sweep.
 const handleSingleShipAsteroidImpact = (game: Game, a: Asteroid, asteroidIdx: number) => {
+  if (game.ship.shieldActive) {
+    shieldRamThroughAsteroid(game, a, asteroidIdx);
+    return;
+  }
   const ramDamage = 4;
   const { killed } = a.applyDamage(ramDamage);
   if (killed) {
@@ -186,13 +194,33 @@ const handleSingleShipAsteroidImpact = (game: Game, a: Asteroid, asteroidIdx: nu
     a.applyKnockback(game.ship.vel.x, game.ship.vel.y, ramDamage, shipSpeed);
     onAsteroidCrackedByRam(game, a);
   }
-  if (game.ship.shieldActive) {
-    game.ship.shieldActive = false;
-    game.ship.invuln = 0.8;
-    popShield(game);
-  } else {
-    killShip(game);
+  killShip(game);
+};
+
+// Shielded ram: the rock shatters outright (any HP) and the ship plows on with
+//   its velocity untouched. Costs a fuel burst scaled by the rock's size × the
+//   relative impact speed. An on-beat plow-through scores + builds the combo
+//   like a bullet kill; an off-beat one breaks the combo like any off-beat hit.
+const shieldRamThroughAsteroid = (game: Game, a: Asteroid, asteroidIdx: number) => {
+  const relSpeed = Math.hypot(game.ship.vel.x - a.vel.x, game.ship.vel.y - a.vel.y);
+  spendShipFuel(game.ship, shieldImpactFuelCost(a.radius, relSpeed));
+  // perceivedBeatTime is the latency-shifted "now" — judge the smash against the
+  //   beat the player hears, the same clock the ship's visual pulse rides.
+  const onBeat = isInBeatWindow(game, game.perceivedBeatTime);
+  // A ram has no fire event, so prime the streak the way an on-beat *fire* does
+  //   (0→1) before the hit climbs it — otherwise an on-beat smash from a cold
+  //   combo would multiply score by 0. Above 1, applyHitToCombo owns the climb.
+  if (onBeat && game.beatCombo === 0) {
+    game.beatCombo = 1;
+    if (game.maxCombo < 1) game.maxCombo = 1;
   }
+  applyHitToCombo(game, onBeat, a.pos);
+  const children = onAsteroidKilledByShieldRam(game, a, game.ship.vel, onBeat);
+  game.asteroids.splice(asteroidIdx, 1, ...children);
+  // No invuln: the caller's per-frame `break` already caps this at one rock per
+  //   frame, so a dense field is plowed smoothly (a rock each tick) instead of
+  //   in one tank-draining burst — and the moment fuel runs out the guard drops.
+  popShield(game);
 };
 
 // aliens use the bassteroid multi-hit pattern — chips before the kill shot.
@@ -292,7 +320,9 @@ const alienBulletHitsShip = (game: Game, ab: AlienBullet): boolean => {
 
 const onShipHitByAlienBullet = (game: Game) => {
   if (game.ship.shieldActive) {
-    game.ship.shieldActive = false;
+    // held shield swallows the bolt for a flat fuel bite; brief invuln so a
+    //   barrage can't punch through the same frame the shield eats one shot.
+    spendShipFuel(game.ship, FUEL_SHIELD_ABSORB);
     game.ship.invuln = 0.8;
     popShield(game);
   } else {
@@ -329,6 +359,24 @@ export const handleCanisterPickups = (game: Game) => {
     else remaining.push(c);
   }
   game.canisters = remaining;
+};
+
+// Fuel Mode: fly through a fuel orb to top up the reserve. No-op when fuel mode
+// is off (no orbs ever spawn, so the list stays empty).
+export const handleFuelOrbPickups = (game: Game) => {
+  if (!FUEL_MODE_ENABLED || !game.ship.alive) return;
+  const remaining: FuelOrb[] = [];
+  for (const o of game.fuelOrbs) {
+    if (o.collidesWith(game.ship.pos, game.ship.radius * 0.9)) collectFuelOrb(game, o);
+    else remaining.push(o);
+  }
+  game.fuelOrbs = remaining;
+};
+
+const collectFuelOrb = (game: Game, o: FuelOrb) => {
+  game.ship.fuel = Math.min(game.ship.maxFuel, game.ship.fuel + FUEL_ORB_RESTORE);
+  game.sound.play("powerup");
+  emitFuelOrbPickup(game.particles, o.pos, o.hue);
 };
 
 // white burst differs from the hue-tinted pickup burst so "wasted pod" reads visibly.
@@ -413,7 +461,7 @@ const shatterGemOnShip = (game: Game, g: Gem) => {
   game.shake = Math.min(game.shake + 0.3, 1.2);
   emitGemPickup(game.particles, g);
   if (game.ship.shieldActive) {
-    game.ship.shieldActive = false;
+    spendShipFuel(game.ship, FUEL_SHIELD_ABSORB);
     game.ship.invuln = 0.8;
     popShield(game);
   } else {
@@ -435,6 +483,12 @@ export const crackGemForCanister = (game: Game, g: Gem) => {
   } else {
     game.score += GEM_REVEAL_SCORE;
     game.popups.push(popupScore(g.pos, GEM_REVEAL_SCORE));
+    // Fuel Mode: a no-upgrade crack still drops something useful — a fuel orb to
+    // chase down. Off → unchanged (score only).
+    if (FUEL_MODE_ENABLED) {
+      game.fuelOrbs.push(spawnFuelOrbAt(g.pos, game.w, game.h));
+      game.sound.play("canisterAppear", 1, g.pos);
+    }
   }
   syncHud(game);
   checkBonusLife(game);

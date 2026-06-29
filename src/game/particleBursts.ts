@@ -214,6 +214,20 @@ export const emitCanisterPickup = (particles: ParticleSystem, c: Canister) => {
   });
 };
 
+// Cyan splash for a fuel orb pickup — same shape as the canister burst, tinted
+// to the orb's coolant hue so it reads as "fuel grabbed", not a powerup.
+export const emitFuelOrbPickup = (particles: ParticleSystem, pos: Vec, hue: number) => {
+  emitBurst(particles, {
+    pos, count: 32,
+    speedRange: [70, 230],
+    lifeRange: [0.5, 1.1], maxLife: 1.1,
+    sizeRange: [1.4, 2.8],
+    hue, hueSpread: [-8, 12],
+    drag: 1.5,
+    angleMode: "random", angleJitter: 0,
+  });
+};
+
 // Bigger, slower-fading gold burst for the crystal pickup — reads as a richer
 // reward than the standard canister pickup since the player had to spot the
 // embedded crystal in the first place.
@@ -322,4 +336,45 @@ export const emitShockwaveSparks = (particles: ParticleSystem, pos: Vec) => {
     drag: 0.9,
     angleMode: "random", angleJitter: 0,
   });
+};
+
+// Where a laser beam connects with a target — layered ON TOP of that target's
+// normal kill/crack burst so a beam strike reads hotter than a bullet's. Two
+// stacked rings: a tight white-hot flash core (additive overlap → blown-out
+// centre) plus a wider cyan plasma spray kicked back along the beam direction,
+// so the hit looks like superheated material blasting off the surface. `tier`
+// (0..1 charge ramp) scales count, speed, and spread so a max-charge beam
+// throws a far bigger gout than a tap. Cosmetic-only (cosmetic rng) → replay-safe.
+export const emitLaserImpact = (particles: ParticleSystem, pos: Vec, dir: Vec, tier: number) => {
+  const back = Math.atan2(-dir.y, -dir.x); // spray back toward the muzzle
+  // White-hot contact flash — dense, short, slow so additive stacking whites out.
+  const flecks = 7 + Math.round(tier * 10);
+  for (let i = 0; i < flecks; i++) {
+    particles.emit({
+      pos: { ...pos },
+      vel: fromAngle(rand(0, TAU), rand(30, 110 + tier * 90)),
+      life: rand(0.06, 0.18),
+      maxLife: 0.18,
+      size: rand(2.0, 3.4 + tier * 1.4),
+      hue: 190 + rand(-8, 8),
+      shrink: 1,
+      drag: 6.5,
+    });
+  }
+  // Plasma spray — a fan of fast cyan-white sparks kicked back along the beam,
+  // wider and faster with charge so the gout reads as "the beam blew a chunk off".
+  const spray = 10 + Math.round(tier * 18);
+  const spread = 0.7 + tier * 0.5;
+  for (let i = 0; i < spray; i++) {
+    particles.emit({
+      pos: { ...pos },
+      vel: fromAngle(back + rand(-spread, spread), rand(160, 360 + tier * 320)),
+      life: rand(0.18, 0.5 + tier * 0.3),
+      maxLife: 0.5 + tier * 0.3,
+      size: rand(1.4, 2.8 + tier * 1.2),
+      hue: 195 + rand(-12, 18),
+      shrink: 1,
+      drag: 2.6,
+    });
+  }
 };

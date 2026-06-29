@@ -423,10 +423,10 @@ export class Pulsar {
     };
   }
 
-  // A distant ecliptic star: bright core + soft radial halo + a faint 4-point
-  // diffraction glint, with a slow brightness breath so it shimmers without
-  // strobing. Per-star `brightness` scales the whole thing so the field varies.
-  // Radial-gradient halo (never shadowBlur). driftT (seconds) drives the breath.
+  // A distant ecliptic star: bright core + soft radial halo, with a slow
+  // brightness breath so it shimmers without strobing. Per-star `brightness`
+  // scales the whole thing so the field varies. Radial-gradient halo (never
+  // shadowBlur). driftT (seconds) drives the breath.
   private paintEclipticStar(ctx: CanvasRenderingContext2D, star: EclipticStar, px: number, py: number) {
     const breath = 0.6 + 0.4 * Math.sin(this.driftT * star.twinkleSpeed + star.twinklePhase);
     const core = star.size * (0.85 + 0.15 * breath);
@@ -441,14 +441,6 @@ export class Pulsar {
     g.addColorStop(1, `hsla(${star.hue}, 80%, 80%, 0)`);
     ctx.fillStyle = g;
     ctx.fillRect(px - haloR, py - haloR, haloR * 2, haloR * 2);
-    // diffraction glint — four thin tapering spikes
-    const spike = haloR * 0.9;
-    ctx.strokeStyle = `hsla(${star.hue}, 70%, 92%, ${0.16 * a})`;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(px - spike, py); ctx.lineTo(px + spike, py);
-    ctx.moveTo(px, py - spike); ctx.lineTo(px, py + spike);
-    ctx.stroke();
     // bright core
     ctx.fillStyle = `hsla(${star.hue}, 60%, 96%, ${0.95 * a})`;
     ctx.beginPath();
