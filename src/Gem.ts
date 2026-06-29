@@ -401,55 +401,6 @@ export const spawnGemSwarm = (w: number, h: number, count: number): Gem[] => {
   return gems;
 };
 
-// Drop a fan of gems at the crystal's death site, then drift each one out to a
-// solved spot on the player's one-beat aim ring so that — if the pilot keeps
-// coasting and just rotates — the reticule lines up on one of them exactly one
-// beat from now. The lead gem sits on the radial line from the player through
-// the death site (so it reads as drifting straight toward or away from the
-// ship); the rest fan slightly around it as nearby alternates.
-//
-// Geometry mirrors computeAimCircle evaluated one beat in the future, when the
-// coasting ship sits at shipPos + shipVel*beat:
-//   center = shipPos + shipVel*beat + shipVel*0.4*beat = shipPos + shipVel*1.4*beat
-//   radius = shipRadius + 4 + bulletSpeed*beat
-// A gem placed on that circle is reachable by a one-beat shot from the ship's
-// future pose, so rotating to aim drops the reticule right onto it.
-export const spawnRhythmAlignedGems = (
-  shipPos: Vec,
-  shipVel: Vec,
-  shipHeading: number,
-  deathPos: Vec,
-  count: number,
-  bulletSpeed: number,
-  beatGrid: number,
-  shipRadius: number,
-): Gem[] => {
-  const center = v(
-    shipPos.x + shipVel.x * 1.4 * beatGrid,
-    shipPos.y + shipVel.y * 1.4 * beatGrid,
-  );
-  const aimRadius = shipRadius + 4 + bulletSpeed * beatGrid;
-  // aim outward from the future aim-circle center toward the kill site so the
-  // lead gem drifts along the player→death line; fall back to ship facing when
-  // the rock died on top of that center.
-  const toDeath = sub(deathPos, center);
-  const baseDist = len(toDeath);
-  const baseAngle = baseDist > 1 ? Math.atan2(toDeath.y, toDeath.x) : shipHeading;
-  // small fan so gems read as distinct targets, not a single column.
-  const SPREAD_PER_GEM = 0.11;
-  const startOffset = -((count - 1) * SPREAD_PER_GEM) / 2;
-  const gems: Gem[] = [];
-  for (let k = 0; k < count; k++) {
-    const angle = baseAngle + startOffset + k * SPREAD_PER_GEM;
-    const dir = fromAngle(angle);
-    const target = v(center.x + dir.x * aimRadius, center.y + dir.y * aimRadius);
-    const gem = new Gem({ ...deathPos }, v(0, 0));
-    gem.driftToPark(target, beatGrid);
-    gems.push(gem);
-  }
-  return gems;
-};
-
 // Drop a fresh powerup canister where the gem was. Aims at a random point on
 // the far side of the playfield and uses the standard canister drift speed so
 // the freed canister flies across the screen and eventually warps out just

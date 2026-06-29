@@ -6,7 +6,7 @@ import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
 import { Vec } from "../vec";
 import { ENTITY_CONFIG } from "./entityConfig";
-import { spawnGemAt, spawnRhythmAlignedGems, spawnBurstGemFan } from "../Gem";
+import { spawnGemAt, spawnBurstGemFan } from "../Gem";
 import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
 import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
@@ -278,21 +278,11 @@ const finishAsteroidKillCore = (
   }
   if (a.kind === "solidCrystal" && a.embeddedGemCount > 0) {
     // Pure-crystal rock drops the same number of gems that were visible as
-    // frosted hints inside its body (0–2, decided at spawn). Gems are placed
-    // on the next beat-slots from the player's vantage so a coasting pilot
-    // who just rotates can rhythm-pop the whole string in a row.
-    const ship = game.ship;
-    const gems = spawnRhythmAlignedGems(
-      ship.pos,
-      ship.vel,
-      ship.heading,
-      a.pos,
-      a.embeddedGemCount,
-      ship.bulletSpeed,
-      BEAT_GRID,
-      ship.radius,
-    );
-    for (const g of gems) game.gems.push(g);
+    // frosted hints inside its body (0–2, decided at spawn), ejected at the
+    // dead rock's position just like a regular gem-bearing asteroid.
+    for (let k = 0; k < a.embeddedGemCount; k++) {
+      game.gems.push(spawnGemAt(a.pos, a.vel));
+    }
   }
   // Defiant final shot: a boss eye-core that just took its killing hit
   // fires one last plasma bolt before the shards spawn. Skip if no ship to
