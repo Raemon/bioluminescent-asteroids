@@ -14,7 +14,7 @@ import { renderLasers, renderLaserChargeDots, renderLaserAmbientFlash } from "./
 import { renderBossBeams } from "./bossBeam";
 import { renderSlowMoTimerBar } from "./slowMoTimerBar";
 import { renderSpectrumVisualizer, updateSpectrumVisualizer, paintSpectrumVisualizer } from "./spectrumVisualizer";
-import { renderEdgeAidsTiled, renderEdgeAidLabel } from "./edgeAids";
+import { renderEdgeAidsTiled } from "./edgeAids";
 import { cosmeticRng } from "./rng";
 
 // shake is purely cosmetic; isolate its math so render() reads top-down.
@@ -453,7 +453,6 @@ export const renderGame = (game: Game) => {
   // wrap-replicated, so it owns the whole render and never snapshots.
   if (game.edgeAidMode === "scroll") {
     paintScrollScene(game, shakeX, shakeY);
-    renderEdgeAidLabel(game);
     return;
   }
   // The snapshot-tiled edge-aid modes (2x2 / 3x3) take over the whole scene
@@ -468,6 +467,4 @@ export const renderGame = (game: Game) => {
     // so it scrolls with the pulsar, so skip the pinned copy here.
     renderSpectrumVisualizer(game);
   }
-  // Always-on label of the active edge-aid prototype.
-  renderEdgeAidLabel(game);
 };

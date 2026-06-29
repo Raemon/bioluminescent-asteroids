@@ -1,5 +1,5 @@
 import type { Game } from "../Game";
-import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, isBurstGem, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
+import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, isBurstGem, isTorusFragment, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
 import { spawnGemSwarm } from "../Gem";
 import { spawnComet as spawnCometAtEdge, spawnMeteorShower, crossingLifetime } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
@@ -45,6 +45,10 @@ const spawnSpeedRange = (a: Asteroid): [number, number] => {
     const m = CFG.burstGem.spawnSpeedMul;
     return [lo * m, hi * m];
   }
+  if (a.kind === "torus") {
+    const m = CFG.torus.spawnSpeedMul;
+    return [lo * m, hi * m];
+  }
   return [lo, hi];
 };
 
@@ -85,6 +89,10 @@ export const alignSplitChildToRhythm = (game: Game, child: Asteroid, claimed?: B
     if (child.isBeatFragment()) seedBeatFragmentSlot(game, child);
     return;
   }
+  // Torus fragments ride a shared phantom ring — their own velocity is unused
+  // (the group's drift owns their motion) and their position is recomputed each
+  // tick, so rhythm-aligning either would just be thrown away.
+  if (isTorusFragment(child.kind)) return;
   const speed = Math.hypot(child.vel.x, child.vel.y);
   if (speed < 1) return;
   alignVelocityToRhythm(child.pos, child.vel, {
@@ -258,6 +266,10 @@ const spawnAsteroidAway = (
   if (isBurstGem(a.kind)) {
     a.vel.x *= CFG.burstGem.spawnSpeedMul;
     a.vel.y *= CFG.burstGem.spawnSpeedMul;
+  }
+  if (a.kind === "torus") {
+    a.vel.x *= CFG.torus.spawnSpeedMul;
+    a.vel.y *= CFG.torus.spawnSpeedMul;
   }
   alignIncomingToRhythm(game, a, claimed);
   applyRhythmSpeed(game, a.vel, waveStartSpeedMul(game));
@@ -714,6 +726,10 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
     // so a warble slot keeps its phasing identity rather than being downgraded.
     const isWarble = game.wave >= CFG.warble.firstWave && rng() < CFG.warble.perSpawnChance;
     if (isWarble) { slotKinds.push("warble"); continue; }
+    // Mechanical torus — post-boss arc (display-level 11+). Rolled before
+    // solid/gem so a torus slot keeps its ring identity.
+    const isTorus = game.wave >= CFG.torus.firstWave && rng() < CFG.torus.perSpawnChance;
+    if (isTorus) { slotKinds.push("torus"); continue; }
     // Gold gem: rare in the early arc, frequent once frequentWave hits. Rolled
     // before solid/gem so a gem slot can't also become a solid crystal or gem rock.
     const burstGemChance =
@@ -744,6 +760,11 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
   // meets the pass-through-during-fade mechanic right away.
   if (game.wave === CFG.warble.firstWave && normalCount > 0 && !slotKinds.includes("warble")) {
     slotKinds[Math.floor(rng() * normalCount)] = "warble";
+  }
+  // Introductory torus wave gets one guaranteed ring so the player meets the
+  // splits-into-orbiting-arcs mechanic right away.
+  if (game.wave === CFG.torus.firstWave && normalCount > 0 && !slotKinds.includes("torus")) {
+    slotKinds[Math.floor(rng() * normalCount)] = "torus";
   }
 
   // Build the concrete spawn descriptors. Special slots (gem / solid / prison)

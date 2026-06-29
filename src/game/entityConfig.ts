@@ -287,6 +287,49 @@ export const ENTITY_CONFIG = {
     lungeAccel: 380,
   },
 
+  // Torus — a mechanical ring that solidifies in display-level 11+ (internal
+  // wave 12, post-boss). Tougher than a normal large and drifts in slowly so
+  // the player reads it as a deliberate puzzle-target. The killing hit cleaves
+  // it into two C-shaped half-rings that keep orbiting a shared centre with the
+  // donut gap intact; each half later breaks into a shorter arc + small chunks,
+  // and every fragment holds its slot on a phantom rotating ring ("reassemble
+  // the ring"). A flickering energy arc strings adjacent fragments together.
+  torus: {
+    firstWave: 12,
+    perSpawnChance: 0.18,
+    // Outer radius of the whole ring (its hitbox + visual footprint). Larger
+    // than a stock large so the hole is wide enough to fly through after split.
+    radius: 78,
+    // Tube thickness as a fraction of the outer radius — the painted ring band
+    // and the inner (passable) hole both derive from this.
+    tubeFrac: 0.34,
+    // Tough: a clean rhythm bullet (4 dmg) needs three hits to crack the ring.
+    hp: 12,
+    score: 1100,
+    // Heavy mechanical mass: drifts in slower than its size band, like the
+    // glass prison, so the tough target is readable.
+    spawnSpeedMul: 0.5,
+    // Steel-cyan. Cool industrial hue distinct from the indigo prison + warble
+    // greens around it in the post-boss arc.
+    hue: 196,
+    // Half-ring (180° C) fragment: HP + the score it pays on the killing hit.
+    arcHp: 6,
+    arcScore: 600,
+    // Shorter arc a half-ring breaks into (one ~110° sliver) + its debris.
+    sliverHp: 3,
+    sliverScore: 300,
+    // Small terminal chunk knocked off when a half-ring breaks. Tougher than a
+    // stock small so clearing the orbiting debris still asks for a clean shot.
+    chunkHp: 2,
+    chunkScore: 150,
+    // How many chunks spall off each half-ring when it breaks (besides the
+    // surviving sliver).
+    chunkCount: 2,
+    // Phantom-ring spin rate (rad/s) the fragments orbit their shared centre at.
+    // Slow enough to read as a coherent rotating ring, not a blur.
+    ringSpin: 0.5,
+  },
+
   boss: {
     waves: [11] as readonly number[],
     foreshadowWaves: [10] as readonly number[],

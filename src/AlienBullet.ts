@@ -59,10 +59,10 @@ export class AlienBullet {
       this.maxLife = BEAT_GRID * 8;
     } else {
       this.radius = SIZE_BULLET_RADIUS[size];
-      // Alien bullets never time out — they keep flying (wrapping around the
-      // field) until they hit the player or are otherwise consumed. maxLife
-      // stays Infinity so the life-based prune in gameUpdate never drops them.
-      this.maxLife = Infinity;
+      // Alien bullets keep flying (wrapping around the field) until they hit
+      // the player, are otherwise consumed, or time out — the life-based prune
+      // in gameUpdate drops them once maxLife elapses.
+      this.maxLife = 16;
     }
     this.life = this.maxLife;
   }

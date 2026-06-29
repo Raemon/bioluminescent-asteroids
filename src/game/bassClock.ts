@@ -87,6 +87,7 @@ const tickBassAsteroids = (game: Game) => {
         game.sound.play(sound, pitchRatio, a.pos);
       }
       a.beatFlash = 1.0;
+      a.haloEcho = 1.0;
       // re-snap to BEAT_GRID so accumulated float error can't drift the voice off the beat.
       a.nextBeatAt = Math.round((a.nextBeatAt + BASS_MEASURE_LENGTH) / BEAT_GRID) * BEAT_GRID;
     }

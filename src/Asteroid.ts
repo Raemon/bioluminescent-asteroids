@@ -94,7 +94,21 @@ export type AsteroidSize = "huge" | "large" | "medium" | "small";
 // "wraith" is what crawls out. It has no baked sprite (drawn live every
 // frame from drifting noise layers and writhing tendrils), pursues the ship
 // in a slow slither, and occasionally lunges. Eats a few bullets to finish.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "asteroidWithGem" | "burstGemMedium" | "burstGemBig" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock";
+// "torus" is a mechanical ring (display-level 11+). The killing hit cleaves it
+// into two "torusArc" C-shaped half-rings that keep orbiting a shared centre
+// with the donut gap intact; each half-ring later breaks into one shorter
+// torusArc sliver + a couple of terminal "torusChunk" debris bits. Every
+// fragment of one torus shares a TorusGroup (the phantom rotating ring) and
+// holds a fixed angular slot on it, so the pieces look like they're still
+// trying to reassemble into one ring. A flickering energy arc strings the
+// surviving fragments together around the ring. See split() / tickTorusGroup.
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "asteroidWithGem" | "burstGemMedium" | "burstGemBig" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock" | "torus" | "torusArc" | "torusChunk";
+
+// The three ring-fragment kinds that orbit a shared TorusGroup. "torus" (the
+// whole ring) isn't a fragment — it spawns standalone and creates the group
+// only when it splits.
+export const isTorusFragment = (kind: AsteroidKind): boolean =>
+  kind === "torusArc" || kind === "torusChunk";
 
 // The two gold-gem tiers share nearly all behaviour (painting, HP, kill bucket,
 // clamp); they differ only in radius and shard count. Most call sites test the
@@ -162,6 +176,11 @@ const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
   burstGemBig: 46,
   glassPrison: 258,
   wraith: 286,
+  // Steel-cyan mechanical ring; arcs + chunks inherit it at split, this is the
+  // gen-0 default.
+  torus: ENTITY_CONFIG.torus.hue,
+  torusArc: ENTITY_CONFIG.torus.hue,
+  torusChunk: ENTITY_CONFIG.torus.hue,
   // Cathedral debris inherits the parent bell's hue at spawn, so these are
   // only fallbacks for the rare case one is constructed standalone.
   cathedralKeystone: 285,
@@ -270,6 +289,34 @@ export const GLASS_PRISON_RADIUS = ENTITY_CONFIG.glassPrison.radius;
 export const WRAITH_HP = ENTITY_CONFIG.wraith.hp;
 export const WRAITH_RADIUS = ENTITY_CONFIG.wraith.radius;
 
+// Torus — mechanical ring + its orbiting arc/chunk fragments. The whole ring's
+// outer radius, tube thickness, and the per-tier HP all live in entityConfig.
+export const TORUS_RADIUS = ENTITY_CONFIG.torus.radius;
+export const TORUS_TUBE_FRAC = ENTITY_CONFIG.torus.tubeFrac;
+export const TORUS_HP = ENTITY_CONFIG.torus.hp;
+
+// Shared state for all fragments that came from one torus. The fragments don't
+// fly apart on momentum like normal debris — they hold fixed angular slots on a
+// phantom ring centred at `center` that slowly rotates (`phase`) and drifts with
+// `vel`, so the broken pieces read as "still trying to be one ring". One group
+// is created at the first split and inherited by every later fragment. Dead
+// members are pruned each tick (see tickTorusGroup); when none remain the group
+// is simply garbage-collected with its last fragment.
+export type TorusGroup = {
+  // Drifting centre of the phantom ring (world coords) + its inherited velocity.
+  center: Vec;
+  vel: Vec;
+  // Radius of the phantom ring the fragment centroids ride on, and its current
+  // rotation (radians) advanced by `spin` each second.
+  ringRadius: number;
+  phase: number;
+  spin: number;
+  // Hue carried so the connecting energy arcs match the ring's steel-cyan.
+  hue: number;
+  // Live members. Repopulated each split; pruned to the living set each tick.
+  members: Asteroid[];
+};
+
 // Cathedral debris (carved building chunks a "bell" shatters into). Tougher
 // than a stock small so clearing the rubble still asks for a couple of clean
 // shots — same intent as solidCrystalSmall — and terminal (no further split).
@@ -302,6 +349,11 @@ function getMaxHp(kind: AsteroidKind, size: AsteroidSize): number {
     case "bassB":
     case "bassC":
     case "bassD": return BASS_HP[size];
+    case "torus": return ENTITY_CONFIG.torus.hp;
+    // The half-ring C spawns at "large"; the shorter sliver it breaks into
+    // spawns at "medium". Same kind, distinguished by size.
+    case "torusArc": return size === "large" ? ENTITY_CONFIG.torus.arcHp : ENTITY_CONFIG.torus.sliverHp;
+    case "torusChunk": return ENTITY_CONFIG.torus.chunkHp;
   }
   return KIND_HP[kind] ?? ASTEROID_HP[size];
 }
@@ -968,6 +1020,11 @@ export class Asteroid {
   // without overwriting each other. Set to 1.0 in tickBassBeats and decays
   // a little slower so the visual beat actually lands.
   beatFlash = 0;
+  // Slow-decaying echo of the beat, seeded to 1.0 alongside beatFlash but
+  // living far longer (~1.2s) so the combo halo can shed an expanding ring
+  // that rides outward and fades well after the on-beat flash is gone. Only
+  // consumed by the combo-halo render, so it costs nothing when the halo's off.
+  haloEcho = 0;
   // Bioluminescent glow trail, only allocated for bassteroids (the only
   // long-lasting drone source among asteroid kinds). One pre-baked sprite
   // stamp per ring-buffer sample under additive blend — no shadowBlur, no
@@ -1002,6 +1059,22 @@ export class Asteroid {
   // facade, spire tower, arcade, buttress ruin). Rolled at construction; picks
   // both the silhouette harmonics and the interior painter. Unused off-kind.
   cathedralArchetype: CathedralArchetype = "lancetWall";
+
+  // ---- torus fragment state (torusArc / torusChunk only) ----
+  // The shared phantom ring this fragment rides. Null for a whole-body "torus"
+  // (it has no group until it splits) and for every non-torus kind.
+  torusGroup: TorusGroup | null = null;
+  // Fixed angular slot (radians) this fragment occupies on the phantom ring.
+  // Combined with the group's rotating `phase` to place the fragment each tick.
+  torusSlot = 0;
+  // Angular span (radians) of this fragment's arc. A half-ring C is ~π, the
+  // shorter sliver ~1.9, a chunk is a small nub (~0.5). Drives the baked arc
+  // sprite sweep + which neighbour the energy thread reaches to.
+  torusArcSpan = 0;
+  // Radius (in the local sprite frame) of the centreline the arc is bent along,
+  // so the baked C-shape curves with the same radius the whole ring had. The
+  // fragment's centroid sits one of these out from the phantom-ring centre.
+  torusBendRadius = 0;
 
   // Level-10 boss reveal phase. "dormant" plays the 8s grow-and-rotate
   // foreshadow animation and is invulnerable. "live" is the normal damageable
@@ -1152,6 +1225,19 @@ export class Asteroid {
       // facet polygon (kiki harmonics + low sample count) does the work.
       this.radius = GLASS_PRISON_RADIUS;
       this.rotSpeed = rand(-0.18, 0.18);
+    }
+    if (kind === "torus") {
+      // The whole ring — wide footprint so the hole is big enough to thread
+      // once it splits. Slow majestic spin like a heavy mechanical body.
+      this.radius = TORUS_RADIUS;
+      this.rotSpeed = rand(-0.14, 0.14);
+    }
+    if (kind === "torusArc" || kind === "torusChunk") {
+      // Arc / chunk radius is set by split() (it knows the parent ring's
+      // geometry); the field rotation is overwritten every tick by
+      // tickTorusGroup so the arc always faces along its ring slot. Seed a
+      // gentle default so a fragment is sane for the frame before its first tick.
+      this.rotSpeed = 0;
     }
     if (kind === "wraith") {
       this.radius = WRAITH_RADIUS;
@@ -1400,6 +1486,8 @@ export class Asteroid {
     // so a pre-baked silhouette would defeat the point.
     if (this.isBossFamily() || this.kind === "wraith") return null;
     if (this.isBass()) return this.buildBassteroidSprite();
+    if (this.kind === "torus") return this.buildTorusSprite();
+    if (this.kind === "torusArc" || this.kind === "torusChunk") return this.buildTorusArcSprite();
     const haloRadius = this.radius * 2.3;
     const padding = 14;
     const size = Math.ceil(2 * (haloRadius + padding));
@@ -1505,6 +1593,207 @@ export class Asteroid {
     if (this.kind === "columnDrum") this.paintColumnDrumBody(ctx);
     if (this.kind === "rubbleBlock") this.paintRubbleBlockBody(ctx);
 
+    return canvas;
+  }
+
+  // Trace an annular-sector path (the "tube" of a torus, optionally only a
+  // slice of it) into the current context, centred at (cx, cy). Sweeps the
+  // outer edge from a0→a1 then the inner edge back a1→a0 and closes, so a fill
+  // paints the ring band and a clip masks interior detail to it. A full ring
+  // (|a1-a0| ≥ ~TAU) is traced as two concentric circles with an even-odd hole.
+  private traceAnnularSector(
+    ctx: CanvasRenderingContext2D, cx: number, cy: number, rOuter: number, rInner: number, a0: number, a1: number,
+  ) {
+    const full = a1 - a0 >= TAU - 1e-3;
+    ctx.beginPath();
+    if (full) {
+      ctx.arc(cx, cy, rOuter, 0, TAU);
+      ctx.arc(cx, cy, rInner, 0, TAU, true);
+      return;
+    }
+    ctx.arc(cx, cy, rOuter, a0, a1, false);
+    ctx.arc(cx, cy, rInner, a1, a0, true);
+    ctx.closePath();
+  }
+
+  // Paint a lit mechanical ring band (or a slice of one) using the house depth
+  // recipe: dark occlusion rim → body gradient with an upper-left hot-spot →
+  // bright inner rim → radial panel seams → a row of glowing energy studs on the
+  // tube. Centre (cx, cy) is the phantom-ring centre in the sprite's local
+  // frame. Shared by the whole-ring bake and each arc-fragment bake.
+  private paintTorusBand(
+    ctx: CanvasRenderingContext2D, cx: number, cy: number, rOuter: number, rInner: number, a0: number, a1: number,
+  ) {
+    const H = this.hue;
+    const rMid = (rOuter + rInner) / 2;
+    const sector = () => this.traceAnnularSector(ctx, cx, cy, rOuter, rInner, a0, a1);
+
+    // Dark outer rim first (occlusion contact against the starfield).
+    ctx.globalCompositeOperation = "source-over";
+    sector();
+    ctx.fillStyle = `hsla(${H}, 28%, 7%, 0.95)`;
+    ctx.fill("evenodd");
+
+    // Body: radial gradient whose hot-spot is pushed up-left so the ring's
+    // upper-left shoulder reads lit and the lower-right falls into shadow. Hue
+    // drifts cooler+darker into the shadow stops so it looks lit, not plastic.
+    ctx.save();
+    sector();
+    ctx.clip("evenodd");
+    const gx = cx - rOuter * 0.4;
+    const gy = cy - rOuter * 0.5;
+    const body = ctx.createRadialGradient(gx, gy, rInner * 0.2, cx, cy, rOuter * 1.25);
+    body.addColorStop(0, `hsla(${H}, 42%, 62%, 1)`);
+    body.addColorStop(0.5, `hsla(${H}, 40%, 38%, 1)`);
+    body.addColorStop(1, `hsla(${H + 8}, 46%, 13%, 1)`);
+    ctx.fillStyle = body;
+    ctx.fillRect(cx - rOuter * 1.3, cy - rOuter * 1.3, rOuter * 2.6, rOuter * 2.6);
+
+    // Concentric machined grooves so the tube reads as turned metal, not a flat
+    // donut. Hairline dark + a thinner bright catch just inside it.
+    const grooveCount = 3;
+    for (let g = 1; g <= grooveCount; g++) {
+      const gr = rInner + ((rOuter - rInner) * g) / (grooveCount + 1);
+      ctx.beginPath();
+      ctx.arc(cx, cy, gr, a0, a1, false);
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = `hsla(${H}, 35%, 10%, 0.55)`;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, gr - 1, a0, a1, false);
+      ctx.lineWidth = 0.7;
+      ctx.strokeStyle = `hsla(${H + 12}, 70%, 78%, 0.3)`;
+      ctx.stroke();
+    }
+
+    // Radial panel seams crossing the tube — turns the band into bolted plates.
+    // A full ring seams all the way round (i from 0); an arc skips its two cut
+    // ends (the break-face caps are drawn separately by the arc baker).
+    const span = a1 - a0;
+    const full = span >= TAU - 1e-3;
+    const seamStep = 0.42;
+    const seamCount = Math.max(2, Math.round(span / seamStep));
+    for (let i = (full ? 0 : 1); i < seamCount; i++) {
+      const sa = a0 + (i / seamCount) * span;
+      const ox = Math.cos(sa), oy = Math.sin(sa);
+      ctx.beginPath();
+      ctx.moveTo(cx + ox * rInner, cy + oy * rInner);
+      ctx.lineTo(cx + ox * rOuter, cy + oy * rOuter);
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = `hsla(${H}, 30%, 9%, 0.6)`;
+      ctx.stroke();
+      // bright machined edge on the up-left side of each seam
+      ctx.beginPath();
+      ctx.moveTo(cx + ox * rInner - 0.8, cy + oy * rInner - 0.8);
+      ctx.lineTo(cx + ox * rOuter - 0.8, cy + oy * rOuter - 0.8);
+      ctx.lineWidth = 0.6;
+      ctx.strokeStyle = `hsla(${H + 15}, 65%, 72%, 0.22)`;
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Bright inner-rim catch (rim light on both the outer and inner edges of
+    // the tube). Two stacked strokes per edge: thin bright over the dark.
+    ctx.globalCompositeOperation = "source-over";
+    for (const edgeR of [rOuter, rInner]) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, edgeR, a0, a1, false);
+      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = `hsla(${H}, 32%, 6%, 0.9)`;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, edgeR, a0, a1, false);
+      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = `hsla(${H + 12}, 85%, 80%, 0.85)`;
+      ctx.stroke();
+    }
+
+    // Energy studs: a row of glowing nodes along the tube centreline, additive,
+    // so the ring reads as a powered machine. These are the anchor points the
+    // live connecting-energy thread reaches toward at render time.
+    ctx.globalCompositeOperation = "lighter";
+    const studStep = 0.5;
+    const studCount = Math.max(2, Math.round(span / studStep));
+    for (let i = 0; i <= studCount; i++) {
+      if (!full && (i === 0 || i === studCount)) continue;
+      const sa = a0 + (i / studCount) * span;
+      const sx = cx + Math.cos(sa) * rMid;
+      const sy = cy + Math.sin(sa) * rMid;
+      drawGlow(ctx, sx, sy, rMid * 0.16, H, 0.5);
+      ctx.fillStyle = `hsla(${H + 30}, 95%, 90%, 0.9)`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 1.6, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  // Pre-bake the whole mechanical ring: a single lit annulus centred in the
+  // sprite, plus a soft additive halo behind it. Per-frame render is one
+  // drawImage + the cheap hit/beat flash overlay.
+  private buildTorusSprite(): HTMLCanvasElement {
+    const rOuter = this.radius;
+    const rInner = this.radius * (1 - TORUS_TUBE_FRAC);
+    const halo = rOuter * 1.25;
+    const padding = 14;
+    const size = Math.ceil(2 * (halo + padding));
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d")!;
+    this.spriteHalfSize = size / 2;
+    ctx.translate(size / 2, size / 2);
+    // Soft halo behind the ring (additive) so it glows like the other kinds.
+    ctx.globalCompositeOperation = "lighter";
+    drawGlow(ctx, 0, 0, halo, this.hue, 0.18);
+    this.paintTorusBand(ctx, 0, 0, rOuter, rInner, 0, TAU);
+    return canvas;
+  }
+
+  // Pre-bake one arc fragment (a torusArc C / sliver, or a torusChunk nub). The
+  // arc curves along a phantom ring of radius `torusBendRadius`; its bend-centre
+  // sits at local (-torusBendRadius, 0), so the arc bulges toward +x. The
+  // fragment's own `radius` (hitbox) is the half-chord of the arc, computed at
+  // split time. render() draws this at the centroid with `rotation` aiming the
+  // bulge radially outward from the group centre.
+  private buildTorusArcSprite(): HTMLCanvasElement {
+    const bend = this.torusBendRadius || this.radius;
+    const tube = bend * TORUS_TUBE_FRAC;
+    const rOuter = bend + tube / 2;
+    const rInner = bend - tube / 2;
+    const span = this.torusArcSpan || 0.5;
+    // Local bend-centre to the left so the arc's mid-point lands near origin.
+    const cx = -bend;
+    const cy = 0;
+    const a0 = -span / 2;
+    const a1 = span / 2;
+    // Sprite must cover the arc's bounding box generously (+ halo for studs).
+    const reach = tube * 1.4 + bend * 0.18;
+    const halfW = Math.max(rOuter - bend, bend - bend * Math.cos(span / 2)) + reach;
+    const halfH = bend * Math.sin(span / 2) + reach;
+    const half = Math.ceil(Math.max(halfW, halfH)) + 14;
+    const sizeC = half * 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = sizeC;
+    canvas.height = sizeC;
+    const ctx = canvas.getContext("2d")!;
+    this.spriteHalfSize = half;
+    // Translate so local origin (arc centroid ≈ 0,0) is the sprite centre.
+    ctx.translate(half, half);
+    ctx.globalCompositeOperation = "lighter";
+    drawGlow(ctx, 0, 0, tube * 2, this.hue, 0.16);
+    this.paintTorusBand(ctx, cx, cy, rOuter, rInner, a0, a1);
+    // Cap the freshly-cut ends with a brighter break-face so a severed arc reads
+    // as "snapped off the ring", echoing the boss hemisphere's cut diameter.
+    ctx.globalCompositeOperation = "source-over";
+    for (const cap of [a0, a1]) {
+      const ox = Math.cos(cap), oy = Math.sin(cap);
+      ctx.beginPath();
+      ctx.moveTo(cx + ox * rInner, cy + oy * rInner);
+      ctx.lineTo(cx + ox * rOuter, cy + oy * rOuter);
+      ctx.lineWidth = 2.6;
+      ctx.strokeStyle = `hsla(${this.hue + 18}, 70%, 64%, 0.85)`;
+      ctx.stroke();
+    }
     return canvas;
   }
 
@@ -2973,6 +3262,11 @@ export class Asteroid {
     // radius so all the awkward shard shapes register cleanly.
     if (this.isBoss()) return distance < this.radius * 0.95 + pointRadius;
     if (this.isBossFragment()) return distance < this.radius * 0.92 + pointRadius;
+    // Torus kinds carry an explicit circular hitbox (the whole ring's outer
+    // radius; each arc/chunk's chord-derived radius from makeTorusArc). They
+    // never went through the organic harmonic outline, so use a plain circle.
+    if (this.kind === "torus") return distance < this.radius * 0.97 + pointRadius;
+    if (this.kind === "torusArc" || this.kind === "torusChunk") return distance < this.radius + pointRadius;
     const localAngle = Math.atan2(dy, dx) - this.rotation;
     const surface = this.radiusAtAngle(localAngle);
     return distance < surface + pointRadius;
@@ -3011,6 +3305,15 @@ export class Asteroid {
   }
 
   update(dt: number, w: number, h: number) {
+    // Torus fragments don't integrate their own position — their pos + rotation
+    // are dictated by the shared phantom ring, recomputed once per frame in
+    // tickTorusGroup. Tick only the cheap decays here and bail before the
+    // standard linear integration (which would fight the orbit).
+    if (this.kind === "torusArc" || this.kind === "torusChunk") {
+      this.membranePhase += dt * 0.8;
+      if (this.flashAmount > 0) this.flashAmount = Math.max(0, this.flashAmount - dt * 4);
+      return;
+    }
     this.rotation += this.rotSpeed * dt;
     this.membranePhase += dt * 0.8;
     addScaledMut(this.pos, this.vel, dt);
@@ -3042,6 +3345,9 @@ export class Asteroid {
     // Beat flare decays a touch slower than the hit flash so the visible
     // pulse rides the audio kick all the way through the beat window.
     if (this.beatFlash > 0) this.beatFlash = Math.max(0, this.beatFlash - dt * 2.6);
+    // Echo outlives the flash so the expanding combo-halo ring rides well past
+    // the on-beat bloom; slow enough to read as a soundwave dissipating.
+    if (this.haloEcho > 0) this.haloEcho = Math.max(0, this.haloEcho - dt * 0.85);
     if (this.bossTopFlash > 0) this.bossTopFlash = Math.max(0, this.bossTopFlash - dt * 1.6);
     if (this.bossBottomFlash > 0) this.bossBottomFlash = Math.max(0, this.bossBottomFlash - dt * 1.6);
     if (this.bossIrisFlash > 0) this.bossIrisFlash = Math.max(0, this.bossIrisFlash - dt * 1.8);
@@ -3450,6 +3756,39 @@ export class Asteroid {
   //     the skill-and-rhythm reward for staying in the pocket.
   // Mediums always split into the classic 2-small wedge regardless of hit
   // context.
+
+  // Construct one ring fragment (a torusArc C / sliver, or a torusChunk nub)
+  // belonging to `group`, occupying angular `slot` on the phantom ring and
+  // spanning `arcSpan` radians. Bakes the curved sprite, derives a circular
+  // hitbox from the arc's chord, and snaps the fragment onto the ring so it's
+  // already in place the frame it spawns. The group's per-frame tick (tickTorus
+  // Group) takes over position + rotation from there.
+  private makeTorusArc(
+    group: TorusGroup, size: AsteroidSize, slot: number, arcSpan: number, kind: AsteroidKind = "torusArc",
+  ): Asteroid {
+    const ringR = group.ringRadius;
+    const tube = ringR * TORUS_TUBE_FRAC;
+    // Hitbox radius: half the arc chord on the centreline, plus the tube half
+    // -thickness, so the circle hugs the curved fragment without swallowing the
+    // gaps between fragments.
+    const chordHalf = ringR * Math.sin(Math.min(Math.PI, arcSpan) / 2);
+    const hitR = Math.max(tube * 0.6, chordHalf * 0.6 + tube * 0.5);
+    // Spawn directly on the slot so there's no one-frame pop before the tick.
+    const ang = slot + group.phase;
+    const pos = { x: group.center.x + Math.cos(ang) * ringR, y: group.center.y + Math.sin(ang) * ringR };
+    const a = new Asteroid(pos, { x: group.vel.x, y: group.vel.y }, size, group.hue, kind);
+    a.torusGroup = group;
+    a.torusSlot = slot;
+    a.torusArcSpan = arcSpan;
+    a.torusBendRadius = ringR;
+    a.radius = hitR;
+    a.rotation = ang; // bulge points radially outward; tick keeps it aligned
+    // Rebuild the sprite now that bend/span/radius are known (the constructor
+    // baked a placeholder with default geometry before these were set).
+    a.sprite = a.buildTorusArcSprite();
+    return a;
+  }
+
   split(opts?: { impactDir?: Vec; impactPos?: Vec; combo?: number; onBeat?: boolean }): Asteroid[] {
     const impactDir = opts?.impactDir;
     // Boss whole-body: cracks open into two hemisphere halves + the iris
@@ -3597,6 +3936,54 @@ export class Asteroid {
     // Boss small-tier shards are terminal — they break into nothing further.
     if (this.kind === "bossPlate" || this.kind === "bossIrisShard" || this.kind === "bossEmber") {
       return [];
+    }
+    // Torus: the whole ring cleaves into two C-shaped half-rings that keep
+    // orbiting a shared phantom-ring centre (the donut gap survives the split).
+    // A half-ring later breaks into one shorter sliver arc + a couple of small
+    // terminal chunks. Every fragment shares the parent's TorusGroup and holds a
+    // fixed angular slot on the ring, so the pieces look like they're still
+    // trying to reassemble. See tickTorusGroup for the orbit + the connecting
+    // energy thread.
+    if (this.kind === "torus") {
+      const cfg = ENTITY_CONFIG.torus;
+      const ringRadius = this.radius * (1 - TORUS_TUBE_FRAC / 2);
+      // Hand the broken ring a faint outward drift so the cluster keeps moving
+      // across the field rather than freezing where it cracked.
+      const group: TorusGroup = {
+        center: { x: this.pos.x, y: this.pos.y },
+        vel: { x: this.vel.x, y: this.vel.y },
+        ringRadius,
+        phase: 0,
+        spin: cfg.ringSpin * (rng() < 0.5 ? -1 : 1),
+        hue: this.hue,
+        members: [],
+      };
+      // Two half-rings: slots π apart, each spanning a bit under π so there's a
+      // comfortably wide gap at the top + bottom for the ship to thread between
+      // the two C's (as well as through the hole).
+      const span = Math.PI * 0.7;
+      const halves = [0, Math.PI].map((slot) => this.makeTorusArc(group, "large", slot, span));
+      group.members = halves;
+      return halves;
+    }
+    if (this.kind === "torusArc" || this.kind === "torusChunk") {
+      // Sliver arcs + chunks are terminal; only a large C-half breaks further.
+      if (!this.torusGroup || this.kind === "torusChunk" || this.size !== "large") return [];
+      const cfg = ENTITY_CONFIG.torus;
+      const group = this.torusGroup;
+      const out: Asteroid[] = [];
+      // One shorter sliver keeps the centre of the parent's slot.
+      const sliverSpan = this.torusArcSpan * 0.6;
+      out.push(this.makeTorusArc(group, "medium", this.torusSlot, sliverSpan));
+      // A couple of small chunks spall off toward the parent slot's two ends.
+      for (let i = 0; i < cfg.chunkCount; i++) {
+        const edge = (i === 0 ? -1 : 1) * this.torusArcSpan * 0.32;
+        const chunk = this.makeTorusArc(group, "small", this.torusSlot + edge, 0.42, "torusChunk");
+        out.push(chunk);
+      }
+      // Replace this dead half-ring in the shared group with its fragments.
+      group.members = group.members.filter((m) => m !== this).concat(out);
+      return out;
     }
     // Bassteroid: each split subdivides the parent's beat slot. Gen-0 (large)
     // → 2 gen-1 (medium) half a measure apart, gen-1 → 2 gen-2 (small) a
@@ -4020,6 +4407,10 @@ export class Asteroid {
     if (this.kind === "bossIrisShard") { this.renderBossIrisShard(ctx, t); return; }
     if (this.kind === "bossEmber") { this.renderBossEmber(ctx, t); return; }
     if (this.kind === "wraith") { this.renderWraith(ctx, t); return; }
+    if (this.kind === "torus" || this.kind === "torusArc" || this.kind === "torusChunk") {
+      this.renderTorus(ctx, t);
+      return;
+    }
     if (this.isBass()) {
       this.renderBass(ctx, t, comboHalo);
       return;
@@ -4106,6 +4497,110 @@ export class Asteroid {
 
     this.renderCracks(ctx);
 
+    ctx.restore();
+  }
+
+  // Render a torus body (whole ring) or one of its arc/chunk fragments: blit
+  // the pre-baked mechanical sprite (no organic membrane swell / drifting
+  // nuclei — these are machines), add the hit/beat flash, then for a fragment
+  // draw the flickering energy thread to its next neighbour around the ring so
+  // the broken pieces read as still electrically bound into one ring.
+  private renderTorus(ctx: CanvasRenderingContext2D, t: number) {
+    const time = t * 0.001;
+    // Connecting energy is drawn in world space (it spans two fragments), so
+    // paint it before the local-space body transform.
+    if ((this.kind === "torusArc" || this.kind === "torusChunk") && this.torusGroup) {
+      this.renderTorusThread(ctx, time);
+    }
+    ctx.save();
+    ctx.translate(this.pos.x, this.pos.y);
+    ctx.rotate(this.rotation);
+    ctx.globalCompositeOperation = "lighter";
+    if (this.sprite) ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
+    // Hit flash: a quick bright bloom over the tube when shot.
+    if (this.flashAmount > 0) {
+      ctx.fillStyle = `hsla(${this.hue + 20}, 90%, 92%, ${this.flashAmount * 0.22})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.radius * 1.05, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Flickering energy thread from this fragment to the next fragment around the
+  // shared ring (ordered by slot, wrapping). Each fragment draws exactly one
+  // segment — the segment to its clockwise neighbour — so the whole group's
+  // chain is painted collectively with no duplication. The arc follows the
+  // phantom-ring path between the two break-faces and periodically flickers
+  // on/off (per-segment phase from the slot so they don't pulse in unison).
+  private renderTorusThread(ctx: CanvasRenderingContext2D, time: number) {
+    const group = this.torusGroup;
+    if (!group) return;
+    const living = group.members.filter((m) => m.alive);
+    if (living.length < 2) return;
+    // Find the neighbour with the next-larger slot (wrap to the smallest).
+    const mySlot = this.torusSlot;
+    let next: Asteroid | null = null;
+    let bestDelta = Infinity;
+    for (const m of living) {
+      if (m === this) continue;
+      let d = m.torusSlot - mySlot;
+      while (d <= 1e-3) d += TAU;
+      while (d > TAU) d -= TAU;
+      if (d < bestDelta) { bestDelta = d; next = m; }
+    }
+    if (!next) return;
+
+    // Flicker: a fast-ish on/off envelope, per-segment phase from the slot. The
+    // thread is fully dark for part of every cycle (the "periodic flickering").
+    const phase = this.torusSlot * 1.7;
+    const flick = Math.sin(time * 6.5 + phase) * 0.5 + 0.5;
+    const env = Math.max(0, flick - 0.35) / 0.65; // dark below 0.35, ramps to 1
+    if (env <= 0.01) return;
+
+    const H = group.hue;
+    const cx = group.center.x;
+    const cy = group.center.y;
+    const r = group.ringRadius;
+    // Walk the phantom-ring arc from this fragment's leading edge to the
+    // neighbour's trailing edge, jittering radius for a crackling-energy look.
+    const a0 = mySlot + group.phase + this.torusArcSpan * 0.5;
+    const a1 = a0 + (bestDelta - this.torusArcSpan * 0.5 - next.torusArcSpan * 0.5);
+    const steps = 14;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    // Two passes: a soft wide glow underlay, then a hot thin core.
+    for (const pass of [0, 1] as const) {
+      ctx.beginPath();
+      for (let i = 0; i <= steps; i++) {
+        const f = i / steps;
+        const ang = a0 + (a1 - a0) * f;
+        // Energy arcs bow slightly off the centreline and crackle along its run.
+        const bow = Math.sin(f * Math.PI) * r * 0.06;
+        const crackle = Math.sin(time * 22 + f * 19 + phase) * r * 0.03 * env;
+        const rr = r + bow + crackle;
+        const px = cx + Math.cos(ang) * rr;
+        const py = cy + Math.sin(ang) * rr;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      if (pass === 0) {
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = `hsla(${H + 10}, 90%, 60%, ${0.18 * env})`;
+      } else {
+        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = `hsla(${H + 35}, 100%, 88%, ${0.85 * env})`;
+      }
+      ctx.stroke();
+    }
+    // Bright nodes where the thread meets each break-face.
+    const endA = a1;
+    const ex = cx + Math.cos(endA) * r;
+    const ey = cy + Math.sin(endA) * r;
+    const sx = cx + Math.cos(a0) * r;
+    const sy = cy + Math.sin(a0) * r;
+    drawGlow(ctx, sx, sy, r * 0.1 * env, H, 0.6 * env);
+    drawGlow(ctx, ex, ey, r * 0.1 * env, H, 0.6 * env);
     ctx.restore();
   }
 
@@ -4492,19 +4987,52 @@ export class Asteroid {
         const alpha =
           (0.22 + 0.12 * comboHalo.beatPulse + 0.08 * shimmer + 0.5 * flash + 0.2 * warm) * tier2;
 
-        // Expanding soundwave: on the beat, a copy of the perimeter blooms
-        // outward and fades. beatFlash decays from 1, so (1 - flash) is the
-        // wave's age — it starts tight on the rim and rides out to ~1.5×.
-        if (flash > 0.001) {
-          const age = 1 - flash;
-          const ringScale = 1 + 0.5 * age;
+        // Expanding soundwave echo: on the beat the perimeter sheds a small
+        // family of staggered copies that ride outward and dissolve. Driven by
+        // haloEcho (slow-decaying, ~1.2s) so the wave outlives the on-beat
+        // flash entirely — a halo that breathes a ring out into the dark after
+        // every pulse. Each ring lags the previous by a fixed phase so they
+        // read as a soft expanding train, not one fat band.
+        if (this.haloEcho > 0.001) {
+          const ECHO_RINGS = 3;
           ctx.save();
-          ctx.scale(ringScale, ringScale);
-          this.traceHaloOutline(ctx);
-          ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${0.45 * flash * tier2})`;
-          ctx.lineWidth = Math.max(1, this.radius * 0.05) / ringScale;
-          ctx.stroke();
+          ctx.globalCompositeOperation = "lighter";
+          for (let r = 0; r < ECHO_RINGS; r++) {
+            // Age 0→1 across this ring's life; staggered so trailing rings are
+            // younger (tighter) than leading ones at any instant.
+            const age = (1 - this.haloEcho) + r * 0.16;
+            if (age <= 0 || age >= 1) continue;
+            // Decelerating expansion (ease-out) out to ~2.4× — soundwave-like.
+            const eased = 1 - (1 - age) * (1 - age);
+            const ringScale = 1 + 1.4 * eased;
+            // Fade as it expands; leading rings are dimmer so the train tapers.
+            const fade = (1 - age) * (1 - age);
+            const ringA = 0.4 * fade * tier2 * (1 - r * 0.22);
+            if (ringA <= 0.003) continue;
+            ctx.save();
+            ctx.scale(ringScale, ringScale);
+            this.traceHaloOutline(ctx);
+            ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${ringA})`;
+            // Keep an even apparent thickness as the ring grows.
+            ctx.lineWidth = Math.max(0.8, this.radius * 0.05) / ringScale;
+            ctx.stroke();
+            ctx.restore();
+          }
           ctx.restore();
+        }
+
+        // On-beat flare: a fat, bright additive bloom that only swells when the
+        // beat is active. Drawn under the resting outline so the active-beat
+        // pop reads as the rim igniting — much larger and brighter than the
+        // resting line, then gone as beatFlash decays. Squared on flash so the
+        // growth front-loads onto the downbeat instead of fading linearly.
+        if (flash > 0.001) {
+          const f2 = flash * flash;
+          const w = Math.max(1, this.radius * 0.04);
+          this.traceHaloOutline(ctx);
+          ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${Math.min(100, light + 8)}%, ${0.7 * f2 * tier2})`;
+          ctx.lineWidth = w * (3 + 9 * flash);
+          ctx.stroke();
         }
 
         // The bassteroid body is a big bright additive sprite, so a hairline
@@ -4515,10 +5043,10 @@ export class Asteroid {
         const w = Math.max(1, this.radius * 0.04);
         this.traceHaloOutline(ctx);
         ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${Math.min(100, light - 10)}%, ${(0.3 + 0.2 * flash + 0.15 * warm) * alpha})`;
-        ctx.lineWidth = w * (2.4 + 2.4 * flash + 1.2 * warm);
+        ctx.lineWidth = w * (2.4 + 4.5 * flash + 1.2 * warm);
         ctx.stroke();
         ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
-        ctx.lineWidth = w * (1 + 0.3 * warm);
+        ctx.lineWidth = w * (1 + 0.6 * flash + 0.3 * warm);
         ctx.stroke();
       }
     }
@@ -5995,6 +6523,46 @@ export class Asteroid {
     ctx.restore();
   }
 }
+
+// Advance one torus fragment cluster for the frame: drift the phantom-ring
+// centre, spin the ring, prune dead members, and snap every living fragment
+// onto its fixed angular slot (position + outward-facing rotation). This is the
+// "reassemble the ring" motion — the broken pieces hold their slots on a slowly
+// rotating ring rather than flying apart on momentum. Called once per group per
+// frame from the game loop (see tickTorusGroups), NOT per member.
+//
+// Returns false once the group is empty so the caller can drop it.
+export const tickTorusGroup = (group: TorusGroup, dt: number, w: number, h: number): boolean => {
+  group.members = group.members.filter((m) => m.alive && m.torusGroup === group);
+  if (group.members.length === 0) return false;
+  // Drift + wrap the shared centre (so the cluster scrolls like everything else)
+  // and rotate the ring.
+  group.center.x += group.vel.x * dt;
+  group.center.y += group.vel.y * dt;
+  wrapMut(group.center, w, h);
+  group.phase += group.spin * dt;
+  for (const m of group.members) {
+    const ang = m.torusSlot + group.phase;
+    m.pos.x = group.center.x + Math.cos(ang) * group.ringRadius;
+    m.pos.y = group.center.y + Math.sin(ang) * group.ringRadius;
+    // The baked arc bulges toward +x in its local frame; rotate so the bulge
+    // faces radially outward from the ring centre.
+    m.rotation = ang;
+  }
+  return true;
+};
+
+// Tick every distinct torus group represented in `asteroids` exactly once.
+// Groups are shared by reference across their fragments, so we dedupe via a Set
+// before ticking — otherwise a 4-fragment ring would advance its phase 4× per
+// frame. Call after the per-asteroid update() pass, before collision.
+export const tickTorusGroups = (asteroids: Asteroid[], dt: number, w: number, h: number) => {
+  let groups: Set<TorusGroup> | null = null;
+  for (const a of asteroids) {
+    if (a.torusGroup) (groups ??= new Set()).add(a.torusGroup);
+  }
+  if (groups) for (const g of groups) tickTorusGroup(g, dt, w, h);
+};
 
 // Drop the boss directly at the screen position the looming planetoid was
 // occupying, with a slow drift toward the screen centre. We don't aim at

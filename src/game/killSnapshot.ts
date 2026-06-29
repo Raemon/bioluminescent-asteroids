@@ -42,10 +42,10 @@ export const snapshotAsteroidKill = (a: Asteroid, killSound: SoundName, scoreEar
   const halfExtent = Math.max(a.radius + margin, a.spriteHalfSize + margin / 2);
   const tile = Math.ceil(halfExtent * 2);
   const cnv = captureToCanvas(tile, (cx) => {
-    const prevPos = a.pos, prevRot = a.rotation, prevFlash = a.flashAmount, prevBeat = a.beatFlash;
-    a.pos = v(0, 0); a.rotation = 0; a.flashAmount = 0; a.beatFlash = 0;
+    const prevPos = a.pos, prevRot = a.rotation, prevFlash = a.flashAmount, prevBeat = a.beatFlash, prevEcho = a.haloEcho;
+    a.pos = v(0, 0); a.rotation = 0; a.flashAmount = 0; a.beatFlash = 0; a.haloEcho = 0;
     a.render(cx, 0);
-    a.pos = prevPos; a.rotation = prevRot; a.flashAmount = prevFlash; a.beatFlash = prevBeat;
+    a.pos = prevPos; a.rotation = prevRot; a.flashAmount = prevFlash; a.beatFlash = prevBeat; a.haloEcho = prevEcho;
   });
   if (!cnv) return null;
   return { full: cnv, fullRadius: a.radius, killSound, maxHp: a.maxHp, scoreEarned };

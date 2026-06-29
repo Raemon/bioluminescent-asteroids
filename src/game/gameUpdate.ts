@@ -2,7 +2,7 @@ import type { Game } from "../Game";
 import type { ReplayPlayer } from "./replayPlayer";
 import { getRngSeed } from "./rng";
 import { dist } from "../vec";
-import { Asteroid } from "../Asteroid";
+import { Asteroid, tickTorusGroups } from "../Asteroid";
 import { Alien, ALIEN_FIRE_PATTERN_BEATS, bigAlienBurstAngleOffset } from "../Alien";
 import { AlienBullet } from "../AlienBullet";
 import { ENTITY_CONFIG } from "./entityConfig";
@@ -1041,6 +1041,10 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   spawnPendingWormholes(game, game.comets);
   pruneDeadComets(game);
   for (const a of game.asteroids) a.update(musicDt, game.w, game.h);
+  // Torus fragments don't integrate their own position in update() — drive the
+  // shared phantom rings here so every fragment is snapped onto its slot before
+  // collision runs.
+  tickTorusGroups(game.asteroids, musicDt, game.w, game.h);
   // defensive prune; no asteroid kind currently clears alive on its own.
   compactInPlace(game.asteroids, (a) => a.alive);
   for (const al of game.aliens) al.update(musicDt, game.w, game.h);

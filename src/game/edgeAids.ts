@@ -178,21 +178,3 @@ const drawTiled3x3 = (game: Game, paint: PaintScene) => {
   ctx.strokeRect(cx, cy, sw, sh);
   ctx.restore();
 };
-
-// ── Always-on mode label ─────────────────────────────────────────────────────
-const MODE_LABEL: Record<EdgeAidMode, string> = {
-  off: "1 · off (baseline)",
-  tiled2x2: "2 · 2x2 tiled",
-  scroll: "3 · locked-center scroll",
-  tiled3x3: "4 · 3x3 silhouette edges",
-};
-export const renderEdgeAidLabel = (game: Game) => {
-  const { ctx, w } = game;
-  ctx.save();
-  ctx.font = "600 16px 'Space Grotesk', system-ui, sans-serif";
-  ctx.textAlign = "right";
-  ctx.textBaseline = "top";
-  ctx.fillStyle = "hsla(192, 80%, 78%, 0.55)";
-  ctx.fillText(`edge aid  ${MODE_LABEL[game.edgeAidMode]}`, w - 24, 80);
-  ctx.restore();
-};
