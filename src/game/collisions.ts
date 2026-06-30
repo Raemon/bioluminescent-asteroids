@@ -350,12 +350,20 @@ const tryKillCometWithBullets = (game: Game, c: Comet): boolean => {
   return true;
 };
 
+// Grabbing a reward should be forgiving — "anywhere the ship touches it counts",
+// not "ram it dead-centre". The old test summed the ship's hull radius scaled
+// DOWN to 0.9, which sat well inside the visible silhouette. Use the ship's
+// full visible perimeter (hull + the halo that IS the player-facing edge)
+// instead, so a pickup fires the moment the sprites overlap on screen.
+const pickupReach = (game: Game): number =>
+  game.ship.radius + game.ship.haloOffset;
+
 // pickup-popup labels what was grabbed so the player can read it after the burst clears.
 export const handleCanisterPickups = (game: Game) => {
   if (!game.ship.alive) return;
   const remaining: Canister[] = [];
   for (const c of game.canisters) {
-    if (c.collidesWith(game.ship.pos, game.ship.radius * 0.9)) collectCanister(game, c);
+    if (c.collidesWith(game.ship.pos, pickupReach(game))) collectCanister(game, c);
     else remaining.push(c);
   }
   game.canisters = remaining;
@@ -367,7 +375,7 @@ export const handleFuelOrbPickups = (game: Game) => {
   if (!FUEL_MODE_ENABLED || !game.ship.alive) return;
   const remaining: FuelOrb[] = [];
   for (const o of game.fuelOrbs) {
-    if (o.collidesWith(game.ship.pos, game.ship.radius * 0.9)) collectFuelOrb(game, o);
+    if (o.collidesWith(game.ship.pos, pickupReach(game))) collectFuelOrb(game, o);
     else remaining.push(o);
   }
   game.fuelOrbs = remaining;

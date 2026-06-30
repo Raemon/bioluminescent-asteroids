@@ -88,12 +88,10 @@ type SummaryEls = {
   extraLifeValueEl: HTMLElement;
 };
 
-// The "Next ship" line runs its own fade animation (ws-extra-life-flash, a
-//   quick fade-in then fast fade-out) timed to start with the panel fade-out,
-//   so it blooms in as the rest of the summary leaves and is gone before the
-//   panel finishes fading. Nested inside the panel, so the panel fade dims it
-//   too — that's intended.
-const EXTRA_LIFE_REVEAL_DELAY_MS = HOLD_BEFORE_FADE_MS;
+// The "Next ship" line fades in the instant the bonus finishes draining into
+//   the score, then stays at full opacity. It carries no fade-out of its own —
+//   nested inside the panel, it leaves with the rest of the summary when the
+//   panel runs its 2s fade-out, so it remains until the summary is fully gone.
 
 let activeTimers: number[] = [];
 
@@ -233,17 +231,13 @@ export const showWaveSummary = (
   root.classList.remove("fade-out");
   void root.offsetWidth;
 
-  // Reveal the next-bonus-life teaser only after the score has finished settling
-  //   (so the threshold reads against the just-paid score) AND the panel has
-  //   begun its fade-out, so the line blooms in as the rest of the summary
-  //   leaves. The reveal itself is deferred by EXTRA_LIFE_REVEAL_DELAY_MS;
-  //   capturing the threshold text happens at reveal time for the same reason.
-  const scheduleExtraLifeReveal = () => {
-    const id = window.setTimeout(() => {
-      extraLifeValueEl.textContent = formatScore(game.nextBonusLifeScore);
-      extraLifeEl.classList.add("in");
-    }, EXTRA_LIFE_REVEAL_DELAY_MS);
-    activeTimers.push(id);
+  // Reveal the next-bonus-life teaser the moment the drain finishes, so the
+  //   threshold reads against the just-paid score and the line blooms in right
+  //   as the bonus lands — then holds while the panel fades it out with the
+  //   rest of the summary.
+  const revealExtraLife = () => {
+    extraLifeValueEl.textContent = formatScore(game.nextBonusLifeScore);
+    extraLifeEl.classList.add("in");
   };
 
   // One row per beat, each with a paired sound.
@@ -263,7 +257,7 @@ export const showWaveSummary = (
   const drainStartMs = FIRST_ROW_DELAY_MS + rows.length * BEAT_MS + PAUSE_BEFORE_DRAIN_MS;
   const startDrain = window.setTimeout(() => {
     if (bonus <= 0) {
-      scheduleExtraLifeReveal();
+      revealExtraLife();
       scheduleFadeOut(root);
       return;
     }
@@ -306,7 +300,7 @@ export const showWaveSummary = (
         //   the still-ringing G-major pad — root + fifth of C resolves the
         //   phrase to the game's tonal anchor instead of clanging.
         game.sound.play("chime", CHIME_C6);
-        scheduleExtraLifeReveal();
+        revealExtraLife();
         scheduleFadeOut(root);
       }
     };

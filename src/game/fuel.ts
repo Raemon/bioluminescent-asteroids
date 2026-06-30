@@ -6,13 +6,18 @@ export const FUEL_MODE_ENABLED = true;
 
 export const FUEL_MAX = 100;
 // drain per second of held forward / reverse thrust at full ramp.
-export const FUEL_THRUST_DRAIN = 14;
+export const FUEL_THRUST_DRAIN = 3;
 // side engines are cheaper than the main drive so strafing stays affordable.
-export const FUEL_SIDE_DRAIN = 9;
-// passive trickle back per second whenever the reserve isn't full.
+export const FUEL_SIDE_DRAIN = 1;
+// passive refill per second whenever the reserve isn't full — delivered as one
+// lump every FUEL_RECHARGE_INTERVAL seconds rather than a smooth per-frame
+// trickle. The pulsing is imperceptible at full tank but is what makes a dry
+// engine cough once a second: it sits empty until a lump lands, fires that lump
+// off in one short burst, then waits out the next interval.
 export const FUEL_RECHARGE = 1;
+export const FUEL_RECHARGE_INTERVAL = 1;
 // fraction of FUEL_MAX a single fuel orb restores.
-export const FUEL_ORB_RESTORE = 35;
+export const FUEL_ORB_RESTORE = 75;
 
 // Shield (held on the shield key). Raising the shield sips fuel pre-emptively
 // every second it's up, and ramming a rock with it up costs a burst scaled by

@@ -247,6 +247,9 @@ export const tickLaserShot = (game: Game, dt: number) => {
       if (!isInBeatWindow(game, game.perceivedBeatTime)) {
         ship.laserChargeFailedThisHold = true;
         game.sound.playLaserChargeFail();
+        // A mistimed press breaks the streak just like an off-beat bullet fire —
+        // the charge buzz alone isn't enough feedback when a combo is riding.
+        registerOffBeatFire(game);
         game.laserChargeGlow = approachGlow(game.laserChargeGlow, 0, dt);
         return;
       }

@@ -7,7 +7,7 @@ import { Sound } from "../Sound";
 import { emitThrust, emitReverseThrust, emitSideThrust } from "./shipParticles";
 import { fireBullets } from "./shipWeapons";
 import { isDown } from "../game/controlBindings";
-import { FUEL_MODE_ENABLED, FUEL_THRUST_DRAIN, FUEL_SIDE_DRAIN, FUEL_RECHARGE, FUEL_SHIELD_HOLD_DRAIN } from "../game/fuel";
+import { FUEL_MODE_ENABLED, FUEL_THRUST_DRAIN, FUEL_SIDE_DRAIN, FUEL_RECHARGE, FUEL_RECHARGE_INTERVAL, FUEL_SHIELD_HOLD_DRAIN } from "../game/fuel";
 import { BEAT_GRID } from "../game/rhythmConstants";
 
 const ENGINE_SOUNDS_ENABLED = false;
@@ -176,15 +176,23 @@ const drainFuel = (ship: Ship, drainPerSec: number, dt: number) => {
   ship.fuel = Math.max(0, ship.fuel - drainPerSec * dt);
 };
 
-// Trickle fuel back toward full each frame the player isn't thrusting, so a held
-// engine running on fumes can't recharge a sliver and limp on forever — once
-// empty it stays empty until the keys are released.
+// Refill the reserve in discrete once-a-second pulses rather than a smooth
+// trickle. The clock only advances on frames the engine isn't already burning
+// fuel (an active thrust, laser charge, or raised shield pauses it), and a lump
+// lands each time it crosses FUEL_RECHARGE_INTERVAL. A dry engine the player is
+// still holding has thrustOn == false (gated by hasFuel), so its frames count
+// toward the clock — it sits dead until a lump arrives, fires that lump off in
+// one short cough, then waits out the next second. No "fumes mode": the cough is
+// just a normal thrust frame that happens to be all the fuel there is.
 const rechargeFuel = (ship: Ship, dt: number) => {
-  if (!FUEL_MODE_ENABLED || ship.fuel >= ship.maxFuel) return;
+  if (!FUEL_MODE_ENABLED) return;
   const thrusting = ship.thrustOn || ship.reverseThrustOn || ship.portThrustOn || ship.starboardThrustOn;
-  // A held laser charge or a raised shield is an active drain too — don't trickle back against it.
   if (thrusting || ship.laserChargeActive || ship.shieldActive) return;
-  ship.fuel = Math.min(ship.maxFuel, ship.fuel + FUEL_RECHARGE * dt);
+  if (ship.fuel >= ship.maxFuel) { ship.fuelRechargeClock = 0; return; }
+  ship.fuelRechargeClock += dt;
+  if (ship.fuelRechargeClock < FUEL_RECHARGE_INTERVAL) return;
+  ship.fuelRechargeClock -= FUEL_RECHARGE_INTERVAL;
+  ship.fuel = Math.min(ship.maxFuel, ship.fuel + FUEL_RECHARGE * FUEL_RECHARGE_INTERVAL);
 };
 
 // Held shield: up only while the shield key is held and there's fuel to burn.

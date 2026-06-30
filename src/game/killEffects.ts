@@ -6,7 +6,7 @@ import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
 import { Vec } from "../vec";
 import { ENTITY_CONFIG } from "./entityConfig";
-import { spawnGemAt, spawnBurstGemFan } from "../Gem";
+import { spawnGemFan, spawnBurstGemFan } from "../Gem";
 import { loseCombo, rebaseBeatEval } from "./rhythmGate";
 import { syncComboHud, syncHud, flashScoreGain } from "./hud";
 import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintStage3Ready, emitFirstWaveHintRhythmProgress } from "./lifecycle";
@@ -266,7 +266,7 @@ const finishAsteroidKillCore = (
     // Eject the embedded gem at the dead rock's position; the fragment recipe
     // (handled inside split() below) takes care of the rubble cloud flying in
     // other directions.
-    game.gems.push(spawnGemAt(a.pos, a.vel));
+    for (const g of spawnGemFan(a.pos, a.vel, 1)) game.gems.push(g);
   }
   if (isBurstGem(a.kind)) {
     // The burst gem doesn't crumble into rubble — its whole payout is a fan of
@@ -278,11 +278,9 @@ const finishAsteroidKillCore = (
   }
   if (a.kind === "solidCrystal" && a.embeddedGemCount > 0) {
     // Pure-crystal rock drops the same number of gems that were visible as
-    // frosted hints inside its body (0–2, decided at spawn), ejected at the
+    // frosted hints inside its body (decided at spawn), fanned out from the
     // dead rock's position just like a regular gem-bearing asteroid.
-    for (let k = 0; k < a.embeddedGemCount; k++) {
-      game.gems.push(spawnGemAt(a.pos, a.vel));
-    }
+    for (const g of spawnGemFan(a.pos, a.vel, a.embeddedGemCount)) game.gems.push(g);
   }
   // Defiant final shot: a boss eye-core that just took its killing hit
   // fires one last plasma bolt before the shards spawn. Skip if no ship to

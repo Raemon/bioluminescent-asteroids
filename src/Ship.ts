@@ -45,10 +45,16 @@ export class Ship {
   driftHoldStarboard = 0;
   thrustPower = 420;
   thrustRamp = 0;
-  // Fuel Mode reserve (see game/fuel.ts). Thrusting drains it; it trickles back
-  // and fuel orbs refill it. Starts full; ignored entirely when fuel mode is off.
+  // Fuel Mode reserve (see game/fuel.ts). Thrusting drains it; it refills in
+  // discrete once-a-second pulses and fuel orbs top it up. Starts full; ignored
+  // entirely when fuel mode is off.
   fuel = FUEL_MAX;
   maxFuel = FUEL_MAX;
+  // seconds counted toward the next recharge pulse (see rechargeFuel). Delivering
+  // recharge as a once-a-second lump rather than a smooth trickle is what makes a
+  // dry engine fire in single coughs: it sits empty until the lump lands, burns
+  // that lump off in one short burst, then waits out the next second.
+  fuelRechargeClock = 0;
   // drag is 0 so the ship coasts; thrust + retro are the only velocity inputs (Newtonian feel).
   drag = 0;
   maxSpeed = 460;

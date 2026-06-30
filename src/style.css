@@ -2539,19 +2539,17 @@ li.lb-self .lb-name-link:hover {
   opacity: 0;
 }
 
-/* Self-contained bloom: the line fades in fast, holds a beat, then fades out
-   well before the panel's 2s fade-out ends. Runs on its own timeline (not the
-   panel transition) so it can leave faster than the rest of the summary;
-   nested in the panel, so the panel fade dims it too. */
+/* Bloom in and hold: the line fades up as the bonus lands, then stays at full
+   opacity. It has no fade-out of its own — nested in the panel, it leaves with
+   the rest of the summary when the panel runs its 2s fade-out, so it remains
+   visible until the whole summary has finished disappearing. */
 #wave-summary .ws-extra-life.in {
-  animation: ws-extra-life-flash 1.3s ease-out forwards;
+  animation: ws-extra-life-flash 0.5s ease-out forwards;
 }
 
 @keyframes ws-extra-life-flash {
   0%   { opacity: 0;    transform: translateY(8px); }
-  25%  { opacity: 0.85; transform: translateY(0);   }
-  40%  { opacity: 0.85; transform: translateY(0);   }
-  100% { opacity: 0;    transform: translateY(0);   }
+  100% { opacity: 0.85; transform: translateY(0);   }
 }
 
 #wave-summary .ws-extra-life .ws-value {

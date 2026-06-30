@@ -154,7 +154,7 @@ export const ENTITY_CONFIG = {
   // firstWave guarantees one gem; later waves roll per spawn.
   asteroidWithGem: {
     firstWave: 1,
-    perSpawnChance: 0.38,
+    perSpawnChance: 0.5,
     radius: 14,
     // long enough that a player can swing back for it after handling rubble,
     // short enough that uncollected gems don't clutter the rest of the wave.

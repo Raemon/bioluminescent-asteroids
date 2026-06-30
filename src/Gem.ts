@@ -332,6 +332,27 @@ export const spawnGemAt = (pos: Vec, parentVel: Vec): Gem => {
   return new Gem({ ...pos }, drift);
 };
 
+// Fan `count` gems out from the dropper's position in an even ring, each gem
+// gently ejected outward so they read as a small burst spreading from the kill
+// site rather than a clump landing on one spot. A single gem just inherits the
+// parent drift (no meaningful direction to fan toward).
+const GEM_FAN_EJECT_SPEED = 42; // gentle outward drift, pre-rhythm-mul
+export const spawnGemFan = (pos: Vec, parentVel: Vec, count: number): Gem[] => {
+  if (count <= 1) return count === 1 ? [spawnGemAt(pos, parentVel)] : [];
+  const baseAngle = rand(0, TAU);
+  const gems: Gem[] = [];
+  for (let i = 0; i < count; i++) {
+    const angle = baseAngle + (i / count) * TAU;
+    const dir = fromAngle(angle);
+    const drift = v(
+      parentVel.x * 0.25 + dir.x * GEM_FAN_EJECT_SPEED,
+      parentVel.y * 0.25 + dir.y * GEM_FAN_EJECT_SPEED,
+    );
+    gems.push(new Gem({ ...pos }, drift));
+  }
+  return gems;
+};
+
 // A burstGem's death: fan `count` fast-flying gems out in an even ring, rotated
 // half a step off the killing-shot axis so none flies straight back down the
 // return line (the bullet came IN along impactDir). Each is a real Gem — fly
