@@ -146,6 +146,8 @@ export class Comet {
       return;
     }
     this.age += dt;
+    const preWrapX = this.pos.x;
+    const preWrapY = this.pos.y;
     addScaledMut(this.pos, this.vel, dt);
     // Wrap around the torus so a comet living its full 30s stays in the tiled
     // scroll world (and thus on-screen) as it crosses map boundaries, instead of
@@ -153,6 +155,14 @@ export class Comet {
     // brief cross-and-leave flock that pops off the far edge.
     if (!this.isMeteor) wrapMut(this.pos, w, h);
     this.glowTrail.update(dt, this.pos.x, this.pos.y);
+
+    // A torus wrap teleports pos across the world in one frame; the streak below
+    // would otherwise draw a segment bridging the two sides — a stripe across the
+    // screen. Drop the recorded tail on a jump so the streak restarts cleanly on
+    // the new side (glowTrail resets itself on the same condition).
+    if (Math.hypot(this.pos.x - preWrapX, this.pos.y - preWrapY) > 200) {
+      this.trail.length = 0;
+    }
 
     // Sample the current position every frame so the trail is dense enough
     // to read as a smooth streak. Trim the tail when the oldest sample has

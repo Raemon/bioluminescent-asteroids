@@ -200,8 +200,9 @@ export const ENTITY_CONFIG = {
     // Subtracted from every incoming hit before it touches HP. A plain 1-damage
     // shot does nothing and visibly bounces off; only on-beat (4) and boosted
     // (8) shots get through, the latter chipping 1 HP. Faceted ice should feel
-    // like it wants a real hit, not a peashooter.
-    damageReduction: 3,
+    // like it wants a real hit, not a peashooter. Smalls resist just as hard.
+    largeDamageReduction: 3,
+    smallDamageReduction: 3,
     // Standalone solidCrystalSmall — a rare "treat" spawn on its own roll
     // (4 HP shard, smallScore on kill). Same cadence the tink roll used.
     smallSpawn: {

@@ -212,10 +212,6 @@ const OUTLINE_SAMPLES: Partial<Record<AsteroidKind, number>> = {
   rubbleBlock: 16,
 };
 
-// Solid crystal large asteroids render slightly bigger than a stock large so
-// they read as a more dangerous, more robust target. Smalls keep stock size.
-const SOLID_CRYSTAL_LARGE_RADIUS = ENTITY_CONFIG.solidCrystal.largeRadius;
-
 // Length of one musical measure (seconds). 4 beats at 120 BPM × 0.5s/beat.
 // Every bassteroid fires exactly once per measure regardless of split
 // generation; what changes with splitting is which beat-slot in the measure
@@ -238,14 +234,6 @@ export const BASS_KIND_BASE_OFFSET: Record<"bassA" | "bassB" | "bassC" | "bassD"
 // still reads as rhythm rather than mush.
 export const BASS_MAX_SPLIT_LEVEL = 2;
 
-// General per-size hit point counts. Every asteroid uses this table now —
-// each non-killing hit leaves a visible crack on the body, and the killing
-// hit explodes (and splits, for non-terminal sizes). Non-rhythm bullets deal
-// 1 damage so an unsynced run needs 4/2/1 shots for a large/medium/small;
-// rhythm bullets deal 4 damage so a well-timed shot one-shots anything in
-// this table.
-export const ASTEROID_HP = ENTITY_CONFIG.asteroid.hp;
-
 // Combo-halo gap: the halo outline floats this many pixels outside the hull,
 // uniform along every edge and across every bassteroid size (a center-scale
 // multiplier would push long hull extremities much further out than the
@@ -255,45 +243,14 @@ const BASS_HALO_GAP_PX = 8;
 // Bassteroids carry the asteroid-HP table scaled by the bass multiplier so
 // the rhythm system has real teeth — even a rhythm-bullet (4 damage) needs
 // four hits to crack a large bassteroid, matching the "armoured" silhouette.
-export const BASS_HP_MULTIPLIER = ENTITY_CONFIG.bassteroid.hpMultiplier;
 export const BASS_HP: Record<AsteroidSize, number> = {
   // Bassteroids never spawn at "huge"; the entry mirrors the scaled large so
   // the Record shape is satisfied and is never read.
-  huge: ASTEROID_HP.huge * BASS_HP_MULTIPLIER,
-  large: ASTEROID_HP.large * BASS_HP_MULTIPLIER,
-  medium: ASTEROID_HP.medium * BASS_HP_MULTIPLIER,
-  small: ASTEROID_HP.small * BASS_HP_MULTIPLIER,
+  huge: ENTITY_CONFIG.asteroid.hp.huge * ENTITY_CONFIG.bassteroid.hpMultiplier,
+  large: ENTITY_CONFIG.asteroid.hp.large * ENTITY_CONFIG.bassteroid.hpMultiplier,
+  medium: ENTITY_CONFIG.asteroid.hp.medium * ENTITY_CONFIG.bassteroid.hpMultiplier,
+  small: ENTITY_CONFIG.asteroid.hp.small * ENTITY_CONFIG.bassteroid.hpMultiplier,
 };
-
-// Solid-crystal HP: large matches the bass-armouring budget in a single tier,
-// small fragments are tougher than a normal small (1 HP) so the splinter
-// cleanup still demands a few well-timed shots.
-export const SOLID_CRYSTAL_HP_LARGE = ENTITY_CONFIG.solidCrystal.largeHp;
-export const SOLID_CRYSTAL_HP_SMALL = ENTITY_CONFIG.solidCrystal.smallHp;
-export const SOLID_CRYSTAL_DAMAGE_REDUCTION = ENTITY_CONFIG.solidCrystal.damageReduction;
-
-// Burst gem — chunky solid-gold diamond that bursts into a fan of fast-flying
-// collectible Gems on death. Two tiers (medium / big) share HP; radius + fan
-// size differ per tier.
-export const BURST_GEM_HP = ENTITY_CONFIG.burstGem.hp;
-export const BURST_GEM_MEDIUM_RADIUS = ENTITY_CONFIG.burstGem.medium.radius;
-export const BURST_GEM_BIG_RADIUS = ENTITY_CONFIG.burstGem.big.radius;
-
-// Glass prison — the shell that locks a brood of wraiths in stasis. Fragile:
-// a single hit cracks it open. On death the prison spawns 2-4 wraiths at its
-// position.
-export const GLASS_PRISON_HP = ENTITY_CONFIG.glassPrison.hp;
-export const GLASS_PRISON_RADIUS = ENTITY_CONFIG.glassPrison.radius;
-// Wraith — the freed captive. HP is low (it's a wisp, not armoured), but
-// it pursues and writhes so it's hard to line up cleanly.
-export const WRAITH_HP = ENTITY_CONFIG.wraith.hp;
-export const WRAITH_RADIUS = ENTITY_CONFIG.wraith.radius;
-
-// Torus — mechanical ring + its orbiting arc/chunk fragments. The whole ring's
-// outer radius, tube thickness, and the per-tier HP all live in entityConfig.
-export const TORUS_RADIUS = ENTITY_CONFIG.torus.radius;
-export const TORUS_TUBE_FRAC = ENTITY_CONFIG.torus.tubeFrac;
-export const TORUS_HP = ENTITY_CONFIG.torus.hp;
 
 // Shared state for all fragments that came from one torus. The fragments don't
 // fly apart on momentum like normal debris — they hold fixed angular slots on a
@@ -325,12 +282,12 @@ export const CATHEDRAL_DEBRIS_HP = 2;
 // Flat per-kind HP. Kinds whose HP scales with size (boss family, bassteroids)
 // or stock asteroids aren't listed — getMaxHp handles those.
 const KIND_HP: Partial<Record<AsteroidKind, number>> = {
-  solidCrystal: SOLID_CRYSTAL_HP_LARGE,
-  solidCrystalSmall: SOLID_CRYSTAL_HP_SMALL,
-  burstGemMedium: BURST_GEM_HP,
-  burstGemBig: BURST_GEM_HP,
-  glassPrison: GLASS_PRISON_HP,
-  wraith: WRAITH_HP,
+  solidCrystal: ENTITY_CONFIG.solidCrystal.largeHp,
+  solidCrystalSmall: ENTITY_CONFIG.solidCrystal.smallHp,
+  burstGemMedium: ENTITY_CONFIG.burstGem.hp,
+  burstGemBig: ENTITY_CONFIG.burstGem.hp,
+  glassPrison: ENTITY_CONFIG.glassPrison.hp,
+  wraith: ENTITY_CONFIG.wraith.hp,
   cathedralKeystone: CATHEDRAL_DEBRIS_HP,
   glassShard: CATHEDRAL_DEBRIS_HP,
   columnDrum: CATHEDRAL_DEBRIS_HP,
@@ -355,7 +312,7 @@ function getMaxHp(kind: AsteroidKind, size: AsteroidSize): number {
     case "torusArc": return size === "large" ? ENTITY_CONFIG.torus.arcHp : ENTITY_CONFIG.torus.sliverHp;
     case "torusChunk": return ENTITY_CONFIG.torus.chunkHp;
   }
-  return KIND_HP[kind] ?? ASTEROID_HP[size];
+  return KIND_HP[kind] ?? ENTITY_CONFIG.asteroid.hp[size];
 }
 
 // Vertex list (local-space, normalised to radius=1) for one armoured panel
@@ -996,7 +953,7 @@ export class Asteroid {
   // bullet hits decrement `hp` and reveal one more entry in `cracks`; the
   // killing hit (hp → 0) explodes the asteroid (and splits it, for non-
   // terminal sizes). Bassteroids carry a 4× multiplier on top of the size
-  // table — see `ASTEROID_HP` / `BASS_HP`.
+  // table — see `getMaxHp` / `BASS_HP`.
   hp = 0;
   maxHp = 0;
   // Flat amount subtracted from every incoming hit before it touches HP. A hit
@@ -1210,26 +1167,29 @@ export class Asteroid {
     if (kind === "solidCrystal") {
       // Slightly oversized vs a stock large — reads as a more menacing target
       // without towering over the field. Smalls keep stock size.
-      this.radius = SOLID_CRYSTAL_LARGE_RADIUS;
-      this.damageReduction = SOLID_CRYSTAL_DAMAGE_REDUCTION;
+      this.radius = ENTITY_CONFIG.solidCrystal.largeRadius;
+      this.damageReduction = ENTITY_CONFIG.solidCrystal.largeDamageReduction;
+    }
+    if (kind === "solidCrystalSmall") {
+      this.damageReduction = ENTITY_CONFIG.solidCrystal.smallDamageReduction;
     }
     if (isBurstGem(kind)) {
       // Chunky gem — reads as a heavy, valuable target worth lining up. Big tier
       // is clearly larger than a stock large; medium sits a touch above it.
-      this.radius = kind === "burstGemBig" ? BURST_GEM_BIG_RADIUS : BURST_GEM_MEDIUM_RADIUS;
+      this.radius = kind === "burstGemBig" ? ENTITY_CONFIG.burstGem.big.radius : ENTITY_CONFIG.burstGem.medium.radius;
       // Heavy mass → barely tumbles; the slow drift is set in waveDirector.
       this.rotSpeed = rand(-0.22, 0.22);
     }
     if (kind === "glassPrison") {
       // Slightly taller/thinner-feeling than a normal large; the elongated
       // facet polygon (kiki harmonics + low sample count) does the work.
-      this.radius = GLASS_PRISON_RADIUS;
+      this.radius = ENTITY_CONFIG.glassPrison.radius;
       this.rotSpeed = rand(-0.18, 0.18);
     }
     if (kind === "torus") {
       // The whole ring — wide footprint so the hole is big enough to thread
       // once it splits. Slow majestic spin like a heavy mechanical body.
-      this.radius = TORUS_RADIUS;
+      this.radius = ENTITY_CONFIG.torus.radius;
       this.rotSpeed = rand(-0.14, 0.14);
     }
     if (kind === "torusArc" || kind === "torusChunk") {
@@ -1240,7 +1200,7 @@ export class Asteroid {
       this.rotSpeed = 0;
     }
     if (kind === "wraith") {
-      this.radius = WRAITH_RADIUS;
+      this.radius = ENTITY_CONFIG.wraith.radius;
       // Slow tumble — the writhe body deformation does the real visual work.
       this.rotSpeed = rand(-0.4, 0.4);
       this.writhePhase = rand(0, TAU);
@@ -1732,7 +1692,7 @@ export class Asteroid {
   // drawImage + the cheap hit/beat flash overlay.
   private buildTorusSprite(): HTMLCanvasElement {
     const rOuter = this.radius;
-    const rInner = this.radius * (1 - TORUS_TUBE_FRAC);
+    const rInner = this.radius * (1 - ENTITY_CONFIG.torus.tubeFrac);
     const halo = rOuter * 1.25;
     const padding = 14;
     const size = Math.ceil(2 * (halo + padding));
@@ -1757,7 +1717,7 @@ export class Asteroid {
   // bulge radially outward from the group centre.
   private buildTorusArcSprite(): HTMLCanvasElement {
     const bend = this.torusBendRadius || this.radius;
-    const tube = bend * TORUS_TUBE_FRAC;
+    const tube = bend * ENTITY_CONFIG.torus.tubeFrac;
     const rOuter = bend + tube / 2;
     const rInner = bend - tube / 2;
     const span = this.torusArcSpan || 0.5;
@@ -3767,7 +3727,7 @@ export class Asteroid {
     group: TorusGroup, size: AsteroidSize, slot: number, arcSpan: number, kind: AsteroidKind = "torusArc",
   ): Asteroid {
     const ringR = group.ringRadius;
-    const tube = ringR * TORUS_TUBE_FRAC;
+    const tube = ringR * ENTITY_CONFIG.torus.tubeFrac;
     // Hitbox radius: half the arc chord on the centreline, plus the tube half
     // -thickness, so the circle hugs the curved fragment without swallowing the
     // gaps between fragments.
@@ -3946,7 +3906,7 @@ export class Asteroid {
     // energy thread.
     if (this.kind === "torus") {
       const cfg = ENTITY_CONFIG.torus;
-      const ringRadius = this.radius * (1 - TORUS_TUBE_FRAC / 2);
+      const ringRadius = this.radius * (1 - ENTITY_CONFIG.torus.tubeFrac / 2);
       // Hand the broken ring a faint outward drift so the cluster keeps moving
       // across the field rather than freezing where it cracked.
       const group: TorusGroup = {
