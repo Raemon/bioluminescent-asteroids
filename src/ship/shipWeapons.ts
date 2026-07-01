@@ -22,13 +22,11 @@ const PIERCE_RANGE_MULT = 2;
 // longshot extends bullet range 1.5x so a shot reaches further than the 1-beat reticule.
 const LONGSHOT_RANGE_MULT = 1.5;
 
-// bullet inherits the ship's full velocity so muzzle output reads as physical, not portaled —
-// a fast ship throws its shots downrange faster. computeAimCircle/computeReticulePosition use the
-// same full inheritance so the reticule and trajectory dots track where shots actually land.
+// bullet inherits a fraction of ship velocity so muzzle output reads as physical, not portaled.
 const launchBullet = (ship: Ship, headingOffset: number, pierce: boolean, longshot: boolean): Bullet => {
   const dir = fromAngle(ship.heading + headingOffset, 1);
   const muzzle = add(ship.pos, mul(dir, ship.radius + 4));
-  const vel = add(mul(dir, ship.bulletSpeed), ship.vel);
+  const vel = add(mul(dir, ship.bulletSpeed), mul(ship.vel, 0.4));
   let life = ship.bulletLife;
   if (pierce) life *= PIERCE_RANGE_MULT;
   if (longshot) life *= LONGSHOT_RANGE_MULT;
@@ -48,12 +46,12 @@ export const fireBullets = (ship: Ship, bullets: Bullet[]) => {
   }
 };
 
-// powerup flags are simple bool latches that persist for the run. Shield is no
-//   longer here — it's a held, fuel-burning ability (see shipPhysics), not a pickup.
+// powerup flags are simple bool latches; shield is one-shot, the rest persist for the run.
 export const applyPowerup = (ship: Ship, kind: PowerupKind) => {
   if (kind === "prong") ship.prongCount += 1;
   else if (kind === "rapid") ship.rapidActive = true;
   else if (kind === "pierce") ship.pierceActive = true;
+  else if (kind === "shield") ship.shieldActive = true;
   else if (kind === "radar") ship.radarActive = true;
   else if (kind === "longshot") ship.longshotActive = true;
   else if (kind === "sideEngines") ship.sideEnginesActive = true;

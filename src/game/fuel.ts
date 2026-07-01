@@ -2,7 +2,7 @@
 // that slowly refills, and fuel orbs (dropped by gold gems that don't pay out
 // an upgrade) top it back up. Flip FUEL_MODE_ENABLED off to remove every fuel
 // cost, hide the HUD bar, and stop fuel orbs from spawning.
-export const FUEL_MODE_ENABLED = true;
+export const FUEL_MODE_ENABLED = false;
 
 export const FUEL_MAX = 100;
 // drain per second of held forward / reverse thrust at full ramp.

@@ -146,6 +146,7 @@ export const syncPowerupHud = (game: Game) => {
   setSlotActive("prong", game.ship.prongActive);
   setSlotActive("rapid", game.ship.rapidActive);
   setSlotActive("pierce", game.ship.pierceActive);
+  setSlotActive("shield", game.ship.shieldActive);
   setSlotActive("radar", game.ship.radarActive);
   setSlotActive("longshot", game.ship.longshotActive);
   const slowOn = game.slowMoTimer > 0;

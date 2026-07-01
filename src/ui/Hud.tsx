@@ -61,6 +61,12 @@ export const Hud = () => (
           <path d="M2 12 L22 12 M19 9 L22 12 L19 15" />
         </svg>
       </Powerup>
+      <Powerup kind="shield" title="Shield — absorbs one hit">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3 L20 6 L20 12 Q20 17 12 21 Q4 17 4 12 L4 6 Z" />
+          <path d="M12 8 L12 16 M8 12 L16 12" opacity="0.6" />
+        </svg>
+      </Powerup>
       <Powerup kind="slow" title="Slow-Mo — time dilation" withProgress>
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="13" r="7" />

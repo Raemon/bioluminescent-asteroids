@@ -7,14 +7,14 @@ import { Sound } from "../Sound";
 import { emitThrust, emitReverseThrust, emitSideThrust } from "./shipParticles";
 import { fireBullets } from "./shipWeapons";
 import { isDown } from "../game/controlBindings";
-import { FUEL_MODE_ENABLED, FUEL_THRUST_DRAIN, FUEL_SIDE_DRAIN, FUEL_RECHARGE, FUEL_RECHARGE_INTERVAL, FUEL_SHIELD_HOLD_DRAIN } from "../game/fuel";
+import { FUEL_MODE_ENABLED, FUEL_THRUST_DRAIN, FUEL_SIDE_DRAIN, FUEL_RECHARGE, FUEL_RECHARGE_INTERVAL } from "../game/fuel";
 import { BEAT_GRID } from "../game/rhythmConstants";
 
 const ENGINE_SOUNDS_ENABLED = false;
 
 // Flip to true to cap the ship's velocity at ship.maxSpeed; false lets
 // Newtonian drift accelerate without limit.
-const TOP_SPEED_ENABLED = false;
+const TOP_SPEED_ENABLED = true;
 
 // Flip to true to give every ship side thrust from the start, ignoring the
 // sideEngines powerup gate. Flip back to false to return it to an upgrade.
@@ -178,30 +178,21 @@ const drainFuel = (ship: Ship, drainPerSec: number, dt: number) => {
 
 // Refill the reserve in discrete once-a-second pulses rather than a smooth
 // trickle. The clock only advances on frames the engine isn't already burning
-// fuel (an active thrust, laser charge, or raised shield pauses it), and a lump
-// lands each time it crosses FUEL_RECHARGE_INTERVAL. A dry engine the player is
-// still holding has thrustOn == false (gated by hasFuel), so its frames count
-// toward the clock — it sits dead until a lump arrives, fires that lump off in
-// one short cough, then waits out the next second. No "fumes mode": the cough is
-// just a normal thrust frame that happens to be all the fuel there is.
+// fuel (an active thrust or laser charge pauses it), and a lump lands each time
+// it crosses FUEL_RECHARGE_INTERVAL. A dry engine the player is still holding
+// has thrustOn == false (gated by hasFuel), so its frames count toward the
+// clock — it sits dead until a lump arrives, fires that lump off in one short
+// cough, then waits out the next second. No "fumes mode": the cough is just a
+// normal thrust frame that happens to be all the fuel there is.
 const rechargeFuel = (ship: Ship, dt: number) => {
   if (!FUEL_MODE_ENABLED) return;
   const thrusting = ship.thrustOn || ship.reverseThrustOn || ship.portThrustOn || ship.starboardThrustOn;
-  if (thrusting || ship.laserChargeActive || ship.shieldActive) return;
+  if (thrusting || ship.laserChargeActive) return;
   if (ship.fuel >= ship.maxFuel) { ship.fuelRechargeClock = 0; return; }
   ship.fuelRechargeClock += dt;
   if (ship.fuelRechargeClock < FUEL_RECHARGE_INTERVAL) return;
   ship.fuelRechargeClock -= FUEL_RECHARGE_INTERVAL;
   ship.fuel = Math.min(ship.maxFuel, ship.fuel + FUEL_RECHARGE * FUEL_RECHARGE_INTERVAL);
-};
-
-// Held shield: up only while the shield key is held and there's fuel to burn.
-//   Recomputed every frame (not a latch) so an empty tank instantly drops the
-//   guard. Raising it sips fuel pre-emptively; ramming a rock costs extra at the
-//   impact site (handleSingleShipAsteroidImpact in collisions.ts).
-const updateShield = (ship: Ship, input: IInput, dt: number) => {
-  ship.shieldActive = isDown(input, "shield") && hasFuel(ship);
-  if (ship.shieldActive) drainFuel(ship, FUEL_SHIELD_HOLD_DRAIN, dt);
 };
 
 // Single acceleration path for every engine — push velocity along (heading + offset) with this
@@ -347,7 +338,6 @@ export const tickShip = (
   updateForwardThrust(ship, input, particles, sound, dt, t);
   updateReverseThrust(ship, input, particles, sound, dt, t);
   updateSideThrust(ship, input, particles, sound, dt, t);
-  updateShield(ship, input, dt);
   rechargeFuel(ship, dt);
   updateFireTrigger(ship, input, bullets);
   integrateMotion(ship, dt, w, h);

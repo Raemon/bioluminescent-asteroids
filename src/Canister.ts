@@ -37,7 +37,7 @@ const POWERUP_GLYPH: Record<PowerupKind, string> = {
 
 // sideEngines is dropped from the pool when side thrust is always-on (it would
 // be a no-op pickup); flip SIDE_THRUST_ALWAYS_ON back to false to restore it.
-export const POWERUP_KINDS: PowerupKind[] = (["prong", "slow", "radar", "longshot", "sideEngines", "lasershot"] as PowerupKind[])
+export const POWERUP_KINDS: PowerupKind[] = (["prong", "shield", "slow", "radar", "longshot", "sideEngines", "lasershot"] as PowerupKind[])
   .filter((k) => !(k === "sideEngines" && SIDE_THRUST_ALWAYS_ON));
 
 // warp-out plays a brief vortex flash before the canister vanishes so the player

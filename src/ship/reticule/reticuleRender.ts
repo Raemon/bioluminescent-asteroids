@@ -259,7 +259,7 @@ const paintDriftLockHint = (ctx: CanvasRenderingContext2D, beatTime: number) => 
 // the aim circle = locus of bullet endpoints at t=beatGrid over all headings. Single source
 // of truth so the reticule painter and the gameRender red-tint check agree on geometry.
 export const computeAimCircle = (ship: Ship, beatGrid: number) => ({
-  center: add(ship.pos, mul(ship.vel, beatGrid)),
+  center: add(ship.pos, mul(ship.vel, 0.4 * beatGrid)),
   radius: ship.radius + 4 + ship.bulletSpeed * beatGrid,
 });
 
@@ -275,7 +275,7 @@ const computeReticulePosition = (
 ): Vec => {
   const dir = fromAngle(ship.heading + headingOffset, 1);
   const muzzle = add(ship.pos, mul(dir, ship.radius + 4));
-  const bulletVel = add(mul(dir, ship.bulletSpeed), ship.vel);
+  const bulletVel = add(mul(dir, ship.bulletSpeed), mul(ship.vel, 0.4));
   return add(muzzle, mul(bulletVel, beatGrid * beatFraction));
 };
 

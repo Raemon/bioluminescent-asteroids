@@ -85,15 +85,12 @@ export class Ship {
   fireRate = BEAT_GRID;
   bulletSpeed = 620;
   bulletLife = 0.85;
-  // prong/rapid/pierce/radar/longshot persist for the run.
+  // prong/rapid/pierce/radar/longshot persist for the run; shield is one-shot.
   // prongCount stacks: each upgrade adds one more prong (and one more bullet).
   prongCount = 0;
   get prongActive() { return this.prongCount > 0; }
   rapidActive = false;
   pierceActive = false;
-  // Held shield: true only on frames the player holds the shield key with fuel
-  //   left. Recomputed every frame in shipPhysics — not a latch — so the
-  //   collision handlers must never write it (it'd be overwritten next tick).
   shieldActive = false;
   radarActive = false;
   longshotActive = false;

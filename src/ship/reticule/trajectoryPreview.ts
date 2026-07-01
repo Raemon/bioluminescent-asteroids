@@ -639,14 +639,16 @@ export const setReticuleWrapAnchor = (anchor: { x: number; y: number } | null): 
 // positions can land outside [0,w)×[0,h). In the non-scroll camera, canvas == world, so we
 // fold them into [0,w) — dots reappear on the opposite edge, matching the wrapped target
 // sprite. In scroll mode the world is wrap-REPLICATED behind a camera translate that pins the
-// ship to centre, so instead we pick the dot's copy nearest the apex and let the camera place
-// it — folding to [0,w) there would fight the translate and make dots vanish near a seam.
+// ship to centre, so we pass the raw apex-relative coordinate straight through and let the
+// camera translate place it: every point that reaches here is already nearest-apex — target
+// dots were toroidalDelta-remapped to their near copy upstream, and the forward reticule ray
+// is an intentional projection from the ship. Folding the offset into ±w/2 here was the bug:
+// a fast ship's 1-beat reticule projects past half a screen, and the fold snapped it a full
+// screen back toward the ship while the bullet (drawn at its true offset by the world layer)
+// kept going — so the shot visibly overshot its own sight. Unfolded, the sight tracks the
+// bullet at any range. The world layer's tileCopies still covers the wrap visually.
 const wrapToCanvas = (x: number, y: number, w: number, h: number): [number, number] => {
-  if (reticuleWrapAnchor) {
-    const dx = ((x - reticuleWrapAnchor.x) % w + w * 1.5) % w - w / 2;
-    const dy = ((y - reticuleWrapAnchor.y) % h + h * 1.5) % h - h / 2;
-    return [reticuleWrapAnchor.x + dx, reticuleWrapAnchor.y + dy];
-  }
+  if (reticuleWrapAnchor) return [x, y];
   return [((x % w) + w) % w, ((y % h) + h) % h];
 };
 

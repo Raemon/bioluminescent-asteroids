@@ -24,7 +24,6 @@ const SHIP_TRAJECTORY_FADE_IN_SPEED = 80;
 // immediately after the last thrust frame so coasting doesn't leave a stale line.
 const SHIP_TRAJECTORY_POST_THRUST_HOLD_BEATS = 0;
 const SHIP_TRAJECTORY_POST_THRUST_FADE_BEATS = 2
-const SHIP_TRAJECTORY_POST_THRUST_HOLD_SEC = 2
 
 export const renderShipTrajectoryPreview = (
   ctx: CanvasRenderingContext2D, ship: Ship, beatGrid: number, beatTime: number, w: number, h: number,
@@ -35,7 +34,7 @@ export const renderShipTrajectoryPreview = (
   if (speed < SHIP_TRAJECTORY_MIN_SPEED) return;
   const speedFade = Math.min(1, (speed - SHIP_TRAJECTORY_MIN_SPEED) / (SHIP_TRAJECTORY_FADE_IN_SPEED - SHIP_TRAJECTORY_MIN_SPEED));
   // drop the preview after the hold window so a coasting player isn't staring at a stale line.
-  const holdSec = SHIP_TRAJECTORY_POST_THRUST_HOLD_BEATS * beatGrid + SHIP_TRAJECTORY_POST_THRUST_HOLD_SEC;
+  const holdSec = SHIP_TRAJECTORY_POST_THRUST_HOLD_BEATS * beatGrid;
   const fadeSec = SHIP_TRAJECTORY_POST_THRUST_FADE_BEATS * beatGrid;
   const sinceThrust = beatTime - ship.lastThrustActiveAt;
   if (sinceThrust >= holdSec + fadeSec) return;
