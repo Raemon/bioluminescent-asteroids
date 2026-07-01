@@ -41,7 +41,6 @@ html:has(#sound-root), body:has(> #sound-root) {
   position: absolute;
   display: block;
   background: radial-gradient(ellipse at 50% 60%, #0a1230 0%, #02030a 60%, #000005 100%);
-  cursor: crosshair;
 }
 
 #hud {
@@ -2717,7 +2716,7 @@ li.lb-self .lb-name-link:hover {
   transform: translateY(-50%);
 }
 
-/* controls hint (tutorial stage 1) — each control fades to .2 once used. */
+/* controls hint (tutorial stage 1) — each control fades to barely visible once used. */
 .tutorial-controls-hint__title {
   margin: 0 0 12px;
   font-size: 14px;
@@ -2743,14 +2742,14 @@ li.lb-self .lb-name-link:hover {
   transition: opacity 500ms ease;
 }
 
-.tch-ctrl.used { opacity: 0.35; }
+.tch-ctrl.used { opacity: 0.1; }
 
 /* each key glyph dims the moment its own key is pressed, independent of the row's
    label (which only dims once every key in the row is used, via .tch-ctrl.used). */
 .tutorial-controls-hint .key {
   transition: opacity 500ms ease;
 }
-.tutorial-controls-hint .key.used { opacity: 0.35; }
+.tutorial-controls-hint .key.used { opacity: 0; }
 /* once the whole row dims, the row-level fade carries it — don't compound. */
 .tch-ctrl.used .key.used { opacity: 1; }
 
