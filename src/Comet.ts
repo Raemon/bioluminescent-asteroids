@@ -1,4 +1,4 @@
-import { Vec, v, fromAngle, rand, randInt, TAU, addScaledMut, circleHit } from "./vec";
+import { Vec, v, fromAngle, rand, randInt, TAU, addScaledMut, circleHit, wrapMut } from "./vec";
 import { Trail } from "./Trail";
 import { rng } from "./game/rng";
 import { ENTITY_CONFIG } from "./game/entityConfig";
@@ -95,11 +95,14 @@ export class Comet {
     return circleHit(this.pos, this.radius, p, r);
   }
 
-  // Brightness envelope: rises during FADE_IN, holds at 1, eases out during
-  // the last FADE_OUT seconds of life. The audio shimmer pad uses the same
-  // curve so the comet's visual and sonic presence track together.
+  // Brightness envelope: rises during FADE_IN, then holds at full. There's no
+  // end-of-life fade — the comet warps out through a portal while still bright
+  // (the dive IS the exit animation), so fading it to invisible first would just
+  // hide the departure. Meteors, which pop off without warping, keep a fade via
+  // the outT term below.
   brightness(): number {
     const inT = Math.min(1, this.age / Comet.FADE_IN);
+    if (!this.isMeteor) return inT;
     const remaining = Math.max(0, this.lifetime - this.age);
     const outT = Math.min(1, remaining / Comet.FADE_OUT);
     return Math.min(inT, outT);
@@ -124,7 +127,7 @@ export class Comet {
     return Math.atan2(this.vel.y, this.vel.x);
   }
 
-  update(dt: number, _w: number, _h: number) {
+  update(dt: number, w: number, h: number) {
     // Once warping out, run the dive instead of normal drift: move pos itself
     // (eased toward the anchor) so the beat-flash and shimmer audio that key off
     // pos follow the head into the throat, not the spot the dive began.
@@ -144,6 +147,11 @@ export class Comet {
     }
     this.age += dt;
     addScaledMut(this.pos, this.vel, dt);
+    // Wrap around the torus so a comet living its full 30s stays in the tiled
+    // scroll world (and thus on-screen) as it crosses map boundaries, instead of
+    // drifting off into un-rendered distance. Meteors don't wrap — they're a
+    // brief cross-and-leave flock that pops off the far edge.
+    if (!this.isMeteor) wrapMut(this.pos, w, h);
     this.glowTrail.update(dt, this.pos.x, this.pos.y);
 
     // Sample the current position every frame so the trail is dense enough
@@ -245,6 +253,14 @@ export class Comet {
 export const crossingLifetime = (w: number, h: number, speed: number): number =>
   speed > 0 ? (Math.hypot(w, h) * 1.5) / speed : 24;
 
+// Seconds a comet flies before it warps out. The comet leaves through a
+// departure portal on this fixed timer — wherever it happens to be, mid-flight —
+// NOT by reaching a screen edge (that old edge-despawn is what this replaces). A
+// comet crosses the visible frame in well under 30s and then keeps drifting
+// through the wrapped world, so it stays in play the full duration and warps out
+// on the clock, on-screen or off, while still (with the fade-out removed) bright.
+export const COMET_WARP_LIFETIME = 30;
+
 // Spawn a comet drifting in from one edge across the screen. Velocity is
 // slow (≈ 1 screen-width per ~12 seconds) so the comet feels like a
 // distant celestial object rather than a fast-moving threat. The exact
@@ -274,10 +290,9 @@ export const spawnComet = (w: number, h: number): Comet => {
   // like the same celestial visitor across runs.
   const hue = rand(180, 290);
   const c = new Comet(from, vel, hue);
-  // Live exactly long enough to drift in, cross, and drift back off the far
-  // side (see crossingLifetime). The caller re-derives this after any rhythm
-  // speed nudge so the on-screen time tracks the final velocity.
-  c.lifetime = crossingLifetime(w, h, speed);
+  // Fixed 30s in play, then warp out mid-flight (see COMET_WARP_LIFETIME) —
+  // independent of speed or where it is on the map.
+  c.lifetime = COMET_WARP_LIFETIME;
   return c;
 };
 

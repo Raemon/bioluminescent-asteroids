@@ -13,8 +13,10 @@ import {
   ACTION_ORDER,
   type Bindings,
   type ControlAction,
+  chordFromEvent,
   formatKey,
   getBindings,
+  isModifierKey as isModifier,
   normalizeKey,
   resetBindings,
   saveBindings,
@@ -84,8 +86,12 @@ export const SettingsDialog = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // swallow keys at capture so the game behind doesn't act on them;
-  // when a binding capture is active, next key becomes the binding
+  // swallow keys at capture so the game behind doesn't act on them; when a
+  //   binding capture is active the next key becomes the binding. Modifiers are
+  //   special: a modifier keydown is held (not committed) so the player can go
+  //   on to press a main key and record a chord (Shift+←). If the player instead
+  //   releases the modifier without pressing anything else, its keyup commits it
+  //   as a bare binding (precise-turn = Ctrl).
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -94,7 +100,9 @@ export const SettingsDialog = () => {
       if (target) {
         e.preventDefault();
         if (e.key === "Escape") { setCapture(null); return; }
-        applyBinding(target.action, normalizeKey(e.key));
+        const key = normalizeKey(e.key);
+        if (isModifier(key)) return; // wait for the main key (or this key's release)
+        applyBinding(target.action, chordFromEvent(e, key));
         setCapture(null);
         return;
       }
@@ -103,8 +111,25 @@ export const SettingsDialog = () => {
         closeDialog();
       }
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      const target = captureRef.current;
+      if (!target) return;
+      const key = normalizeKey(e.key);
+      if (!isModifier(key)) return;
+      // Bare-modifier bind, but only if no other modifier is still held — so
+      //   releasing Shift mid-chord-attempt doesn't prematurely bind "shift".
+      if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      applyBinding(target.action, key);
+      setCapture(null);
+    };
     document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
+    document.addEventListener("keyup", onKeyUp, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("keyup", onKeyUp, true);
+    };
   }, [open]);
 
   const applyOffset = (ms: number) => {

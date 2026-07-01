@@ -163,9 +163,17 @@ export class LaserBeam {
 
 // Beam origin: the ship's muzzle, a touch ahead of the hull, along the beam's
 // (possibly prong-offset) heading.
-const muzzleOf = (ship: Ship, headingOffset = 0): Vec => {
+export const laserMuzzle = (ship: Ship, headingOffset = 0): Vec => {
   const dir = fromAngle(ship.heading + headingOffset, 1);
   return add(ship.pos, mul(dir, ship.radius + 4));
+};
+const muzzleOf = laserMuzzle;
+
+// World position of a beam's far endpoint — same origin + length the renderer
+// and fireLaser use so the laser reticule lands on the actual beam tip.
+export const laserBeamEndpointAt = (ship: Ship, length: number, headingOffset = 0): Vec => {
+  const dir = fromAngle(ship.heading + headingOffset, 1);
+  return add(laserMuzzle(ship, headingOffset), mul(dir, length));
 };
 
 // Number of dots currently charged (0..maxDots). One dot ticks in per beat

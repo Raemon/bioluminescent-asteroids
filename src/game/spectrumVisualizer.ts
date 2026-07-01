@@ -124,7 +124,9 @@ const updateBands = (bins: Uint8Array | null) => {
 // ends of the beam axis — the directions the lighthouse flashes streak toward —
 // and treble meets in the perpendicular gaps. Quartering the circle (bass→treble
 // →bass→treble) yields the 4-fold mirror the flashes already suggest.
-const RADIAL_BAR_MAX = 75;
+// Max spoke reach as a multiple of the pulsar radius, so the whole ring scales
+// in lockstep with the pulsar (18.75 = 75px at the wave-1 radius of 4px).
+const RADIAL_BAR_MAX_MULT = 18.75;
 // Extra dimming on top of MASTER_OPACITY, just for the pulsar ring.
 const RADIAL_OPACITY = 0.25;
 // Inner radius as a multiple of the pulsar radius. 1 = spokes start at the
@@ -143,6 +145,7 @@ const drawRadial = (game: Game) => {
   const { x: cx, y: cy, r, beamAngle } = game.pulsar.visualizerAnchor();
   // Spokes start at the pulsar's surface and radiate straight out.
   const inner = r * RADIAL_INNER_R_MULT;
+  const barMax = r * RADIAL_BAR_MAX_MULT;
   const sprite = buildGlowSprite();
 
   // Spoke i's absolute screen angle, measured from the beam axis so the ring's
@@ -158,7 +161,7 @@ const drawRadial = (game: Game) => {
     const ang = angFor(i);
     const ca = Math.cos(ang);
     const sa = Math.sin(ang);
-    const len = v * RADIAL_BAR_MAX;
+    const len = v * barMax;
     const hue = hueForBand(band);
     ctx.strokeStyle = `hsla(${hue}, 95%, 68%, ${0.7 * Math.min(1, v * 2) * MASTER_OPACITY * RADIAL_OPACITY})`;
     ctx.lineWidth = 3 + v * 4;
@@ -175,10 +178,10 @@ const drawRadial = (game: Game) => {
     const v = bandHeights[band];
     if (v < 0.02) continue;
     const ang = angFor(i);
-    const len = v * RADIAL_BAR_MAX;
+    const len = v * barMax;
     const tx = cx + Math.cos(ang) * (inner + len);
     const ty = cy + Math.sin(ang) * (inner + len);
-    const glowR = 10 + v * 26;
+    const glowR = (10 + v * 26) * (r / 4);
     ctx.globalAlpha = (0.07 + v * 0.2) * MASTER_OPACITY * RADIAL_OPACITY;
     ctx.drawImage(sprite, tx - glowR, ty - glowR, glowR * 2, glowR * 2);
   }

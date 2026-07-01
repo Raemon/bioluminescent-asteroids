@@ -61,11 +61,9 @@ export const paintAimDiscs = (
   ctx.lineWidth = 1;
   ctx.setLineDash(RETICULE_LINE_DASH);
   const isSecondary = slot >= 2;
-  if (isSecondary) {
-    ctx.beginPath();
-    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_OFF_BEAT, 0, TAU);
-    ctx.stroke();
-  } else {
+  // secondary reticules (farshot / high-rhythm 2nd & 3rd) are just the crosshair
+  // ticks — no circles — so only the primary reads as the full targeting disc.
+  if (!isSecondary) {
     ctx.beginPath();
     ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_OFF_BEAT, 0, TAU);
     ctx.stroke();

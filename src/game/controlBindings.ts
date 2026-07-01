@@ -1,8 +1,15 @@
 import type { IInput } from "../Input";
 
-// Player-editable keyboard bindings. Each action holds up to two keys (primary +
-//   alternate) — matches how the game has always supported both arrow keys and
-//   WASD for movement. Stored in localStorage so it survives page reloads.
+// Player-editable keyboard bindings. Each action holds a single binding string,
+//   which may be a plain key ("arrowleft", " ") or a modifier chord
+//   ("shift+arrowleft"). Stored in localStorage so it survives page reloads.
+//
+// Chord matching is EXACT on modifiers: a binding fires only when the set of
+//   modifiers currently held equals the set the binding declares. So bare
+//   "arrowleft" is suppressed while shift is held (the player means the
+//   shift+arrowleft chord), and "shift+arrowleft" never fires from arrowleft
+//   alone. A binding whose main key is itself a modifier ("control" for a hold)
+//   ignores that key when comparing the held-modifier set.
 
 export type ControlAction =
   | "rotateLeft"
@@ -19,15 +26,16 @@ export type Bindings = Record<ControlAction, string[]>;
 
 const STORAGE_KEY = "pulsar.controls.v1";
 
-// Arrow-key defaults; the controls editor exposes one slot per action.
+// Arrow-key defaults; the controls editor exposes one slot per action. A slot
+//   may hold a modifier chord (e.g. side thrust = shift + arrow).
 export const DEFAULT_BINDINGS: Bindings = {
   rotateLeft: ["arrowleft"],
   rotateRight: ["arrowright"],
-  precisionTurn: ["shift"],
+  precisionTurn: ["control"],
   thrust: ["arrowup"],
   reverse: ["arrowdown"],
-  sidePort: ["z"],
-  sideStarboard: ["x"],
+  sidePort: ["shift+arrowleft"],
+  sideStarboard: ["shift+arrowright"],
   fire: [" "],
   pause: ["escape"],
 };
@@ -67,7 +75,7 @@ export const TUTORIAL_CONTROLS: TutorialControl[] = [
   { label: "rotate", keys: [{ action: "rotateLeft", glyph: "←" }, { action: "rotateRight", glyph: "→" }] },
   { label: "thrust", keys: [{ action: "thrust", glyph: "↑" }] },
   { label: "reverse", keys: [{ action: "reverse", glyph: "↓" }] },
-  { label: "side thrust", keys: [{ action: "sidePort", glyph: "Z" }, { action: "sideStarboard", glyph: "X" }] },
+  { label: "side thrust", keys: [{ action: "sidePort", glyph: "⇧←" }, { action: "sideStarboard", glyph: "⇧→" }] },
   { label: "fire", keys: [{ action: "fire", glyph: "space" }] },
 ];
 // Flat list of every action shown in the pane, in display order.
@@ -163,11 +171,15 @@ const KEY_DISPLAY: Record<string, string> = {
   tab: "tab",
 };
 
-export const formatKey = (key: string): string => {
+const formatKeyPart = (key: string): string => {
   const k = key.toLowerCase();
   if (KEY_DISPLAY[k]) return KEY_DISPLAY[k];
   return k.length === 1 ? k.toUpperCase() : k;
 };
+
+// A binding may be a chord ("shift+arrowleft"); render each part joined by "+".
+export const formatKey = (binding: string): string =>
+  binding.split("+").map(formatKeyPart).join("+");
 
 // Normalize a KeyboardEvent.key into the form used by the Input layer.
 export const normalizeKey = (raw: string): string => {
@@ -176,6 +188,62 @@ export const normalizeKey = (raw: string): string => {
   if (k === "esc") return "escape";
   if (k === "return") return "enter";
   return k;
+};
+
+// Keys that act as chord modifiers. Stored in normalized (lowercase) form.
+export const MODIFIER_KEYS: readonly string[] = ["shift", "control", "alt", "meta"];
+export const isModifierKey = (key: string): boolean => (MODIFIER_KEYS as string[]).includes(key);
+const isModifier = isModifierKey;
+
+// Build a chord binding string from a keydown event's held modifiers plus the
+//   (already-normalized, non-modifier) main key. Modifier order is fixed so two
+//   bindings for the same chord always stringify identically. Used by the
+//   Settings capture flow: pressing Shift+← yields "shift+arrowleft".
+export const chordFromEvent = (
+  e: { shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean },
+  mainKey: string,
+): string => {
+  const held: Record<string, boolean> = {
+    shift: e.shiftKey, control: e.ctrlKey, alt: e.altKey, meta: e.metaKey,
+  };
+  const mods = MODIFIER_KEYS.filter((m) => held[m]);
+  return [...mods, mainKey].join("+");
+};
+
+// Split a binding string into its modifier prefix keys and its main key. The
+//   last "+"-separated part is the main key; everything before it must be a
+//   modifier. "shift+arrowleft" → { mods:["shift"], main:"arrowleft" }.
+type Chord = { mods: string[]; main: string };
+const parseChord = (binding: string): Chord => {
+  const parts = binding.split("+");
+  const main = parts[parts.length - 1];
+  const mods = parts.slice(0, -1).filter(isModifier);
+  return { mods, main };
+};
+
+// Do the currently-held modifiers exactly match those this chord declares?
+//   Exact match is what suppresses bare bindings while a modifier is held:
+//   "arrowleft" (no mods) fails the moment shift goes down, so shift+arrow
+//   fires the chord alone. When the main key is itself a modifier ("control"
+//   for a hold), that key is expected held and excluded from the surplus check.
+const modsMatch = (input: IInput, chord: Chord): boolean => {
+  for (const m of MODIFIER_KEYS) {
+    const wantHeld = chord.mods.includes(m) || m === chord.main;
+    if (input.down(m) !== wantHeld) return false;
+  }
+  return true;
+};
+
+const chordDown = (input: IInput, binding: string): boolean => {
+  const chord = parseChord(binding);
+  return input.down(chord.main) && modsMatch(input, chord);
+};
+
+// Edge-trigger on the main key, but only while the modifier set already matches
+//   this frame — so shift+arrow's press edge doesn't leak to a bare-arrow action.
+const chordPressed = (input: IInput, binding: string): boolean => {
+  const chord = parseChord(binding);
+  return input.pressed(chord.main) && modsMatch(input, chord);
 };
 
 // During replay we substitute the recording's bindings so the recorded raw
@@ -187,12 +255,12 @@ const activeBindings = (): Bindings => replayBindings ?? getBindings();
 
 export const isDown = (input: IInput, action: ControlAction): boolean => {
   const keys = activeBindings()[action];
-  for (let i = 0; i < keys.length; i++) if (input.down(keys[i])) return true;
+  for (let i = 0; i < keys.length; i++) if (chordDown(input, keys[i])) return true;
   return false;
 };
 
 export const wasPressed = (input: IInput, action: ControlAction): boolean => {
   const keys = activeBindings()[action];
-  for (let i = 0; i < keys.length; i++) if (input.pressed(keys[i])) return true;
+  for (let i = 0; i < keys.length; i++) if (chordPressed(input, keys[i])) return true;
   return false;
 };

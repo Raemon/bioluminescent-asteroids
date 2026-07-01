@@ -193,7 +193,7 @@ export const ENTITY_CONFIG = {
     // (not applied post-hoc) so the crystal still crosses the kill range on a
     // beat, just later and more ponderously.
     largeSpawnSpeedMul: 0.5,
-    largeHp: 9,
+    largeHp: 5,
     largeScore: 400,
     smallHp: 4,
     smallScore: 200,

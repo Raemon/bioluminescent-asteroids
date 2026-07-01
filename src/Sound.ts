@@ -447,6 +447,10 @@ export class Sound {
   // Null unless a full song is playing. Mutually exclusive with haloMusic —
   // syncHaloAmbient routes to one or the other, never both at once.
   haloFullMusic: HaloFullMusicNode | null = null;
+  // Current slow-mo playback rate for music, tracked independently of any
+  // playing node so music that STARTS mid-slomo also opens at the slowed rate
+  // (the start paths seed new sources from this). set*PlaybackRate keeps it live.
+  private currentMusicPlaybackRate = 1.0;
   // Per-stem buffer cache, keyed by URL. AudioBuffers are decoded once and
   // reused across all start/stop cycles for a given variation.
   haloMusicBuffers: Map<string, AudioBuffer> = new Map();
@@ -1335,6 +1339,7 @@ export class Sound {
   // music playbackRate to keep them locked (pitch-shifts the stems down,
   // which reads as "world slowing into molasses").
   setHaloMusicPlaybackRate(rate: number, rampSec: number = 0): void {
+    this.currentMusicPlaybackRate = rate;
     if (!this.haloMusic || !this.ctx) return;
     const now = this.ctx.currentTime;
     const srcs: AudioBufferSourceNode[] = [
@@ -3717,6 +3722,13 @@ export class Sound {
       layer3Gain.connect(mainGain);
     }
 
+    // Seed the slow-mo rate so music that starts mid-slomo opens slowed, not
+    // at 1× (set*PlaybackRate only touches already-playing sources).
+    const rate0 = this.currentMusicPlaybackRate;
+    ambientSrc.playbackRate.value = rate0;
+    melodicSrc.playbackRate.value = rate0;
+    if (layer3Src) layer3Src.playbackRate.value = rate0;
+
     // All sources start at exactly the same audio time so they remain
     // phase-locked for the lifetime of the music — switching the melodic
     // or layer-3 tier is then just a gain ramp, no fresh .start() that
@@ -3733,7 +3745,7 @@ export class Sound {
       climaxActive: false,
       startedAtAudioTime: startAt,
       startedAtBeatTime,
-      currentPlaybackRate: 1.0,
+      currentPlaybackRate: rate0,
     };
   }
 
@@ -3821,6 +3833,11 @@ export class Sound {
       layer3Gain.connect(mainGain);
     }
 
+    const rate0 = this.currentMusicPlaybackRate;
+    ambientSrc.playbackRate.value = rate0;
+    melodicSrc.playbackRate.value = rate0;
+    if (layer3Src) layer3Src.playbackRate.value = rate0;
+
     ambientSrc.start(startAt);
     melodicSrc.start(startAt);
     if (layer3Src) layer3Src.start(startAt);
@@ -3843,7 +3860,7 @@ export class Sound {
       climaxActive: true,
       startedAtAudioTime: startAt,
       startedAtBeatTime,
-      currentPlaybackRate: 1.0,
+      currentPlaybackRate: rate0,
     };
   }
 
@@ -4009,6 +4026,11 @@ export class Sound {
       muteGains.push(m);
     }
 
+    // Seed the slow-mo rate so a song that starts mid-slomo opens slowed.
+    // The start offset is in buffer-time (rate-independent), so setting rate
+    // before .start() only affects playback speed, not where the head lands.
+    const rate0 = this.currentMusicPlaybackRate;
+    for (const src of layerSrcs) src.playbackRate.value = rate0;
     for (let i = 0; i < layerSrcs.length; i++) layerSrcs[i].start(startAt, layerOffsets[i]);
 
     const node: HaloFullMusicNode = {
@@ -4016,7 +4038,7 @@ export class Sound {
       activeTier,
       startedAtAudioTime: startAt,
       startedAtBeatTime,
-      currentPlaybackRate: 1.0,
+      currentPlaybackRate: rate0,
       onTrackEnd,
       offset,
       layerOffsets,
@@ -4068,6 +4090,7 @@ export class Sound {
   // Slow-mo: match the music playbackRate to the gameplay clock, same as
   // setHaloMusicPlaybackRate but across all six full-song layers.
   setHaloFullMusicPlaybackRate(rate: number, rampSec: number = 0): void {
+    this.currentMusicPlaybackRate = rate;
     if (!this.haloFullMusic || !this.ctx) return;
     const now = this.ctx.currentTime;
     for (const src of this.haloFullMusic.layerSrcs) {

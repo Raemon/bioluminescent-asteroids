@@ -2,7 +2,7 @@ import type { Ship } from "../../Ship";
 import type { Sound } from "../../Sound";
 import { Vec, add, mul, fromAngle, TAU } from "../../vec";
 import { computeConeFrame } from "./coneGeometry";
-import { paintConeBackground, paintRangeArcs, RETICULE_DASH_HSL } from "./radarCone";
+import { paintConeBackground, paintRangeArcs } from "./radarCone";
 import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost, expireHoverZoneHintIfHoverEnded, paintHoverZoneHint, nearestFirstBeatDot, wrapReticuleVec } from "./trajectoryPreview";
 import {
   reticuleOverlapsAnyTarget,
@@ -62,7 +62,6 @@ const ARROW_FADE_SEC = 0.18;
 const HOVER_PULSE_START_R = BULLET_HIT_RADIUS_ON_BEAT;
 const HOVER_PULSE_END_R = BULLET_HIT_RADIUS_ON_BEAT + 34;
 const HOVER_PULSE_LINE_WIDTH = 2;
-const HOVER_PULSE_HSL = "48, 100%, 70%";
 const HOVER_PULSE_PEAK_ALPHA = 0.8;
 // Tier-6 climax (the final tier): the hold pulse stops being "the same ring, wider/whiter" and
 // becomes a distinct radiant event — a thick incandescent leading ring trailed by a soft halo,
@@ -122,7 +121,11 @@ const HOVER_DOT_PULSE_PERIOD_SEC = 2.0;
 const HOVER_DOT_RESTING_ALPHA = 0.18;
 const HOVER_DOT_FADE_SEC = 0.4;
 const HOVER_DOT_FADEOUT_SEC = 0.1;
-const HOVER_DOT_HSL = RETICULE_DASH_HSL;
+// white while the hold is still short of the drift-shot threshold, gold once it would trigger one
+// — the colour flip is the "release now and you get a drift shot" cue. Gold matches
+// HOVER_FLARE_WARM_HSL so the fill's armed colour and the lock flare read as one hue.
+const HOVER_DOT_HSL_UNARMED = "0, 0%, 100%";
+const HOVER_DOT_HSL_ARMED = "48, 100%, 70%";
 // lock flare: brightens the dot-ring arcs briefly at lock acquisition. Marks "lock acquired"
 // — the octave-up hum starts here too. Tutorial gate fires on elapsed >= TUTORIAL_HOVER_SEC
 // independently; the flare visual can outrun it.
@@ -365,9 +368,13 @@ const paintHoverDotRing = (
   const tier = fullyBuilt ? Math.max(1, driftTierForElapsed(elapsed)) : 0;
   const tierWarmHsl = tier > 0 ? driftTierPulseHsl(tier) : HOVER_FLARE_WARM_HSL;
   const tierWidth = tier > 0 ? driftTierWidthMult(tier) : 1;
+  // arcs read white while the hold is too short to trigger a drift shot, then flip to gold the
+  // instant the ring completes (would trigger). The lock flare blooms from that gold base toward
+  // the tier hue.
+  const arcBaseHsl = fullyBuilt ? HOVER_DOT_HSL_ARMED : HOVER_DOT_HSL_UNARMED;
   const arcHsl = burstEnvelope > 0
-    ? lerpHsl(HOVER_DOT_HSL, tierWarmHsl, burstEnvelope)
-    : HOVER_DOT_HSL;
+    ? lerpHsl(arcBaseHsl, tierWarmHsl, burstEnvelope)
+    : arcBaseHsl;
   // apply overall fadeOut multiplier (used when reticule leaves the trigger zone)
   const effectiveAlphaMultiplier = fadeOutAlpha;
   // soundwaves emit BEFORE arcs so the arcs and the dot/aim disc paint on top of them.
@@ -375,7 +382,10 @@ const paintHoverDotRing = (
   // pulse is already underway by the time the arcs finish locking in.
   const wavesStartSec = fillCompleteSec - HOVER_WAVE_LEAD_BEATS * beatGrid;
   if (elapsed >= wavesStartSec) {
-    paintSoundwaves(ctx, center, elapsed - wavesStartSec, beatTime, beatGrid, fadeOutAlpha, tierWarmHsl, tierWidth);
+    // soundwaves track the arc colour: white while the hold hasn't yet armed a drift shot,
+    // then the warm tier hue once it would trigger — so nothing reads gold before the lock.
+    const waveHsl = fullyBuilt ? tierWarmHsl : HOVER_DOT_HSL_UNARMED;
+    paintSoundwaves(ctx, center, elapsed - wavesStartSec, beatTime, beatGrid, fadeOutAlpha, waveHsl, tierWidth);
   }
   // white center flash on lock acquisition — sized to the bullet's on-beat hit radius so the
   // moment of lock visually anchors on the actual hit zone, not the wider dashed dot ring.
@@ -575,9 +585,10 @@ const paintHoverPulse = (
     paintFinalHoverPulse(ctx, center, phase, beatTime, beatGrid, fade01);
     return;
   }
-  // tier (live, from total hold) tints the pulse gold → cyan → magenta and widens it, so the
-  // "you're going deeper" escalation shows on the same circles the player is watching.
-  const hsl = tier > 0 ? driftTierPulseHsl(tier) : HOVER_PULSE_HSL;
+  // white until the hold arms a drift shot (tier 0), then the tier hue tints the pulse gold →
+  // cyan → magenta as the player holds deeper — so the pulse only reads warm once a drift shot
+  // would actually trigger, matching the dot-ring arcs and soundwaves.
+  const hsl = tier > 0 ? driftTierPulseHsl(tier) : HOVER_DOT_HSL_UNARMED;
   const widthMult = tier > 0 ? driftTierWidthMult(tier) : 1;
   const endR = HOVER_PULSE_START_R + (HOVER_PULSE_END_R - HOVER_PULSE_START_R) * widthMult;
   const r = HOVER_PULSE_START_R + (endR - HOVER_PULSE_START_R) * phase;

@@ -1,7 +1,7 @@
 import type { Game } from "../Game";
 import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, isBurstGem, isTorusFragment, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
 import { spawnGemSwarm } from "../Gem";
-import { spawnComet as spawnCometAtEdge, spawnMeteorShower, crossingLifetime } from "../Comet";
+import { spawnComet as spawnCometAtEdge, spawnMeteorShower, COMET_WARP_LIFETIME } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
 import { rand, randInt, v, TAU } from "../vec";
@@ -357,10 +357,9 @@ export const spawnComet = (game: Game) => {
     });
   }
   applyRhythmSpeed(game, c.vel);
-  // Re-derive the on-screen lifetime from the FINAL speed (after rhythm
-  // alignment + the wave speed-up) so the comet drifts in, crosses once, and
-  // drifts off the far edge — matched to how fast it's actually moving.
-  c.lifetime = crossingLifetime(game.w, game.h, Math.hypot(c.vel.x, c.vel.y));
+  // Fixed 30s in play regardless of speed or map position — the comet crosses,
+  // keeps drifting through the wrapped world, then warps out on the clock.
+  c.lifetime = COMET_WARP_LIFETIME;
   game.comets.push(c);
   game.sound.startCometShimmer(c, c.pos);
 };

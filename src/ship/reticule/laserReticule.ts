@@ -1,6 +1,5 @@
 import type { Game } from "../../Game";
-import { fromAngle } from "../../vec";
-import { reachableBeamLengths, laserDotCount, maxLaserDots } from "../../game/laserShot";
+import { reachableBeamLengths, laserDotCount, maxLaserDots, laserBeamEndpointAt } from "../../game/laserShot";
 import { BEAT_GRID } from "../../game/rhythmConstants";
 import { drawGlow } from "../../glow";
 
@@ -22,10 +21,12 @@ const GATE_HSL_NEAR = { h: 195, s: 100, l: 75 }; // cyan, the resting laser hue
 const GATE_HSL_MAX = { h: 45, s: 100, l: 88 };   // white-gold at full charge
 // Caliper geometry: each tick sits GATE_OFFSET off the centre line and runs
 // GATE_TICK_LEN along the perpendicular; the pip marks the exact reach.
+// The whole glyph (both ticks + pip) is rotated 90° as a unit at paint time.
 const GATE_OFFSET = 6;
 const GATE_TICK_LEN = 9;
 const GATE_TICK_WIDTH = 2;
 const GATE_PIP_R = 2.4;
+const GATE_ROTATION = Math.PI / 2;
 // Passed tiers (the shot overshoots them) draw faintly as a charge ladder.
 const GATE_PASSED_ALPHA = 0.28;
 // gentle on-beat breathe so the gates share the rest of the HUD's pulse.
@@ -44,41 +45,38 @@ const gateHsl = (tierFrac: number): string => {
   return `${h.toFixed(0)}, ${s.toFixed(0)}%, ${l.toFixed(0)}%`;
 };
 
-// Paint a range gate centred at world distance `dist` along `(dx,dy)` from the
-// muzzle: two caliper ticks straddling the firing line + a glowing centre pip.
-// `scale` (0..1) grows the whole glyph in for the arming animation.
+// Paint a range gate with its pip on the beam endpoint. Two caliper ticks rotate
+// with the pip as one unit. `scale` (0..1) grows the whole glyph in for arming.
 const paintGate = (
   ctx: CanvasRenderingContext2D,
-  muzzleX: number, muzzleY: number, dx: number, dy: number,
-  dist: number, alpha: number, hsl: string, scale: number,
+  endX: number, endY: number, dx: number, dy: number,
+  alpha: number, hsl: string, scale: number,
 ) => {
   if (alpha <= 0.001 || scale <= 0.001) return;
-  const perpX = -dy;
-  const perpY = dx;
-  const cx = muzzleX + dx * dist;
-  const cy = muzzleY + dy * dist;
   const off = GATE_OFFSET * scale;
   const len = GATE_TICK_LEN * scale;
+  ctx.save();
+  ctx.translate(endX, endY);
+  ctx.rotate(Math.atan2(dy, dx) + GATE_ROTATION);
   ctx.strokeStyle = `hsla(${hsl}, ${alpha})`;
   ctx.lineWidth = GATE_TICK_WIDTH;
   ctx.lineCap = "round";
-  // two ticks, one each side of the centre line, running along the perpendicular.
+  // Canonical +x runs toward the beam tip; pip sits on the tip, ticks sweep back.
   for (const sign of [-1, 1]) {
-    const baseX = cx + perpX * off * sign;
-    const baseY = cy + perpY * off * sign;
     ctx.beginPath();
-    ctx.moveTo(baseX, baseY);
-    ctx.lineTo(baseX + perpX * len * sign, baseY + perpY * len * sign);
+    ctx.moveTo(-off, off * sign);
+    ctx.lineTo(-off - len, off * sign);
     ctx.stroke();
   }
   // centre pip with a soft glow — the precise endpoint the shot reaches.
   // drawGlow leaves globalAlpha set; reset before the pip fill so it isn't dimmed.
-  drawGlow(ctx, cx, cy, GATE_PIP_R * 3 * scale, GATE_HSL_NEAR.h, alpha * 0.5);
+  drawGlow(ctx, 0, 0, GATE_PIP_R * 3 * scale, GATE_HSL_NEAR.h, alpha * 0.5);
   ctx.globalAlpha = 1;
   ctx.fillStyle = `hsla(${hsl}, ${Math.min(1, alpha * 1.2)})`;
   ctx.beginPath();
-  ctx.arc(cx, cy, GATE_PIP_R * scale, 0, Math.PI * 2);
+  ctx.arc(0, 0, GATE_PIP_R * scale, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
 };
 
 export const renderLaserReticule = (
@@ -96,24 +94,24 @@ export const renderLaserReticule = (
   const nextDotFrac = charging
     ? clamp01((beatTime - (ship.laserChargeStartBeatTime + dots * BEAT_GRID)) / BEAT_GRID)
     : 0;
-  const dir = fromAngle(ship.heading, 1);
-  const muzzleX = ship.pos.x + dir.x * (ship.radius + 4);
-  const muzzleY = ship.pos.y + dir.y * (ship.radius + 4);
+  const dirX = Math.cos(ship.heading);
+  const dirY = Math.sin(ship.heading);
   const pulse = PULSE_MIN + (PULSE_MAX - PULSE_MIN) * (0.5 + 0.5 * Math.cos((beatTime / PULSE_PERIOD_SEC) * Math.PI * 2));
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   const maxTier = lengths.length - 1;
   for (let tier = 0; tier < lengths.length; tier++) {
+    const end = laserBeamEndpointAt(ship, lengths[tier]);
     const hsl = gateHsl(maxTier > 0 ? tier / maxTier : 0);
     if (tier < dots) {
       // passed tier — the shot overshoots it; draw a dim ladder rung.
-      paintGate(ctx, muzzleX, muzzleY, dir.x, dir.y, lengths[tier], GATE_PASSED_ALPHA, hsl, 1);
+      paintGate(ctx, end.x, end.y, dirX, dirY, GATE_PASSED_ALPHA, hsl, 1);
     } else if (tier === dots) {
       // ACTIVE gate — where a release right now lands; full brightness + breathe.
-      paintGate(ctx, muzzleX, muzzleY, dir.x, dir.y, lengths[tier], pulse, hsl, 1);
+      paintGate(ctx, end.x, end.y, dirX, dirY, pulse, hsl, 1);
     } else if (tier === dots + 1 && charging) {
       // ARMING gate — the next tier locking in as the dot lands; grows from 0.
-      paintGate(ctx, muzzleX, muzzleY, dir.x, dir.y, lengths[tier], pulse * nextDotFrac, hsl, 0.4 + 0.6 * nextDotFrac);
+      paintGate(ctx, end.x, end.y, dirX, dirY, pulse * nextDotFrac, hsl, 0.4 + 0.6 * nextDotFrac);
     }
     // deeper tiers (tier > dots + 1) are not drawn — they only appear once charge
     // reaches them, so the sight never promises range the shot doesn't have.

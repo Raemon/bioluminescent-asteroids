@@ -13,12 +13,13 @@ export const GEM_UPGRADE_CHANCE = ENTITY_CONFIG.asteroidWithGem.upgradeChance;
 export const GEM_REVEAL_SCORE = ENTITY_CONFIG.asteroidWithGem.revealScore;
 
 // A standalone target left behind by a "asteroidWithGem" asteroid's death — a
-// chunk of gold-bearing ore: a lumpy stone with raw gold veins and nuggets
-// shot through it, NOT a clean cut gem you'd obviously scoop up. It's a rhythm
-// target (shoot on-beat to crack it open), so it deliberately reads as "rock
-// with treasure inside" rather than "free pickup". It drifts where the rock
-// died, inheriting a fraction of the parent's velocity so it reads as "ejected
-// from the explosion", then dims and warps out after a long lifetime.
+// jagged gold gem: a faceted diamond-cut crystal, half brilliant shine and half
+// rough chipped/gritty stone, so it reads as valuable-but-hazardous rather than
+// a clean pickup you'd obviously scoop up. It's a rhythm target (shoot on-beat
+// to crack it open), so the dangerous-looking rough edges sell "shoot me, don't
+// touch me". It drifts where the rock died, inheriting a fraction of the
+// parent's velocity so it reads as "ejected from the explosion", then dims and
+// warps out after a long lifetime.
 
 export const GEM_SCORE = ENTITY_CONFIG.asteroidWithGem.pickupScore;
 
@@ -113,80 +114,144 @@ export class Gem {
     if (!this.sprite) this.buildSprite();
     const time = t * 0.001;
     const fade = this.fadeAlpha(time);
-    // gold veins catch the light as the rock turns — a slow, low-contrast
-    // glint so the ore reads as "valuable" without flashing like a pickup pod.
-    const glint = 0.5 + 0.5 * Math.sin(time * 1.6 + this.age * 0.9);
+    // The polished facets catch the light as the gem turns — a slow, brighter
+    // glint (this is a shiny crystal, not dull ore) so it reads as "sharp and
+    // valuable" without flashing like a friendly pickup pod.
+    const glint = 0.5 + 0.5 * Math.sin(time * 1.7 + this.age * 0.9);
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
     ctx.rotate(this.rot);
 
-    // The lit ore body (stone + baked gold veins) — solid, not additive.
+    // The lit gem body (faceted crystal + rough chipped stone) — solid, not
+    // additive.
     ctx.globalAlpha = fade;
     ctx.drawImage(this.sprite!, -this.spriteHalf, -this.spriteHalf);
     ctx.globalAlpha = 1;
 
-    // A faint additive ore-glint over the veins only, keyed to the same baked
-    // sprite so the gold seams shimmer in place rather than the whole rock
-    // glowing — kept low-alpha so it never reads as a pickup halo.
+    // A faint additive glint over the polished facets + sparkle points only,
+    // keyed to the same baked sprite so the shine lands on the crystal faces
+    // rather than the whole gem glowing — low-alpha so it never reads as a
+    // pickup halo.
     ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = 0.22 * glint * fade;
+    ctx.globalAlpha = 0.3 * glint * fade;
     ctx.drawImage(this.veinSprite!, -this.spriteHalf, -this.spriteHalf);
     ctx.globalAlpha = 1;
 
     ctx.restore();
   }
 
-  // Veins-only sprite (gold seams on transparent), reused as the additive glint
-  // overlay so the shimmer lands exactly on the ore and nowhere else.
+  // Glint-only sprite (bright facet planes + sparkle points on transparent),
+  // reused as the additive glint overlay so the shimmer lands on the polished
+  // faces and nowhere else.
   private veinSprite: HTMLCanvasElement | null = null;
 
-  // Prebake the ore rock once: a lumpy harmonic-noise stone with an offset
-  // upper-left light, a dark/bright two-stroke rim, and raw gold veins + nuggets
-  // shot through a clipped interior. Static appearance → drawn once, then just
-  // rotated/faded per frame (no per-frame gradients).
+  // Outline vertices of the gem silhouette (gem-local, unrotated). Cached so the
+  // body bake and the glint bake share the exact same faceted silhouette.
+  private hullPts: Array<[number, number]> = [];
+  // The flat top "table" facet's corners, and the culet (bottom point). The
+  // brilliant cut is: table on top, CROWN facets sloping girdle→table, PAVILION
+  // facets sloping girdle→culet. Real 3D structure, not a flat pinwheel fan.
+  private tablePts: Array<[number, number]> = [];
+  private culet: [number, number] = [0, 0];
+
+  // Prebake the gem once: a brilliant-cut faceted diamond — a flat top table,
+  // crown facets above the girdle, pavilion facets converging to a culet point,
+  // each shaded by distance to a single up-left light so the cut reads as one
+  // solid 3D object. Half brilliant shine, half rough chipped stone so it looks
+  // valuable-but-dangerous. Static → baked once, then rotated/faded per frame.
   private buildSprite() {
     const H = this.hue;
-    const r = this.radius * 1.25; // body extent in the sprite, incl. lumps
+    const R = this.radius;
     const pad = 4;
-    const half = r + pad;
+    const half = R * 1.4 + pad; // room for the sharp culet point + rim
     const size = Math.ceil(half * 2);
     this.spriteHalf = half;
 
-    // Deterministic-enough lumpy outline (sampled at draw time, baked once).
-    const harmonics = [
-      { freq: 2, amp: crand(0.1, 0.18), phase: crand(0, TAU) },
-      { freq: 3, amp: crand(0.06, 0.12), phase: crand(0, TAU) },
-      { freq: 5, amp: crand(0.04, 0.08), phase: crand(0, TAU) },
-      { freq: 7, amp: crand(0.02, 0.05), phase: crand(0, TAU) },
+    // Girdle outline: a tall kite/marquise silhouette. Widest at the girdle
+    // (y≈-0.1), a shortish pointed crown up top, a long pointed pavilion below.
+    // Per-corner nicks so edges read chipped/rough, not machined.
+    const base: Array<[number, number]> = [
+      [0, -1.14], // crown apex (top point)
+      [0.5, -0.62],
+      [0.92, -0.12], // right girdle (widest)
+      [0.58, 0.5],
+      [0.24, 1.02],
+      [0, 1.36], // culet (bottom point)
+      [-0.24, 1.02],
+      [-0.58, 0.5],
+      [-0.92, -0.12], // left girdle
+      [-0.5, -0.62],
     ];
-    const radiusAt = (ang: number) => {
-      let m = 1;
-      for (const h of harmonics) m += h.amp * Math.cos(ang * h.freq + h.phase);
-      return this.radius * Math.max(0.7, Math.min(1.3, m));
-    };
-    const SAMPLES = 36;
+    this.hullPts = base.map(([bx, by]) => {
+      const j = 1 + crand(-0.07, 0.07);
+      return [bx * R * j, by * R * j] as [number, number];
+    });
+    // Table: a small flat top facet, its rim sitting a bit below the crown apex
+    // and pushed slightly up-left so the flat top catches the key light.
+    const tw = R * 0.34, ty = -R * 0.5, tox = -R * 0.06;
+    this.tablePts = [
+      [tox - tw, ty - R * 0.12],
+      [tox + tw * 0.9, ty - R * 0.16],
+      [tox + tw, ty + R * 0.14],
+      [tox - tw * 0.85, ty + R * 0.18],
+    ];
+    this.culet = this.hullPts[5];
+
     const rimPath = (c: CanvasRenderingContext2D) => {
       c.beginPath();
-      for (let i = 0; i <= SAMPLES; i++) {
-        const ang = (i / SAMPLES) * TAU;
-        const rr = radiusAt(ang);
-        const x = Math.cos(ang) * rr;
-        const y = Math.sin(ang) * rr;
-        if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
-      }
+      const p = this.hullPts;
+      c.moveTo(p[0][0], p[0][1]);
+      for (let i = 1; i < p.length; i++) c.lineTo(p[i][0], p[i][1]);
       c.closePath();
     };
 
-    this.sprite = this.paintBody(size, half, H, rimPath, harmonics);
-    this.veinSprite = this.paintVeins(size, half, H, rimPath, harmonics);
+    this.sprite = this.paintBody(size, half, H, rimPath);
+    this.veinSprite = this.paintGlint(size, half, rimPath);
   }
 
-  // Stone body + clipped interior detail + gold ore + two-stroke rim.
+  // Single virtual light, up-left of the gem. Facet brightness = proximity of
+  // its centroid to this point, so shading is continuous across the whole body
+  // and the cut looks like one solid object catching one light (the Asteroid
+  // solid-crystal technique).
+  private litAt(x: number, y: number, R: number): number {
+    const lx = -R * 0.6, ly = -R * 0.7;
+    const d = Math.hypot(x - lx, y - ly);
+    return Math.pow(Math.max(0, 1 - d / (R * 2.1)), 1.5); // 1 under light … 0 far
+  }
+
+  // Fill one facet triangle/quad, shaded by its centroid's light proximity and
+  // given a subtle across-facet gradient so each plane isn't a flat tint. `bias`
+  // nudges this facet lighter/darker on top of the continuous lighting so
+  // adjacent facets alternate — the scintillation that reads as "cut & polished"
+  // rather than a smooth dome.
+  private fillFacet(
+    c: CanvasRenderingContext2D, H: number, R: number,
+    pts: Array<[number, number]>, bias = 0,
+  ) {
+    let sx = 0, sy = 0;
+    for (const [x, y] of pts) { sx += x; sy += y; }
+    const cx = sx / pts.length, cy = sy / pts.length;
+    const lit = Math.max(0, Math.min(1, this.litAt(cx, cy, R) + bias));
+    // Deep amber floors on the shadow facets → near-white-gold on the lit ones.
+    const l0 = 12 + lit * 42, l1 = 22 + lit * 62;
+    const s = 94 - lit * 38; // rich gold in shadow, pale/bright where hit
+    const g = c.createLinearGradient(-R * 0.5, -R * 0.6, R * 0.5, R * 0.6);
+    g.addColorStop(0, `hsl(${H + 8}, ${s}%, ${l1}%)`);
+    g.addColorStop(1, `hsl(${H - 8}, ${s}%, ${l0}%)`);
+    c.fillStyle = g;
+    c.beginPath();
+    c.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]);
+    c.closePath();
+    c.fill();
+    return lit;
+  }
+
+  // Faceted crystal body + rough chipped stone + two-stroke rim.
   private paintBody(
     size: number, half: number, H: number,
     rimPath: (c: CanvasRenderingContext2D) => void,
-    harmonics: Array<{ freq: number; amp: number; phase: number }>,
   ): HTMLCanvasElement {
     const cv = document.createElement("canvas");
     cv.width = size; cv.height = size;
@@ -194,119 +259,165 @@ export class Gem {
     c.translate(half, half);
     const R = this.radius;
 
-    // Stone body: warm golden-tan ore (halfway between a grey rock and a pure
-    // gold gem) with an offset upper-left hot-spot and a deep terminator on the
-    // lower-right that drifts cool so the lit side reads as bright metal-bearing
-    // stone, not flat dirt.
-    const body = c.createRadialGradient(-R * 0.4, -R * 0.45, R * 0.1, 0, 0, R * 1.35);
-    body.addColorStop(0, "hsl(44, 52%, 56%)");
-    body.addColorStop(0.55, "hsl(38, 44%, 34%)");
-    body.addColorStop(1, "hsl(30, 30%, 13%)");
+    // Base gem fill: a rich gold radial with an offset upper-left hot-spot, so
+    // the whole crystal reads as a lit metallic body before the facets carve
+    // light and shadow into it.
+    const body = c.createRadialGradient(-R * 0.35, -R * 0.5, R * 0.1, 0, 0, R * 1.5);
+    body.addColorStop(0, `hsl(${H + 8}, 90%, 62%)`);
+    body.addColorStop(0.55, `hsl(${H - 2}, 82%, 40%)`);
+    body.addColorStop(1, `hsl(${H - 14}, 70%, 16%)`);
     c.fillStyle = body;
     rimPath(c);
     c.fill();
 
-    // Interior detail clipped to the silhouette: mottled grain + a couple of
-    // pits (bright up-left lip, dark down-right floor) to sell the stone.
+    // Everything else clipped to the hard gem silhouette.
     c.save();
     rimPath(c);
     c.clip();
-    for (let i = 0; i < 10; i++) {
-      const ang = harmonics[i % harmonics.length].phase + i * 1.7;
-      const d = R * (0.15 + 0.6 * ((i * 0.137) % 1));
-      const x = Math.cos(ang) * d, y = Math.sin(ang) * d;
-      const blotR = R * (0.12 + 0.1 * ((i * 0.31) % 1));
-      const dark = i % 2 === 0;
-      const g = c.createRadialGradient(x, y, 0, x, y, blotR);
-      g.addColorStop(0, dark ? "hsla(34, 30%, 16%, 0.45)" : "hsla(46, 48%, 66%, 0.42)");
-      g.addColorStop(1, "hsla(40, 40%, 34%, 0)");
-      c.fillStyle = g;
-      c.beginPath();
-      c.arc(x, y, blotR, 0, TAU);
-      c.fill();
-    }
-    // Gold ore: a few raw veins (jagged hairlines) + scattered nuggets, lit
-    // from the upper-left so the metal reads as embedded, not painted on.
-    this.paintOreInto(c, R, H);
+    this.paintFacets(c, R, H);
     c.restore();
 
-    // Two-stroke rim: dark outer occlusion contact + thin bright inner catch.
+    // Two-stroke rim: dark outer occlusion contact + thin bright inner catch —
+    // crisp mitred joins (not rounded) keep the edges reading sharp/dangerous.
     c.globalCompositeOperation = "source-over";
-    c.lineJoin = "round";
-    c.lineWidth = 3;
-    c.strokeStyle = "hsla(34, 35%, 6%, 0.9)";
+    c.lineJoin = "miter";
+    c.miterLimit = 4;
+    c.lineWidth = 2.4;
+    c.strokeStyle = "hsla(38, 55%, 8%, 0.95)";
     rimPath(c);
     c.stroke();
-    c.lineWidth = 1.2;
-    c.strokeStyle = "hsla(45, 55%, 70%, 0.75)";
+    c.lineWidth = 1;
+    c.strokeStyle = `hsla(${H + 12}, 90%, 82%, 0.85)`;
     rimPath(c);
     c.stroke();
     return cv;
   }
 
-  // Paint the gold ore (veins + nuggets) into an already-clipped context.
-  // Shared by the body bake and the veins-only glint sprite so they line up.
-  private paintOreInto(c: CanvasRenderingContext2D, R: number, H: number) {
-    // Veins: jagged seams crossing the rock, each a bright gold core over a
-    // slightly darker, wider underlay so the seam has body. A few extra seams
-    // (over the original grey-ore look) push it back toward the pure-gem feel
-    // it grew out of.
-    const veinCount = 4;
-    for (let i = 0; i < veinCount; i++) {
-      const baseAng = (i / veinCount) * TAU + (i * 0.9);
-      const steps = 5;
-      const pts: Array<[number, number]> = [];
-      let px = Math.cos(baseAng) * R * 0.9;
-      let py = Math.sin(baseAng) * R * 0.9;
-      const dir = baseAng + Math.PI + ((i % 2) ? 0.5 : -0.5);
-      for (let s = 0; s <= steps; s++) {
-        pts.push([px, py]);
-        const jitter = (s % 2 ? 0.6 : -0.5) * 0.7;
-        const a = dir + jitter;
-        const step = R * 0.42;
-        px += Math.cos(a) * step;
-        py += Math.sin(a) * step;
-      }
-      const drawSeam = (w: number, color: string) => {
-        c.lineWidth = w;
-        c.lineCap = "round";
-        c.lineJoin = "round";
-        c.strokeStyle = color;
-        c.beginPath();
-        for (let s = 0; s < pts.length; s++) {
-          if (s === 0) c.moveTo(pts[s][0], pts[s][1]);
-          else c.lineTo(pts[s][0], pts[s][1]);
-        }
-        c.stroke();
-      };
-      drawSeam(R * 0.26, `hsla(${H - 6}, 80%, 34%, 0.85)`);
-      drawSeam(R * 0.13, `hsla(${H + 4}, 98%, 62%, 0.96)`);
-      drawSeam(R * 0.05, `hsla(${H + 14}, 100%, 85%, 0.97)`);
+  // Carve the interior into a real brilliant-cut structure: crown facets from
+  // the girdle up to the table's edges, a flat lit table on top, pavilion facets
+  // fanning from the girdle down to the culet — each shaded by one up-left light
+  // so the whole thing reads as a solid 3D cut stone. Then a rough chipped/gritty
+  // patch on the shadow side so it looks too dangerous to grab.
+  //
+  // Hull indices: 0 crown apex, 2 right girdle (widest), 5 culet (bottom point),
+  // 8 left girdle. The girdle line runs 8→2 across the middle; the crown fills
+  // above it to the table, the pavilion fills below it to the culet.
+  private paintFacets(c: CanvasRenderingContext2D, R: number, H: number) {
+    const hull = this.hullPts;
+    const tbl = this.tablePts;
+    const culet = this.culet;
+    // The girdle midline endpoints (widest points, left & right).
+    const gL = hull[8], gR = hull[2];
+    // A pavilion keel just above the culet, on the light side, so the lower half
+    // has a bright main facet instead of collapsing to one dark point.
+    const keel: [number, number] = [-R * 0.1, R * 0.34];
+
+    // --- Pavilion: fan the WHOLE lower polygon (girdle line gL→gR down through
+    // the lower hull points to the culet) around the keel, so it fully tiles
+    // with no dark gaps. Each facet shaded by its centroid's light proximity.
+    const lower = [gR, hull[3], hull[4], culet, hull[6], hull[7], gL];
+    for (let i = 0; i < lower.length - 1; i++) {
+      // Alternate facets brighter/darker so the pavilion scintillates.
+      this.fillFacet(c, H, R, [keel, lower[i], lower[i + 1]], i % 2 ? 0.14 : -0.12);
     }
-    // Nuggets: small gold blobs with an upper-left specular and a darker base.
-    const nuggetCount = 7;
-    for (let i = 0; i < nuggetCount; i++) {
-      const ang = i * 2.3 + 0.6;
-      const d = R * (0.2 + 0.55 * ((i * 0.27) % 1));
+    // Close the fan across the girdle midline so the band above the keel fills.
+    this.fillFacet(c, H, R, [keel, gL, gR], 0.1);
+
+    // --- Crown: fill the whole upper polygon (girdle line gL→gR up through the
+    // upper hull points) out to the table edges. Fan from the table so the crown
+    // facets slope up to the flat top with no gaps.
+    // Left crown wall, table-top band, right crown wall, and the two girdle
+    // bevels linking table corners down to the widest points.
+    this.fillFacet(c, H, R, [gL, hull[9], tbl[0]]);
+    this.fillFacet(c, H, R, [hull[9], hull[0], tbl[1], tbl[0]]);
+    this.fillFacet(c, H, R, [hull[0], hull[1], tbl[2], tbl[1]]);
+    this.fillFacet(c, H, R, [hull[1], gR, tbl[2]]);
+    this.fillFacet(c, H, R, [gL, tbl[0], tbl[3]]);   // left girdle bevel
+    this.fillFacet(c, H, R, [gR, tbl[2], tbl[3]]);   // right girdle bevel
+    this.fillFacet(c, H, R, [gL, tbl[3], gR]);       // under-table band to girdle
+
+    // --- Table: the flat top facet. Brightest plane, a smooth bright gradient
+    // (a mirror flat surface reflecting the sky), edged crisply.
+    const tl = this.litAt(0, -R * 0.5, R);
+    const tg = c.createLinearGradient(tbl[0][0], tbl[0][1], tbl[2][0], tbl[2][1]);
+    tg.addColorStop(0, `hsl(${H + 14}, 95%, ${72 + tl * 22}%)`);
+    tg.addColorStop(1, `hsl(${H + 2}, 88%, ${52 + tl * 20}%)`);
+    c.fillStyle = tg;
+    c.beginPath();
+    c.moveTo(tbl[0][0], tbl[0][1]);
+    for (let i = 1; i < tbl.length; i++) c.lineTo(tbl[i][0], tbl[i][1]);
+    c.closePath();
+    c.fill();
+
+    // Facet seams: bright hairlines along every cut edge (pavilion mains, girdle,
+    // table rim, crown spokes). Crisp seams are what make a cut stone sparkle.
+    c.lineJoin = "miter";
+    c.lineWidth = 0.7;
+    const seam = (a: [number, number], b: [number, number]) => {
+      const lit = this.litAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, R);
+      c.strokeStyle = `hsla(${H + 12}, 95%, ${58 + lit * 34}%, ${0.28 + lit * 0.5})`;
+      c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke();
+    };
+    for (const pt of lower) seam(keel, pt);          // pavilion mains
+    seam(gL, gR);                                    // girdle midline
+    for (let i = 0; i < tbl.length; i++) seam(tbl[i], tbl[(i + 1) % tbl.length]);
+    seam(hull[0], tbl[1]); seam(hull[9], tbl[0]); seam(hull[1], tbl[2]);
+    seam(gL, tbl[0]); seam(gR, tbl[2]);
+
+    // --- The rough half: a gritty chipped patch of raw stone biased to the
+    // lower-right shadow side, so the gem is clearly "not a clean pickup".
+    for (let i = 0; i < 20; i++) {
+      const ang = i * 2.399 + 0.5; // golden-angle scatter
+      const d = R * (0.3 + 0.7 * ((i * 0.191) % 1));
       const x = Math.cos(ang) * d, y = Math.sin(ang) * d;
-      const nr = R * (0.1 + 0.08 * ((i * 0.41) % 1));
-      const g = c.createRadialGradient(x - nr * 0.4, y - nr * 0.4, 0, x, y, nr);
-      g.addColorStop(0, `hsla(${H + 16}, 100%, 85%, 0.98)`);
-      g.addColorStop(0.5, `hsla(${H + 2}, 95%, 58%, 0.95)`);
-      g.addColorStop(1, `hsla(${H - 12}, 80%, 30%, 0.9)`);
-      c.fillStyle = g;
+      if ((x * 0.6 + y) < R * 0.25 && i % 4 !== 0) continue; // bias to shadow side
+      const gr = R * (0.04 + 0.06 * ((i * 0.37) % 1));
+      c.fillStyle = i % 2 === 0
+        ? `hsla(${H - 18}, 45%, 12%, 0.5)`
+        : `hsla(${H + 12}, 65%, 70%, 0.35)`;
+      c.beginPath(); c.arc(x, y, gr, 0, TAU); c.fill();
+    }
+    // Hard dark chip-gouges (sharp notches) on the rough side.
+    c.lineCap = "round";
+    for (let i = 0; i < 3; i++) {
+      const ang = 0.7 + i * 1.4;
+      const x = Math.cos(ang) * R * 0.72, y = Math.sin(ang) * R * 0.72;
+      c.strokeStyle = `hsla(${H - 22}, 40%, 6%, 0.55)`;
+      c.lineWidth = R * 0.06;
       c.beginPath();
-      c.arc(x, y, nr, 0, TAU);
-      c.fill();
+      c.moveTo(x, y);
+      c.lineTo(x - Math.cos(ang + 0.6) * R * 0.26, y - Math.sin(ang + 0.6) * R * 0.26);
+      c.stroke();
+    }
+
+    // Brilliant specular: a hard bright chip on the table's up-left corner + a
+    // couple of pinpoint sparkles at lit facet junctions — the shine that says
+    // "gem", concentrated where the light hits.
+    c.fillStyle = "hsla(52, 100%, 97%, 0.95)";
+    c.beginPath();
+    c.moveTo(tbl[0][0], tbl[0][1]);
+    c.lineTo(tbl[0][0] + R * 0.22, tbl[0][1] + R * 0.05);
+    c.lineTo(tbl[0][0] + R * 0.05, tbl[0][1] + R * 0.24);
+    c.closePath();
+    c.fill();
+    for (const [sx, sy, sr] of [
+      [-R * 0.5, -R * 0.2, R * 0.09],
+      [R * 0.15, -R * 0.05, R * 0.06],
+    ] as Array<[number, number, number]>) {
+      const g = c.createRadialGradient(sx, sy, 0, sx, sy, sr);
+      g.addColorStop(0, "hsla(52, 100%, 98%, 0.95)");
+      g.addColorStop(1, "hsla(50, 100%, 90%, 0)");
+      c.fillStyle = g;
+      c.beginPath(); c.arc(sx, sy, sr, 0, TAU); c.fill();
     }
   }
 
-  // Veins-only sprite: same ore on transparent, clipped to the body, used as
-  // the subtle additive glint overlay.
-  private paintVeins(
-    size: number, half: number, H: number,
+  // Glint-only sprite: just the bright facet seams + table sparkle on
+  // transparent, clipped to the gem, used as the subtle additive glint overlay
+  // so the shine shimmers in place as the gem turns.
+  private paintGlint(
+    size: number, half: number,
     rimPath: (c: CanvasRenderingContext2D) => void,
-    _harmonics: Array<{ freq: number; amp: number; phase: number }>,
   ): HTMLCanvasElement {
     const cv = document.createElement("canvas");
     cv.width = size; cv.height = size;
@@ -315,7 +426,29 @@ export class Gem {
     c.save();
     rimPath(c);
     c.clip();
-    this.paintOreInto(c, this.radius, H);
+    const R = this.radius, H = this.hue;
+    const culet = this.culet, tbl = this.tablePts, hull = this.hullPts;
+    // Bright seams along pavilion mains + table rim — the sparkle skeleton.
+    c.lineWidth = 0.9;
+    c.lineCap = "round";
+    const seam = (a: [number, number], b: [number, number]) => {
+      const lit = this.litAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, R);
+      c.strokeStyle = `hsla(${H + 12}, 95%, ${68 + lit * 28}%, ${0.15 + lit * 0.6})`;
+      c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke();
+    };
+    for (let i = 2; i <= 8; i++) seam(hull[i], culet);
+    for (let i = 0; i < tbl.length; i++) seam(tbl[i], tbl[(i + 1) % tbl.length]);
+    // Sparkle pinpoints on the lit table corner + up-left girdle.
+    for (const [sx, sy, sr] of [
+      [tbl[0][0], tbl[0][1], R * 0.16],
+      [-R * 0.5, -R * 0.2, R * 0.11],
+    ] as Array<[number, number, number]>) {
+      const g = c.createRadialGradient(sx, sy, 0, sx, sy, sr);
+      g.addColorStop(0, "hsla(52, 100%, 98%, 0.95)");
+      g.addColorStop(1, "hsla(50, 100%, 90%, 0)");
+      c.fillStyle = g;
+      c.beginPath(); c.arc(sx, sy, sr, 0, TAU); c.fill();
+    }
     c.restore();
     return cv;
   }
