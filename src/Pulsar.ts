@@ -1,6 +1,6 @@
 import { Vec, v, rand, TAU } from "./vec";
 import { rng, cosmeticRng } from "./game/rng";
-import { ENTITY_CONFIG } from "./game/entityConfig";
+import { ENTITY_STATS } from "./game/entityConfig";
 
 // Background pulsar + parallax planets. The pulsar spins continuously (twin
 // magnetic-axis beams sweep around the core), pulses softly on every beat,
@@ -179,10 +179,9 @@ export class Pulsar {
         baseRadiusFrac: 0.38,
         baseSize: 12,
         growthRate: 7.4,
-        // Boss menace-red, sourced from the boss config so the colour that
-        // floods in at full size matches the planetoid that solidifies into
-        // the boss on the boss wave — the handoff stays one continuous body.
-        hue: ENTITY_CONFIG.boss.hue,
+        // Boss menace-red, sourced from the boss entity so the foreshadow
+        // planet and the planetoid that solidifies into the boss share one hue.
+        hue: ENTITY_STATS.boss!.hue!,
         baseSat: 60,
         satGrowth: 30,
         baseLight: 7,

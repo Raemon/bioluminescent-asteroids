@@ -75,7 +75,7 @@ import { cosmeticRng as rng } from "./game/rng";
 //
 //   Colour (pitch → hue, volume → lightness):
 //     Hue comes from the asteroid's KIND_HUE (already pitch-coded:
-//     A=0 red, B=28 orange, C=215 blue, D=290 purple). Lightness rides the
+//     A=0 red, B=28 orange, C=192 cyan-blue, D=290 purple). Lightness rides the
 //     drone LFO between 55 % (trough) and 88 % (peak). Small / gen-2 voices
 //     are an octave higher — we lift their lightness floor by 8 pp so the
 //     "higher pitch = brighter" reading holds at the per-wave level too.

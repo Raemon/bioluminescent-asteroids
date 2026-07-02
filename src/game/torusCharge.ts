@@ -1,12 +1,12 @@
 import type { Game } from "../Game";
 import { shipTouchingTorusThread } from "../Asteroid";
 import { emitBurst } from "./particleBursts";
-import { ENTITY_CONFIG } from "./entityConfig";
+import { ENTITY_STATS } from "./entityConfig";
 import { isDown } from "./controlBindings";
 import { fireSuperLaser } from "./laserShot";
 
 // Steel-cyan, matching the torus ring + its energy threads.
-const CHARGE_HUE = ENTITY_CONFIG.torus.hue;
+const CHARGE_HUE = ENTITY_STATS.torus!.hue!;
 
 // How fast the charge aura ramps up / decays (exponential approach rate).
 const AURA_RATE = 7;

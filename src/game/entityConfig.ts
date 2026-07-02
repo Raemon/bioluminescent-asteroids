@@ -1,5 +1,5 @@
 import type { AlienSize } from "../Alien";
-import type { AsteroidSize } from "../Asteroid";
+import type { AsteroidKind, AsteroidSize } from "../Asteroid";
 
 // Central tunables for every spawnable entity and a few environment effects.
 // Spawn rules (firstWave, chancePerWave, spawnWindow) live alongside the
@@ -179,32 +179,16 @@ export const ENTITY_CONFIG = {
     count: [5, 10] as [number, number],
   },
 
-  // Solid crystal: tougher than a regular gem rock (16 HP + 4× small fragments).
-  // Introduced later than gold so the player has time to learn the gem-drop
-  // dynamic with a single-HP target before facing a 16-HP variant.
+  // Solid crystal: tougher than a regular gem rock. Introduced later than gold so
+  // the player learns the gem-drop dynamic on a single-HP target first.
+  // Combat stats (hp/score/radius/damageReduction) live in ENTITY_STATS.
   solidCrystal: {
     firstWave: 2,
     perSpawnChance: 0.12,
-    // large variant renders slightly oversized to feel more dangerous.
-    largeRadius: 30,
-    // Large solid crystals are heavy — they drift in noticeably slower than
-    // their size band would suggest, so the player has time to read the tough
-    // target and line up. Fed to the rhythm aligner as a scaled speed band
-    // (not applied post-hoc) so the crystal still crosses the kill range on a
-    // beat, just later and more ponderously.
+    // Heavy: drifts in slower than its band (fed to the rhythm aligner scaled,
+    // so it still crosses the kill range on a beat, just later).
     largeSpawnSpeedMul: 0.5,
-    largeHp: 5,
-    largeScore: 400,
-    smallHp: 4,
-    smallScore: 200,
-    // Subtracted from every incoming hit before it touches HP. A plain 1-damage
-    // shot does nothing and visibly bounces off; only on-beat (4) and boosted
-    // (8) shots get through, the latter chipping 1 HP. Faceted ice should feel
-    // like it wants a real hit, not a peashooter. Smalls resist just as hard.
-    largeDamageReduction: 3,
-    smallDamageReduction: 3,
-    // Standalone solidCrystalSmall — a rare "treat" spawn on its own roll
-    // (4 HP shard, smallScore on kill). Same cadence the tink roll used.
+    // Standalone solidCrystalSmall — a rare "treat" spawn on its own roll.
     smallSpawn: {
       firstWave: 4,
       chancePerWave: 1 / 3,
@@ -217,33 +201,26 @@ export const ENTITY_CONFIG = {
   // rotated off the killing-shot axis so none flies straight back at the shooter.
   // Each flung Gem is a live rhythm target (fly in → die; shoot on-beat → points
   // or an upgrade). Two tiers share this block: a medium and a big variant.
+  // Combat stats (hp/score/radius/damageReduction) live in ENTITY_STATS per
+  // tier (burstGemMedium / burstGemBig); this block is spawn + burst tuning.
   burstGem: {
-    // Truly rare across the early/mid arc (display 2-9): no guaranteed intro
-    // spawn, just a low per-rock roll. From the post-boss arc it's a recurring
-    // threat.
+    // Rare across the early/mid arc (a low per-rock roll); recurring post-boss.
     firstWave: 3,
     lastEarlyWave: 10,
     perSpawnChance: 0.05,
     // From this internal wave (display 11) the gem shows up much more often.
     frequentWave: 12,
     frequentChance: 0.18,
-    hp: 8,
-    score: 800,
-    damageReduction: 4,
-    // Heavy: drifts in noticeably slower than its size band, like a solid
-    // crystal large, so the player can read the tough target and line up.
+    // Heavy: drifts in slower than its size band so the tough target reads.
     spawnSpeedMul: 0.45,
-    // When a gem slot fires, the chance it's the big 8-fan tier; otherwise medium.
+    // When a gem slot fires, the chance it's the big 8-fan tier; else medium.
     bigChance: 0.25,
-    // Flung-Gem launch speed (px/s). Fast — they read as flung-apart blades,
-    // not drifting rubble.
+    // Flung-Gem launch speed (px/s) — fast, they read as flung-apart blades.
     shardSpeed: 360,
     medium: {
-      radius: 34,
       shardCount: 4,
     },
     big: {
-      radius: 64,
       shardCount: 8,
     },
   },
@@ -252,29 +229,23 @@ export const ENTITY_CONFIG = {
   // immediately after the boss fight). Fragile indigo crystal shell with
   // wraiths locked inside; the single killing hit shatters the shell and
   // frees a brood of wraiths.
+  // Combat stats (hp/score/radius) live in ENTITY_STATS.
   glassPrison: {
     firstWave: 12,
     perSpawnChance: 0.33,
-    radius: 46,
-    hp: 1,
-    score: 600,
     // Wraiths released when the shell shatters (inclusive range).
     minWraiths: 2,
     maxWraiths: 4,
-    // Heavy — drifts in slower than its size band suggests so the player has
-    // time to read "do I want to crack this thing open?" before committing.
+    // Heavy — drifts in slower so the player can read "crack this open?" first.
     spawnSpeedMul: 0.55,
   },
 
   // Wraith — what spawns out of a shattered prison. No standalone spawn; it
   // exists only as a glassPrison drop. Low HP relative to its menace, but
   // pursues the ship and writhes so cleanly lining up the kill is the trick.
+  // Combat stats (hp/score/radius) live in ENTITY_STATS.
   wraith: {
-    radius: 26,
-    hp: 5,
-    score: 900,
-    // How long (seconds) the wraith fades in / cannot damage the player after
-    // emerging. Gives the player a beat to react to the new threat.
+    // Fade-in / damage-immune window (s) after emerging — a beat to react.
     emergeDuration: 0.9,
     // Pursuit acceleration (px/s/s) while drifting toward the ship.
     pursuitAccel: 36,
@@ -295,76 +266,35 @@ export const ENTITY_CONFIG = {
   // donut gap intact; each half later breaks into a shorter arc + small chunks,
   // and every fragment holds its slot on a phantom rotating ring ("reassemble
   // the ring"). A flickering energy arc strings adjacent fragments together.
+  // Combat stats (hp/score/radius/hue) for torus/torusArc/torusChunk live in
+  // ENTITY_STATS; this block is spawn + ring-geometry tuning.
   torus: {
     firstWave: 12,
     perSpawnChance: 0.18,
-    // Outer radius of the whole ring (its hitbox + visual footprint). Larger
-    // than a stock large so the hole is wide enough to fly through after split.
-    radius: 78,
     // Tube thickness as a fraction of the outer radius — the painted ring band
     // and the inner (passable) hole both derive from this.
     tubeFrac: 0.34,
-    // Tough: a clean rhythm bullet (4 dmg) needs three hits to crack the ring.
-    hp: 12,
-    score: 1100,
-    // Heavy mechanical mass: drifts in slower than its size band, like the
-    // glass prison, so the tough target is readable.
+    // Heavy mechanical mass: drifts in slower so the tough target is readable.
     spawnSpeedMul: 0.5,
-    // Steel-cyan. Cool industrial hue distinct from the indigo prison + warble
-    // greens around it in the post-boss arc.
-    hue: 196,
-    // Half-ring (180° C) fragment: HP + the score it pays on the killing hit.
-    arcHp: 6,
-    arcScore: 600,
-    // Shorter arc a half-ring breaks into (one ~110° sliver) + its debris.
-    sliverHp: 3,
-    sliverScore: 300,
-    // Small terminal chunk knocked off when a half-ring breaks. Tougher than a
-    // stock small so clearing the orbiting debris still asks for a clean shot.
-    chunkHp: 2,
-    chunkScore: 150,
-    // How many chunks spall off each half-ring when it breaks (besides the
-    // surviving sliver).
+    // Chunks spalled off each half-ring when it breaks (besides the sliver).
     chunkCount: 2,
     // Phantom-ring spin rate (rad/s) the fragments orbit their shared centre at.
-    // Slow enough to read as a coherent rotating ring, not a blur.
     ringSpin: 0.5,
   },
 
+  // Combat stats (hp/score/radius/hue/damageReduction) for the whole boss and
+  // its fragments live in ENTITY_STATS; this block is the fight's timing tuning.
   boss: {
     waves: [11] as readonly number[],
     foreshadowWaves: [10] as readonly number[],
-    // The whole-body large solidifies out of the grown background planet;
-    // the killing hit cracks it into two hemispheres + an eye-core. Mediums
-    // are the hemispheres — kept close to the full-body radius so the halves
-    // read as genuine cleaved chunks of the planet, not shrunken mediums.
-    // Smalls are the plate fragments that come off them.
-    // The boss has no "huge" tier; the huge entries mirror large purely to
-    // satisfy the Record<AsteroidSize> shape and are never read.
-    radius: { huge: 132, large: 132, medium: 104, small: 30 } as Record<AsteroidSize, number>,
-    hp: { huge: 60, large: 60, medium: 18, small: 6 } as Record<AsteroidSize, number>,
-    score: { huge: 2500, large: 2500, medium: 800, small: 300 } as Record<AsteroidSize, number>,
-    // The eye-core is a third gen-1 fragment alongside the two hemispheres:
-    // smaller, slightly less HP, keeps shooting until destroyed. On death it
-    // breaks into 2 iris shards + 1 inert pupil ember (all small-size).
+    // Iris radius for the whole-body eyelid layout (not the bossEye fragment).
     eyeRadius: 48,
-    eyeHp: 10,
-    eyeScore: 1200,
-    // Bolt projectile speed. Cadence + telegraph are no longer dt-driven —
-    // both the iris laser and the post-break hemisphere plasma are snapped
-    // to the boss's 8-beat rhythm (see Asteroid.tickBossRhythm).
+    // Bolt projectile speed; cadence + telegraph snap to the boss 8-beat rhythm.
     eyeBulletSpeed: 200,
-    // Total dormant intro before the boss becomes live and damageable. For
-    // most of it the planetoid is a black, subdued, background-like silhouette
-    // slowly swelling to full size; only the trailing revealActiveDuration
-    // seconds carry the shudder / dust-off / eye-open.
+    // Total dormant intro before the boss becomes live and damageable; only the
+    // trailing revealActiveDuration carries the shudder / dust-off / eye-open.
     revealDuration: 60.0,
-    // The trailing slice of revealDuration in which the boss shudders, dusts
-    // off its crust, and the eye opens. The rest is the quiet black approach.
     revealActiveDuration: 8.0,
-    // menace-rim red — matches the foreshadowing planet's tint.
-    hue: 12,
-    damageReduction: 3,
   },
 
   bgBeatIntensity: {
@@ -379,3 +309,193 @@ export const ENTITY_CONFIG = {
     return size === "small" ? 0.3 : size === "medium" ? 0.35 : 0.35;
   },
 } as const;
+
+// Per-kind combat/visual stats — the single source of truth fetched via
+// entityStat / ENTITY_STATS[kind], replacing the old switch-on-kind tables.
+// hp/score/radius are a plain number, or a per-size record for the families that
+// ladder by AsteroidSize (boss, bass, torusArc). A field left off falls back to
+// the stock asteroid size band; hue left off rolls a fresh wave hue at spawn.
+type Sized = number | Partial<Record<AsteroidSize, number>>;
+
+export type EntityStats = {
+  hp?: Sized;
+  score?: Sized;
+  radius?: Sized;
+  hue?: number;
+  damageReduction?: number;
+  // Outline vertex count; kinds without one keep the smooth 60-sample default.
+  outlineSamples?: number;
+};
+
+export const ENTITY_STATS: Partial<Record<AsteroidKind, EntityStats>> = {
+  // Bassteroids are 2× the stock HP ladder (armoured); each voice has its hue.
+  bassA: {
+    hp: { huge: 16, large: 8, medium: 4, small: 2 },
+    hue: 0,
+  },
+  bassB: {
+    hp: { huge: 16, large: 8, medium: 4, small: 2 },
+    hue: 28,
+  },
+  bassC: {
+    hp: { huge: 16, large: 8, medium: 4, small: 2 },
+    hue: 192,
+  },
+  bassD: {
+    hp: { huge: 16, large: 8, medium: 4, small: 2 },
+    hue: 290,
+  },
+
+  // Sound-decorator rocks — stock stats, only a hue (+ bell's masonry outline).
+  chime: {
+    hue: 52,
+  },
+  bell: {
+    hue: 285,
+    outlineSamples: 22,
+  },
+  warble: {
+    hue: 130,
+  },
+
+  // Boss family — six distinct pieces. The whole-body boss ladders by size so
+  // its split children can reuse the band; the fragments are single-size.
+  boss: {
+    hp: { huge: 60, large: 60, medium: 18, small: 6 },
+    score: { huge: 2500, large: 2500, medium: 800, small: 300 },
+    radius: { huge: 132, large: 132, medium: 104, small: 30 },
+    hue: 12,
+    damageReduction: 3,
+  },
+  bossHemisphere: {
+    hp: 18,
+    score: 800,
+    radius: 104,
+    hue: 12,
+  },
+  bossEye: {
+    hp: 10,
+    score: 1200,
+    radius: 48,
+    hue: 12,
+  },
+  bossPlate: {
+    hp: 6,
+    score: 300,
+    radius: 30,
+    hue: 12,
+  },
+  bossIrisShard: {
+    hp: 6,
+    score: 300,
+    radius: 30 * 0.85,
+    hue: 12,
+  },
+  bossEmber: {
+    hp: 6,
+    score: 300,
+    radius: 30 * 0.55,
+    hue: 12,
+  },
+
+  solidCrystal: {
+    hp: 5,
+    score: 400,
+    radius: 30,
+    hue: 238,
+    damageReduction: 3,
+    outlineSamples: 7,
+  },
+  solidCrystalSmall: {
+    hp: 4,
+    score: 200,
+    hue: 238,
+    damageReduction: 3,
+    outlineSamples: 6,
+  },
+
+  // Solid gold — gem and shards share the cut-gold material; tiers differ in
+  // radius + shard count (shardCount lives on the burstGem config block).
+  burstGemMedium: {
+    hp: 8,
+    score: 800,
+    radius: 34,
+    hue: 46,
+    damageReduction: 4,
+    outlineSamples: 8,
+  },
+  burstGemBig: {
+    hp: 8,
+    score: 800,
+    radius: 64,
+    hue: 46,
+    damageReduction: 4,
+    outlineSamples: 8,
+  },
+
+  glassPrison: {
+    hp: 1,
+    score: 600,
+    radius: 46,
+    hue: 258,
+    outlineSamples: 8,
+  },
+  wraith: {
+    hp: 5,
+    score: 900,
+    radius: 26,
+    hue: 286,
+  },
+
+  // Steel-cyan ring; arc/chunk radius is set by split() from ring geometry.
+  torus: {
+    hp: 12,
+    score: 1100,
+    radius: 78,
+    hue: 196,
+  },
+  // Half-ring at "large"; the shorter sliver it breaks into at "medium".
+  torusArc: {
+    hp: { large: 6, medium: 3 },
+    score: { large: 600, medium: 300 },
+    hue: 196,
+  },
+  torusChunk: {
+    hp: 2,
+    score: 150,
+    hue: 196,
+  },
+
+  // Cathedral debris a "bell" shatters into; hue here is only a standalone
+  // fallback (the parent bell's hue is passed in at split).
+  cathedralKeystone: {
+    hp: 2,
+    hue: 285,
+    outlineSamples: 8,
+  },
+  glassShard: {
+    hp: 2,
+    hue: 285,
+    outlineSamples: 6,
+  },
+  columnDrum: {
+    hp: 2,
+    hue: 285,
+    outlineSamples: 16,
+  },
+  rubbleBlock: {
+    hp: 2,
+    hue: 285,
+    outlineSamples: 16,
+  },
+};
+
+const resolveSized = (stat: Sized | undefined, size: AsteroidSize): number | undefined =>
+  typeof stat === "object" ? stat[size] : stat;
+
+// Fetch a per-kind combat stat, resolving a size-varying entry against `size`
+// and falling back to the stock asteroid size band. Replaces getMaxHp / KIND_HP.
+export function entityStat(kind: AsteroidKind, size: AsteroidSize, field: "hp" | "score" | "radius"): number {
+  const resolved = resolveSized(ENTITY_STATS[kind]?.[field], size);
+  return resolved ?? ENTITY_CONFIG.asteroid[field][size];
+}

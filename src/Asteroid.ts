@@ -2,7 +2,7 @@ import { Vec, v, fromAngle, rand, cosmeticRand, TAU, addScaledMut, wrapMut } fro
 import { Trail } from "./Trail";
 import { SoundwaveRadiator } from "./SoundwaveRadiator";
 import { rng, cosmeticRng } from "./game/rng";
-import { ENTITY_CONFIG } from "./game/entityConfig";
+import { ENTITY_CONFIG, ENTITY_STATS, entityStat } from "./game/entityConfig";
 import { drawGlow } from "./glow";
 
 const HUE_PALETTE = [185, 200, 220, 250, 280, 310, 330];
@@ -134,12 +134,10 @@ const SIZE_RADIUS = ENTITY_CONFIG.asteroid.radius;
 // The boss asteroid is the first end-of-arc fight: a cratered planetoid that
 // solidifies out of the looming background planet on wave 10. It's roughly
 // 3× the diameter of a large asteroid, splits into 3 medium children, and
-// each medium splits into 3 smalls (smalls don't split).
-export const BOSS_RADIUS = ENTITY_CONFIG.boss.radius;
-export const BOSS_HP = ENTITY_CONFIG.boss.hp;
-// Boss hue. Matches the menace-rim red used by the foreshadowing planet so
-// the "the planetoid just dropped in" read is unbroken. Children inherit.
-export const BOSS_HUE = ENTITY_CONFIG.boss.hue;
+// each medium splits into 3 smalls (smalls don't split). The per-size radius
+// ladder lives on the boss entity entry; alias it as a concrete record so the
+// boss geometry code can index it directly (.large / .small * 0.85 etc.).
+export const BOSS_RADIUS = ENTITY_STATS.boss!.radius as Record<AsteroidSize, number>;
 
 export const SIZE_SPAWN_SPEED = ENTITY_CONFIG.asteroid.spawnSpeed;
 
@@ -158,59 +156,6 @@ const FAST_SHARD_RHYTHM = 4;
 const SLOW_SHARD_MUL = 0.25;
 const fastShardSpeedMul = (combo: number | undefined): number =>
   (combo ?? 0) >= FAST_SHARD_RHYTHM ? 1 : SLOW_SHARD_MUL;
-
-const SIZE_SCORE = ENTITY_CONFIG.asteroid.score;
-
-const KIND_HUE: Partial<Record<AsteroidKind, number>> = {
-  bassA: 0,
-  bassB: 28,
-  bassC: 215,
-  bassD: 290,
-  chime: 52,
-  bell: 285,
-  warble: 130,
-  solidCrystal: 232,
-  solidCrystalSmall: 232,
-  // Solid gold — the gem and its shards are the same cut-gold material.
-  burstGemMedium: 46,
-  burstGemBig: 46,
-  glassPrison: 258,
-  wraith: 286,
-  // Steel-cyan mechanical ring; arcs + chunks inherit it at split, this is the
-  // gen-0 default.
-  torus: ENTITY_CONFIG.torus.hue,
-  torusArc: ENTITY_CONFIG.torus.hue,
-  torusChunk: ENTITY_CONFIG.torus.hue,
-  // Cathedral debris inherits the parent bell's hue at spawn, so these are
-  // only fallbacks for the rare case one is constructed standalone.
-  cathedralKeystone: 285,
-  glassShard: 285,
-  columnDrum: 285,
-  rubbleBlock: 285,
-};
-
-// Outline vertex count per kind; kinds not listed keep the default (60), a
-// smoothly resampled Fourier curve. Low counts read as hard-edged cut
-// polygons (kiki, not bouba):
-//   solid crystals — cut glass with sharp corners.
-//   burst gems — chunky cut brilliant; 8 lands vertices on the
-//     cardinals so computeOutline gives crisp top/bottom points + wide girdle.
-//   glassPrison — tall hand-cut sarcophagus.
-//   bell — chunk of cathedral wall, chipped-masonry edge.
-//   cathedral debris — glass shard is a sliver; keystone a chunky wedge;
-//     column drum + rubble keep more vertices for a chipped-stone edge.
-const OUTLINE_SAMPLES: Partial<Record<AsteroidKind, number>> = {
-  solidCrystal: 7,
-  solidCrystalSmall: 6,
-  burstGemMedium: 8,
-  burstGemBig: 8,
-  glassPrison: 8,
-  bell: 22,
-  glassShard: 6,
-  cathedralKeystone: 8,
-  columnDrum: 16,
-  rubbleBlock: 16,
-};
 
 // Length of one musical measure (seconds). 4 beats at 120 BPM × 0.5s/beat.
 // Every bassteroid fires exactly once per measure regardless of split
@@ -240,18 +185,6 @@ export const BASS_MAX_SPLIT_LEVEL = 2;
 // flanks, and would scale the gap with the rock).
 const BASS_HALO_GAP_PX = 8;
 
-// Bassteroids carry the asteroid-HP table scaled by the bass multiplier so
-// the rhythm system has real teeth — even a rhythm-bullet (4 damage) needs
-// four hits to crack a large bassteroid, matching the "armoured" silhouette.
-export const BASS_HP: Record<AsteroidSize, number> = {
-  // Bassteroids never spawn at "huge"; the entry mirrors the scaled large so
-  // the Record shape is satisfied and is never read.
-  huge: ENTITY_CONFIG.asteroid.hp.huge * ENTITY_CONFIG.bassteroid.hpMultiplier,
-  large: ENTITY_CONFIG.asteroid.hp.large * ENTITY_CONFIG.bassteroid.hpMultiplier,
-  medium: ENTITY_CONFIG.asteroid.hp.medium * ENTITY_CONFIG.bassteroid.hpMultiplier,
-  small: ENTITY_CONFIG.asteroid.hp.small * ENTITY_CONFIG.bassteroid.hpMultiplier,
-};
-
 // Shared state for all fragments that came from one torus. The fragments don't
 // fly apart on momentum like normal debris — they hold fixed angular slots on a
 // phantom ring centred at `center` that slowly rotates (`phase`) and drifts with
@@ -273,47 +206,6 @@ export type TorusGroup = {
   // Live members. Repopulated each split; pruned to the living set each tick.
   members: Asteroid[];
 };
-
-// Cathedral debris (carved building chunks a "bell" shatters into). Tougher
-// than a stock small so clearing the rubble still asks for a couple of clean
-// shots — same intent as solidCrystalSmall — and terminal (no further split).
-export const CATHEDRAL_DEBRIS_HP = 2;
-
-// Flat per-kind HP. Kinds whose HP scales with size (boss family, bassteroids)
-// or stock asteroids aren't listed — getMaxHp handles those.
-const KIND_HP: Partial<Record<AsteroidKind, number>> = {
-  solidCrystal: ENTITY_CONFIG.solidCrystal.largeHp,
-  solidCrystalSmall: ENTITY_CONFIG.solidCrystal.smallHp,
-  burstGemMedium: ENTITY_CONFIG.burstGem.hp,
-  burstGemBig: ENTITY_CONFIG.burstGem.hp,
-  glassPrison: ENTITY_CONFIG.glassPrison.hp,
-  wraith: ENTITY_CONFIG.wraith.hp,
-  cathedralKeystone: CATHEDRAL_DEBRIS_HP,
-  glassShard: CATHEDRAL_DEBRIS_HP,
-  columnDrum: CATHEDRAL_DEBRIS_HP,
-  rubbleBlock: CATHEDRAL_DEBRIS_HP,
-};
-
-function getMaxHp(kind: AsteroidKind, size: AsteroidSize): number {
-  switch (kind) {
-    case "boss": return BOSS_HP[size];
-    case "bossHemisphere": return BOSS_HP.medium;
-    case "bossEye": return ENTITY_CONFIG.boss.eyeHp;
-    case "bossPlate":
-    case "bossIrisShard":
-    case "bossEmber": return BOSS_HP.small;
-    case "bassA":
-    case "bassB":
-    case "bassC":
-    case "bassD": return BASS_HP[size];
-    case "torus": return ENTITY_CONFIG.torus.hp;
-    // The half-ring C spawns at "large"; the shorter sliver it breaks into
-    // spawns at "medium". Same kind, distinguished by size.
-    case "torusArc": return size === "large" ? ENTITY_CONFIG.torus.arcHp : ENTITY_CONFIG.torus.sliverHp;
-    case "torusChunk": return ENTITY_CONFIG.torus.chunkHp;
-  }
-  return KIND_HP[kind] ?? ENTITY_CONFIG.asteroid.hp[size];
-}
 
 // Vertex list (local-space, normalised to radius=1) for one armoured panel
 // of a bassteroid. Each kind is a fixed cluster of these panels — drawn with
@@ -1140,7 +1032,10 @@ export class Asteroid {
     this.pos = pos;
     this.vel = vel;
     this.size = size;
-    this.radius = SIZE_RADIUS[size];
+    // Radius + damage-reduction off the stat table (stock size band by default);
+    // the boss family re-derives radius below from the per-size ladder.
+    this.radius = entityStat(kind, size, "radius");
+    this.damageReduction = ENTITY_STATS[kind]?.damageReduction ?? 0;
     this.rotation = rand(0, TAU);
     this.rotSpeed = rand(-0.6, 0.6);
     this.kind = kind;
@@ -1151,7 +1046,6 @@ export class Asteroid {
     const isBossPlate = kind === "bossPlate";
     const isBossIrisShard = kind === "bossIrisShard";
     const isBossEmber = kind === "bossEmber";
-    const isBossFragment = isBossHemisphere || isBossEye || isBossPlate || isBossIrisShard || isBossEmber;
     if (isBass) {
       this.measureOffset = BASS_KIND_BASE_OFFSET[kind];
       // Split children inherit a chunk of the parent's modules so they look
@@ -1164,43 +1058,22 @@ export class Asteroid {
       // drifting slowly.
       this.rotSpeed = rand(-0.18, 0.18);
     }
-    if (kind === "solidCrystal") {
-      // Slightly oversized vs a stock large — reads as a more menacing target
-      // without towering over the field. Smalls keep stock size.
-      this.radius = ENTITY_CONFIG.solidCrystal.largeRadius;
-      this.damageReduction = ENTITY_CONFIG.solidCrystal.largeDamageReduction;
-    }
-    if (kind === "solidCrystalSmall") {
-      this.damageReduction = ENTITY_CONFIG.solidCrystal.smallDamageReduction;
-    }
     if (isBurstGem(kind)) {
-      // Chunky gem — reads as a heavy, valuable target worth lining up. Big tier
-      // is clearly larger than a stock large; medium sits a touch above it.
-      this.radius = kind === "burstGemBig" ? ENTITY_CONFIG.burstGem.big.radius : ENTITY_CONFIG.burstGem.medium.radius;
       // Heavy mass → barely tumbles; the slow drift is set in waveDirector.
       this.rotSpeed = rand(-0.22, 0.22);
     }
     if (kind === "glassPrison") {
-      // Slightly taller/thinner-feeling than a normal large; the elongated
-      // facet polygon (kiki harmonics + low sample count) does the work.
-      this.radius = ENTITY_CONFIG.glassPrison.radius;
       this.rotSpeed = rand(-0.18, 0.18);
     }
     if (kind === "torus") {
-      // The whole ring — wide footprint so the hole is big enough to thread
-      // once it splits. Slow majestic spin like a heavy mechanical body.
-      this.radius = ENTITY_CONFIG.torus.radius;
+      // Slow majestic spin like a heavy mechanical body.
       this.rotSpeed = rand(-0.14, 0.14);
     }
     if (kind === "torusArc" || kind === "torusChunk") {
-      // Arc / chunk radius is set by split() (it knows the parent ring's
-      // geometry); the field rotation is overwritten every tick by
-      // tickTorusGroup so the arc always faces along its ring slot. Seed a
-      // gentle default so a fragment is sane for the frame before its first tick.
+      // Radius is set by split() from ring geometry; rotation by tickTorusGroup.
       this.rotSpeed = 0;
     }
     if (kind === "wraith") {
-      this.radius = ENTITY_CONFIG.wraith.radius;
       // Slow tumble — the writhe body deformation does the real visual work.
       this.rotSpeed = rand(-0.4, 0.4);
       this.writhePhase = rand(0, TAU);
@@ -1213,57 +1086,34 @@ export class Asteroid {
       }
     }
     if (kind === "bell") {
-      // Roll the cathedral archetype up front — buildHarmonicsForKind reads it
-      // to pick a silhouette that suits the architecture (a spire is tall and
-      // narrow, an arcade is wide and squat, etc.), and paintCathedralFragment
-      // -Body dispatches the interior on it.
+      // Archetype drives both the harmonics silhouette and the interior painter.
       this.cathedralArchetype = CATHEDRAL_ARCHETYPES[Math.floor(rng() * CATHEDRAL_ARCHETYPES.length)];
     }
     if (isBoss) {
-      // Boss is huge — override the size table so its physical footprint
-      // matches its visual identity as a planetoid that just dropped in.
-      this.radius = BOSS_RADIUS[size];
-      // Slow majestic spin. Even the small bosses keep a heavier rotation
-      // than ordinary asteroids — these are chunks of broken planet, not
-      // pebbles.
+      // Slow majestic spin; even small bosses out-rotate ordinary asteroids.
       this.rotSpeed = rand(-0.12, 0.12) * (size === "large" ? 0.5 : 1);
-      // Whole-body boss starts dormant: the 8s grow-and-rotate reveal plays
-      // before the eye opens and damage becomes possible. Children of the
-      // shatter spawn directly into "live" phase (overridden below).
+      // Dormant until the reveal opens the eye; fragments spawn straight to live.
       this.bossPhase = "dormant";
       this.bossRevealT = 0;
-      // The closed eyelid seam is centred at this latitude; the iris radius
-      // is fixed for visual layout consistency.
+      // Iris radius scales with the (dormant) body so the eyelid layout holds.
       this.bossEyeRadius = ENTITY_CONFIG.boss.eyeRadius * (this.radius / BOSS_RADIUS.large);
     }
     if (isBossHemisphere) {
-      // Hemispheres render as half-discs but use a circular hitbox sized to
-      // the full half-disc bounds. Radius matches the boss medium tier.
-      this.radius = BOSS_RADIUS.medium;
       this.rotSpeed = rand(-0.18, 0.18);
     }
     if (isBossEye) {
-      // Eye core is smaller than the hemispheres but the most dangerous
-      // piece — it keeps firing. Use the dedicated eyeRadius.
-      this.radius = ENTITY_CONFIG.boss.eyeRadius;
       this.rotSpeed = rand(-0.12, 0.12);
-      // Rhythm fields are inherited from the parent boss via Asteroid.split
-      // — no per-construction setup needed beyond the defaults declared at
-      // the field level.
     }
     if (isBossPlate) {
-      this.radius = BOSS_RADIUS.small;
       this.rotSpeed = rand(-1.4, 1.4);
     }
     if (isBossIrisShard) {
-      this.radius = BOSS_RADIUS.small * 0.85;
       this.rotSpeed = rand(-2.0, 2.0);
     }
     if (isBossEmber) {
-      this.radius = BOSS_RADIUS.small * 0.55;
       this.rotSpeed = rand(-1.0, 1.0);
     }
-    this.maxHp = getMaxHp(kind, size);
+    this.maxHp = entityStat(kind, size, "hp");
     this.hp = this.maxHp;
     // For most asteroids each HP gets its own pre-rolled crack so the
     // damage state escalates predictably. The boss has a much higher HP
@@ -1276,10 +1126,11 @@ export class Asteroid {
       : isBossHemisphere ? 8 : isBossEye ? 6 : (isBossPlate || isBossIrisShard || isBossEmber) ? 4
       : this.maxHp;
     this.cracks = rollCracks(crackCount);
-    const kindHue = KIND_HUE[kind];
-    this.hue = hue ?? ((isBoss || isBossFragment) ? BOSS_HUE : kindHue !== undefined ? kindHue : nextWaveHue());
+    // Boss-family, bass, gem etc. carry a fixed hue in ENTITY_STATS; the plain
+    // kinds leave it undefined and roll a fresh wave hue.
+    this.hue = hue ?? ENTITY_STATS[kind]?.hue ?? nextWaveHue();
     this.harmonics = this.buildHarmonicsForKind(kind);
-    this.outlineSamples = OUTLINE_SAMPLES[kind] ?? this.outlineSamples;
+    this.outlineSamples = ENTITY_STATS[kind]?.outlineSamples ?? this.outlineSamples;
     this.outline = this.computeOutline();
     this.nuclei = [];
     const nucleusCount = size === "huge" ? 7 : size === "large" ? 5 : size === "medium" ? 3 : 2;
@@ -2665,7 +2516,7 @@ export class Asteroid {
       // 1.0 = right under the light, 0.0 = farthest facet. Power curve makes
       // the lit side noticeably brighter without crushing the shaded side.
       const lit = Math.pow(Math.max(0, 1 - d / maxLightDist), 1.6);
-      const lightness = 16 + lit * 56;          // 16% (deep ice) → 72% (frosted highlight)
+      const lightness = 14 + lit * 46;          // 14% (deep ice) → 60% (frosted highlight)
       // Saturation falls off toward the lit side — frosted ice scatters light
       // and reads near-white where it's hit, deep cool blue where it isn't.
       const sat = 85 - lit * 30;                // 85% (shaded) → 55% (lit, frost-pale)
@@ -3640,28 +3491,11 @@ export class Asteroid {
     return Math.atan2(dy, dx);
   }
 
+  // Per-kind score from ENTITY_STATS (boss ladder / eye bump / gem / wraith /
+  // torus all carry their own), falling back to the stock asteroid size band for
+  // plain kinds. Combo multiplier applies on top at the call site.
   scoreValue(): number {
-    if (this.isBoss()) {
-      // Boss scoring rewards the sustained engagement: large dwarfs a normal
-      // kill, mediums and smalls are still chunky. Combo multiplier applies
-      // on top at the call site.
-      return ENTITY_CONFIG.boss.score[this.size];
-    }
-    // Boss fragments inherit the boss score band by tier — hemispheres use
-    // the medium boss score, plates/shards/embers use small. The eye-core
-    // gets its own bump for being the most dangerous fragment.
-    if (this.kind === "bossHemisphere") return ENTITY_CONFIG.boss.score.medium;
-    if (this.kind === "bossEye") return ENTITY_CONFIG.boss.eyeScore;
-    if (this.kind === "bossPlate" || this.kind === "bossIrisShard" || this.kind === "bossEmber") {
-      return ENTITY_CONFIG.boss.score.small;
-    }
-    // Solid crystal pays out for the bullet budget it absorbs (16 HP / 4 HP).
-    if (this.kind === "solidCrystal") return ENTITY_CONFIG.solidCrystal.largeScore;
-    if (this.kind === "solidCrystalSmall") return ENTITY_CONFIG.solidCrystal.smallScore;
-    if (isBurstGem(this.kind)) return ENTITY_CONFIG.burstGem.score;
-    if (this.kind === "glassPrison") return ENTITY_CONFIG.glassPrison.score;
-    if (this.kind === "wraith") return ENTITY_CONFIG.wraith.score;
-    return SIZE_SCORE[this.size];
+    return entityStat(this.kind, this.size, "score");
   }
 
   isBass(): boolean {
@@ -5181,7 +5015,7 @@ export class Asteroid {
       // horizontal band across the body, clipped by the disc so the curved
       // limb cuts the bottom and top of the band.
       const bandHeight = r * 0.42;
-      const bassHues = [0, 28, 215, 290];
+      const bassHues = [0, 28, 192, 290];
       const panelCount = 14;
       for (let i = 0; i < panelCount; i++) {
         const u = i / panelCount;
@@ -5692,7 +5526,7 @@ export class Asteroid {
     // pins at the corners along the seams. The result reads as plated armor,
     // not a stripe.
     const bandHeight = r * 0.42;
-    const bassHues = [0, 28, 215, 290];
+    const bassHues = [0, 28, 192, 290];
     const panelCount = 14;
     // Per-quadrant beat pulse: the red/orange/blue/purple quadrants light in
     // sequence (kick→pluck→boom→snap), borrowing the bassteroids' rhythm. Four
@@ -6056,7 +5890,7 @@ export class Asteroid {
     // Draw it as a horizontal band on the +x side; the diameter edge cuts
     // the band so its left edge is the broken cross-section.
     const bandHeight = r * 0.36;
-    const bassHues = [0, 28, 215, 290];
+    const bassHues = [0, 28, 192, 290];
     for (let i = 0; i < 7; i++) {
       const u = i / 7;
       const x0 = u * r * 1.05;
@@ -6205,7 +6039,7 @@ export class Asteroid {
   renderBossPlate(ctx: CanvasRenderingContext2D, t: number) {
     const damageT = 1 - this.hp / Math.max(1, this.maxHp);
     const r = this.radius;
-    const bassHues = [0, 28, 215, 290];
+    const bassHues = [0, 28, 192, 290];
     const hue = bassHues[this.bossPlateBand];
 
     ctx.save();
