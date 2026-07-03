@@ -21,6 +21,13 @@ export const ENTITY_CONFIG = {
     dampen: 0.35,
   },
 
+  // Shared despawn-timer range for mid-wave visitors (comets, aliens, meteor
+  // showers) — each rolls its own random value from this range at spawn so
+  // they don't all clear out in lockstep.
+  warpLifetime: {
+    range: [10, 36] as [number, number],
+  },
+
   asteroid: {
     // "huge" is the twice-as-big tier: 2× a large rock's radius, 8 HP, and it
     // cleaves into a mass-conserving combo of large/medium/small (the 2-2-2-2
@@ -105,8 +112,7 @@ export const ENTITY_CONFIG = {
     firstWave: 3,
     chancePerWave: 0.6,
     spawnWindow: [4, 16] as [number, number],
-    // lifetime is derived from the crossing distance at spawn (see
-    // crossingLifetime) so the comet drifts in, crosses once, and drifts out.
+    // lifetime before warp-out is randomized per spawn — see warpLifetime.range.
     hitRadius: 24,
     fadeIn: 1.6,
     fadeOut: 2.0,
@@ -124,8 +130,6 @@ export const ENTITY_CONFIG = {
     count: [3, 9] as [number, number],
     scale: 0.45,
     speedMult: 2,
-    // shorter than a comet — fast movers clear the field quickly.
-    lifetime: [10, 14] as [number, number],
     baseScore: 500,
     // One wave runs a guaranteed oversized swarm a few seconds in, with its
     // own thinned-out asteroid field so the swarm is the headline threat.
