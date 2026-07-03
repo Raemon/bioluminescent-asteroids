@@ -1,5 +1,39 @@
 [
   {
+    "id": "2026-07-03-49bc6d5",
+    "date": "2026-07-03",
+    "title": "Comets, fuel orbs, and gem visual overhaul",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Fuel orbs now drop from gold ore that cracks open without an upgrade in Fuel Mode — fly through the cyan tumbling orb to refill your reserve.",
+          "Comets now wrap around the map boundaries instead of drifting off-screen, keeping them visible for their full 30-second lifespan before warping out.",
+          "Comets depart through a warp portal at a fixed 30-second timer rather than fading out when they reach a screen edge."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Gems have a new look: a faceted brilliant-cut diamond with shaded crown and pavilion facets, a rough chipped shadow side, and crisp sparkle seams instead of a wireframe octahedron.",
+          "Comets no longer fade to invisible before leaving — they stay bright and dive through a departure portal as their exit animation.",
+          "The shield option has been removed from powerup canisters."
+        ]
+      }
+    ],
+    "commits": [
+      "49bc6d5",
+      "983fe57",
+      "3002f33",
+      "3dadd91",
+      "70b821b",
+      "ee4ccdf",
+      "2d53ff5",
+      "7614add",
+      "b79d797"
+    ]
+  },
+  {
     "id": "2026-06-29-fb61fd3",
     "date": "2026-06-29",
     "title": "Torus Ring, Super-Laser, and Farshot rename",
