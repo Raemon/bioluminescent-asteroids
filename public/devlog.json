@@ -1,5 +1,34 @@
 [
   {
+    "id": "2026-07-04-d35f382",
+    "date": "2026-07-04",
+    "title": "Hints expanded, meteors now expire, controls auto-sync",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Added new atmospheric hint messages shown at the start of a run."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Stray meteors that lagged behind a shower now despawn instead of lingering indefinitely."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Control key display in the instructions panel now stays automatically in sync with actual bindings."
+        ]
+      }
+    ],
+    "commits": [
+      "d35f382",
+      "1122ef3"
+    ]
+  },
+  {
     "id": "2026-07-03-49bc6d5",
     "date": "2026-07-03",
     "title": "Comets, fuel orbs, and gem visual overhaul",
