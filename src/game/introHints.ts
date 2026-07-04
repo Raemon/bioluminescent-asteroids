@@ -20,21 +20,29 @@ export const FIRE_HIT_HINT = "Fire on the beat. Hit on the beat.";
 const SLOT_2_POOL: readonly string[] = [
   "Aim carefully.",
   "One shot. One kill.",
-  "It's okay to wait",
+  "It's okay to wait.",
+  "Patience.",
   "Drift gently.",
   FIRE_HIT_HINT,
   "Build rhythm, carefully.",
   "Find the rhythm.",
   "Become stronger.",
   "Drift among the asteroids.",
+  "Get in sync.",
+  "Heartbeat to heartbeat.",
 ];
 
 const SLOT_3_POOL: readonly string[] = [
   "Dance with the void.",
-  "Begin the journey.",
+  "Drink your coffee. It'll be a long night.",
   "Don't forget your dream.",
+  "Report what you find.",
   "Tell your son you'll be home soon.",
-  "Remember your promise to your wife."
+  "Remember your promise to your wife.",
+  "The stars are listening.",
+  "You have all the time in the world.",
+  "Don't forget the way back.",
+  "Don't lose the way forward."
 ];
 
 const SLOT_POOLS: readonly (readonly string[])[] = [SLOT_1_POOL, SLOT_2_POOL, SLOT_3_POOL];
