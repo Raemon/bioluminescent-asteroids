@@ -1,5 +1,6 @@
 import type { Game } from "../Game";
 import type { Asteroid } from "../Asteroid";
+import { WORLD_W, WORLD_H } from "../vec";
 import { killShip } from "./lifecycle";
 import { popShield } from "./collisions";
 import { BEAT_GRID } from "./rhythmConstants";
@@ -72,18 +73,28 @@ export class BossBeam {
     return !this.dead;
   }
 
-  // Shortest distance from the ship centre to the beam ray, used both for
-  // the hit test and to know when the ship is grazing it.
+  // Shortest distance from any wrap image of the ship centre to the beam
+  // ray — the beam segment can run past the seam, so the folded ship may sit
+  // on a line the raw math would miss.
   distanceToShip(sx: number, sy: number): number {
     const cos = Math.cos(this.angle);
     const sin = Math.sin(this.angle);
-    const dx = sx - this.originX;
-    const dy = sy - this.originY;
-    const along = dx * cos + dy * sin;
-    const t = Math.max(0, Math.min(BEAM_LENGTH, along));
-    const px = this.originX + cos * t;
-    const py = this.originY + sin * t;
-    return Math.hypot(sx - px, sy - py);
+    let best = Infinity;
+    for (let ix = -1; ix <= 1; ix++) {
+      for (let iy = -1; iy <= 1; iy++) {
+        const px0 = sx + ix * WORLD_W;
+        const py0 = sy + iy * WORLD_H;
+        const dx = px0 - this.originX;
+        const dy = py0 - this.originY;
+        const along = dx * cos + dy * sin;
+        const t = Math.max(0, Math.min(BEAM_LENGTH, along));
+        const px = this.originX + cos * t;
+        const py = this.originY + sin * t;
+        const d = Math.hypot(px0 - px, py0 - py);
+        if (d < best) best = d;
+      }
+    }
+    return best;
   }
 
   hitsShip(game: Game): boolean {
@@ -91,14 +102,24 @@ export class BossBeam {
     const ship = game.ship;
     const cos = Math.cos(this.angle);
     const sin = Math.sin(this.angle);
-    const dx = ship.pos.x - this.originX;
-    const dy = ship.pos.y - this.originY;
-    // The ship hitbox reach varies with facing; sample it toward the beam's
-    // nearest point so a grazing pass reads fairly.
-    const reach = ship.hitDistanceToward(Math.atan2(-dy, -dx));
-    const along = dx * cos + dy * sin;
-    if (along < -reach) return false;
-    return this.distanceToShip(ship.pos.x, ship.pos.y) < reach + BEAM_HALF_WIDTH;
+    for (let ix = -1; ix <= 1; ix++) {
+      for (let iy = -1; iy <= 1; iy++) {
+        const sx = ship.pos.x + ix * game.w;
+        const sy = ship.pos.y + iy * game.h;
+        const dx = sx - this.originX;
+        const dy = sy - this.originY;
+        // The ship hitbox reach varies with facing; sample it toward the
+        // beam's nearest point so a grazing pass reads fairly.
+        const reach = ship.hitDistanceToward(Math.atan2(-dy, -dx));
+        const along = dx * cos + dy * sin;
+        if (along < -reach) continue;
+        const t = Math.max(0, Math.min(BEAM_LENGTH, along));
+        const px = this.originX + cos * t;
+        const py = this.originY + sin * t;
+        if (Math.hypot(sx - px, sy - py) < reach + BEAM_HALF_WIDTH) return true;
+      }
+    }
+    return false;
   }
 }
 

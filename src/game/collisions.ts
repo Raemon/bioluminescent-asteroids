@@ -1,4 +1,5 @@
 import type { Game } from "../Game";
+import { toroidalDelta } from "../vec";
 import { rng } from "./rng";
 import { Asteroid } from "../Asteroid";
 import { Alien } from "../Alien";
@@ -71,8 +72,7 @@ const consumeBullet = (b: Bullet) => { if (!b.pierce) b.life = 0; };
 // Half the momentum the blocked damage *would* have transferred still shoves the
 // crystal, so a fully-armoured rock can still be nudged by sustained fire.
 const deflectBulletOff = (game: Game, b: Bullet, a: Asteroid, blockedDmg: number) => {
-  let nx = b.pos.x - a.pos.x;
-  let ny = b.pos.y - a.pos.y;
+  let [nx, ny] = toroidalDelta(b.pos.x - a.pos.x, b.pos.y - a.pos.y, game.w, game.h);
   const len = Math.hypot(nx, ny) || 1;
   nx /= len;
   ny /= len;
@@ -92,6 +92,8 @@ const deflectBulletOff = (game: Game, b: Bullet, a: Asteroid, blockedDmg: number
   // push outside the hitbox along the normal so the next frame starts clear.
   // Use the faceted surface radius at this angle (crystals peak well past their
   // nominal radius) plus a small margin so the deflected shot can't re-collide.
+  // A cross-seam deflection may land slightly out of domain — harmless, the
+  // next update folds it.
   const surface = a.radiusAtAngle(Math.atan2(ny, nx) - a.rotation);
   const clear = surface + b.hitRadius() + 2;
   b.pos.x = a.pos.x + nx * clear;
@@ -165,8 +167,7 @@ const handleShipAsteroidCollisions = (game: Game) => {
 
 // polygon-accurate test against the visible halo means the outline IS the hitbox.
 export const shipAsteroidHit = (game: Game, a: Asteroid): boolean => {
-  const dx = a.pos.x - game.ship.pos.x;
-  const dy = a.pos.y - game.ship.pos.y;
+  const [dx, dy] = toroidalDelta(a.pos.x - game.ship.pos.x, a.pos.y - game.ship.pos.y, game.w, game.h);
   const distance = Math.hypot(dx, dy);
   if (distance > a.radius * 1.3 + game.ship.hitRadius) return false;
   const shipReach = game.ship.hitDistanceToward(Math.atan2(dy, dx));
@@ -254,7 +255,8 @@ const playerBulletShootsDownAlienBullet = (game: Game, ab: AlienBullet): boolean
   for (const b of game.bullets) {
     if (b.life <= 0) continue;
     const reach = b.hitRadius() + ab.radius;
-    if (Math.hypot(b.pos.x - ab.pos.x, b.pos.y - ab.pos.y) > reach) continue;
+    const [dx, dy] = toroidalDelta(b.pos.x - ab.pos.x, b.pos.y - ab.pos.y, game.w, game.h);
+    if (Math.hypot(dx, dy) > reach) continue;
     consumeBullet(b);
     game.sound.play("explosionSmall", 0.7, ab.pos);
     game.shake = Math.min(game.shake + 0.12, 1.2);
@@ -285,8 +287,7 @@ const alienBulletDamagesAsteroid = (game: Game, ab: AlienBullet): boolean => {
 };
 
 const alienBulletHitsShip = (game: Game, ab: AlienBullet): boolean => {
-  const dx = ab.pos.x - game.ship.pos.x;
-  const dy = ab.pos.y - game.ship.pos.y;
+  const [dx, dy] = toroidalDelta(ab.pos.x - game.ship.pos.x, ab.pos.y - game.ship.pos.y, game.w, game.h);
   const distance = Math.hypot(dx, dy);
   const shipReach = game.ship.hitDistanceToward(Math.atan2(dy, dx));
   return distance < shipReach + ab.radius;

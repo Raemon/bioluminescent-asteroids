@@ -1,4 +1,4 @@
-import { Vec, v, mul, sub, len, rand, pick, TAU, addScaledMut, circleHit } from "./vec";
+import { Vec, v, mul, sub, len, rand, pick, TAU, addScaledMut, circleHit, wrapMut } from "./vec";
 import { ENTITY_CONFIG } from "./game/entityConfig";
 import { OCTAHEDRON_EDGES, projectOctahedron } from "./octahedron";
 import { SIDE_THRUST_ALWAYS_ON } from "./ship/shipPhysics";
@@ -86,21 +86,13 @@ export class Canister {
     this.rotZ += this.rotSpeedZ * dt;
     if (this.warpTimer === null) {
       addScaledMut(this.pos, this.vel, dt);
+      wrapMut(this.pos, w, h);
       this.traveled += Math.hypot(this.vel.x, this.vel.y) * dt;
       if (this.traveled >= this.pathLength) this.warpTimer = 0;
     } else {
       this.warpTimer += dt;
       if (this.warpTimer >= WARP_DURATION) this.alive = false;
     }
-    // safety net — if the pod somehow leaves the visible area before the warp triggers,
-    //   start the warp anyway so it doesn't blink out without an effect.
-    const margin = this.radius * 4;
-    const offscreen =
-      this.pos.x < -margin ||
-      this.pos.x > w + margin ||
-      this.pos.y < -margin ||
-      this.pos.y > h + margin;
-    if (offscreen && this.warpTimer === null) this.warpTimer = 0;
   }
 
   get warping(): boolean {

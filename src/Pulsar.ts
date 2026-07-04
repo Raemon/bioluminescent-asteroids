@@ -1,4 +1,4 @@
-import { Vec, v, rand, TAU } from "./vec";
+import { Vec, v, rand, TAU, toroidalDelta } from "./vec";
 import { rng, cosmeticRng } from "./game/rng";
 import { ENTITY_STATS } from "./game/entityConfig";
 
@@ -516,8 +516,9 @@ export class Pulsar {
   // normalised; falls back to a random angle for points coincident with
   // the origin so the ship/asteroids always pick up *some* impulse.
   shockwaveImpulseAt(point: Vec): Vec {
-    const dx = point.x - this.shockOriginX;
-    const dy = point.y - this.shockOriginY;
+    const [dx, dy] = toroidalDelta(
+      point.x - this.shockOriginX, point.y - this.shockOriginY, this.w, this.h,
+    );
     const d = Math.hypot(dx, dy);
     if (d < 1e-3) {
       const a = rng() * TAU;

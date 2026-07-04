@@ -2,7 +2,7 @@ import type { Game } from "../Game";
 import { Ship } from "../Ship";
 import { ParticleSystem } from "../Particle";
 import { v } from "../vec";
-import { AsteroidKind, AsteroidSize, spawnBossAt, BASS_KINDS, spawnAsteroidAtEdge } from "../Asteroid";
+import { AsteroidKind, AsteroidSize, spawnBossAt, BASS_KINDS } from "../Asteroid";
 import { AlienSize } from "../Alien";
 import { PowerupKind, POWERUP_KINDS, spawnCanister } from "../Canister";
 import { syncHud, syncPowerupHud } from "./hud";
@@ -11,10 +11,10 @@ import { newWaveEventSchedule } from "./waveEvents";
 import {
   alignBassBeat,
   spawnAlien,
+  spawnAsteroidAway,
   spawnComet,
   updateBgBeatIntensity,
 } from "./waveDirector";
-import { spawnAwayFromShip } from "./spawnAwayFromShip";
 import { startShockwave } from "./shockwave";
 import { SLOW_MO_DURATION } from "./slowMo";
 
@@ -28,12 +28,10 @@ type BetaElement = {
   apply: (game: Game) => void;
 };
 
+// Route through the wave-director helper so beta-panel spawns behave like
+// wave spawns (ship-relative edge entry + staged entrance).
 const spawnAsteroid = (game: Game, kind: AsteroidKind = "normal", size?: AsteroidSize) => {
-  const a = spawnAwayFromShip(
-    () => spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size),
-    game.ship.pos,
-    220,
-  );
+  const a = spawnAsteroidAway(game, kind, size);
   if (a.isBass()) alignBassBeat(game, a);
   if (a.isBass() && (a.size === "medium" || a.size === "small")) {
     game.sound.startBassteroidDrone(a, kind as "bassA" | "bassB" | "bassC" | "bassD", a.size, a.pos);

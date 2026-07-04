@@ -1,4 +1,5 @@
 import type { Game } from "../Game";
+import { toroidalDelta } from "../vec";
 
 // hard cap keeps worst-case drawImage count bounded; dropped trails are the furthest offscreen.
 const MAX_VISIBLE_TRAILS = 40;
@@ -13,29 +14,31 @@ const idx = new Int32Array(128);
 const sect = new Int8Array(128);
 const sqDist = new Float32Array(128);
 
-// squared distance from screen centre — cheap selection metric for the over-cap fallback.
+// squared toroidal distance from the ship (screen centre under the scroll
+// cam) — cheap selection metric for the over-cap fallback.
 const collectTrailCandidates = (game: Game, cx: number, cy: number): number => {
   let n = 0;
   const cap = idx.length;
+  const { w, h } = game;
   for (let i = 0; i < game.asteroids.length && n < cap; i++) {
     // gen-0 bassteroids wear a Trail, post-split fragments wear a
     // SoundwaveRadiator — either qualifies as a candidate to draw.
+    // Entering owners draw their wake in the entrance pass instead.
+    if (game.asteroids[i].entering) continue;
     if (!game.asteroids[i].trail && !game.asteroids[i].radiator) continue;
-    const dx = game.asteroids[i].pos.x - cx;
-    const dy = game.asteroids[i].pos.y - cy;
+    const [dx, dy] = toroidalDelta(game.asteroids[i].pos.x - cx, game.asteroids[i].pos.y - cy, w, h);
     idx[n] = i; sect[n] = SECTION_ASTEROID; sqDist[n] = dx * dx + dy * dy;
     n++;
   }
   for (let i = 0; i < game.aliens.length && n < cap; i++) {
-    if (!game.aliens[i].alive) continue;
-    const dx = game.aliens[i].pos.x - cx;
-    const dy = game.aliens[i].pos.y - cy;
+    if (!game.aliens[i].alive || game.aliens[i].entering) continue;
+    const [dx, dy] = toroidalDelta(game.aliens[i].pos.x - cx, game.aliens[i].pos.y - cy, w, h);
     idx[n] = i; sect[n] = SECTION_ALIEN; sqDist[n] = dx * dx + dy * dy;
     n++;
   }
   for (let i = 0; i < game.comets.length && n < cap; i++) {
-    const dx = game.comets[i].pos.x - cx;
-    const dy = game.comets[i].pos.y - cy;
+    if (game.comets[i].entering) continue;
+    const [dx, dy] = toroidalDelta(game.comets[i].pos.x - cx, game.comets[i].pos.y - cy, w, h);
     idx[n] = i; sect[n] = SECTION_COMET; sqDist[n] = dx * dx + dy * dy;
     n++;
   }
@@ -77,8 +80,8 @@ const paintSelectedTrails = (game: Game, ctx: CanvasRenderingContext2D, n: numbe
 
 // trails drawn before bodies so each entity sits on top of its own trail; one pass for all.
 export const renderTrails = (game: Game, ctx: CanvasRenderingContext2D) => {
-  const cx = game.w * 0.5;
-  const cy = game.h * 0.5;
+  const cx = game.ship.pos.x;
+  const cy = game.ship.pos.y;
   let n = collectTrailCandidates(game, cx, cy);
   if (n === 0) return;
   if (n > MAX_VISIBLE_TRAILS) {

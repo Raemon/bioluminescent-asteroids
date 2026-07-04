@@ -1,4 +1,5 @@
 import type { Game } from "../Game";
+import { toroidalDelta } from "../vec";
 import { Asteroid } from "../Asteroid";
 import { emitExplosion, emitShockwaveSparks } from "./particleBursts";
 import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet, BeatClaimSet } from "./waveDirector";
@@ -64,7 +65,10 @@ const shatterAllAsteroids = (game: Game) => {
   const surviving: Asteroid[] = [];
   const claimed = newBeatClaimSet();
   for (const a of game.asteroids) {
-    if (a.isBossFamily()) bossWeathersShockwave(game, a, surviving);
+    // Entering rocks are still off-screen and intangible — the wavefront
+    // passes under them untouched.
+    if (a.entering) surviving.push(a);
+    else if (a.isBossFamily()) bossWeathersShockwave(game, a, surviving);
     else if (a.isBass()) shatterBassRock(game, a, surviving, claimed);
     else shatterPlainRock(game, a, surviving, claimed);
   }
@@ -75,7 +79,12 @@ const shatterAllAsteroids = (game: Game) => {
 const kickShipFromShockwave = (game: Game) => {
   if (!game.ship.alive) return;
   const kick = game.pulsar.shockwaveImpulseAt(game.ship.pos);
-  const d = Math.hypot(game.ship.pos.x - game.pulsar.shockOriginX, game.ship.pos.y - game.pulsar.shockOriginY);
+  const [dx, dy] = toroidalDelta(
+    game.ship.pos.x - game.pulsar.shockOriginX,
+    game.ship.pos.y - game.pulsar.shockOriginY,
+    game.w, game.h,
+  );
+  const d = Math.hypot(dx, dy);
   const falloff = Math.max(0.45, 1 - d / Math.max(game.w, game.h));
   const mag = SW.shipImpulse * falloff;
   game.ship.vel = { x: game.ship.vel.x + kick.x * mag, y: game.ship.vel.y + kick.y * mag };

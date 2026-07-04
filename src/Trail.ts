@@ -140,6 +140,39 @@ export class Trail {
     this.writeHead(x, y);
   }
 
+  // Carry the recorded wake across a torus fold so it stays attached to the
+  // owner instead of resetting at the seam. `ox/oy` is the fold offset the
+  // owner's position just took (see wrapMut's return).
+  shift(ox: number, oy: number) {
+    const buf = this.buf;
+    const live = this.count;
+    for (let i = 0; i < live; i++) {
+      const base = i * STRIDE;
+      buf[base] += ox;
+      buf[base + 1] += oy;
+    }
+    if (!Number.isNaN(this.lastX)) {
+      this.lastX += ox;
+      this.lastY += oy;
+    }
+  }
+
+  // True when every visible sample, shifted by (ox, oy), sits inside
+  // [0,w)x[0,h). The entrance state uses this to decide the whole wake has
+  // slid on-screen before handing the body to the wrapped world layer.
+  allInside(ox: number, oy: number, w: number, h: number): boolean {
+    const buf = this.buf;
+    const live = this.count;
+    for (let i = 0; i < live; i++) {
+      const base = i * STRIDE;
+      if (buf[base + 2] >= MAX_AGE_SECONDS) continue;
+      const x = buf[base] + ox;
+      const y = buf[base + 1] + oy;
+      if (x < 0 || x >= w || y < 0 || y >= h) return false;
+    }
+    return true;
+  }
+
   // Internal: place (x, y, age=0) at head, advance head, grow count up to cap.
   private writeHead(x: number, y: number) {
     const base = this.head * STRIDE;

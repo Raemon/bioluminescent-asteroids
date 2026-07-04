@@ -14,8 +14,7 @@ import { renderLasers, renderLaserChargeDots, renderLaserAmbientFlash } from "./
 import { renderLaserReticule } from "../ship/reticule/laserReticule";
 import { renderBossBeams } from "./bossBeam";
 import { renderSlowMoTimerBar } from "./slowMoTimerBar";
-import { renderSpectrumVisualizer, updateSpectrumVisualizer, paintSpectrumVisualizer } from "./spectrumVisualizer";
-import { renderEdgeAidsTiled } from "./edgeAids";
+import { updateSpectrumVisualizer, paintSpectrumVisualizer } from "./spectrumVisualizer";
 import { cosmeticRng } from "./rng";
 
 // shake is purely cosmetic; isolate its math so render() reads top-down.
@@ -96,117 +95,87 @@ const paintBeatFlash = (
   ctx.restore();
 };
 
-// Wrapping bodies pop across the seam: their pos teleports edge-to-edge in one
-// frame (wrapMut). To make a body slide across instead, draw it a second time
-// at the wrapped-across offset whenever it straddles an edge — as it leaves the
-// right, its twin is already entering from the left. `reach` is the body's
-// visible extent (silhouette + glow), so the twin enters the moment the glow
-// touches the seam, not when the centre does; off the seam nothing extra draws.
-const drawWrapped = (
-  ctx: CanvasRenderingContext2D,
-  pos: Vec, reach: number, w: number, h: number,
-  draw: () => void,
-) => {
-  draw();
-  const dx = pos.x < reach ? w : pos.x > w - reach ? -w : 0;
-  const dy = pos.y < reach ? h : pos.y > h - reach ? -h : 0;
-  if (dx === 0 && dy === 0) return;
-  const twin = (ox: number, oy: number) => {
-    ctx.save();
-    ctx.translate(ox, oy);
-    draw();
-    ctx.restore();
-  };
-  if (dx !== 0) twin(dx, 0);
-  if (dy !== 0) twin(0, dy);
-  if (dx !== 0 && dy !== 0) twin(dx, dy);
-};
-
-// Visible reach past each body's hitbox radius: the glow halo extends well
-// beyond the bullet/plasma core, so the twin must appear while the halo is
-// still mid-seam. Asteroids/gems are silhouette-dominant; a small pad covers
-// their rim glow.
-const BODY_GLOW_REACH = 1.5;
-const BULLET_GLOW_REACH = 12;
-const ALIEN_BULLET_GLOW_REACH = 6;
-
-// How this layer handles the world wrap, set by the caller's camera:
-//   "gameplay" — wrap only the bodies that wrap in play (the straight "off" cam)
-//   "all"      — wrap EVERY body (even comets/aliens/canisters/parked gems) so a
-//                snapshot is seam-complete for the tiled 2x2/3x3 modes
-//   "none"     — draw each body once; the SCROLL camera replicates the whole
-//                layer at the wrap offsets, so an internal twin would double-draw
-//                the body at the seam (additive over-brightening)
-type WrapMode = "gameplay" | "all" | "none";
-
-// bodies must sit ON their own trails, so trails pass before any per-entity render call.
-// pulsar: draw the pulsar + its shockwave ring inline (behind/above the
-// entities). The scroll camera draws the pulsar on its OWN parallax layer (it's
-// a distant body that should slide slower than gameplay entities), so it passes
-// pulsar=false and paints paintPulsarLayer separately.
-const paintEntityLayers = (
-  game: Game, focusedTarget: ReticuleTarget | null, wrapMode: WrapMode = "gameplay", pulsar = true,
-) => {
-  const { ctx, w, h } = game;
-  // Wrap a body per the camera's wrap mode (see WrapMode).
-  const maybeWrap = (pos: Vec, reach: number, wraps: boolean, draw: () => void) => {
-    if (wrapMode === "none") draw();
-    else if (wraps || wrapMode === "all") drawWrapped(ctx, pos, reach, w, h, draw);
-    else draw();
-  };
-  // Bodies that always wrap in gameplay (asteroids, bullets) still skip the
-  // internal twin when the layer is externally replicated.
-  const wrapBody = (pos: Vec, reach: number, draw: () => void) =>
-    wrapMode === "none" ? draw() : drawWrapped(ctx, pos, reach, w, h, draw);
-  // The pulsar sits behind the entities (it used to ride with the starfield as
-  // the second background layer) but in front of the starfield.
-  if (pulsar) game.pulsar.render(ctx);
+// bodies must sit ON their own trails, so trails pass before any per-entity
+// render call. Each body draws ONCE — the scroll camera replicates the whole
+// layer at the wrap offsets, so a body near the seam is drawn whole by the
+// neighbouring copy. The pulsar renders separately via paintPulsarLayer.
+// Entering bodies are skipped here (in every loop, incl. beat-flash) — they
+// draw once at their unfolded entrance image via paintEntrances instead.
+const paintEntityLayers = (game: Game, focusedTarget: ReticuleTarget | null) => {
+  const { ctx } = game;
   renderTrails(game, ctx);
   // Departure portals sit behind the comet/alien bodies so a warping-out body
   // dives into the visible mouth and shrinks down the throat in front of it.
   renderWormholes(ctx, game.wormholes, game.time * 0.001);
-  for (const c of game.comets) maybeWrap(c.pos, c.radius * BODY_GLOW_REACH, false, () => c.render(ctx));
-  // shards are tiny, brief explosion debris — not worth a seam twin.
+  for (const c of game.comets) if (!c.entering) c.render(ctx);
   for (const s of game.shards) s.render(ctx);
   // bassteroids wear the ship's 4+/12+ combo halo — share the ship's eased
   // intensity + the live beat pulse so every halo on the field rides one rhythm.
   const comboHalo = { intensity: game.ship.comboHaloIntensity, beatPulse: currentBeatPulse(game) };
-  for (const a of game.asteroids) wrapBody(a.pos, a.radius * BODY_GLOW_REACH, () => a.render(ctx, game.time, comboHalo));
-  for (const c of game.canisters) maybeWrap(c.pos, c.radius * BODY_GLOW_REACH, false, () => c.render(ctx, game.time));
-  // only flung blades wrap in gameplay; parked/drifting gems settle in place.
-  for (const g of game.gems) maybeWrap(g.pos, g.radius * BODY_GLOW_REACH, g.fast, () => g.render(ctx, game.time));
-  for (const o of game.fuelOrbs) maybeWrap(o.pos, o.radius * BODY_GLOW_REACH, false, () => o.render(ctx, game.time));
-  for (const al of game.aliens) maybeWrap(al.pos, al.radius * BODY_GLOW_REACH, false, () => al.render(ctx, game.time));
-  for (const ab of game.alienBullets) wrapBody(ab.pos, ab.radius * ALIEN_BULLET_GLOW_REACH, () => ab.render(ctx));
+  for (const a of game.asteroids) if (!a.entering) a.render(ctx, game.time, comboHalo);
+  for (const c of game.canisters) c.render(ctx, game.time);
+  for (const g of game.gems) if (!g.entering) g.render(ctx, game.time);
+  for (const o of game.fuelOrbs) o.render(ctx, game.time);
+  for (const al of game.aliens) if (!al.entering) al.render(ctx, game.time);
+  for (const ab of game.alienBullets) ab.render(ctx);
   renderBossBeams(ctx, game.bossBeams);
-  for (const b of game.bullets) wrapBody(b.pos, b.radius * BULLET_GLOW_REACH, () => b.render(ctx));
+  for (const b of game.bullets) b.render(ctx);
   renderLasers(ctx, game.lasers);
   // every wave body brightens on the beat then tapers over ~100ms (paints over the sprites above).
   const beatFlash = currentBeatFlash(game);
   if (beatFlash > 0) {
-    // flash rides each body; wrap it alongside the body so the glow doesn't get
-    // cropped from a twin at the seam in the tiled snapshot.
-    const flash = (pos: Vec, r: number) =>
-      maybeWrap(pos, r * BODY_GLOW_REACH, false, () => paintBeatFlash(ctx, pos, r, beatFlash));
-    for (const a of game.asteroids) flash(a.pos, a.radius);
+    for (const a of game.asteroids) if (!a.entering) paintBeatFlash(ctx, a.pos, a.radius, beatFlash);
     // warping-out comets/aliens skip the beat-flash — a full-size flash disc
     // would detach from the shrinking body diving down the portal throat.
-    for (const c of game.comets) if (c.warpT === null) flash(c.pos, c.radius);
-    for (const al of game.aliens) if (al.warpT === null) flash(al.pos, al.radius);
-    for (const c of game.canisters) flash(c.pos, c.radius);
-    for (const g of game.gems) flash(g.pos, g.radius);
+    for (const c of game.comets) if (c.warpT === null && !c.entering) paintBeatFlash(ctx, c.pos, c.radius, beatFlash);
+    for (const al of game.aliens) if (al.warpT === null && !al.entering) paintBeatFlash(ctx, al.pos, al.radius, beatFlash);
+    for (const c of game.canisters) paintBeatFlash(ctx, c.pos, c.radius, beatFlash);
+    for (const g of game.gems) if (!g.entering) paintBeatFlash(ctx, g.pos, g.radius, beatFlash);
   }
   if (focusedTarget) paintFocusGlow(ctx, focusedTarget);
   renderBassLightnings(ctx, game.bassLightnings, game.time * 0.001);
   renderDriftBursts(ctx, game.driftBursts, game.time * 0.001);
   game.particles.render(ctx);
-  // The bass-drop shockwave ring radiates from the pulsar, so it rides the
-  // pulsar (inline here for non-scroll modes; the scroll camera draws it on the
-  // pulsar's parallax layer via paintPulsarLayer).
-  if (pulsar) game.pulsar.renderShockwaveOverlay(ctx);
   // Popups (combo / pickup / score) anchor at the world spot they describe (a hit
   // location, the ship), so they scroll + wrap with the world, not the glass.
   renderPopups(ctx, game.popups);
+};
+
+// Entering bodies draw ONCE at their unfolded entrance image (pos + enterOff)
+// under the RAW camera offset — not mod-normalized; the enterOff bookkeeping
+// (entity folds, ship folds) keeps that product continuous — so they slide in
+// from the screen border and canvas clipping masks the offscreen part. Order
+// mirrors the world layer: trails → comets → asteroids → gems → aliens.
+const paintEntrances = (game: Game, camX: number, camY: number) => {
+  const { ctx } = game;
+  const entering =
+    game.comets.some((c) => c.entering) ||
+    game.asteroids.some((a) => a.entering) ||
+    game.gems.some((g) => g.entering) ||
+    game.aliens.some((al) => al.entering);
+  if (!entering) return;
+  const atEntrance = (e: { enterOffX: number; enterOffY: number }, draw: () => void) => {
+    ctx.save();
+    ctx.translate(e.enterOffX, e.enterOffY);
+    draw();
+    ctx.restore();
+  };
+  ctx.save();
+  ctx.translate(camX, camY);
+  const tSec = game.time * 0.001;
+  // trails first so each body sits on its own wake, like the world layer.
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const a of game.asteroids) if (a.entering && a.trail) atEntrance(a, () => a.trail!.render(ctx, tSec));
+  for (const al of game.aliens) if (al.entering) atEntrance(al, () => al.trail.render(ctx, tSec));
+  for (const c of game.comets) if (c.entering) atEntrance(c, () => c.glowTrail.render(ctx, tSec));
+  ctx.restore();
+  for (const c of game.comets) if (c.entering) atEntrance(c, () => c.render(ctx));
+  const comboHalo = { intensity: game.ship.comboHaloIntensity, beatPulse: currentBeatPulse(game) };
+  for (const a of game.asteroids) if (a.entering) atEntrance(a, () => a.render(ctx, game.time, comboHalo));
+  for (const g of game.gems) if (g.entering) atEntrance(g, () => g.render(ctx, game.time));
+  for (const al of game.aliens) if (al.entering) atEntrance(al, () => al.render(ctx, game.time));
+  ctx.restore();
 };
 
 // The pulsar's own layer: the planet + shockwave ring + spectrum halo, drawn
@@ -227,17 +196,19 @@ const paintPulsarLayer = (game: Game) => {
 // The dormant boss is excluded too — during its approach it's meant to read as part of the
 // background planet, so the reticule must not light it up or treat it as a lockable target.
 export const targetsForReticule = (game: Game) => [
-  // Skip intangible rocks — a dormant boss and a phased-out warble both pass
-  // bullets through, so the reticule shouldn't promise a hit on them.
-  ...game.asteroids.filter((a) => !(a.isBoss() && a.bossPhase === "dormant") && !a.isPhasedOut()),
-  // Warping-out comets/aliens are intangible and leaving — don't lock them.
-  ...game.comets.filter((c) => c.warpT === null),
-  ...game.aliens.filter((a) => a.warpT === null),
+  // Skip intangible rocks — a dormant boss, a phased-out warble and an
+  // entering spawn all pass bullets through, so the reticule shouldn't
+  // promise a hit on them.
+  ...game.asteroids.filter((a) => !(a.isBoss() && a.bossPhase === "dormant") && !a.isPhasedOut() && !a.entering),
+  // Warping-out comets/aliens are intangible and leaving; entering ones are
+  // intangible and still arriving — don't lock either.
+  ...game.comets.filter((c) => c.warpT === null && !c.entering),
+  ...game.aliens.filter((a) => a.warpT === null && !a.entering),
   ...game.canisters,
   // Moving gems (the fan a burst gold asteroid throws off) are real rhythm
   // targets, so give them trajectory lines + a first-beat dot like any rock.
   // Parked/near-still drops self-skip in the trajectory walk (speed<1).
-  ...game.gems.filter((g) => Math.hypot(g.vel.x, g.vel.y) >= 1),
+  ...game.gems.filter((g) => !g.entering && Math.hypot(g.vel.x, g.vel.y) >= 1),
 ];
 
 // Ship + reticule + trajectory are the screen-pinned foreground: in scroll mode
@@ -268,42 +239,6 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   game.ship.render(ctx, game.time, currentBeatPulse(game));
   renderLaserReticule(ctx, game, game.beatTime);
   renderLaserChargeDots(ctx, game, game.beatTime);
-};
-
-// Paint the full world scene (backdrop + background + entities + foreground +
-// world-space overlays) into the current ctx at the current transform. Factored
-// out of renderGame so the tiled edge-aid modes can paint it once to an
-// offscreen canvas and composite that snapshot into tiles. `shakeX/shakeY` are
-// passed in so a tiled snapshot can be taken without shake (tiles add their own
-// transforms) while the normal path keeps the shake.
-const paintScene = (game: Game, shakeX: number, shakeY: number, forSnapshot = false) => {
-  const { ctx } = game;
-  // Non-scroll cameras draw the reticule at folded [0,w) canvas coords, so make
-  // sure no stale scroll-mode wrap anchor is left set from a prior frame.
-  setReticuleWrapAnchor(null);
-  ctx.save();
-  paintBackdrop(game);
-  ctx.translate(shakeX, shakeY);
-  paintBackground(game);
-  // pick the same focused target the reticule will draw the on-rhythm spot on, so the
-  // brightness boost on the sprite and the reticule overlay agree on which target is "the one".
-  // One target gather per frame, reused by the focus pick and the reticule pass.
-  const targets = targetsForReticule(game);
-  const focusedTarget = pickCenterMostTargetForFocus(
-    game.ship.pos, computeConeFrame(game.ship), game.w, game.h, targets,
-  );
-  paintEntityLayers(game, focusedTarget, forSnapshot ? "all" : "gameplay");
-  paintForeground(game, targets);
-  // slow-mo countdown rail sits above the field so its beat ticks read clearly.
-  renderSlowMoTimerBar(game);
-  // laser ambient wash sits above entities; the bass-drop white flash sits above
-  // even that so a bass drop still wins.
-  renderLaserAmbientFlash(ctx, game);
-  // For a tiled snapshot the visualizer halo must live in the snapshot so it
-  // scrolls + tiles with the pulsar it rings; the straight (off) path draws it
-  // after the scene as a screen-pinned overlay instead.
-  if (forSnapshot) renderSpectrumVisualizer(game);
-  ctx.restore();
 };
 
 // ── Scroll mode (locked-center): live wrap-replicated paint ───────────────────
@@ -412,10 +347,12 @@ const paintScrollScene = (game: Game, shakeX: number, shakeY: number) => {
   // Pulsar layer at its own (slower) parallax, behind the entities.
   tileCopies(parallaxX * PULSAR_PARALLAX, parallaxY * PULSAR_PARALLAX, () => paintPulsarLayer(game));
 
-  // World layer at the 1.0 wrap offsets. wrapMode "none": every copy is a live
-  // full paint, so a body near the seam is drawn whole by the neighbouring copy
-  // (the per-body twin would double-draw it).
-  tileCopies(camX, camY, () => paintEntityLayers(game, focusedTarget, "none", false));
+  // World layer at the 1.0 wrap offsets. Every copy is a live full paint, so a
+  // body near the seam is drawn whole by the neighbouring copy.
+  tileCopies(camX, camY, () => paintEntityLayers(game, focusedTarget));
+
+  // Entering bodies slide in over the world layer, under the foreground.
+  paintEntrances(game, camX, camY);
 
   // Screen-pinned foreground: ship is locked dead-centre, so translate the world
   // by the camera offset and the reticule/preview (drawn relative to ship.pos)
@@ -437,37 +374,8 @@ const paintScrollScene = (game: Game, shakeX: number, shakeY: number) => {
   ctx.restore();
 };
 
-// The ship has no wrap-twin, so the tiled snapshot crops it at the world edge.
-// Redraw it whole on top at a caller-chosen offset/scale. The reticule is left
-// to the snapshot — it's gameplay UI tied to the live field, not a landmark.
-const paintShipOverlay = (game: Game, ox: number, oy: number, scale: number) => {
-  const { ctx } = game;
-  ctx.save();
-  ctx.translate(ox, oy);
-  ctx.scale(scale, scale);
-  game.ship.render(ctx, game.time, currentBeatPulse(game));
-  ctx.restore();
-};
-
 // one entry point so main.ts doesn't see the layer ordering, and shake wraps the whole scene.
 export const renderGame = (game: Game) => {
   const { shakeX, shakeY } = applyScreenShake(game);
-  // Scroll (locked-center) is the default camera: it paints the live world
-  // wrap-replicated, so it owns the whole render and never snapshots.
-  if (game.edgeAidMode === "scroll") {
-    paintScrollScene(game, shakeX, shakeY);
-    return;
-  }
-  // The snapshot-tiled edge-aid modes (2x2 / 3x3) take over the whole scene
-  // render; for those renderEdgeAidsTiled paints the scene to an offscreen and
-  // composites the tiles. "off" and every other state paint the scene straight.
-  const landmarks = { paintShip: paintShipOverlay };
-  const tiled = renderEdgeAidsTiled(game, paintScene, landmarks);
-  if (!tiled) {
-    paintScene(game, shakeX, shakeY);
-    // Master-bus spectrum halo — drawn after the scene as a screen-pinned
-    // overlay. Tiled modes draw it inside the snapshot instead (see paintScene)
-    // so it scrolls with the pulsar, so skip the pinned copy here.
-    renderSpectrumVisualizer(game);
-  }
+  paintScrollScene(game, shakeX, shakeY);
 };

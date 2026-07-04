@@ -40,6 +40,11 @@ export class Gem {
   // and wrap at the screen edge instead of decaying to a near-stop, so they read
   // as blades thrown across the field rather than a quietly settling drop.
   fast = false;
+  // Entrance state (gem-swarm gems) — see game/entrance.ts.
+  entering = false;
+  enterOffX = 0;
+  enterOffY = 0;
+  enterTraveled = 0;
   // Optional drift-to-park: rhythm-aligned gems fly from the crystal's death
   // site to a solved spot on the player's one-beat aim ring, arriving exactly
   // when `parkAge` is reached, then freeze. `parkTarget` null = free drift.
@@ -85,18 +90,28 @@ export class Gem {
       // Flung blade: hold velocity and wrap, so the gem keeps crossing the
       // field as a live rhythm target until its lifetime expires.
       addScaledMut(this.pos, this.vel, dt);
-      wrapMut(this.pos, w, h);
+      this.applyFold(wrapMut(this.pos, w, h));
     } else {
       // Gentle drift; the gem isn't supposed to chase or flee, it just floats
       // where the rock died.
       addScaledMut(this.pos, this.vel, dt);
+      this.applyFold(wrapMut(this.pos, w, h));
       // Slow the drift over time so it eventually settles near its origin.
       scaleMut(this.vel, Math.max(0, 1 - dt * 0.6));
     }
     if (this.age >= LIFETIME) this.alive = false;
   }
 
+  // Keep the entrance image continuous when the gem folds mid-entrance.
+  private applyFold(off: { x: number; y: number } | null) {
+    if (!off || !this.entering) return;
+    this.enterOffX -= off.x;
+    this.enterOffY -= off.y;
+  }
+
   collidesWith(point: Vec, pointRadius: number): boolean {
+    // Still sliding in from the border — intangible until fully on-screen.
+    if (this.entering) return false;
     return circleHit(this.pos, this.radius, point, pointRadius);
   }
 

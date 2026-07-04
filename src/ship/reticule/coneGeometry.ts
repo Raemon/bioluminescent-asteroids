@@ -40,13 +40,7 @@ export const computeConeFrame = (ship: Ship): ConeFrame => {
 };
 
 // screen-wrap means the closest "image" of a target may be on the other side; pick the nearest.
-export const toroidalDelta = (dx: number, dy: number, w: number, h: number): [number, number] => {
-  if (dx > w / 2) dx -= w;
-  else if (dx < -w / 2) dx += w;
-  if (dy > h / 2) dy -= h;
-  else if (dy < -h / 2) dy += h;
-  return [dx, dy];
-};
+export { toroidalDelta } from "../../vec";
 
 // a target's silhouette overlaps the cone if forward and either side-normal sit within tr of the wedge.
 export const targetIsInsideCone = (

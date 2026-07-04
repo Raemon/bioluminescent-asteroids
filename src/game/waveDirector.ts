@@ -4,10 +4,10 @@ import { spawnGemSwarm } from "../Gem";
 import { spawnComet as spawnCometAtEdge, spawnMeteorShower, COMET_WARP_LIFETIME } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
-import { rand, randInt, v, TAU } from "../vec";
+import { rand, randInt, v, TAU, nearestImageOf, wrapMut } from "../vec";
 import { rng } from "./rng";
 import { BEAT_GRID } from "./rhythmConstants";
-import { spawnAwayFromShip } from "./spawnAwayFromShip";
+import { stageEntrance, audiblePos } from "./entrance";
 import { newWaveEventSchedule, maybeSchedule, scheduleAt } from "./waveEvents";
 import { startShockwave } from "./shockwave";
 import { emitCrackParticles } from "./particleBursts";
@@ -55,9 +55,8 @@ const spawnSpeedRange = (a: Asteroid): [number, number] => {
 const alignIncomingToRhythm = (game: Game, a: Asteroid, claimed?: BeatClaimSet) => {
   if (a.isBoss()) return;
   const range = spawnSpeedRange(a);
-  const centre = visibleCentre(game);
   alignVelocityToRhythm(a.pos, a.vel, {
-    refPos: centre,
+    refPos: game.ship.pos,
     beatTime: game.beatTime,
     speedRange: range,
     engageRadius: CFG.engageRadius.incoming,
@@ -96,7 +95,7 @@ export const alignSplitChildToRhythm = (game: Game, child: Asteroid, claimed?: B
   const speed = Math.hypot(child.vel.x, child.vel.y);
   if (speed < 1) return;
   alignVelocityToRhythm(child.pos, child.vel, {
-    refPos: game.ship.pos,
+    refPos: nearestImageOf(game.ship.pos, child.pos, game.w, game.h),
     refVel: game.ship.vel,
     beatTime: game.beatTime,
     speedRange: [speed * 0.65, speed * 1.35],
@@ -207,62 +206,35 @@ const applyRhythmSpeed = (game: Game, vel: { x: number; y: number }, k = rhythmS
   vel.y *= k;
 };
 
-// World-space offset from playfield coords to the player's *visible* frame.
+// World-space origin of the player's *visible* frame.
 //
 // The edge-spawn helpers place bodies relative to the 1920x1080 playfield
-// (off the playfield edges, aiming at the playfield centre). In the default
-// "scroll" camera the ship is locked to screen centre and the torus scrolls
-// around it, so the visible viewport is `ship.pos ± (w/2, h/2)` — NOT the
-// playfield rect. Wrapping fixes the seam, NOT where on screen a playfield-edge
-// spawn first appears: the visible window is one playfield-sized tile, so a rock
-// at playfield-edge wraps to ship-dependent on-screen spot — often mid-field —
-// the moment the ship drifts off centre. So wrapping bodies (asteroids, gems)
-// need this offset for a clean *first* entrance just as much as non-wrapping
-// ones (comets, meteors, aliens), which are drawn once at their literal world
-// position. Either way, without the shift a spawn pops in at whatever screen
-// spot the camera maps it to instead of sliding in from offscreen.
-//
-// Shifting those spawns (and their rhythm-encounter reference) by this offset
-// maps playfield-centre → ship.pos, so "just off the left playfield edge"
-// becomes "just off the left of what the player currently sees", and the body
-// crosses the visible screen and exits the far visible edge. Zero in the
-// non-scroll modes, where the playfield rect *is* the screen.
-const cameraWorldOffset = (game: Game): { x: number; y: number } => {
-  if (game.edgeAidMode !== "scroll") return { x: 0, y: 0 };
-  return { x: game.ship.pos.x - game.w / 2, y: game.ship.pos.y - game.h / 2 };
-};
+// (off the playfield edges, aiming at the playfield centre). Under the
+// locked-centre scroll camera the visible viewport is `ship.pos ± (w/2, h/2)`
+// — NOT the playfield rect — so adding this origin maps playfield-centre →
+// ship.pos: "just off the left playfield edge" becomes "just off the left of
+// what the player currently sees". The spawn is then folded in-domain by
+// stageEntrance, which records the unfolded entrance image it slides in at.
+const shipFrameOrigin = (game: Game): { x: number; y: number } => ({
+  x: game.ship.pos.x - game.w / 2,
+  y: game.ship.pos.y - game.h / 2,
+});
 
-// The world point the player sees at screen centre — playfield centre shifted
-// into the visible frame. Used as the rhythm-encounter anchor for incoming
-// non-wrapping bodies so the engagement ring sits where the player actually is.
-const visibleCentre = (game: Game): { x: number; y: number } => {
-  const off = cameraWorldOffset(game);
-  return { x: game.w / 2 + off.x, y: game.h / 2 + off.y };
-};
-
-// shared retry helper keeps the "no rock on top of the ship" rule in one place.
-//   Every fresh spawn is rhythm-aligned post-roll so the player's first clean
-//   shot at the rock can land on a beat — see alignIncomingToRhythm. The
-//   optional `claimed` set spreads a batch of spawns across distinct beat
-//   slots instead of stacking them all on the same beat.
-const spawnAsteroidAway = (
+// One wave rock: edge-spawn shifted into the visible frame, rhythm-aligned
+//   while still unfolded (see alignIncomingToRhythm — the `claimed` set
+//   spreads a batch across distinct beat slots), then staged so it slides in
+//   from the screen border. Ship-relative edge spawns start ≥ half a screen
+//   from the ship, so no away-from-ship retry is needed.
+export const spawnAsteroidAway = (
   game: Game,
-  minDist: number,
   kind?: AsteroidKind,
   size?: AsteroidSize,
   claimed?: BeatClaimSet,
 ) => {
-  // Shift each edge-spawn into the visible frame (see cameraWorldOffset) so the
-  // rock slides in from a real offscreen edge under the scroll camera, not the
-  // playfield-rect edge that wraps to some on-screen spot. The away-from-ship
-  // check then runs against the shifted position.
-  const off = cameraWorldOffset(game);
-  const a = spawnAwayFromShip(() => {
-    const r = spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size);
-    r.pos.x += off.x;
-    r.pos.y += off.y;
-    return r;
-  }, game.ship.pos, minDist);
+  const origin = shipFrameOrigin(game);
+  const a = spawnAsteroidAtEdge(game.w, game.h, undefined, kind, size);
+  a.pos.x += origin.x;
+  a.pos.y += origin.y;
   // Heavy solid crystals drift slower; pre-scale before alignment so even a
   //   no-candidate fallback keeps the ponderous speed. The aligner works in
   //   the matching slowed band (see spawnSpeedRange), so a successful match
@@ -285,12 +257,13 @@ const spawnAsteroidAway = (
   }
   alignIncomingToRhythm(game, a, claimed);
   applyRhythmSpeed(game, a.vel, waveStartSpeedMul(game));
+  stageEntrance(game, a);
   return a;
 };
 
 // specials need alignBassBeat so their first downbeat lands on the pulsar grid immediately.
 const spawnSpecial = (game: Game, kind: AsteroidKind, claimed?: BeatClaimSet): Asteroid => {
-  const a = spawnAsteroidAway(game, 220, kind, undefined, claimed);
+  const a = spawnAsteroidAway(game, kind, undefined, claimed);
   alignBassBeat(game, a);
   return a;
 };
@@ -298,30 +271,22 @@ const spawnSpecial = (game: Game, kind: AsteroidKind, claimed?: BeatClaimSet): A
 // standalone solidCrystalSmall has a fixed small size + kind so we roll it
 // outside activeSpecialsForWave. Same "rare treat" slot the tink roll filled.
 const spawnSolidCrystalSmall = (game: Game, claimed?: BeatClaimSet): Asteroid =>
-  spawnAsteroidAway(game, 200, "solidCrystalSmall", "small", claimed);
+  spawnAsteroidAway(game, "solidCrystalSmall", "small", claimed);
 
 // pre-align first fire to the next BEAT_GRID slot so saucer shots lock into
 // the rhythm immediately. From there the alien advances through its own
 // fire pattern (see ALIEN_FIRE_PATTERN_BEATS in Alien.ts).
 export const spawnAlien = (game: Game, size: AlienSize) => {
-  // Shift each edge-spawn into the visible frame (see cameraWorldOffset) BEFORE
-  // the away-from-ship distance check, so the alien flies in from a real
-  // offscreen edge and the "not on top of the ship" test runs in one frame.
-  const off = cameraWorldOffset(game);
-  const a = spawnAwayFromShip(
-    () => {
-      const al = spawnAlienAtEdge(game.w, game.h, size);
-      al.pos.x += off.x;
-      al.pos.y += off.y;
-      return al;
-    },
-    game.ship.pos, 260, 6,
-  );
+  const origin = shipFrameOrigin(game);
+  const a = spawnAlienAtEdge(game.w, game.h, size);
+  a.pos.x += origin.x;
+  a.pos.y += origin.y;
   applyRhythmSpeed(game, a.vel);
   a.nextFireAt = Math.ceil((game.beatTime + 0.5) / BEAT_GRID) * BEAT_GRID;
   a.firePatternIndex = 0;
+  stageEntrance(game, a);
   game.aliens.push(a);
-  game.sound.startAlienDrone(a, size, a.pos);
+  game.sound.startAlienDrone(a, size, audiblePos(a));
 };
 
 // comet's first melody note locks to the next bass-measure downbeat (every BASS_MEASURE_LENGTH s),
@@ -339,17 +304,16 @@ export const spawnAlien = (game: Game, size: AlienSize) => {
 export const spawnComet = (game: Game) => {
   const c = spawnCometAtEdge(game.w, game.h);
   // Slide the edge-spawn into the player's visible frame so the comet streaks
-  // in from a real offscreen edge and crosses the screen (see cameraWorldOffset).
-  const off = cameraWorldOffset(game);
-  c.pos.x += off.x;
-  c.pos.y += off.y;
+  // in from a real offscreen edge and crosses the screen (see shipFrameOrigin).
+  const origin = shipFrameOrigin(game);
+  c.pos.x += origin.x;
+  c.pos.y += origin.y;
   const cometEntryLead = 0.6;
   c.nextNoteBeatTime = Math.ceil((game.beatTime + cometEntryLead) / BASS_MEASURE_LENGTH) * BASS_MEASURE_LENGTH;
   const cometSpeed = Math.hypot(c.vel.x, c.vel.y);
   if (cometSpeed > 0) {
-    const centre = visibleCentre(game);
     alignVelocityToRhythm(c.pos, c.vel, {
-      refPos: centre,
+      refPos: game.ship.pos,
       beatTime: game.beatTime,
       speedRange: [cometSpeed * 0.85, cometSpeed * 1.15],
       engageRadius: CFG.engageRadius.incoming,
@@ -360,8 +324,9 @@ export const spawnComet = (game: Game) => {
   // Fixed 30s in play regardless of speed or map position — the comet crosses,
   // keeps drifting through the wrapped world, then warps out on the clock.
   c.lifetime = COMET_WARP_LIFETIME;
+  stageEntrance(game, c);
   game.comets.push(c);
-  game.sound.startCometShimmer(c, c.pos);
+  game.sound.startCometShimmer(c, audiblePos(c));
 };
 
 // The rare meteor shower: a flock of small fast meteors. They share the comet
@@ -370,20 +335,21 @@ export const spawnComet = (game: Game) => {
 // played at the lead meteor's position.
 export const spawnMeteorShowerEvent = (game: Game, countOverride?: number) => {
   const meteors = spawnMeteorShower(game.w, game.h, countOverride);
-  // Shift the whole flock into the visible frame (see cameraWorldOffset) so it
+  // Shift the whole flock into the visible frame (see shipFrameOrigin) so it
   // sweeps in from a real offscreen edge instead of popping in at the seam.
-  const off = cameraWorldOffset(game);
+  const origin = shipFrameOrigin(game);
   const k = rhythmSpeedMul(game);
   for (const m of meteors) {
-    m.pos.x += off.x;
-    m.pos.y += off.y;
+    m.pos.x += origin.x;
+    m.pos.y += origin.y;
     applyRhythmSpeed(game, m.vel, k);
     // Keep the cross-and-leave lifetime matched to the sped-up velocity: a
     // faster meteor crosses sooner, so it should fade out sooner too.
     if (k !== 1) m.lifetime /= k;
+    stageEntrance(game, m);
     game.comets.push(m);
   }
-  if (meteors.length > 0) game.sound.play("meteorShower", 1, meteors[0].pos);
+  if (meteors.length > 0) game.sound.play("meteorShower", 1, audiblePos(meteors[0]));
 }
 
 // The gem swarm: a flock of bare gems sweeping across the field, the
@@ -398,15 +364,14 @@ export const spawnGemSwarmEvent = (game: Game, countOverride?: number) => {
   const gems = spawnGemSwarm(game.w, game.h, count);
   const claimed = newBeatClaimSet();
   // Same camera shift as wave rocks: enter from the visible edge, cross the
-  // player at screen centre (see cameraWorldOffset / spawnAsteroidAway).
-  const off = cameraWorldOffset(game);
-  const centre = visibleCentre(game);
+  // player at screen centre (see shipFrameOrigin / spawnAsteroidAway).
+  const origin = shipFrameOrigin(game);
   for (const g of gems) {
-    g.pos.x += off.x;
-    g.pos.y += off.y;
+    g.pos.x += origin.x;
+    g.pos.y += origin.y;
     const speed = Math.hypot(g.vel.x, g.vel.y);
     alignVelocityToRhythm(g.pos, g.vel, {
-      refPos: centre,
+      refPos: game.ship.pos,
       beatTime: game.beatTime,
       speedRange: [speed * 0.85, speed * 1.15],
       engageRadius: CFG.engageRadius.incoming,
@@ -414,9 +379,10 @@ export const spawnGemSwarmEvent = (game: Game, countOverride?: number) => {
       claimed,
     });
     applyRhythmSpeed(game, g.vel);
+    stageEntrance(game, g);
     game.gems.push(g);
   }
-  if (gems.length > 0) game.sound.play("gemSwarm", 1, gems[0].pos);
+  if (gems.length > 0) game.sound.play("gemSwarm", 1, audiblePos(gems[0]));
 };
 
 // one entry replaces the previous if/else maze covering boss/foreshadow/normal wave dispatch.
@@ -431,7 +397,7 @@ export const spawnTutorialSmall = (game: Game) => {
   // The guided tutorial is the rookie's "first level"; consume the flag so the
   //   first real density wave after graduation streaks in normally.
   game.hasSpawnedFirstLevel = true;
-  const a = spawnAsteroidAway(game, 240, undefined, "small", newBeatClaimSet());
+  const a = spawnAsteroidAway(game, undefined, "small", newBeatClaimSet());
   game.asteroids.push(a);
   emitCrackParticles(game.particles, a, true);
 };
@@ -440,7 +406,7 @@ export const spawnTutorialSmall = (game: Game) => {
 //   until the player finishes the hint progression. Avoids the difficulty cliff
 //   of jumping straight from one small practice rock to the full 3-big wave.
 export const spawnTutorialBig = (game: Game) => {
-  const a = spawnAsteroidAway(game, 240, undefined, "large", newBeatClaimSet());
+  const a = spawnAsteroidAway(game, undefined, "large", newBeatClaimSet());
   game.asteroids.push(a);
   emitCrackParticles(game.particles, a, true);
 };
@@ -646,7 +612,9 @@ const angularDist = (a: number, b: number): number => {
   return Math.min(d, TAU - d);
 };
 
-// Spawn one opening-wave rock drifting straight out from the centre.
+// Spawn one opening-wave rock drifting straight out from the ship. Folded
+// in-domain at the end but NOT staged — it materialises in view, it doesn't
+// slide in from a border.
 const spawnFirstLevelDrifter = (
   game: Game,
   angle: number,
@@ -655,8 +623,8 @@ const spawnFirstLevelDrifter = (
   size: AsteroidSize,
   claimed: BeatClaimSet,
 ): Asteroid => {
-  const cx = game.w / 2;
-  const cy = game.h / 2;
+  const cx = game.ship.pos.x;
+  const cy = game.ship.pos.y;
   const engage = CFG.engageRadius.incoming;
   const pos = v(cx + Math.cos(angle) * dist, cy + Math.sin(angle) * dist);
   // Heavy solid crystals keep their slowdown multiplier on top of the already
@@ -677,6 +645,7 @@ const spawnFirstLevelDrifter = (
     maxBeats: 24,
     claimed,
   });
+  wrapMut(a.pos, game.w, game.h);
   return a;
 };
 
@@ -809,7 +778,7 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
   spawns.forEach(({ kind: k, size }, slotIndex) => {
     const rock = isFirstLevel && firstLevelPlacements
       ? spawnFirstLevelDrifter(game, firstLevelPlacements[slotIndex].angle, firstLevelPlacements[slotIndex].dist, k, size, claimed)
-      : spawnAsteroidAway(game, 200, k, size, claimed);
+      : spawnAsteroidAway(game, k, size, claimed);
     game.asteroids.push(rock);
   });
   for (const kind of activeSpecials) {

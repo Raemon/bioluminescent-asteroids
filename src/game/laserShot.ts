@@ -483,22 +483,34 @@ const applyBeamDamage = (game: Game, beam: LaserBeam, dir: Vec) => {
 // body, gem/comet/canister circles) exactly as the bullet path does.
 const applyBeamToGroup = (game: Game, beam: LaserBeam, dir: Vec, group: LaserTargetGroup) => {
   const { origin, length } = beam;
+  const { w, h } = game;
   const swathR = beamHalfWidth(beam.dots) + LASER_HIT_PAD;
   const surviving: LaserTarget[] = [];
   for (const target of group.list()) {
     if (beam.alreadyHit.has(target) || !beam.eligible.has(target)) {
       surviving.push(target); continue;
     }
-    const t = closestApproach(origin, dir, length, target.pos);
-    const closest = v(origin.x + dir.x * t, origin.y + dir.y * t);
-    if (!target.collidesWith(closest, swathR)) {
+    // The segment may run past the seam: sweep each wrap image of the target
+    // and fold the contact point back in-domain so impact effects land on the
+    // visible body.
+    let contact: Vec | null = null;
+    for (let ix = -1; ix <= 1 && !contact; ix++) {
+      for (let iy = -1; iy <= 1 && !contact; iy++) {
+        const offX = ix * w;
+        const offY = iy * h;
+        const t = closestApproach(origin, dir, length, { x: target.pos.x + offX, y: target.pos.y + offY });
+        const closest = v(origin.x + dir.x * t - offX, origin.y + dir.y * t - offY);
+        if (target.collidesWith(closest, swathR)) contact = closest;
+      }
+    }
+    if (!contact) {
       surviving.push(target); continue;
     }
     beam.alreadyHit.add(target);
     // Hot beam-strike gout at the contact point, on top of the target's own
     // kill/crack burst — sells the laser as a heavier hit than a bullet.
-    emitLaserImpact(game.particles, closest, dir, beam.dots / LASER_MAX_DOTS);
-    const fakeBullet = makeFakeBullet(closest, dir, beam.firedOnBeat);
+    emitLaserImpact(game.particles, contact, dir, beam.dots / LASER_MAX_DOTS);
+    const fakeBullet = makeFakeBullet(contact, dir, beam.firedOnBeat);
     for (const remaining of group.onHit(game, target, beam, dir, fakeBullet)) {
       surviving.push(remaining);
     }

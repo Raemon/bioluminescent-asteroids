@@ -1,7 +1,7 @@
 import type { Game } from "../Game";
 import type { ReplayPlayer } from "./replayPlayer";
 import { getRngSeed } from "./rng";
-import { dist } from "../vec";
+import { dist, nearestImageOf } from "../vec";
 import { Asteroid, tickTorusGroups } from "../Asteroid";
 import { Alien, ALIEN_FIRE_PATTERN_BEATS, bigAlienBurstAngleOffset } from "../Alien";
 import { AlienBullet } from "../AlienBullet";
@@ -51,6 +51,7 @@ import { showGameOverIntro } from "./gameOverIntro";
 import { isDown, wasPressed, TUTORIAL_CONTROL_ACTIONS } from "./controlBindings";
 import { tickLaserShot, FIRE_FLASH_DECAY } from "./laserShot";
 import { tickTorusCharge, tickSuperLaserFire } from "./torusCharge";
+import { tickEntrances, shiftEntranceFrames, audiblePos } from "./entrance";
 import { fireBossSweepBeam, tickBossBeams } from "./bossBeam";
 import { targetsForReticule } from "./gameRender";
 import { driftTierForRing } from "../ship/reticule/reticuleRender";
@@ -764,6 +765,10 @@ const updatePlaying = (game: Game, dt: number) => {
   // fire trigger reads it this frame.
   tickTorusCharge(game, dt);
   game.ship.update(dt, game.input, game.particles, game.bullets, game.w, game.h, game.time, game.sound);
+  // A ship fold jumps the camera a full screen; keep entrance images pinned.
+  if (game.ship.lastWrapDX !== 0 || game.ship.lastWrapDY !== 0) {
+    shiftEntranceFrames(game, game.ship.lastWrapDX, game.ship.lastWrapDY);
+  }
   // Debug instrumentation: capture ship state right after physics tick so the
   //   recorded snapshot reflects the exact state the replay should reproduce.
   //   Replay-side compares to the same snapshot and logs the first divergence.
@@ -809,6 +814,7 @@ const updatePlaying = (game: Game, dt: number) => {
   graceFrameNearAsteroids(game);
   tickWavePhase(game, dt, musicDt);
   tickWorldEntities(game, dt, musicDt);
+  tickEntrances(game, musicDt);
   game.particles.update(musicDt);
   game.popups = updatePopups(game.popups, dt);
   game.bassLightnings = updateBassLightnings(game.bassLightnings, dt);
@@ -1099,20 +1105,22 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
 // dimensions so pan saturates at the actual visible edges.
 const updatePositionalAudio = (game: Game) => {
   game.sound.setListener(game.ship.pos.x, game.ship.pos.y, game.w, game.h);
+  // audiblePos: an entering body pans from its visible entrance image, not
+  // the folded pos on the far side of the torus.
   for (const a of game.asteroids) {
     if (a.isBass() && (a.size === "medium" || a.size === "small")) {
-      game.sound.updateBassteroidDrone(a, a.pos);
+      game.sound.updateBassteroidDrone(a, audiblePos(a));
     }
     if (a.kind === "warble") {
       // Lazily open the voice (guards against dupes) and ride the phase morph:
       // ghost = 1 - opacity, so the hum warbles harder as the rock fades out.
-      game.sound.startWarbleDrone(a, a.pos);
-      game.sound.updateWarbleDrone(a, a.pos);
+      game.sound.startWarbleDrone(a, audiblePos(a));
+      game.sound.updateWarbleDrone(a, audiblePos(a));
       game.sound.setWarbleDronePhase(a, 1 - a.warbleOpacity);
     }
   }
-  for (const al of game.aliens) game.sound.updateAlienDrone(al, al.pos);
-  for (const c of game.comets) if (!c.isMeteor) game.sound.updateCometShimmer(c, c.pos);
+  for (const al of game.aliens) game.sound.updateAlienDrone(al, audiblePos(al));
+  for (const c of game.comets) if (!c.isMeteor) game.sound.updateCometShimmer(c, audiblePos(c));
 };
 
 // A comet that times out / an alien that flies past the far edge flags
@@ -1164,6 +1172,7 @@ const tickAlienFire = (game: Game) => {
   if (game.aliens.length === 0) return;
   for (const a of game.aliens) {
     if (a.warpT !== null) continue; // warping out — done fighting, just leaving
+    if (a.entering) continue; // still sliding in — fire clock re-arms on arrival
     while (game.beatTime >= a.nextFireAt) fireOneAlienShot(game, a);
   }
 };
@@ -1190,7 +1199,8 @@ const tickBossRhythm = (game: Game) => {
         syncComboHud(game);
       }
     }
-    a.trackPlayer(game.ship.pos.x, game.ship.pos.y);
+    const shipImg = nearestImageOf(game.ship.pos, a.pos, game.w, game.h);
+    a.trackPlayer(shipImg.x, shipImg.y);
     const ev = a.tickBossRhythm(game.beatTime);
     if (ev.topFlash || ev.bottomFlash || ev.irisFlash) game.sound.play("bossPulse", 0.9, a.pos);
     if (ev.pupilFlash) game.sound.play("bossPulse", 1.0, a.pos);
@@ -1202,7 +1212,8 @@ const tickBossRhythm = (game: Game) => {
 const tickWraiths = (game: Game, dt: number) => {
   for (const a of game.asteroids) {
     if (a.kind !== "wraith") continue;
-    const didLunge = a.tickWraith(dt, game.ship.pos.x, game.ship.pos.y, game.beatTime);
+    const shipImg = nearestImageOf(game.ship.pos, a.pos, game.w, game.h);
+    const didLunge = a.tickWraith(dt, shipImg.x, shipImg.y, game.beatTime);
     if (didLunge) game.sound.play("wraithLunge", 1, a.pos);
   }
 };
@@ -1223,7 +1234,8 @@ const fireBossEyeBolt = (game: Game, a: Asteroid) => {
 // per cycle on their own flash beat. The ball lives exactly 4 beats and
 // fades over the 5th — a sustained dodge window per shot.
 const fireBossHemispherePlasma = (game: Game, a: Asteroid) => {
-  const angle = Math.atan2(game.ship.pos.y - a.pos.y, game.ship.pos.x - a.pos.x);
+  const shipImg = nearestImageOf(game.ship.pos, a.pos, game.w, game.h);
+  const angle = Math.atan2(shipImg.y - a.pos.y, shipImg.x - a.pos.x);
   const speed = ENTITY_CONFIG.boss.eyeBulletSpeed * 0.85;
   const muzzleDist = a.radius * 0.95;
   const muzzleX = a.pos.x + Math.cos(angle) * muzzleDist;
@@ -1246,7 +1258,7 @@ const fireBossHemispherePlasma = (game: Game, a: Asteroid) => {
 const fireOneAlienShot = (game: Game, a: Alien) => {
   if (game.ship.alive) {
     const angleOffset = a.size === "big" ? bigAlienBurstAngleOffset(a.firePatternIndex) : 0;
-    const bullet = a.fireAt(game.ship.pos, angleOffset);
+    const bullet = a.fireAt(nearestImageOf(game.ship.pos, a.pos, game.w, game.h), angleOffset);
     if (a.size === "small") {
       const k = rhythmSpeedMul(game);
       bullet.vel.x *= k;

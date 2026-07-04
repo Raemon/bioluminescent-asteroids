@@ -1,4 +1,4 @@
-import { Vec, v, fromAngle, rand, cosmeticRand, TAU, addScaledMut, wrapMut } from "./vec";
+import { Vec, v, fromAngle, rand, cosmeticRand, TAU, addScaledMut, wrapMut, toroidalDelta, nearestImageOf, WORLD_W, WORLD_H } from "./vec";
 import { Trail } from "./Trail";
 import { SoundwaveRadiator } from "./SoundwaveRadiator";
 import { rng, cosmeticRng } from "./game/rng";
@@ -813,6 +813,14 @@ export class Asteroid {
   outlineSamples = 60;
   membranePhase: number;
   flashAmount = 0;
+  // Entrance state — the arrival mirror of the warpT exit. A staged spawn is
+  // folded in-domain but drawn once at its unfolded entrance image
+  // (pos + enterOff) and intangible until fully on-screen. enterOff
+  // components are multiples of ±w/±h. See game/entrance.ts.
+  entering = false;
+  enterOffX = 0;
+  enterOffY = 0;
+  enterTraveled = 0;
   // Pre-rendered offscreen sprite of the static body (halo, outline, interior,
   // filaments, baseline nucleus glow). Built once in the constructor. Per-frame
   // rendering is a single drawImage + a couple of cheap pulse/flash overlays.
@@ -3057,11 +3065,12 @@ export class Asteroid {
     // transition to "live" enables both at once on the same frame as the
     // eye opens.
     if (this.isBoss() && this.bossPhase === "dormant") return false;
+    // Still sliding in from the border — intangible until fully on-screen.
+    if (this.entering) return false;
     // Phased-out warble: bullets and the ship pass clean through during the
     // dim window.
     if (this.isPhasedOut()) return false;
-    const dx = point.x - this.pos.x;
-    const dy = point.y - this.pos.y;
+    const [dx, dy] = toroidalDelta(point.x - this.pos.x, point.y - this.pos.y, WORLD_W, WORLD_H);
     const distance = Math.hypot(dx, dy);
     if (distance > this.radius * 1.3 + pointRadius) return false;
     // Bassteroids are modular silhouettes, not organic blobs — use a tight
@@ -3128,13 +3137,18 @@ export class Asteroid {
     this.rotation += this.rotSpeed * dt;
     this.membranePhase += dt * 0.8;
     addScaledMut(this.pos, this.vel, dt);
-    wrapMut(this.pos, w, h);
-    // Stamp/age the drone trail (gen-0 large) or radiator (fragments). Done
-    // after the wrap so a screen-wrap teleport is caught by Trail's own
-    // jump detector and the trail restarts cleanly on the new side. The
-    // radiator anchors each wave to its own emission origin, so a wrap
-    // simply means future waves emit from the new side while older waves
-    // age out where they were — no special-case handling needed.
+    const off = wrapMut(this.pos, w, h);
+    // Carry the drone trail (gen-0 large) across a fold so the wake stays
+    // attached at the seam. The radiator is deliberately untouched — each
+    // wave anchors to its own emission origin, so a fold simply means future
+    // waves emit from the new side while older waves age out where they were.
+    if (off) {
+      if (this.trail) this.trail.shift(off.x, off.y);
+      if (this.entering) {
+        this.enterOffX -= off.x;
+        this.enterOffY -= off.y;
+      }
+    }
     if (this.trail) this.trail.update(dt, this.pos.x, this.pos.y);
     if (this.radiator) this.radiator.update(dt, this.pos.x, this.pos.y, this.vel.x, this.vel.y);
     // Ease the displayed laser aim toward the committed aim so the telegraph
@@ -6378,6 +6392,11 @@ export const shipTouchingTorusThread = (
   for (const g of groups) {
     const living = g.members.filter((m) => m.alive);
     if (living.length < 2) continue;
+    // Unfold the ship point to the group's frame so a ring straddling the
+    // seam still registers the pass-through.
+    const p = nearestImageOf({ x: px, y: py }, g.center, WORLD_W, WORLD_H);
+    const gpx = p.x;
+    const gpy = p.y;
     // Order fragments by their current ring angle so neighbours are adjacent.
     const byAngle = living
       .map((m) => ({ m, ang: m.torusSlot + g.phase, span: m.torusArcSpan }))
@@ -6390,8 +6409,8 @@ export const shipTouchingTorusThread = (
       let a1 = nxt.ang - nxt.span * 0.5;
       while (a1 <= a0) a1 += TAU;
       // Broad cull: if the point is nowhere near the ring radius, skip.
-      const dxc = px - g.center.x;
-      const dyc = py - g.center.y;
+      const dxc = gpx - g.center.x;
+      const dyc = gpy - g.center.y;
       const distFromCenter = Math.hypot(dxc, dyc);
       if (Math.abs(distFromCenter - g.ringRadius) > reach + g.ringRadius * 0.12) continue;
       const steps = 8;
@@ -6399,8 +6418,8 @@ export const shipTouchingTorusThread = (
         const ang = a0 + (a1 - a0) * (s / steps);
         const tx = g.center.x + Math.cos(ang) * g.ringRadius;
         const ty = g.center.y + Math.sin(ang) * g.ringRadius;
-        const dx = px - tx;
-        const dy = py - ty;
+        const dx = gpx - tx;
+        const dy = gpy - ty;
         if (dx * dx + dy * dy <= reachSq) return true;
       }
     }

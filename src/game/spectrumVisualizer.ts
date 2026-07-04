@@ -203,9 +203,3 @@ export const paintSpectrumVisualizer = (game: Game) => {
   drawRadial(game);
   game.ctx.restore();
 };
-
-// Convenience for the non-scroll paths: update + paint once at screen space.
-export const renderSpectrumVisualizer = (game: Game) => {
-  updateSpectrumVisualizer(game);
-  paintSpectrumVisualizer(game);
-};

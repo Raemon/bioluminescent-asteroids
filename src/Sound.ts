@@ -2,6 +2,7 @@
 // doesn't ship the ~150KB library. `import type` keeps the Tone.X type
 // annotations on the engine struct without dragging the runtime in.
 import type * as Tone from "tone";
+import { toroidalDelta } from "./vec";
 import { cfgN, cfgU } from "./soundConfig";
 import { getChannelVolume, type AudioChannel } from "./game/audioPrefs";
 import { musicGain, loadMusicConfig, type MusicLayer } from "./musicConfig";
@@ -492,9 +493,13 @@ export class Sound {
   // Compute pan + falloff gain from a world position relative to the listener.
   // Pan is the x-offset normalized to [-PAN_MAX, +PAN_MAX]; gain falls off
   // smoothly with euclidean distance, clamped to DIST_MIN_GAIN at the edge.
+  // Offsets are toroidal so a source just across the seam pans as nearby.
   private spatialFor(pos: Pos): { pan: number; gain: number } {
-    const dx = (pos.x - this.listenerX) / this.halfW;
-    const dy = (pos.y - this.listenerY) / this.halfH;
+    const [tdx, tdy] = toroidalDelta(
+      pos.x - this.listenerX, pos.y - this.listenerY, this.halfW * 2, this.halfH * 2,
+    );
+    const dx = tdx / this.halfW;
+    const dy = tdy / this.halfH;
     const pan = Math.max(-1, Math.min(1, dx)) * Sound.PAN_MAX;
     const d = Math.min(1, Math.hypot(dx, dy));
     const gain = 1 - (1 - Sound.DIST_MIN_GAIN) * d;

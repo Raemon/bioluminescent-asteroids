@@ -16,7 +16,7 @@ import { FuelOrb } from "./FuelOrb";
 import { Comet } from "./Comet";
 import { Alien, AlienSize } from "./Alien";
 import { AlienBullet } from "./AlienBullet";
-import { v } from "./vec";
+import { v, WORLD_W, WORLD_H } from "./vec";
 import { Popup } from "./game/popups";
 import type { BassLightning } from "./game/bassLightning";
 import type { DriftBurst } from "./game/driftBurst";
@@ -35,7 +35,6 @@ import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
 import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
-import { EdgeAidMode, EDGE_AID_MODES } from "./game/edgeAids";
 import { TutorialControlsUsed, emptyTutorialControlsUsed } from "./game/controlBindings";
 
 // re-export so existing external imports (Ship.ts) keep working without touching their imports.
@@ -44,8 +43,10 @@ export { BEAT_GRID } from "./game/rhythmConstants";
 // Fixed 16:9 logical playfield. Every entity (ship, bullets, asteroids, stars)
 // sizes itself against game.w/game.h, so locking these to constants keeps the
 // relative scale of the world identical at any window size or browser zoom.
-export const LOGICAL_W = 1920;
-export const LOGICAL_H = 1080;
+// Defined in vec.ts (the torus is exactly one viewport) — importing Game.ts
+// from vec.ts would be a cycle.
+export const LOGICAL_W = WORLD_W;
+export const LOGICAL_H = WORLD_H;
 
 type GameState = "title" | "playing" | "paused" | "dying" | "gameover" | "replaying";
 
@@ -339,10 +340,6 @@ export class Game implements HudElements {
   // ?debug=true in the URL forces debug-on from page load (handy for triaging
   // production issues where the player can't easily hit backtick on mobile).
   debugMode = new URLSearchParams(window.location.search).get("debug") === "true";
-  // Which edge-of-map camera is active; switched live with number keys 1-4.
-  // "scroll" (locked-center) is the default — the ship is pinned to screen
-  // centre and the torus scrolls + wraps around it. See game/edgeAids.ts.
-  edgeAidMode: EdgeAidMode = "scroll";
   // prevents a double-submit if the player mashes Enter while the POST is in flight.
   scoreSubmitState: "idle" | "submitting" | "submitted" = "idle";
   // lets the title screen after a game-over show a score-neighborhood (±5) around the
@@ -601,11 +598,6 @@ export class Game implements HudElements {
       if (k === "`") {
         this.debugMode = !this.debugMode;
         this.debugOverlayEl.classList.toggle("hidden", !this.debugMode);
-      }
-      // Number keys 1-4 switch the active edge-of-map legibility prototype live.
-      if (k >= "1" && k <= "4") {
-        const mode = EDGE_AID_MODES[Number(k) - 1];
-        if (mode) this.edgeAidMode = mode;
       }
     });
     showTitle(this);

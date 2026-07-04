@@ -320,7 +320,11 @@ const integrateMotion = (ship: Ship, dt: number, w: number, h: number) => {
   const speed = Math.hypot(ship.vel.x, ship.vel.y);
   if (TOP_SPEED_ENABLED && speed > ship.maxSpeed) scaleMut(ship.vel, ship.maxSpeed / speed);
   addScaledMut(ship.pos, ship.vel, dt);
-  wrapMut(ship.pos, w, h);
+  const off = wrapMut(ship.pos, w, h);
+  if (off) {
+    ship.lastWrapDX = off.x;
+    ship.lastWrapDY = off.y;
+  }
 };
 
 // one frame's worth of player control, audio, and motion — keeps Ship.update one-line readable.
@@ -329,6 +333,8 @@ export const tickShip = (
   particles: ParticleSystem, bullets: Bullet[],
   w: number, h: number, t: number, sound: Sound,
 ) => {
+  ship.lastWrapDX = 0;
+  ship.lastWrapDY = 0;
   if (!ship.alive) return;
   if (ship.invuln > 0) ship.invuln -= dt;
   if (ship.fireCooldown > 0) ship.fireCooldown -= dt;

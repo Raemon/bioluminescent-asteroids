@@ -73,7 +73,15 @@ export class AlienBullet {
     const trailCap = this.isBossLaser ? 28 : 10;
     if (this.trail.length > trailCap) this.trail.shift();
     addScaledMut(this.pos, this.vel, dt);
-    wrapMut(this.pos, w, h);
+    const off = wrapMut(this.pos, w, h);
+    // Carry the streak across a fold — otherwise the boss laser bolt strokes
+    // a full-screen line the frame it wraps.
+    if (off) {
+      for (const p of this.trail) {
+        p.x += off.x;
+        p.y += off.y;
+      }
+    }
   }
 
   render(ctx: CanvasRenderingContext2D) {

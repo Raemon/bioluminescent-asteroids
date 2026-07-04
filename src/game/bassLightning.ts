@@ -1,6 +1,6 @@
 import type { Game } from "../Game";
 import type { Asteroid } from "../Asteroid";
-import { Vec } from "../vec";
+import { Vec, toroidalDelta, nearestImageOf } from "../vec";
 // Bolt jag/seed visuals only — cosmetic stream so it can't desync replays.
 import { cosmeticRng as rng } from "./rng";
 import { comboGrid } from "./rhythmGate";
@@ -103,13 +103,13 @@ export const triggerBassLightning = (game: Game, targetPos: Vec, killed?: Astero
   }
   if (sources.length === 0) return;
   const dist2 = (a: Asteroid) => {
-    const dx = a.pos.x - targetPos.x;
-    const dy = a.pos.y - targetPos.y;
+    const [dx, dy] = toroidalDelta(a.pos.x - targetPos.x, a.pos.y - targetPos.y, game.w, game.h);
     return dx * dx + dy * dy;
   };
   sources.sort((a, b) => dist2(a) - dist2(b));
   for (const src of sources.slice(0, MAX_ARCS_PER_KILL)) {
-    game.bassLightnings.push(newBolt(src, targetPos));
+    // arc to the target image nearest this source so it never spans the seam.
+    game.bassLightnings.push(newBolt(src, nearestImageOf(targetPos, src.pos, game.w, game.h)));
     const value = resonanceValueOf(src);
     if (value > 0) game.popups.push(popupBassEcho(src, value));
   }

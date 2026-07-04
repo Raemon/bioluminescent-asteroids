@@ -35,6 +35,11 @@ export class Comet {
   // Set true on the first frame warp-out begins so the Game spawns exactly one
   // portal for this comet, then cleared.
   needsWormhole = false;
+  // Entrance state — the arrival mirror of warpT. See game/entrance.ts.
+  entering = false;
+  enterOffX = 0;
+  enterOffY = 0;
+  enterTraveled = 0;
   // Trail of past positions for the streak. Newest at index 0.
   trail: { pos: Vec; age: number }[] = [];
   // The current step in the melody. Advanced by the Game on each BEAT_GRID
@@ -92,6 +97,8 @@ export class Comet {
     // A comet diving into its departure portal is intangible — it's leaving, not
     // a target, so a late bullet can't "kill" it for score mid-warp.
     if (this.warpT !== null) return false;
+    // Still sliding in from the border — intangible until fully on-screen.
+    if (this.entering) return false;
     return circleHit(this.pos, this.radius, p, r);
   }
 
@@ -146,23 +153,23 @@ export class Comet {
       return;
     }
     this.age += dt;
-    const preWrapX = this.pos.x;
-    const preWrapY = this.pos.y;
     addScaledMut(this.pos, this.vel, dt);
-    // Wrap around the torus so a comet living its full 30s stays in the tiled
-    // scroll world (and thus on-screen) as it crosses map boundaries, instead of
-    // drifting off into un-rendered distance. Meteors don't wrap — they're a
-    // brief cross-and-leave flock that pops off the far edge.
-    if (!this.isMeteor) wrapMut(this.pos, w, h);
-    this.glowTrail.update(dt, this.pos.x, this.pos.y);
-
-    // A torus wrap teleports pos across the world in one frame; the streak below
-    // would otherwise draw a segment bridging the two sides — a stripe across the
-    // screen. Drop the recorded tail on a jump so the streak restarts cleanly on
-    // the new side (glowTrail resets itself on the same condition).
-    if (Math.hypot(this.pos.x - preWrapX, this.pos.y - preWrapY) > 200) {
-      this.trail.length = 0;
+    // Fold onto the torus; carry both trails across the fold so the streak
+    // stays attached instead of resetting at the seam. Meteors fold too —
+    // they still despawn on their lifetime clock.
+    const off = wrapMut(this.pos, w, h);
+    if (off) {
+      this.glowTrail.shift(off.x, off.y);
+      for (const t of this.trail) {
+        t.pos.x += off.x;
+        t.pos.y += off.y;
+      }
+      if (this.entering) {
+        this.enterOffX -= off.x;
+        this.enterOffY -= off.y;
+      }
     }
+    this.glowTrail.update(dt, this.pos.x, this.pos.y);
 
     // Sample the current position every frame so the trail is dense enough
     // to read as a smooth streak. Trim the tail when the oldest sample has

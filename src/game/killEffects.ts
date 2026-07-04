@@ -4,7 +4,7 @@ import { Alien } from "../Alien";
 import { AlienBullet } from "../AlienBullet";
 import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
-import { Vec } from "../vec";
+import { Vec, nearestImageOf } from "../vec";
 import { ENTITY_CONFIG } from "./entityConfig";
 import { spawnGemFan, spawnBurstGemFan } from "../Gem";
 import { loseCombo, rebaseBeatEval } from "./rhythmGate";
@@ -35,7 +35,8 @@ import type { KillBucket } from "./killBuckets";
 // a "died with its boots on" beat. Aims at the ship's current position
 // (no telegraph; the eye is already broken) and skips the cooldown gate.
 const fireBossEyeFinalShot = (game: Game, a: Asteroid) => {
-  const angle = Math.atan2(game.ship.pos.y - a.pos.y, game.ship.pos.x - a.pos.x);
+  const shipImg = nearestImageOf(game.ship.pos, a.pos, game.w, game.h);
+  const angle = Math.atan2(shipImg.y - a.pos.y, shipImg.x - a.pos.x);
   const speed = ENTITY_CONFIG.boss.eyeBulletSpeed;
   const muzzleDist = a.radius * 1.1;
   const muzzleX = a.pos.x + Math.cos(angle) * muzzleDist;

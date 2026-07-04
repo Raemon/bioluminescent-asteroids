@@ -71,6 +71,11 @@ export class Ship {
   get hitRadius() { return this.radius * 1.4 + this.haloOffset + this.hitPad + this.hitFrontBonus; }
   alive = true;
   invuln = 2.0;
+  // Fold the ship's position took this frame (0 when it didn't wrap) — the
+  // entrance state shifts every entering entity's frame by it so entrance
+  // images stay continuous when the camera jumps. See game/entrance.ts.
+  lastWrapDX = 0;
+  lastWrapDY = 0;
   thrustOn = false;
   reverseThrustOn = false;
   // port = Z (accelerate left of heading), starboard = X (accelerate right of heading).

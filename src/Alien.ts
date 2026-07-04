@@ -1,4 +1,4 @@
-import { Vec, v, add, mul, fromAngle, rand, cosmeticRand, TAU, circleHit } from "./vec";
+import { Vec, v, add, mul, fromAngle, rand, cosmeticRand, TAU, circleHit, wrapMut } from "./vec";
 import { AlienBullet } from "./AlienBullet";
 import { Trail } from "./Trail";
 import { rng, cosmeticRng } from "./game/rng";
@@ -354,6 +354,11 @@ export class Alien {
   warpStartX = 0;
   warpStartY = 0;
   needsWormhole = false;
+  // Entrance state — the arrival mirror of warpT. See game/entrance.ts.
+  entering = false;
+  enterOffX = 0;
+  enterOffY = 0;
+  enterTraveled = 0;
   // Theremin-drone glow trail. Vibrato pulse mode lines up loosely with the
   // alien voice's amplitude LFO. See Trail.ts.
   trail: Trail;
@@ -403,7 +408,7 @@ export class Alien {
     return Math.atan2(this.vel.y, this.vel.x);
   }
 
-  update(dt: number, _w: number, _h: number) {
+  update(dt: number, w: number, h: number) {
     // Once warping out, run the dive instead of normal flight: ease the body
     // into the portal mouth and end it when it's fully swallowed.
     if (this.warpT !== null) {
@@ -441,13 +446,17 @@ export class Alien {
     const stepY = (this.vel.y + perpY * swayMag) * dt;
     this.pos.x += stepX;
     this.pos.y += stepY;
-    // No wrap — fly in from offscreen, cross the screen, then despawn once
-    // enough distance has been covered to clear the far edge. We despawn on
-    // distance *travelled* rather than an absolute off-screen box: under the
-    // locked-centre scroll camera the world tiles seamlessly around the ship,
-    // so there is no fixed off-screen region (a body's wrapped copy is always
-    // somewhere on screen). Spawned just off the visible edge and flying across,
-    // maxTravel (set from the screen diagonal) lands it past the opposite edge.
+    // Fold onto the torus; carry the wake across the fold. Despawn stays on
+    // distance *travelled* (maxTravel, set from the screen diagonal) — under
+    // the locked-centre scroll camera there is no fixed off-screen region.
+    const off = wrapMut(this.pos, w, h);
+    if (off) {
+      this.trail.shift(off.x, off.y);
+      if (this.entering) {
+        this.enterOffX -= off.x;
+        this.enterOffY -= off.y;
+      }
+    }
     this.traveled += Math.hypot(stepX, stepY);
     if (this.traveled > this.maxTravel) {
       this.beginWarpOut();
@@ -498,6 +507,8 @@ export class Alien {
     // A warping-out alien is intangible — it's diving through its portal, no
     // longer a target or a threat, so neither bullets nor the ship interact.
     if (this.warpT !== null) return false;
+    // Still sliding in from the border — intangible until fully on-screen.
+    if (this.entering) return false;
     // 0.9 — tight circle so glancing shots miss the spindly limbs.
     return circleHit(this.pos, this.radius * 0.9, point, pointRadius);
   }

@@ -1,4 +1,4 @@
-import { Vec, v, rand, sub, len, mul, TAU, addScaledMut, circleHit } from "./vec";
+import { Vec, v, rand, sub, len, mul, TAU, addScaledMut, circleHit, wrapMut } from "./vec";
 import { OCTAHEDRON_EDGES, projectOctahedron } from "./octahedron";
 
 // A fuel cell — the consolation drop a gold-ore rock leaves when an on-beat
@@ -47,12 +47,13 @@ export class FuelOrb {
     this.rotSpeedZ = rand(-0.9, 0.9);
   }
 
-  update(dt: number, _w: number, _h: number) {
+  update(dt: number, w: number, h: number) {
     this.age += dt;
     this.rotX += this.rotSpeedX * dt;
     this.rotY += this.rotSpeedY * dt;
     this.rotZ += this.rotSpeedZ * dt;
     addScaledMut(this.pos, this.vel, dt);
+    wrapMut(this.pos, w, h);
     // ease the drift toward a near-stop so the orb settles where it can be grabbed.
     this.vel.x *= Math.max(0, 1 - dt * 0.8);
     this.vel.y *= Math.max(0, 1 - dt * 0.8);
