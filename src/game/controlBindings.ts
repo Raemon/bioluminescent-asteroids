@@ -72,10 +72,10 @@ export const ACTION_LABELS: Record<ControlAction, string> = {
 export type TutorialKey = { action: ControlAction; glyph: string };
 export type TutorialControl = { label: string; keys: TutorialKey[] };
 export const TUTORIAL_CONTROLS: TutorialControl[] = [
-  { label: "rotate", keys: [{ action: "rotateLeft", glyph: "←" }, { action: "rotateRight", glyph: "→" }] },
   { label: "thrust", keys: [{ action: "thrust", glyph: "↑" }] },
   { label: "reverse", keys: [{ action: "reverse", glyph: "↓" }] },
-  { label: "side thrust", keys: [{ action: "sidePort", glyph: "⇧←" }, { action: "sideStarboard", glyph: "⇧→" }] },
+  { label: "rotate", keys: [{ action: "rotateLeft", glyph: "←" }, { action: "rotateRight", glyph: "→" }] },
+  { label: "side thrust", keys: [{ action: "sidePort", glyph: "SHIFT ←" }, { action: "sideStarboard", glyph: "SHIFT →" }] },
   { label: "fire", keys: [{ action: "fire", glyph: "space" }] },
 ];
 // Flat list of every action shown in the pane, in display order.
