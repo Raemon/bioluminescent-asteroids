@@ -3,6 +3,8 @@
 // installInstructionsDemos() can still query them and start/stop the demos
 // on the instructions-open/instructions-close custom events.
 
+import { ControlInfo } from "./ControlInfo";
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -29,12 +31,7 @@ export const InstructionsPanel = ({ open, onClose }: Props) => {
         <h2 id="instructions-heading">Pilot Briefing</h2>
         <section className="instructions-section">
           <h3>Controls</h3>
-          <p>
-            <span className="key">←</span> <span className="key">→</span> rotate &nbsp;·&nbsp;
-            <span className="key">↑</span> <span className="key">↓</span> thrust &nbsp;·&nbsp;
-            <span className="key">space</span> fire &nbsp;·&nbsp;
-            <span className="key">esc</span> pause
-          </p>
+          <ControlInfo id="instructions-controls" />
         </section>
         <section className="instructions-section instructions-section--text-left">
           <div className="instructions-text">

@@ -131,6 +131,9 @@ export const ENTITY_CONFIG = {
     scale: 0.45,
     speedMult: 2,
     baseScore: 500,
+    // Hard cap on a single meteor's lifetime (seconds), so a trailing/laggy
+    // member of the flock can't linger far past the rest of the shower.
+    lifetime: [8, 14] as [number, number],
     // One wave runs a guaranteed oversized swarm a few seconds in, with its
     // own thinned-out asteroid field so the swarm is the headline threat.
     swarmWave: {
