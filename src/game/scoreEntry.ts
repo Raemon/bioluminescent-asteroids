@@ -175,7 +175,7 @@ export const isScoreEntryBlockingEnter = (game: Game): boolean => {
   return game.scoreSubmitState !== "submitted";
 };
 
-// default sort: rhythm first (headline streak stat), score as tiebreaker.
+// "Rhythm" column sort: max combo first, score as tiebreaker.
 const sortByComboThenScore = (rows: HighscoreRow[]): HighscoreRow[] =>
   [...rows].sort((a, b) => {
     const comboDiff = (b.max_combo ?? 0) - (a.max_combo ?? 0);
@@ -604,7 +604,7 @@ const renderHallOfFame = (game: Game) => {
   syncFooterVisibility(false);
   syncTopOnlyVisibility(false);
   syncTitleBackAffordance(game, false);
-  game.leaderboardSort = "rhythm";
+  game.leaderboardSort = "score";
   // Paint cached rows immediately so the title screen is never blank on reload;
   //   the in-flight fetch will swap them out with fresh data when it lands.
   const cached = getCachedHighscores();

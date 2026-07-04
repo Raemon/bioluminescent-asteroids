@@ -379,9 +379,8 @@ export class Game implements HudElements {
   // True while a "show more" page fetch is in flight; used to debounce clicks
   //   and to swap the button label to "loading…".
   leaderboardLoadingMore = false;
-  // clickable column headers re-sort; rhythm is the default with score as
-  //   the tiebreaker so the headline streak stat leads the board.
-  leaderboardSort: "rhythm" | "score" | "wave" | "name" | "date" = "rhythm";
+  // clickable column headers re-sort; score is the default.
+  leaderboardSort: "rhythm" | "score" | "wave" | "name" | "date" = "score";
   // One-shot: after submitting a score, the very next title screen shows the
   //   ±25 neighborhood centred on the player instead of the hall-of-fame. The
   //   fetch is armed during the game-over screen so there's no loading flash.
