@@ -197,25 +197,38 @@ export const popupRapidRhythm = (pos: Vec): Popup =>
 export const popupTwinShot = (pos: Vec): Popup =>
   popupBonusLabel(pos, "TWIN SHOT", "#c9a6ff", "rgba(180, 140, 255, 0.85)");
 
-// fires when a same-interval combo-shot streak ends, over the detonating dots.
-//   Bigger streaks read louder: font + life grow with N so a long run announces
-//   itself. Cyan-white to match the streak-dot glow and stand apart from the gold
-//   combo readouts.
-export const popupStreakShots = (pos: Vec, n: number): Popup => {
-  const fontPx = Math.min(34, 20 + n);
-  const life = 1.4 + Math.min(0.8, n * 0.06);
+// per-shot streak payout tag — a "Streak #N" headline over the points it paid.
+//   Cyan-white to match the spark ring carrying the streak and stand apart from
+//   the gold combo readouts. A kill can stack three readouts on one strike point
+//   (combo "xN" at the hit, score "+N" above it, this tag on top), so the tag
+//   spawns above the score popup's band and rises in lockstep with it — same
+//   vel + decay — keeping the stack's gaps constant instead of converging.
+const STREAK_BONUS_POPUP_LIFE = 1.1;
+export const popupStreakBonus = (pos: Vec, n: number, points: number): Popup => {
+  const labelFont = "700 18px 'Space Grotesk', system-ui, sans-serif";
+  const valueFont = "700 17px 'Space Grotesk', system-ui, sans-serif";
+  const fill = "#bff4ff";
+  const shadow = "rgba(140, 230, 255, 0.85)";
   return {
-    pos: { x: pos.x, y: pos.y - 20 },
-    vel: { x: rand(-8, 8), y: -50 },
-    life,
-    maxLife: life,
-    text: `${n} STREAK SHOT${n === 1 ? "" : "S"}`,
-    font: `800 ${fontPx}px 'Space Grotesk', system-ui, sans-serif`,
-    fill: "#bff4ff",
-    shadowColor: "rgba(140, 230, 255, 0.9)",
+    pos: { x: pos.x, y: pos.y - 52 },
+    vel: { x: rand(-6, 6), y: -60 },
+    life: STREAK_BONUS_POPUP_LIFE,
+    maxLife: STREAK_BONUS_POPUP_LIFE,
+    text: `+${formatScore(points)}`,
+    font: valueFont,
+    fill,
+    shadowColor: shadow,
     decayX: 0.94, decayY: 0.94,
-    popPeak: 0.5, popDuration: 0.18,
-    holdUntil: 0.3, fadeGain: 1.3,
+    popPeak: 0.35, popDuration: 0.15,
+    holdUntil: 0.4, fadeGain: 1,
+    draw: (ctx) => {
+      ctx.font = labelFont;
+      ctx.fillStyle = fill;
+      ctx.shadowColor = shadow;
+      ctx.fillText(`Streak #${n}`, 0, -22);
+      ctx.font = valueFont;
+      ctx.fillText(`+${formatScore(points)}`, 0, 0);
+    },
   };
 };
 

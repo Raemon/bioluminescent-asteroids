@@ -42,7 +42,7 @@ import { snapshotShipKill } from "./killSnapshot";
 import { updatePopups, popupDriftBonus, popupDriftCombo } from "./popups";
 import { updateBassLightnings } from "./bassLightning";
 import { updateDriftBursts } from "./driftBurst";
-import { updateStreakBursts, endStreak, resetStreak, streakWindowClosed } from "./streakBurst";
+import { resetStreak, streakWindowClosed } from "./streakBurst";
 import { updateWormholes, spawnWormhole } from "./wormhole";
 import { tickPendingRhythmBonuses } from "./rhythmBonus";
 import { emitExplosion } from "./particleBursts";
@@ -828,7 +828,6 @@ const updatePlaying = (game: Game, dt: number) => {
   game.popups = updatePopups(game.popups, dt);
   game.bassLightnings = updateBassLightnings(game.bassLightnings, dt);
   game.driftBursts = updateDriftBursts(game.driftBursts, dt);
-  game.streakBursts = updateStreakBursts(game.streakBursts, dt);
   // musicDt (not dt) so the portal opens/closes in lockstep with the body's
   // dive, which also runs on musicDt — under slow-mo both stretch together.
   game.wormholes = updateWormholes(game.wormholes, musicDt);
@@ -1014,7 +1013,7 @@ export const registerOffBeatFire = (game: Game) => {
 //   this frame qualifies iff the window is still open at this same clock value.
 const tickStreakTimeout = (game: Game) => {
   if (game.streakGrid <= 0) return;
-  if (streakWindowClosed(game)) endStreak(game);
+  if (streakWindowClosed(game)) resetStreak(game);
 };
 
 // cheap respawn-grace — extend invuln if a rock is still inside the safe radius near the end.
@@ -1345,7 +1344,7 @@ const advanceWave = (game: Game) => {
   const completedWave = game.wave;
   const maxRhythm = Math.max(1, game.maxComboThisWave);
   const finalRhythm = Math.max(1, game.beatCombo);
-  const streakShots = game.streakShotsThisWave;
+  const bestStreak = game.bestStreakThisWave;
   const driftBonuses = game.driftBonusesThisWave;
   const nextWave = completedWave + 1;
   // A player who clears Wave 1 without touching every control shouldn't keep
@@ -1362,9 +1361,9 @@ const advanceWave = (game: Game) => {
   //   spawn. beatTime is a deterministic sum of recorded musicDt, so the sim
   //   half reproduces in replays; the snap in the builder is what puts the
   //   whole summary on the same grid the bgBeat pulse plays on.
-  const bonus = (maxRhythm + finalRhythm + driftBonuses + streakShots) * 100;
+  const bonus = (maxRhythm + finalRhythm + driftBonuses + bestStreak) * 100;
   const schedule = buildSummarySchedule(game.beatTime, bonus);
-  showWaveSummary(game, schedule, displayWave(completedWave), maxRhythm, finalRhythm, streakShots, driftBonuses);
+  showWaveSummary(game, schedule, displayWave(completedWave), maxRhythm, finalRhythm, bestStreak, driftBonuses);
   beginWaveTransition(game, schedule, () => {
     game.wave = nextWave;
     // opening rocks' speed keys off the peak combo of the wave just cleared, not
@@ -1372,7 +1371,7 @@ const advanceWave = (game: Game) => {
     game.waveStartRhythm = game.maxComboThisWave;
     game.maxComboThisWave = game.beatCombo;
     game.driftBonusesThisWave = 0;
-    game.streakShotsThisWave = 0;
+    game.bestStreakThisWave = 0;
     // clear any leftover trailing dots so a streak doesn't ride into the next wave.
     resetStreak(game);
     game.pulsar.setWaveLevel(game.wave);

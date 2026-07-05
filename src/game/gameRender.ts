@@ -6,7 +6,7 @@ import { renderTrails } from "./trailsRender";
 import { renderPopups } from "./popups";
 import { renderBassLightnings } from "./bassLightning";
 import { renderDriftBursts } from "./driftBurst";
-import { renderStreakBursts, renderStreakOrbs } from "./streakBurst";
+import { renderStreakOrbs } from "./streakBurst";
 import { primaryReticulePosition } from "../ship/reticule/reticuleRender";
 import { renderWormholes } from "./wormhole";
 import { computeConeFrame, toroidalDelta } from "../ship/reticule/coneGeometry";
@@ -239,10 +239,8 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   // gold crystals are stationary (or near-stationary) "First Dot" probes — they need a direct
   // proximity pass since the trajectory walk skips speed<1 targets.
   game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime, superBoosted, game.gems);
-  // Streak orbs orbit the primary "next-beat" reticule. Stash the anchor so a
-  //   streak-end flare (which can fire from the gameplay path) knows where to spawn.
+  // Streak orbs orbit the primary "next-beat" reticule.
   const reticuleCenter = primaryReticulePosition(game.ship, BEAT_GRID, game.w, game.h, doubletime, superBoosted);
-  game.streakOrbCenter = { x: reticuleCenter.x, y: reticuleCenter.y };
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   renderStreakOrbs(ctx, game, reticuleCenter);
@@ -252,7 +250,6 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   // without advancing game.time).
   renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.time / 1000, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
-  renderStreakBursts(ctx, game.streakBursts);
   renderLaserReticule(ctx, game, game.beatTime);
   renderLaserChargeDots(ctx, game, game.beatTime);
 };

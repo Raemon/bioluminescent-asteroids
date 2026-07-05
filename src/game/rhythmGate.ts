@@ -3,7 +3,7 @@ import { Vec } from "../vec";
 import { BEAT_GRID, BEAT_WINDOW, DEBUG_BEAT_TIMING } from "./rhythmConstants";
 import { syncComboHud } from "./hud";
 import { popupBeatDebug, popupComboLost } from "./popups";
-import { endStreak } from "./streakBurst";
+import { resetStreak } from "./streakBurst";
 
 // Two grid tiers, measured as the period between on-beat slots:
 //   combo 0–31       → quarter-notes (BEAT_GRID): the default groove.
@@ -102,8 +102,8 @@ export const loseCombo = (game: Game, sourcePos?: Vec, reason: "fire" | "hit" = 
   game.lastRhythmHitBeatCenter = -1;
   game.rhythmHitsThisBeat = 0;
   game.lastRhythmHitPos = null;
-  // a broken combo also ends any same-interval streak — flare its orbs.
-  endStreak(game);
+  // a broken combo also ends any same-interval streak — the ring clears.
+  resetStreak(game);
   if (wasMeaningful) {
     // sharper sour wrrr for a mistimed press, deflating wrrr for an off-beat hit.
     game.sound.play(reason === "fire" ? "comboLostFire" : "comboLost");

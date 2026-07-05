@@ -1,16 +1,12 @@
 import type { Game } from "../Game";
 import { Vec } from "../vec";
 import { comboGrid } from "./rhythmGate";
-import { syncComboHud } from "./hud";
-import { popupCombo, popupRapidRhythm, popupTwinShot } from "./popups";
-import { endStreak, STREAK_MAX_GAP } from "./streakBurst";
+import { syncComboHud, syncHud, flashScoreGain } from "./hud";
+import { checkBonusLife } from "./bonusLife";
+import { popupCombo, popupRapidRhythm, popupStreakBonus, popupTwinShot } from "./popups";
+import { resetStreak, STREAK_MAX_GAP } from "./streakBurst";
 
-// A streak shot at this ordinal (or beyond) also pays a bonus rhythm — queued as
-//   a staggered xN flash after the shot's own combo popup, like a drift bonus.
-//   Ordinals count streak shots (the seed shot is #0): 2 = the 3rd landed shot.
-const STREAK_BONUS_FROM = 2;
-
-// Streak bonuses on top of the per-hit combo increment:
+// Beat bonuses on top of the per-hit combo increment:
 //   Rapid Rhythm — combo hits on two back-to-back beats pays +1 rhythm.
 //   Twin Shot   — a second combo hit on the SAME beat (prong pair) pays +2.
 // Bonus increments are queued with staggered fire times rather than applied
@@ -28,6 +24,23 @@ const queueRhythmBonus = (game: Game, pos: Vec, order: number) => {
 // The orbs always spin at 1 rev / 4 beats — the streak no longer locks a per-gap
 //   interval, so the orbit speed is a single steady rate for every streak.
 const STREAK_ORBIT_BEATS = 4;
+
+const STREAK_BASE_POINTS = 25;
+
+// Every counted streak shot pays escalating points on the spot, flashed as a
+//   small "Streak #N" tag the way the Bassteroid resonance bonuses are. Flat
+//   score — no rhythm multiply.
+const awardStreakShot = (game: Game, hitPos: Vec) => {
+  if (game.streakShots > game.bestStreakThisWave) game.bestStreakThisWave = game.streakShots;
+  const points = STREAK_BASE_POINTS * 2 ** (game.streakShots - 1);
+  game.score += points;
+  flashScoreGain(game, points);
+  checkBonusLife(game);
+  // not every streak shot is a kill (e.g. a bass chip), so sync the score
+  //   readout here rather than relying on the kill path's syncHud.
+  syncHud(game);
+  game.popups.push(popupStreakBonus(hitPos, game.streakShots, points));
+};
 
 // Begin a fresh streak from a single shot: a silent seed — no orb, nothing on
 //   screen — waiting for a 2nd in-window shot to confirm the rhythm.
@@ -62,8 +75,8 @@ const trackStreak = (game: Game, grid: number, beatCenter: number, hitPos: Vec) 
     game.streakEstablished = true;
     game.streakShots = 1;
     game.streakLastBeatCenter = beatCenter;
-    game.streakShotsThisWave += 1;
     game.sound.play("tink", 1, hitPos);
+    awardStreakShot(game, hitPos);
     return;
   }
 
@@ -71,17 +84,14 @@ const trackStreak = (game: Game, grid: number, beatCenter: number, hitPos: Vec) 
   if (qualifies && game.streakEstablished) {
     game.streakShots += 1;
     game.streakLastBeatCenter = beatCenter;
-    game.streakShotsThisWave += 1;
     game.sound.play("tink", 1, hitPos);
-    // 2nd orb onward (3rd landed shot) also pays a bonus rhythm, flashed after
-    //   the shot's own xN (same staggered UI as a drift bonus).
-    if (game.streakShots >= STREAK_BONUS_FROM) queueRhythmBonus(game, hitPos, 1);
+    awardStreakShot(game, hitPos);
     return;
   }
 
-  // Out of the window (or grid changed): flare the old streak (if established),
-  //   then this shot seeds a fresh one.
-  endStreak(game);
+  // Out of the window (or grid changed): drop the old streak — every shot
+  //   already paid on landing — and this shot seeds a fresh one.
+  resetStreak(game);
   startStreak(game, grid, beatCenter);
 };
 

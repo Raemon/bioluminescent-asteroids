@@ -1,7 +1,6 @@
 import type { Game } from "../Game";
 import type { Vec } from "../vec";
 import { drawGlow } from "../glow";
-import { popupStreakShots } from "./popups";
 import { BEAT_GRID } from "./rhythmConstants";
 
 // Rhythm-streak sparks. Landing successive combo-shots within STREAK_MAX_GAP
@@ -16,13 +15,13 @@ import { BEAT_GRID } from "./rhythmConstants";
 // center while the older sparks re-space smoothly — nothing teleports. The whole
 // ring fades linearly over the extension window and reaches zero exactly when
 // the window closes — sparks still visible means the streak can still be
-// extended. Breaking the interval (or a combo loss) ends the streak and flares
-// every spark outward — the "N STREAK SHOTS" reward.
+// extended. Ending the streak (a wider gap, a combo loss, or the window
+// closing) just clears the ring — each counted shot already paid its escalating
+// score bonus on landing (see awardStreakShot in rhythmBonus.ts).
 //
 // Orbit phase is a pure function of beatTime; the fade + window + birth tween
-// are pure functions of perceivedBeatTime (the clock hits are judged on), and
-// the end-flourish is a fully deterministic tween — no RNG anywhere here, so
-// replays reproduce it exactly.
+// are pure functions of perceivedBeatTime (the clock hits are judged on) — no
+// RNG anywhere here, so replays reproduce it exactly.
 
 const TAU = Math.PI * 2;
 
@@ -70,7 +69,7 @@ const drawSparkHead = (ctx: CanvasRenderingContext2D, x: number, y: number, r: n
 //   many grid units of the last one (see trackStreak in rhythmBonus.ts).
 export const STREAK_MAX_GAP = 4;
 // only render up to this many orbs so a very long streak stays cheap; N still
-//   counts in full for the metric + flare label.
+//   counts in full for the metric.
 const MAX_ORBS = 16;
 
 // The extension window, measured from the last shot's beat center in the
@@ -140,8 +139,6 @@ type SparkPos = {
   birth: number; // 0..1 bloom progress for the newest spark; 1 once settled
 };
 
-// Current spark positions — shared by the live ring and the end-flourish spawn so
-//   the flourish launches from exactly where the sparks were last drawn.
 const streakSparkPositions = (game: Game, center: Vec): SparkPos[] => {
   const n = game.streakShots;
   const shown = Math.min(n, MAX_ORBS);
@@ -230,190 +227,16 @@ export const renderStreakOrbs = (ctx: CanvasRenderingContext2D, game: Game, cent
   ctx.globalAlpha = 1;
 };
 
-// ---- End-of-streak flourish: the orbs gather, then streak off together in a
-//   straight horizontal line to where the "N STREAK SHOTS" label blooms. ----
-//
-// Applies the animation principles that make a reward read on a chaotic field:
-//   Anticipation — the orbs pull inward + brighten (a wind-up) before launch.
-//   Slow-in/slow-out — an ease-in-out S-curve, so they accelerate out of the
-//     wind-up and settle into the line rather than snapping.
-//   Squash & stretch — orbs stretch along X at peak velocity (a motion smear),
-//     round back out as they arrive.
-//   Secondary motion / follow-through — a fading trail smear lags behind each orb
-//     along the travel axis, then the orbs dissolve into the label as it blooms.
-//   Staging — bright white cores + wide halos + staggered arrival so the line
-//     reads as assembling in the flight direction, not popping in at once.
-
-type FlareOrb = {
-  startX: number; // orbit position it launches FROM
-  startY: number;
-  slot: number; // 0-based index in the assembled horizontal row
-};
-export type StreakBurst = {
-  originX: number;
-  originY: number;
-  dir: number; // +1 fly right, -1 fly left (whichever has more screen room)
-  travel: number; // px the line travels horizontally
-  gap: number; // spacing between orbs in the assembled row
-  count: number;
-  life: number;
-  maxLife: number;
-  orbs: FlareOrb[];
-};
-
-const FLARE_LIFE = 0.85;
-const FLARE_TRAVEL = 150; // px the assembled line slides toward the label
-const FLARE_GAP = 26; // spacing between orbs in the row
-const ANTICIPATION = 0.18; // fraction of life spent winding inward before launch
-
-// distance the label + line settle from the reticule, matching FLARE_TRAVEL so
-//   the popup blooms exactly where the orbs arrive.
-export const streakLabelOffset = (game: Game, center: Vec): { x: number; y: number; dir: number } => {
-  const dir = center.x > game.w / 2 ? -1 : 1; // fly toward the roomier side
-  return { x: center.x + dir * FLARE_TRAVEL, y: center.y, dir };
-};
-
-export const spawnStreakBurst = (game: Game, center: Vec) => {
-  const dir = center.x > game.w / 2 ? -1 : 1;
-  // launch each spark from exactly where the live ring last drew it (beat-ticked
-  //   phase, mid-respace slots, a half-born bloom included) so the flourish picks
-  //   the sparks up rather than teleporting them.
-  const orbs: FlareOrb[] = streakSparkPositions(game, center).map((s, i) => ({
-    startX: s.x,
-    startY: s.y,
-    slot: i,
-  }));
-  game.streakBursts.push({
-    originX: center.x,
-    originY: center.y,
-    dir,
-    travel: FLARE_TRAVEL,
-    gap: FLARE_GAP,
-    count: orbs.length,
-    life: FLARE_LIFE,
-    maxLife: FLARE_LIFE,
-    orbs,
-  });
-};
-
-export const updateStreakBursts = (bursts: StreakBurst[], dt: number): StreakBurst[] => {
-  for (const b of bursts) b.life -= dt;
-  return bursts.filter((b) => b.life > 0);
-};
-
-const easeInOut = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
-const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
-
-// A horizontally-stretched glow: draw the sprite wider than tall to smear the orb
-//   along its travel — squash & stretch without a separate sprite.
-const drawStretched = (
-  ctx: CanvasRenderingContext2D, x: number, y: number, r: number, stretch: number,
-  hue: number, alpha: number, white = false,
-) => {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(stretch, 1 / Math.sqrt(stretch));
-  drawGlow(ctx, 0, 0, r, hue, alpha, white);
-  ctx.restore();
-};
-
-// The spark head under the same squash & stretch — keeps the flying orbs reading
-//   as the same hard white-cored pips the live ring uses.
-const drawSparkStretched = (
-  ctx: CanvasRenderingContext2D, x: number, y: number, r: number, stretch: number, alpha: number,
-) => {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(stretch, 1 / Math.sqrt(stretch));
-  ctx.globalAlpha = alpha;
-  ctx.drawImage(getSparkSprite(), -r, -r, r * 2, r * 2);
-  ctx.restore();
-};
-
-// Caller does NOT need to set composite mode — handled here (additive).
-export const renderStreakBursts = (ctx: CanvasRenderingContext2D, bursts: StreakBurst[]) => {
-  if (bursts.length === 0) return;
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  for (const b of bursts) {
-    const t = 1 - b.life / b.maxLife; // 0 → 1 over the flourish
-    // row is centred on the origin so the label (also centred on the target) reads
-    //   with the line: total width (count-1)*gap, first slot at -half.
-    const rowHalf = ((b.count - 1) * b.gap) / 2;
-    for (const o of b.orbs) {
-      // assembled-row target for this orb.
-      const targetX = b.originX + b.dir * b.travel - rowHalf + o.slot * b.gap;
-      const targetY = b.originY;
-
-      let x: number, y: number, stretch: number, alpha: number, r: number;
-      if (t < ANTICIPATION) {
-        // Anticipation: ease inward toward the origin and brighten — the wind-up.
-        const at = t / ANTICIPATION;
-        const pull = easeOut(at) * 0.4; // pull 40% of the way in
-        x = o.startX + (b.originX - o.startX) * pull;
-        y = o.startY + (b.originY - o.startY) * pull;
-        stretch = 1;
-        alpha = 0.85 + 0.15 * at;
-        r = HEAD_RADIUS * (1 + 0.5 * at); // swell as it charges
-      } else {
-        // Flight: ease-in-out from the wound-up cluster to the row slot, staggered
-        //   per slot so the line assembles left-to-right (in flight direction).
-        const ft = (t - ANTICIPATION) / (1 - ANTICIPATION);
-        const stagger = (o.slot / Math.max(1, b.count)) * 0.18;
-        const local = Math.max(0, Math.min(1, (ft - stagger) / (1 - stagger)));
-        const e = easeInOut(local);
-        // launch FROM the wound-up position (40% pulled in).
-        const fromX = o.startX + (b.originX - o.startX) * 0.4;
-        const fromY = o.startY + (b.originY - o.startY) * 0.4;
-        x = fromX + (targetX - fromX) * e;
-        y = fromY + (targetY - fromY) * e;
-        // speed peaks mid-flight (derivative of ease-in-out) → stretch there.
-        const speed = Math.sin(Math.min(1, local) * Math.PI); // 0→1→0
-        stretch = 1 + 2.2 * speed;
-        // fade out over the last stretch so it dissolves into the settled label.
-        alpha = 1 - easeOut(Math.max(0, (t - 0.6) / 0.4));
-        r = HEAD_RADIUS * 1.5;
-      }
-
-      // trailing smear (secondary motion): a dimmer, longer-stretched ghost lagging
-      //   behind along the travel axis.
-      if (stretch > 1.05) {
-        drawStretched(ctx, x - b.dir * r * 0.8, y, r * 0.9, stretch * 1.4, STREAK_HUE, alpha * 0.35);
-      }
-      drawStretched(ctx, x, y, r * 1.6, stretch, STREAK_HUE, alpha * 0.4);
-      drawSparkStretched(ctx, x, y, r, stretch, alpha);
-    }
-  }
-  ctx.globalAlpha = 1;
-  ctx.restore();
-};
-
 // ---- Streak lifecycle (shared by rhythmBonus + rhythmGate/loseCombo). ----
 
-// Zero the run-streak state. Keeps the per-wave total. Kept here so both
-//   rhythmBonus and rhythmGate (loseCombo) can call it without an import cycle
-//   through comboGrid.
+// End a streak: zero the run-streak state (the ring just stops drawing — each
+//   counted shot already paid on landing). Keeps the per-wave total. Kept here
+//   so both rhythmBonus and rhythmGate (loseCombo) can call it without an
+//   import cycle through comboGrid.
 export const resetStreak = (game: Game) => {
   game.streakInterval = 0;
   game.streakGrid = 0;
   game.streakShots = 0;
   game.streakEstablished = false;
   game.streakLastBeatCenter = -1;
-};
-
-// End an active streak: flare the orbs + flash "N STREAK SHOTS", then clear the
-//   run-streak state. Only an ESTABLISHED streak (2+ matching shots) flares and
-//   labels; a lone unconfirmed seed shot just clears silently.
-export const endStreak = (game: Game) => {
-  if (game.streakEstablished && game.streakShots >= 1) {
-    const center = game.streakOrbCenter ?? game.ship.pos;
-    spawnStreakBurst(game, center);
-    // Label blooms at the flight destination — the orbs stream into it, so the
-    //   number reads as being delivered by the streak that earned it.
-    const label = streakLabelOffset(game, center);
-    game.popups.push(popupStreakShots({ x: label.x, y: label.y }, game.streakShots));
-    game.sound.play("comboSparkle", 1, center);
-    game.sound.play("crystalShatterSmall", 1, center);
-  }
-  resetStreak(game);
 };

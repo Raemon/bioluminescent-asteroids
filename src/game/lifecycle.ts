@@ -540,8 +540,7 @@ const resetRunTimers = (game: Game) => {
   game.streakShots = 0;
   game.streakEstablished = false;
   game.streakLastBeatCenter = -1;
-  game.streakShotsThisWave = 0;
-  game.streakOrbCenter = null;
+  game.bestStreakThisWave = 0;
   game.slowMoTimer = 0;
   game.hasLostComboEver = false;
   game.pilotLog1Unlocked = false;
@@ -568,7 +567,6 @@ const resetRunCollections = (game: Game) => {
   game.popups = [];
   game.bassLightnings = [];
   game.driftBursts = [];
-  game.streakBursts = [];
   game.shards = [];
   game.canisters = [];
   game.gems = [];

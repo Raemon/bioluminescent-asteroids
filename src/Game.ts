@@ -20,7 +20,6 @@ import { v, WORLD_W, WORLD_H } from "./vec";
 import { Popup } from "./game/popups";
 import type { BassLightning } from "./game/bassLightning";
 import type { DriftBurst } from "./game/driftBurst";
-import type { StreakBurst } from "./game/streakBurst";
 import type { Wormhole } from "./game/wormhole";
 import { LaserBeam } from "./game/laserShot";
 import { BossBeam } from "./game/bossBeam";
@@ -83,9 +82,6 @@ export class Game implements HudElements {
   // one-shot "sound visualizer explosion" radiating from each on-beat drift-shot
   //   hit, tier-coloured and tier-sized — see game/driftBurst.ts.
   driftBursts: DriftBurst[] = [];
-  // one-shot flare when a same-interval streak of combo-shots ends — the orbs
-  //   orbiting the reticule flare + fling outward. See game/streakBurst.ts.
-  streakBursts: StreakBurst[] = [];
   // 3D departure portals: comets that time out and aliens that fly off the far
   //   edge warp out THROUGH one of these instead of fading/vanishing. The body's
   //   suck-in lives on the entity; this holds the portal visual — see
@@ -111,9 +107,10 @@ export class Game implements HudElements {
   // Rhythm-streak state (game/rhythmBonus.ts): rewards landing successive combo-shots
   //   close together. The first shot seeds silently; the 2nd in-window shot mints the
   //   first orb orbiting the reticule and each further shot adds one; the streak continues
-  //   as long as each shot lands within STREAK_MAX_GAP grid-beats of the last. A wider
+  //   as long as each shot lands within STREAK_MAX_GAP grid-beats of the last. Every
+  //   counted shot pays an escalating score bonus on the spot (awardStreakShot). A wider
   //   gap, a combo loss, or the extension window closing (streakWindowClosed — the ring
-  //   fade reaches zero at the same moment) ends it and flares the orbs. The orbs spin
+  //   fade reaches zero at the same moment) ends it and clears the ring. The orbs spin
   //   at a steady 4-beat/rev rate. Orbit phase derives from beatTime, fade + window from
   //   perceivedBeatTime — no per-frame RNG or stored phase, so replays reproduce it.
   streakInterval = 0; // orbit rate in grid units (beats per revolution); 0 = no streak
@@ -121,11 +118,7 @@ export class Game implements HudElements {
   streakShots = 0; // orbs currently orbiting (the "N") — 0 while a seed awaits its 2nd shot
   streakEstablished = false; // has a 2nd in-window shot started counting toward the metric?
   streakLastBeatCenter = -1; // beat-center of the last streak shot; gap measurement + fade
-  streakShotsThisWave = 0; // total ESTABLISHED streak shots this wave, for the summary metric
-  // last folded reticule position the orbs orbited — cosmetic only, updated each
-  //   render frame so a streak-end flare (which can fire from the gameplay path,
-  //   e.g. a combo loss) knows where to spawn. Never affects gameplay/RNG.
-  streakOrbCenter: { x: number; y: number } | null = null;
+  bestStreakThisWave = 0; // longest ESTABLISHED streak this wave, for the summary metric
   score = 0;
   wave = 1;
   lives = 3;

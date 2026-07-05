@@ -141,7 +141,7 @@ const buildPanel = (): SummaryEls => {
       <div class="ws-row ws-rhythm"><span class="ws-label">Max Rhythm</span> <span class="ws-value" data-row="max"></span></div>
       <div class="ws-row ws-rhythm"><span class="ws-label">Final Rhythm</span> <span class="ws-value" data-row="final"></span></div>
       <div class="ws-row ws-drift"><span class="ws-label">Drift Shot</span> <span class="ws-value" data-row="drift"></span></div>
-      <div class="ws-row ws-drift"><span class="ws-label">Streak Shot</span> <span class="ws-value" data-row="streak"></span></div>
+      <div class="ws-row ws-drift"><span class="ws-label">Largest Streak</span> <span class="ws-value" data-row="streak"></span></div>
       <div class="ws-row ws-bonus"><span class="ws-label">Bonus</span> <span class="ws-value" data-row="bonus"></span></div>
       <div class="ws-row ws-score"><span class="ws-label">Score</span> <span class="ws-value" data-row="score"></span></div>
       <div class="ws-row ws-extra-life" data-row="extra-life"><span class="ws-label">Next ship</span> <span class="ws-value" data-row="extra-life-value"></span></div>
@@ -239,12 +239,12 @@ export const showWaveSummary = (
   completedWave: number,
   maxRhythm: number,
   finalRhythm: number,
-  streakShots: number,
+  bestStreak: number,
   driftBonuses: number,
 ) => {
   cancelActiveTimers();
   cancelBeatCues(game, CUE_TAG);
-  const bonus = (maxRhythm + finalRhythm + driftBonuses + streakShots) * 100;
+  const bonus = (maxRhythm + finalRhythm + driftBonuses + bestStreak) * 100;
   const { root, rows, bonusValueEl, scoreValueEl, extraLifeEl, extraLifeValueEl } = buildPanel();
   // Score the sim clock will drain the bonus on top of; the cosmetic numbers
   //   read game.score against this so the panel mirrors the real payout.
@@ -253,7 +253,7 @@ export const showWaveSummary = (
   setRow(root, "wave", String(completedWave));
   setRow(root, "max", `x${maxRhythm}`);
   setRow(root, "final", `x${finalRhythm}`);
-  setRow(root, "streak", String(streakShots));
+  setRow(root, "streak", String(bestStreak));
   setRow(root, "drift", String(driftBonuses));
   setRow(root, "bonus", formatScore(bonus));
   setRow(root, "score", formatScore(game.score));
