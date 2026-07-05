@@ -1,5 +1,7 @@
 THE CARRY
 
+*Written July 2026, from a prompt to take that week's news as loose, improv-style inspiration. Three headlines fed it: the multi-day funeral of Iran's assassinated Supreme Leader — processions through a heatwave, crowds cooled by misting carts, and a successor never seen in public who speaks only through written statements while a committee quietly governs; the announcement of a synthetic cell built from nonliving parts that eats by hooking feeder vesicles, grows, and divides, with its makers carefully declining to call it alive; and, in the background, the steady drumbeat of drought and water-scarcity stories. None of those events appear here — only their shapes.*
+
 *Salt remembers the sea.*
 — a maker's proverb
 

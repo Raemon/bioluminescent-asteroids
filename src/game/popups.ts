@@ -1,6 +1,6 @@
 // Popup drift velocity is purely visual — cosmetic stream so it can't shift the
 //   gameplay RNG draw count and desync replays.
-import { Vec, cosmeticRand as rand } from "../vec";
+import { Vec, cosmeticRand as rand, toroidalDelta } from "../vec";
 import { PowerupKind, POWERUP_HUE } from "../Canister";
 import { formatScore } from "./formatScore";
 import { driftTierPulseHsl } from "../ship/reticule/reticuleRender";
@@ -31,6 +31,10 @@ export type Popup = {
   // when set, replaces the default text fill at render time — lets a popup
   // composite its own glyphs (e.g. keycaps for the Side Engines pickup).
   draw?: (ctx: CanvasRenderingContext2D, p: Popup, alpha: number, scale: number) => void;
+  // approximate half-extents of the rendered text, used by the anti-overlap
+  // pass — only set where the font/text derivation is wrong (multi-line draws).
+  halfW?: number;
+  halfH?: number;
 };
 
 const COMBO_POPUP_LIFE = 0.9;
@@ -126,6 +130,7 @@ export const popupDriftBonus = (pos: Vec, tier = 1, withSubtitle = false): Popup
     decayX: 0.94, decayY: 0.94,
     popPeak: 0.4, popDuration: 0.15,
     holdUntil: 0, fadeGain: 1.4,
+    halfH: withSubtitle ? 20 : undefined,
     draw: withSubtitle ? (ctx) => {
       ctx.font = labelFont;
       ctx.fillStyle = fill;
@@ -160,6 +165,7 @@ export const popupInsufficientDamage = (pos: Vec): Popup => {
     decayX: 0.94, decayY: 0.94,
     popPeak: 0.4, popDuration: 0.15,
     holdUntil: 0.55, fadeGain: 1.4,
+    halfH: 20,
     draw: (ctx) => {
       ctx.font = labelFont;
       ctx.fillStyle = fill;
@@ -197,40 +203,27 @@ export const popupRapidRhythm = (pos: Vec): Popup =>
 export const popupTwinShot = (pos: Vec): Popup =>
   popupBonusLabel(pos, "TWIN SHOT", "#c9a6ff", "rgba(180, 140, 255, 0.85)");
 
-// per-shot streak payout tag — a "Streak #N" headline over the points it paid.
-//   Cyan-white to match the spark ring carrying the streak and stand apart from
-//   the gold combo readouts. A kill can stack three readouts on one strike point
-//   (combo "xN" at the hit, score "+N" above it, this tag on top), so the tag
-//   spawns above the score popup's band and rises in lockstep with it — same
-//   vel + decay — keeping the stack's gaps constant instead of converging.
+// per-shot streak payout tag — a single "Streak +N" line naming the points it
+//   paid. Cyan-white to match the spark ring carrying the streak and stand
+//   apart from the gold combo readouts. A kill can stack three readouts on one
+//   strike point (combo "xN" at the hit, score "+N" above it, this tag on
+//   top), so the tag spawns above the score popup's band and rises in lockstep
+//   with it — same vel + decay — keeping the stack's gaps constant instead of
+//   converging.
 const STREAK_BONUS_POPUP_LIFE = 1.1;
-export const popupStreakBonus = (pos: Vec, n: number, points: number): Popup => {
-  const labelFont = "700 18px 'Space Grotesk', system-ui, sans-serif";
-  const valueFont = "700 17px 'Space Grotesk', system-ui, sans-serif";
-  const fill = "#bff4ff";
-  const shadow = "rgba(140, 230, 255, 0.85)";
-  return {
-    pos: { x: pos.x, y: pos.y - 52 },
-    vel: { x: rand(-6, 6), y: -60 },
-    life: STREAK_BONUS_POPUP_LIFE,
-    maxLife: STREAK_BONUS_POPUP_LIFE,
-    text: `+${formatScore(points)}`,
-    font: valueFont,
-    fill,
-    shadowColor: shadow,
-    decayX: 0.94, decayY: 0.94,
-    popPeak: 0.35, popDuration: 0.15,
-    holdUntil: 0.4, fadeGain: 1,
-    draw: (ctx) => {
-      ctx.font = labelFont;
-      ctx.fillStyle = fill;
-      ctx.shadowColor = shadow;
-      ctx.fillText(`Streak #${n}`, 0, -22);
-      ctx.font = valueFont;
-      ctx.fillText(`+${formatScore(points)}`, 0, 0);
-    },
-  };
-};
+export const popupStreakBonus = (pos: Vec, points: number): Popup => ({
+  pos: { x: pos.x, y: pos.y - 52 },
+  vel: { x: rand(-6, 6), y: -60 },
+  life: STREAK_BONUS_POPUP_LIFE,
+  maxLife: STREAK_BONUS_POPUP_LIFE,
+  text: `Streak +${formatScore(points)}`,
+  font: "700 18px 'Space Grotesk', system-ui, sans-serif",
+  fill: "#bff4ff",
+  shadowColor: "rgba(140, 230, 255, 0.85)",
+  decayX: 0.94, decayY: 0.94,
+  popPeak: 0.35, popDuration: 0.15,
+  holdUntil: 0.4, fadeGain: 1,
+});
 
 // surfaces the streak break at the spot that caused it (ship fire / target hit).
 //   reason names which half of the rhythm gate failed so the player can correct it.
@@ -257,6 +250,7 @@ export const popupComboLost = (pos: Vec, reason: "fire" | "hit"): Popup => {
     decayX: 0.94, decayY: 0.94,
     popPeak: 0.4, popDuration: 0.15,
     holdUntil: 0.15, fadeGain: 1.4,
+    halfH: 20,
     draw: (ctx) => {
       ctx.font = labelFont;
       ctx.fillStyle = titleFill;
@@ -355,8 +349,82 @@ export const popupBeatDebug = (pos: Vec, prefix: string, onBeat: boolean, offset
   holdUntil: 0, fadeGain: 1.4,
 });
 
+// box half-extents for the anti-overlap pass — estimated from the font size
+//   and text length unless the popup declared its own (multi-line draws).
+const popupHalfW = (p: Popup): number => {
+  if (p.halfW !== undefined) return p.halfW;
+  const m = /(\d+)px/.exec(p.font);
+  return p.text.length * (m ? Number(m[1]) : 16) * 0.31;
+};
+const popupHalfH = (p: Popup): number => {
+  if (p.halfH !== undefined) return p.halfH;
+  const m = /(\d+)px/.exec(p.font);
+  return (m ? Number(m[1]) : 16) * 0.55;
+};
+
+// A single strike point can anchor several hints at once (combo "xN", score
+//   "+N", "Streak +N", DRIFT SHOT, RAPID RHYTHM…). Rather than hand-tuning
+//   every spawn offset against every combination, slide vertically-overlapping
+//   popups apart: pairs with a fresh (just-spawned) member snap fully clear
+//   before that popup's first visible frame, while popups that converge
+//   mid-flight ease apart. Ghosts that have mostly faded don't shove anyone.
+//   Vertical-only so every hint stays column-aligned with the spot it names.
+const POPUP_STACK_GAP = 4;
+const POPUP_EASE_RATE = 14;
+const POPUP_SOLID_ALPHA = 0.3;
+const FRESH_SETTLE_PASSES = 4;
+
+const liftPopup = (p: Popup, dy: number) => {
+  // follow popups re-pin to their target every tick, so shift the pin itself.
+  if (p.follow) {
+    p.followOffset = p.followOffset ?? { x: 0, y: 0 };
+    p.followOffset.y += dy;
+  }
+  p.pos.y += dy;
+};
+
+const separatePopups = (popups: Popup[], dt: number, w: number, h: number, fresh: boolean[]) => {
+  const passes = fresh.some(Boolean) ? FRESH_SETTLE_PASSES : 1;
+  for (let pass = 0; pass < passes; pass++) {
+    for (let i = 0; i < popups.length; i++) {
+      for (let j = i + 1; j < popups.length; j++) {
+        // extra settle passes only chase the fresh snaps; eased pairs move once.
+        if (pass > 0 && !fresh[i] && !fresh[j]) continue;
+        const a = popups[i], b = popups[j];
+        if (a.follow && b.follow) continue;
+        if (popupAlpha(a, a.life / a.maxLife) < POPUP_SOLID_ALPHA) continue;
+        if (popupAlpha(b, b.life / b.maxLife) < POPUP_SOLID_ALPHA) continue;
+        const [dx, dy] = toroidalDelta(b.pos.x - a.pos.x, b.pos.y - a.pos.y, w, h);
+        if (Math.abs(dx) >= popupHalfW(a) + popupHalfW(b)) continue;
+        const needY = popupHalfH(a) + popupHalfH(b) + POPUP_STACK_GAP;
+        if (Math.abs(dy) >= needY) continue;
+        const k = fresh[i] || fresh[j] ? 1 : Math.min(1, dt * POPUP_EASE_RATE);
+        const push = (needY - Math.abs(dy)) * k;
+        // keep current vertical order; a same-spot tie sends the older one up,
+        //   matching the rising motion the earlier spawn already has.
+        const dir = dy >= 0 ? 1 : -1;
+        // pinned follow tags hold their target, and a snapping fresh popup
+        //   slots around what's already on screen instead of shoving it.
+        const moveA = !a.follow && !(fresh[j] && !fresh[i]);
+        const moveB = !b.follow && !(fresh[i] && !fresh[j]);
+        if (moveA && moveB) {
+          liftPopup(a, -dir * push / 2);
+          liftPopup(b, dir * push / 2);
+        } else if (moveA) {
+          liftPopup(a, -dir * push);
+        } else if (moveB) {
+          liftPopup(b, dir * push);
+        }
+      }
+    }
+  }
+};
+
 // returns surviving array so callers can reassign (matches the codebase filter pattern).
-export const updatePopups = (popups: Popup[], dt: number): Popup[] => {
+export const updatePopups = (popups: Popup[], dt: number, w: number, h: number): Popup[] => {
+  // a popup pushed since the last tick hasn't aged yet — snap it clear of
+  //   neighbours in one go before the player ever sees it overlapped.
+  const fresh = popups.map((p) => p.life === p.maxLife);
   for (const p of popups) {
     p.life -= dt;
     if (p.follow) {
@@ -372,6 +440,7 @@ export const updatePopups = (popups: Popup[], dt: number): Popup[] => {
       p.vel.y *= p.decayY;
     }
   }
+  separatePopups(popups, dt, w, h, fresh);
   return popups.filter((p) => p.life > 0);
 };
 
@@ -470,6 +539,7 @@ export const popupLaserShotPickup = (shipPos: Vec): Popup => {
     decayX: 1, decayY: 0.97,
     popPeak: 0.3, popDuration: 0.15,
     holdUntil: 0.65, fadeGain: 1.2,
+    halfH: 28,
     draw: (ctx) => {
       ctx.font = labelFont;
       ctx.fillStyle = fill;

@@ -44,7 +44,7 @@ import { updateBassLightnings } from "./bassLightning";
 import { updateDriftBursts } from "./driftBurst";
 import { resetStreak, streakWindowClosed } from "./streakBurst";
 import { updateWormholes, spawnWormhole } from "./wormhole";
-import { tickPendingRhythmBonuses } from "./rhythmBonus";
+import { tickPendingRhythmBonuses, flushPendingRhythmBonuses } from "./rhythmBonus";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderboardKeyRepeat } from "./scoreEntry";
@@ -825,7 +825,7 @@ const updatePlaying = (game: Game, dt: number) => {
   tickWorldEntities(game, dt, musicDt);
   tickEntrances(game, musicDt);
   game.particles.update(musicDt);
-  game.popups = updatePopups(game.popups, dt);
+  game.popups = updatePopups(game.popups, dt, game.w, game.h);
   game.bassLightnings = updateBassLightnings(game.bassLightnings, dt);
   game.driftBursts = updateDriftBursts(game.driftBursts, dt);
   // musicDt (not dt) so the portal opens/closes in lockstep with the body's
@@ -891,27 +891,38 @@ const captureOrAssertCheckpoint = (game: Game) => {
 //   the bonus is tied to a live streak. The hit itself already showed the first combo number
 //   (C+1, popupDriftCombo); this fires the second (C+2), staged a beat later and offset to the
 //   lower-right so the player reads the streak climbing one step at a time.
+const awardDriftBonus = (game: Game, entry: Game["pendingDriftBonuses"][number]) => {
+  if (game.beatCombo === 0) return;
+  game.beatCombo += entry.amount;
+  if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
+  if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
+  game.driftBonusesThisWave += 1;
+  syncComboHud(game);
+  game.sound.playComboChime(game.beatCombo, entry.pos);
+  // second staged combo number, offset down-right of the first so both steps read in rhythm.
+  game.popups.push(popupDriftCombo(entry.pos, game.beatCombo, true));
+  // DRIFT SHOT label rides this beat too; show the tier-coloured "N× DAMAGE" subtitle only on
+  //   a new game-best multiplier (and force the first-of-run label so the player learns it).
+  const firstOfRun = !game.hasShownDriftShotLabel;
+  game.popups.push(popupDriftBonus(entry.pos, entry.tier, entry.showDamageMult || firstOfRun));
+  if (firstOfRun) game.hasShownDriftShotLabel = true;
+};
+
 const tickPendingDriftBonuses = (game: Game) => {
   if (game.pendingDriftBonuses.length === 0) return;
   const keep: typeof game.pendingDriftBonuses = [];
   for (const entry of game.pendingDriftBonuses) {
     if (game.perceivedBeatTime < entry.fireAt) { keep.push(entry); continue; }
-    if (game.beatCombo === 0) continue;
-    game.beatCombo += entry.amount;
-    if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
-    if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
-    game.driftBonusesThisWave += 1;
-    syncComboHud(game);
-    game.sound.playComboChime(game.beatCombo, entry.pos);
-    // second staged combo number, offset down-right of the first so both steps read in rhythm.
-    game.popups.push(popupDriftCombo(entry.pos, game.beatCombo, true));
-    // DRIFT SHOT label rides this beat too; show the tier-coloured "N× DAMAGE" subtitle only on
-    //   a new game-best multiplier (and force the first-of-run label so the player learns it).
-    const firstOfRun = !game.hasShownDriftShotLabel;
-    game.popups.push(popupDriftBonus(entry.pos, entry.tier, entry.showDamageMult || firstOfRun));
-    if (firstOfRun) game.hasShownDriftShotLabel = true;
+    awardDriftBonus(game, entry);
   }
   game.pendingDriftBonuses = keep;
+};
+
+// Wave closed before a staged bonus's beat arrived: pay it out immediately so
+//   the wave-ending drift shot still lands inside the summary snapshot.
+const flushPendingDriftBonuses = (game: Game) => {
+  for (const entry of game.pendingDriftBonuses) awardDriftBonus(game, entry);
+  game.pendingDriftBonuses = [];
 };
 
 // slow-mo timer ticks in wall-clock so its lifespan isn't extended by its own effect.
@@ -1342,6 +1353,11 @@ const showWaveAnnounce = (game: Game) => {
 const advanceWave = (game: Game) => {
   const wasBossWave = isBossWave(game.wave);
   const completedWave = game.wave;
+  // The wave-ending hit's staged bonuses (drift / rapid-rhythm / twin-shot)
+  //   haven't fired yet — pay them out before snapshotting the summary stats,
+  //   or the last shot's rewards silently vanish from the panel and its bonus.
+  flushPendingDriftBonuses(game);
+  flushPendingRhythmBonuses(game);
   const maxRhythm = Math.max(1, game.maxComboThisWave);
   const finalRhythm = Math.max(1, game.beatCombo);
   const bestStreak = game.bestStreakThisWave;

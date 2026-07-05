@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 13;
+export const REPLAY_FORMAT_VERSION = 14;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -45,6 +45,10 @@ export const REPLAY_FORMAT_VERSION = 13;
 //   from total streak shots to the wave's largest streak (it feeds the wave
 //   bonus). Combo totals AND score (→ bonus lives) both diverge, so v12
 //   recordings re-sim into different runs.
+// v14 flushes pending drift/rhythm bonuses at wave closure so the wave-ending
+//   shot's staged +1s land inside the summary snapshot instead of being paid
+//   mid-transition (or lost). Combo totals and the wave bonus shift at every
+//   wave boundary cleared by a staged bonus, so v13 recordings desync.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat

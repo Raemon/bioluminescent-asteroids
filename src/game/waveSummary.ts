@@ -253,7 +253,8 @@ export const showWaveSummary = (
   setRow(root, "wave", String(completedWave));
   setRow(root, "max", `x${maxRhythm}`);
   setRow(root, "final", `x${finalRhythm}`);
-  setRow(root, "streak", String(bestStreak));
+  // shown count includes the seed shot, so a 1-counted streak reads as 2.
+  setRow(root, "streak", String(bestStreak > 0 ? bestStreak + 1 : 0));
   setRow(root, "drift", String(driftBonuses));
   setRow(root, "bonus", formatScore(bonus));
   setRow(root, "score", formatScore(game.score));

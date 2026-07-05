@@ -28,7 +28,7 @@ const STREAK_ORBIT_BEATS = 4;
 const STREAK_BASE_POINTS = 25;
 
 // Every counted streak shot pays escalating points on the spot, flashed as a
-//   small "Streak #N" tag the way the Bassteroid resonance bonuses are. Flat
+//   small "Streak +N" tag the way the Bassteroid resonance bonuses are. Flat
 //   score — no rhythm multiply.
 const awardStreakShot = (game: Game, hitPos: Vec) => {
   if (game.streakShots > game.bestStreakThisWave) game.bestStreakThisWave = game.streakShots;
@@ -39,7 +39,7 @@ const awardStreakShot = (game: Game, hitPos: Vec) => {
   // not every streak shot is a kill (e.g. a bass chip), so sync the score
   //   readout here rather than relying on the kill path's syncHud.
   syncHud(game);
-  game.popups.push(popupStreakBonus(hitPos, game.streakShots, points));
+  game.popups.push(popupStreakBonus(hitPos, points));
 };
 
 // Begin a fresh streak from a single shot: a silent seed — no orb, nothing on
@@ -128,6 +128,16 @@ export const trackRhythmComboHit = (game: Game, hitPos: Vec) => {
   game.lastRhythmHitPos = { x: hitPos.x, y: hitPos.y };
 };
 
+const awardRhythmBonus = (game: Game, entry: Game["pendingRhythmBonuses"][number]) => {
+  if (game.beatCombo === 0) return;
+  game.beatCombo += 1;
+  if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
+  if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
+  syncComboHud(game);
+  game.sound.playComboChime(game.beatCombo, entry.pos);
+  game.popups.push(popupCombo(entry.pos, game.beatCombo));
+};
+
 // mirrors tickPendingDriftBonuses: entries whose moment came pay +1 rhythm with
 // its own chime + xN flash; dropped if the streak died in the meantime.
 export const tickPendingRhythmBonuses = (game: Game) => {
@@ -135,13 +145,14 @@ export const tickPendingRhythmBonuses = (game: Game) => {
   const keep: typeof game.pendingRhythmBonuses = [];
   for (const entry of game.pendingRhythmBonuses) {
     if (game.perceivedBeatTime < entry.fireAt) { keep.push(entry); continue; }
-    if (game.beatCombo === 0) continue;
-    game.beatCombo += 1;
-    if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
-    if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
-    syncComboHud(game);
-    game.sound.playComboChime(game.beatCombo, entry.pos);
-    game.popups.push(popupCombo(entry.pos, game.beatCombo));
+    awardRhythmBonus(game, entry);
   }
   game.pendingRhythmBonuses = keep;
+};
+
+// Wave closed before a staged bonus's stagger arrived: pay it out immediately
+//   so the wave-ending hit's bonus lands inside the summary snapshot.
+export const flushPendingRhythmBonuses = (game: Game) => {
+  for (const entry of game.pendingRhythmBonuses) awardRhythmBonus(game, entry);
+  game.pendingRhythmBonuses = [];
 };
