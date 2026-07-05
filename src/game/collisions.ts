@@ -86,7 +86,10 @@ const deflectBulletOff = (game: Game, b: Bullet, a: Asteroid, blockedDmg: number
     b.vel.x -= 2 * vdotn * nx;
     b.vel.y -= 2 * vdotn * ny;
   }
-  a.applyKnockback(inVx, inVy, blockedDmg * 0.5);
+  if (!b.hasAppliedKnockback) {
+    b.hasAppliedKnockback = true;
+    a.applyKnockback(inVx, inVy, blockedDmg * 0.5);
+  }
   b.vel.x *= 0.5;
   b.vel.y *= 0.5;
   // push outside the hitbox along the normal so the next frame starts clear.
@@ -145,7 +148,10 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     game.shake = Math.min(game.shake + (killed ? 0.4 : 0.2), 1.2);
     applyHitToCombo(game, onBeat, b.pos);
     if (!killed) {
-      a.applyKnockback(b.vel.x, b.vel.y, dmg);
+      if (!b.hasAppliedKnockback) {
+        b.hasAppliedKnockback = true;
+        a.applyKnockback(b.vel.x, b.vel.y, dmg);
+      }
       onAsteroidCrackedByBullet(game, a, b, onBeat);
       return null;
     }

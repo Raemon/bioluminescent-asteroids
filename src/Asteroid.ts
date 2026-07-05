@@ -3119,11 +3119,13 @@ export class Asteroid {
 
   // a non-killing hit should visibly shove the target — fraction of "kill-worth"
   // damage maps to a fraction of a reference speed bump along the impact direction.
-  // Heavier targets (high maxHp) get pushed proportionally less for the same damage.
+  // Heavier targets (high maxHp + armor) get pushed proportionally less for the
+  // same damage; counting damageReduction keeps a low-hp armored crystal from
+  // weighing nothing and taking the full reference speed per blocked shot.
   applyKnockback(dirX: number, dirY: number, amount: number, referenceSpeed: number = 120) {
     const len = Math.hypot(dirX, dirY);
     if (len === 0) return;
-    const fraction = Math.min(1, amount / Math.max(1, this.maxHp));
+    const fraction = Math.min(1, amount / Math.max(1, this.maxHp + this.damageReduction));
     const dv = fraction * referenceSpeed;
     this.vel.x += (dirX / len) * dv;
     this.vel.y += (dirY / len) * dv;

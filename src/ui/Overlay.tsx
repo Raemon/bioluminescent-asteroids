@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { InstructionsPanel } from "./InstructionsPanel";
 import { ControlInfo } from "./ControlInfo";
+import { DevLog } from "./DevLog";
 
 // Overlay shell: title, instructions, leaderboard, score-entry, abort-mission.
 // Hidden/visible state is still toggled by the game via .hidden on #overlay,
@@ -14,7 +15,6 @@ const isLocalhost = () =>
 export const Overlay = () => {
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [devlogUnseen, setDevlogUnseen] = useState(false);
 
   useEffect(() => {
     const onOpen = () => setInstructionsOpen(true);
@@ -22,10 +22,6 @@ export const Overlay = () => {
     const onState = (e: Event) => {
       const detail = (e as CustomEvent<{ state: string }>).detail;
       setPaused(detail.state === "paused");
-    };
-    const onUnseen = (e: Event) => {
-      const detail = (e as CustomEvent<{ unseen: boolean }>).detail;
-      setDevlogUnseen(!!detail?.unseen);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && instructionsOpen) {
@@ -41,26 +37,13 @@ export const Overlay = () => {
     window.addEventListener("instructions-open-request", onOpen);
     window.addEventListener("instructions-close-request", onClose);
     window.addEventListener("game:state", onState as EventListener);
-    window.addEventListener("devlog:unseen", onUnseen as EventListener);
     return () => {
       document.removeEventListener("keydown", onKey, true);
       window.removeEventListener("instructions-open-request", onOpen);
       window.removeEventListener("instructions-close-request", onClose);
       window.removeEventListener("game:state", onState as EventListener);
-      window.removeEventListener("devlog:unseen", onUnseen as EventListener);
     };
   }, [instructionsOpen]);
-
-  const startTutorial = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    window.dispatchEvent(new CustomEvent("tutorial:request"));
-  };
-
-  const toggleDevLog = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setDevlogUnseen(false);
-    window.dispatchEvent(new CustomEvent("devlog:toggle"));
-  };
 
   const closeInstructions = () => {
     setInstructionsOpen(false);
@@ -69,17 +52,7 @@ export const Overlay = () => {
 
   return (
     <div id="overlay" className="hidden">
-      <button id="instructions-link" type="button" onClick={startTutorial}>
-        tutorial
-      </button>
-      <button
-        id="devlog-link"
-        type="button"
-        className={devlogUnseen ? "has-unseen" : ""}
-        onClick={toggleDevLog}
-      >
-        dev log
-      </button>
+      <DevLog />
       <a
         id="sound-link"
         href="/sound"

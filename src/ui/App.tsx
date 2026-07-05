@@ -7,7 +7,6 @@ import { BeatCalibrator } from "./BeatCalibrator";
 import { IntroSequence } from "./IntroSequence";
 import { SettingsDialog } from "./SettingsDialog";
 import { PauseButton } from "./PauseButton";
-import { DevLogPopup } from "./DevLogPopup";
 import { TouchControls } from "./TouchControls";
 import { ReplayScrubber } from "./ReplayScrubber";
 
@@ -23,7 +22,6 @@ export const App = () => (
     <IntroSequence />
     <SettingsDialog />
     <PauseButton />
-    <DevLogPopup />
     <TouchControls />
   </>
 );

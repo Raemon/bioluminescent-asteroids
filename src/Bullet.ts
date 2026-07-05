@@ -55,6 +55,10 @@ export class Bullet {
   // collision pass keeps a piercing bullet alive on hit instead of consuming
   // it, so a single shot can punch through a row of asteroids.
   pierce = false;
+  // A bullet's momentum transfers once, ever. Set on the first knockback it
+  // applies (deflection or cracked hit); repeat deflections off a spinning
+  // armored crystal — or later pierce hits — shove nothing more.
+  hasAppliedKnockback = false;
   // beatTime (seconds since game start) at which this bullet was fired.
   // Recorded by Game when stamping new bullets so debug logging at hit time
   // can report the original fire offset, not just the impact offset.

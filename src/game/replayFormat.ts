@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 14;
+export const REPLAY_FORMAT_VERSION = 15;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -49,6 +49,11 @@ export const REPLAY_FORMAT_VERSION = 14;
 //   shot's staged +1s land inside the summary snapshot instead of being paid
 //   mid-transition (or lost). Combo totals and the wave bonus shift at every
 //   wave boundary cleared by a staged bonus, so v13 recordings desync.
+// v15 reweighs knockback (mass proxy is maxHp + damageReduction, so armored
+//   low-hp crystals no longer take the full reference speed per blocked shot)
+//   and lets a bullet transfer momentum at most once, ever (repeat deflections
+//   and later pierce hits shove nothing). Asteroid velocities → positions →
+//   the whole run diverge, so v14 recordings re-sim into different runs.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat
