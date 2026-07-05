@@ -1,4 +1,5 @@
 import { Vec, v, fromAngle, rand, cosmeticRand, TAU, addScaledMut, wrapMut, toroidalDelta, nearestImageOf, WORLD_W, WORLD_H } from "./vec";
+import { completeEntrance, foldWithEntrance } from "./game/entrance";
 import { Trail } from "./Trail";
 import { SoundwaveRadiator } from "./SoundwaveRadiator";
 import { rng, cosmeticRng } from "./game/rng";
@@ -813,10 +814,7 @@ export class Asteroid {
   outlineSamples = 60;
   membranePhase: number;
   flashAmount = 0;
-  // Entrance state — the arrival mirror of the warpT exit. A staged spawn is
-  // folded in-domain but drawn once at its unfolded entrance image
-  // (pos + enterOff) and intangible until fully on-screen. enterOff
-  // components are multiples of ±w/±h. See game/entrance.ts.
+  // Entrance state — the arrival mirror of the warpT exit. See game/entrance.ts.
   entering = false;
   enterOffX = 0;
   enterOffY = 0;
@@ -3065,11 +3063,17 @@ export class Asteroid {
     // transition to "live" enables both at once on the same frame as the
     // eye opens.
     if (this.isBoss() && this.bossPhase === "dormant") return false;
-    // Still sliding in from the border — intangible until fully on-screen.
-    if (this.entering) return false;
     // Phased-out warble: bullets and the ship pass clean through during the
     // dim window.
     if (this.isPhasedOut()) return false;
+    const hit = this.hitTest(point, pointRadius);
+    // Real contact ends the entrance presentation so the impact and its
+    // effects land at the true torus position (see game/entrance.ts).
+    if (hit) completeEntrance(this);
+    return hit;
+  }
+
+  private hitTest(point: Vec, pointRadius: number): boolean {
     const [dx, dy] = toroidalDelta(point.x - this.pos.x, point.y - this.pos.y, WORLD_W, WORLD_H);
     const distance = Math.hypot(dx, dy);
     if (distance > this.radius * 1.3 + pointRadius) return false;
@@ -3137,18 +3141,12 @@ export class Asteroid {
     this.rotation += this.rotSpeed * dt;
     this.membranePhase += dt * 0.8;
     addScaledMut(this.pos, this.vel, dt);
-    const off = wrapMut(this.pos, w, h);
+    const off = foldWithEntrance(this, w, h);
     // Carry the drone trail (gen-0 large) across a fold so the wake stays
     // attached at the seam. The radiator is deliberately untouched — each
     // wave anchors to its own emission origin, so a fold simply means future
     // waves emit from the new side while older waves age out where they were.
-    if (off) {
-      if (this.trail) this.trail.shift(off.x, off.y);
-      if (this.entering) {
-        this.enterOffX -= off.x;
-        this.enterOffY -= off.y;
-      }
-    }
+    if (off && this.trail) this.trail.shift(off.x, off.y);
     if (this.trail) this.trail.update(dt, this.pos.x, this.pos.y);
     if (this.radiator) this.radiator.update(dt, this.pos.x, this.pos.y, this.vel.x, this.vel.y);
     // Ease the displayed laser aim toward the committed aim so the telegraph

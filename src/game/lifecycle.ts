@@ -27,6 +27,7 @@ import { HighlightTimeline } from "./highlightTimeline";
 import { resetHuePaletteCursor } from "../Asteroid";
 import { getBindings, normalizeBindings, setReplayBindings, emptyTutorialControlsUsed, type TutorialControlsUsed } from "./controlBindings";
 import { precomputeRhythmHistogram } from "./gameUpdate";
+import { shiftEntranceFrames } from "./entrance";
 
 // React-side <FirstWaveHint> subscribes to this so the canvas/game loop stays
 //   out of layout + transitions — CSS + a single setTimeout do the dismiss work.
@@ -678,7 +679,13 @@ export const abortMission = (game: Game) => {
 
 // combo grid may have flipped (8ths→quarters if previous life had rapid); rebase the eval index.
 export const respawn = (game: Game) => {
+  const oldX = game.ship.pos.x;
+  const oldY = game.ship.pos.y;
   game.ship = new Ship(v(game.w / 2, game.h / 2));
+  // The respawn teleports the locked-centre camera; shift entrance frames by
+  // the same jump (as shiftEntranceFrames does for a fold) so mid-entrance
+  // bodies keep sliding in from the border instead of popping elsewhere.
+  shiftEntranceFrames(game, game.ship.pos.x - oldX, game.ship.pos.y - oldY);
   game.ship.invuln = 2.2;
   game.nextBeatToEvaluate = Math.max(0, Math.floor((game.perceivedBeatTime - beatWindow(game)) / comboGrid(game)) + 1);
   game.state = game.replayPlayer ? "replaying" : "playing";

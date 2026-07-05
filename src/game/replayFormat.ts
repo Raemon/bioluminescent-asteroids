@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 7;
+export const REPLAY_FORMAT_VERSION = 8;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -21,6 +21,10 @@ export const REPLAY_FORMAT_VERSION = 7;
 //   the seeded-draw stream. A matching beatTime + score but mismatched rngState
 //   localises a desync to an unseeded code path; matching rngState + mismatched
 //   score points at a rhythm-judgment drift instead. Diagnostic only.
+// v8 marks the torus-native world: ship-relative staged edge spawns (no
+//   spawn-away rng retries), toroidal collision everywhere, and
+//   contact-completed entrances all change sim semantics, so v7 recordings
+//   would re-sim into a different run.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat

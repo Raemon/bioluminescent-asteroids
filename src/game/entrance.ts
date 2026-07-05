@@ -1,15 +1,26 @@
 import type { Game } from "../Game";
-import type { Alien } from "../Alien";
 import type { Comet } from "../Comet";
 import { wrapMut } from "../vec";
-import { BEAT_GRID } from "./rhythmConstants";
 
 // Entrance presentation state — the arrival mirror of the warpT exit. A fresh
 // edge spawn is placed in unfolded ship-frame coords (just off the visible
 // border), folded in-domain for the sim, and drawn once at its unfolded
 // entrance image (pos + enterOff) so it slides in from the screen border.
-// While entering it's intangible; once body + trail are fully on-screen the
-// state clears and the wrap-replicated world layer takes over seamlessly.
+// The entrance is purely cosmetic and self-destructs on contact: the body
+// collides toroidally like anything else, and its own collidesWith calls
+// completeEntrance on a positive test — so ANY weapon or contact path, current
+// or future, automatically ends the presentation before the hit lands and
+// effects/splits stay torus-true. Once body + trail are fully on-screen the
+// state clears anyway and the wrap-replicated world layer takes over.
+//
+// Giving a NEW entity type staged entrances means:
+//   1. add the EnteringEntity fields (entering/enterOffX/enterOffY/enterTraveled)
+//   2. fold via foldWithEntrance (not bare wrapMut) in its update
+//   3. call completeEntrance from its collidesWith on a positive test
+//   4. stage spawns with stageEntrance; register the array in
+//      shiftEntranceFrames + tickEntrances + paintEntrances (gameRender) and
+//      skip entering bodies in the world layer + trailsRender
+//   5. route its positional audio through audiblePos
 
 export type EnteringEntity = {
   pos: { x: number; y: number };
@@ -45,11 +56,28 @@ export const shiftEntranceFrames = (game: Game, dx: number, dy: number) => {
   for (const g of game.gems) shift(g);
 };
 
-const completeEntrance = (e: EnteringEntity) => {
+// End the entrance presentation. Entities call this from collidesWith on a
+// positive test (contact reveals the body at its true torus position); the
+// shockwave calls it directly (full-field event, no collision test).
+export const completeEntrance = (e: EnteringEntity) => {
+  if (!e.entering) return;
   e.entering = false;
   e.enterOffX = 0;
   e.enterOffY = 0;
   e.enterTraveled = 0;
+};
+
+// Fold an entity onto the torus, keeping its entrance image continuous when
+// it folds mid-entrance. Entrance-capable entities must use this instead of
+// bare wrapMut; the returned offset still needs applying to any connected
+// history buffer (trail shift), which stays with the owner.
+export const foldWithEntrance = (e: EnteringEntity, w: number, h: number): { x: number; y: number } | null => {
+  const off = wrapMut(e.pos, w, h);
+  if (off && e.entering) {
+    e.enterOffX -= off.x;
+    e.enterOffY -= off.y;
+  }
+  return off;
 };
 
 // Body is fully inside the viewport when its entrance image sits at least
@@ -61,8 +89,8 @@ const bodyInside = (game: Game, e: EnteringEntity, reach: number, camX: number, 
 };
 
 // Force-completion budget: fully crossing the diagonal guarantees the body
-// swept the whole screen, so a spawn fleeing alongside the ship can't stay
-// intangible forever.
+// swept the whole screen, so a spawn fleeing alongside the ship can't ride
+// the border half-drawn forever.
 const advance = (game: Game, e: EnteringEntity, dt: number, inside: boolean): boolean => {
   e.enterTraveled += Math.hypot(e.vel.x, e.vel.y) * dt;
   if (inside || e.enterTraveled > Math.hypot(game.w, game.h)) {
@@ -105,19 +133,12 @@ export const tickEntrances = (game: Game, dt: number) => {
     const inside =
       bodyInside(game, al, al.radius * 2.2, camX, camY) &&
       al.trail.allInside(al.enterOffX + camX, al.enterOffY + camY, game.w, game.h);
-    if (advance(game, al, dt, inside)) realignAlienFireClock(game, al);
+    advance(game, al, dt, inside);
   }
   for (const g of game.gems) {
     if (!g.entering) continue;
     advance(game, g, dt, bodyInside(game, g, g.radius * 1.5, camX, camY));
   }
-};
-
-// While entering, tickAlienFire skips the alien; without a re-align the
-// `while (beatTime >= nextFireAt)` loop would fire a catch-up burst the
-// moment the entrance completes.
-const realignAlienFireClock = (game: Game, a: Alien) => {
-  a.nextFireAt = Math.ceil((game.beatTime + 0.5) / BEAT_GRID) * BEAT_GRID;
 };
 
 // Where a positional sound for this body should pan from: the visible

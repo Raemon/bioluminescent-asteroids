@@ -1,4 +1,5 @@
-import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut, sub, mul, len, fromAngle, circleHit, wrapMut } from "./vec";
+import { Vec, v, rand, pick, TAU, addScaledMut, scaleMut, sub, mul, len, fromAngle, circleHit } from "./vec";
+import { completeEntrance, foldWithEntrance } from "./game/entrance";
 import { Canister, POWERUP_KINDS } from "./Canister";
 import { ENTITY_CONFIG } from "./game/entityConfig";
 import { cosmeticRng } from "./game/rng";
@@ -90,29 +91,23 @@ export class Gem {
       // Flung blade: hold velocity and wrap, so the gem keeps crossing the
       // field as a live rhythm target until its lifetime expires.
       addScaledMut(this.pos, this.vel, dt);
-      this.applyFold(wrapMut(this.pos, w, h));
+      foldWithEntrance(this, w, h);
     } else {
       // Gentle drift; the gem isn't supposed to chase or flee, it just floats
       // where the rock died.
       addScaledMut(this.pos, this.vel, dt);
-      this.applyFold(wrapMut(this.pos, w, h));
+      foldWithEntrance(this, w, h);
       // Slow the drift over time so it eventually settles near its origin.
       scaleMut(this.vel, Math.max(0, 1 - dt * 0.6));
     }
     if (this.age >= LIFETIME) this.alive = false;
   }
 
-  // Keep the entrance image continuous when the gem folds mid-entrance.
-  private applyFold(off: { x: number; y: number } | null) {
-    if (!off || !this.entering) return;
-    this.enterOffX -= off.x;
-    this.enterOffY -= off.y;
-  }
-
   collidesWith(point: Vec, pointRadius: number): boolean {
-    // Still sliding in from the border — intangible until fully on-screen.
-    if (this.entering) return false;
-    return circleHit(this.pos, this.radius, point, pointRadius);
+    const hit = circleHit(this.pos, this.radius, point, pointRadius);
+    // Real contact ends the entrance presentation (see game/entrance.ts).
+    if (hit) completeEntrance(this);
+    return hit;
   }
 
   // Tail-end fade + quickening flicker warning the gem is about to warp out.

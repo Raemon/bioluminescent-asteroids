@@ -1,5 +1,6 @@
 import type { Game } from "../Game";
 import { toroidalDelta } from "../vec";
+import { completeEntrance } from "./entrance";
 import { Asteroid } from "../Asteroid";
 import { emitExplosion, emitShockwaveSparks } from "./particleBursts";
 import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet, BeatClaimSet } from "./waveDirector";
@@ -65,10 +66,10 @@ const shatterAllAsteroids = (game: Game) => {
   const surviving: Asteroid[] = [];
   const claimed = newBeatClaimSet();
   for (const a of game.asteroids) {
-    // Entering rocks are still off-screen and intangible — the wavefront
-    // passes under them untouched.
-    if (a.entering) surviving.push(a);
-    else if (a.isBossFamily()) bossWeathersShockwave(game, a, surviving);
+    // The wavefront is a full-field event — an entering rock is hit like any
+    // other; the contact just ends its entrance presentation first.
+    completeEntrance(a);
+    if (a.isBossFamily()) bossWeathersShockwave(game, a, surviving);
     else if (a.isBass()) shatterBassRock(game, a, surviving, claimed);
     else shatterPlainRock(game, a, surviving, claimed);
   }

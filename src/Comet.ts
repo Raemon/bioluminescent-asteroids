@@ -1,4 +1,5 @@
-import { Vec, v, fromAngle, rand, randInt, TAU, addScaledMut, circleHit, wrapMut } from "./vec";
+import { Vec, v, fromAngle, rand, randInt, TAU, addScaledMut, circleHit } from "./vec";
+import { completeEntrance, foldWithEntrance } from "./game/entrance";
 import { Trail } from "./Trail";
 import { rng } from "./game/rng";
 import { ENTITY_CONFIG } from "./game/entityConfig";
@@ -97,9 +98,10 @@ export class Comet {
     // A comet diving into its departure portal is intangible — it's leaving, not
     // a target, so a late bullet can't "kill" it for score mid-warp.
     if (this.warpT !== null) return false;
-    // Still sliding in from the border — intangible until fully on-screen.
-    if (this.entering) return false;
-    return circleHit(this.pos, this.radius, p, r);
+    const hit = circleHit(this.pos, this.radius, p, r);
+    // Real contact ends the entrance presentation (see game/entrance.ts).
+    if (hit) completeEntrance(this);
+    return hit;
   }
 
   // Brightness envelope: rises during FADE_IN, then holds at full. There's no
@@ -157,16 +159,12 @@ export class Comet {
     // Fold onto the torus; carry both trails across the fold so the streak
     // stays attached instead of resetting at the seam. Meteors fold too —
     // they still despawn on their lifetime clock.
-    const off = wrapMut(this.pos, w, h);
+    const off = foldWithEntrance(this, w, h);
     if (off) {
       this.glowTrail.shift(off.x, off.y);
       for (const t of this.trail) {
         t.pos.x += off.x;
         t.pos.y += off.y;
-      }
-      if (this.entering) {
-        this.enterOffX -= off.x;
-        this.enterOffY -= off.y;
       }
     }
     this.glowTrail.update(dt, this.pos.x, this.pos.y);

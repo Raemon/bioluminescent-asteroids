@@ -196,19 +196,18 @@ const paintPulsarLayer = (game: Game) => {
 // The dormant boss is excluded too — during its approach it's meant to read as part of the
 // background planet, so the reticule must not light it up or treat it as a lockable target.
 export const targetsForReticule = (game: Game) => [
-  // Skip intangible rocks — a dormant boss, a phased-out warble and an
-  // entering spawn all pass bullets through, so the reticule shouldn't
-  // promise a hit on them.
-  ...game.asteroids.filter((a) => !(a.isBoss() && a.bossPhase === "dormant") && !a.isPhasedOut() && !a.entering),
-  // Warping-out comets/aliens are intangible and leaving; entering ones are
-  // intangible and still arriving — don't lock either.
-  ...game.comets.filter((c) => c.warpT === null && !c.entering),
-  ...game.aliens.filter((a) => a.warpT === null && !a.entering),
+  // Skip intangible rocks — a dormant boss and a phased-out warble both pass
+  // bullets through, so the reticule shouldn't promise a hit on them.
+  // (Entering spawns ARE included: they're live toroidal targets.)
+  ...game.asteroids.filter((a) => !(a.isBoss() && a.bossPhase === "dormant") && !a.isPhasedOut()),
+  // Warping-out comets/aliens are intangible and leaving — don't lock them.
+  ...game.comets.filter((c) => c.warpT === null),
+  ...game.aliens.filter((a) => a.warpT === null),
   ...game.canisters,
   // Moving gems (the fan a burst gold asteroid throws off) are real rhythm
   // targets, so give them trajectory lines + a first-beat dot like any rock.
   // Parked/near-still drops self-skip in the trajectory walk (speed<1).
-  ...game.gems.filter((g) => !g.entering && Math.hypot(g.vel.x, g.vel.y) >= 1),
+  ...game.gems.filter((g) => Math.hypot(g.vel.x, g.vel.y) >= 1),
 ];
 
 // Ship + reticule + trajectory are the screen-pinned foreground: in scroll mode

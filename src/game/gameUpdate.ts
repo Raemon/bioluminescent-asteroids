@@ -1172,7 +1172,14 @@ const tickAlienFire = (game: Game) => {
   if (game.aliens.length === 0) return;
   for (const a of game.aliens) {
     if (a.warpT !== null) continue; // warping out — done fighting, just leaving
-    if (a.entering) continue; // still sliding in — fire clock re-arms on arrival
+    if (a.entering) continue; // holds fire while sliding in
+    // A clock that fell behind (fire was held during the entrance — however it
+    // ended) re-arms to the next slot instead of firing a catch-up burst. Legit
+    // fire never lags more than one frame, so a full BEAT_GRID of lag is
+    // unambiguous.
+    if (game.beatTime - a.nextFireAt > BEAT_GRID) {
+      a.nextFireAt = Math.ceil((game.beatTime + 0.5) / BEAT_GRID) * BEAT_GRID;
+    }
     while (game.beatTime >= a.nextFireAt) fireOneAlienShot(game, a);
   }
 };

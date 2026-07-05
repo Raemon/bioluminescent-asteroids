@@ -1,4 +1,5 @@
-import { Vec, v, add, mul, fromAngle, rand, cosmeticRand, TAU, circleHit, wrapMut } from "./vec";
+import { Vec, v, add, mul, fromAngle, rand, cosmeticRand, TAU, circleHit } from "./vec";
+import { completeEntrance, foldWithEntrance } from "./game/entrance";
 import { AlienBullet } from "./AlienBullet";
 import { Trail } from "./Trail";
 import { rng, cosmeticRng } from "./game/rng";
@@ -449,14 +450,8 @@ export class Alien {
     // Fold onto the torus; carry the wake across the fold. Despawn stays on
     // distance *travelled* (maxTravel, set from the screen diagonal) — under
     // the locked-centre scroll camera there is no fixed off-screen region.
-    const off = wrapMut(this.pos, w, h);
-    if (off) {
-      this.trail.shift(off.x, off.y);
-      if (this.entering) {
-        this.enterOffX -= off.x;
-        this.enterOffY -= off.y;
-      }
-    }
+    const off = foldWithEntrance(this, w, h);
+    if (off) this.trail.shift(off.x, off.y);
     this.traveled += Math.hypot(stepX, stepY);
     if (this.traveled > this.maxTravel) {
       this.beginWarpOut();
@@ -507,10 +502,11 @@ export class Alien {
     // A warping-out alien is intangible — it's diving through its portal, no
     // longer a target or a threat, so neither bullets nor the ship interact.
     if (this.warpT !== null) return false;
-    // Still sliding in from the border — intangible until fully on-screen.
-    if (this.entering) return false;
     // 0.9 — tight circle so glancing shots miss the spindly limbs.
-    return circleHit(this.pos, this.radius * 0.9, point, pointRadius);
+    const hit = circleHit(this.pos, this.radius * 0.9, point, pointRadius);
+    // Real contact ends the entrance presentation (see game/entrance.ts).
+    if (hit) completeEntrance(this);
+    return hit;
   }
 
   // Traces the closed body outline (the curved manta silhouette) onto whatever
