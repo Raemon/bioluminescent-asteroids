@@ -188,7 +188,7 @@ export const showTitle = (game: Game) => {
   syncPowerupHud(game);
   hideScoreEntry(game);
   showLeaderboard(game);
-  hideWaveSummary();
+  hideWaveSummary(game);
   setFirstWaveHintStage(game, 0);
   game.waveTransitioning = false;
   game.waveTransition = null;
@@ -548,8 +548,10 @@ const resetRunTimers = (game: Game) => {
   game.hasSpawnedFirstLevel = false;
   game.replayDyingTimer = null;
   // Drop any in-flight end-of-wave drain/spawn so a stale schedule from the prior
-  //   run (or a torn-down replay) can't fire into this fresh world.
+  //   run (or a torn-down replay) can't fire into this fresh world. Beat cues are
+  //   keyed to the old beatTime, so they'd be far-future garbage after the reset.
   game.waveTransition = null;
+  game.beatCues = [];
 };
 
 // parade + drones from the previous title screen must be torn down before the new run runs.
@@ -668,7 +670,7 @@ export const abortMission = (game: Game) => {
   game.overlayStartEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
-  hideWaveSummary();
+  hideWaveSummary(game);
   const shipSnap = snapshotShipKill(game.ship, "death");
   if (shipSnap) game.killedSnapshots.push(shipSnap);
   renderKilledRow(game, "vertical");

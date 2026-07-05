@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 8;
+export const REPLAY_FORMAT_VERSION = 9;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -25,6 +25,10 @@ export const REPLAY_FORMAT_VERSION = 8;
 //   spawn-away rng retries), toroidal collision everywhere, and
 //   contact-completed entrances all change sim semantics, so v7 recordings
 //   would re-sim into a different run.
+// v9 keys the end-of-wave transition (score drain + next-wave spawn) on
+//   beatTime instead of summed dt, snapped to the beat grid — the payout and
+//   spawn land at different sim moments than v8, and now stretch under
+//   slow-mo, so v8 recordings would fail their checkpoints.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat

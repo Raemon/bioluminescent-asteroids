@@ -20,7 +20,7 @@ import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } 
 import { tickWaveEvents } from "./waveEvents";
 import { detonateShockwave } from "./shockwave";
 import { spawnWave, isBossWave, updateBgBeatIntensity, spawnTutorialSmall, spawnTutorialBig, rhythmSpeedMul, displayWave } from "./waveDirector";
-import { showWaveSummary, hideWaveSummary } from "./waveSummary";
+import { showWaveSummary, hideWaveSummary, buildSummarySchedule } from "./waveSummary";
 import { beginWaveTransition, tickWaveTransition } from "./waveTransition";
 import {
   handleCollisions,
@@ -439,7 +439,7 @@ const transitionToGameOver = (game: Game) => {
   game.overlayStartEl.classList.add("hidden");
   game.overlayEl.classList.remove("hidden");
   game.overlayEl.classList.add("gameover-layout");
-  hideWaveSummary();
+  hideWaveSummary(game);
   showGameOverIntro(game, "gameover");
   showScoreEntry(game);
   if (highlightStarted) {
@@ -753,7 +753,6 @@ const updatePlaying = (game: Game, dt: number) => {
     nextBeatToEvaluate: game.nextBeatToEvaluate,
     lastBeatResnapAt: game.lastBeatResnapAt,
   });
-  tickWaveTransition(game, dt);
   tickBeatIntensityRamp(game, dt);
   tickTutorialSpawn(game);
   if (game.controlsHintActive) tickControlsGate(game);
@@ -807,6 +806,8 @@ const updatePlaying = (game: Game, dt: number) => {
   // scheduler; under slow-mo musicDt < dt so beats are scheduled further out.
   const beatPlaybackRate = dt > 0 ? rawMusicDt / dt : 1;
   tickBassBeats(game, musicDt, beatPlaybackRate);
+  // after tickBassBeats so the payout compares this frame's advanced beatTime.
+  tickWaveTransition(game);
   // pulsar runs against perceivedBeatTime so its flash lands with the *heard* bass voices.
   game.pulsar.update(dt, game.perceivedBeatTime, BEAT_GRID);
   game.ship.tickComboHalo(musicDt, currentBeatPulse(game));
@@ -1331,12 +1332,15 @@ const advanceWave = (game: Game) => {
   game.pulsar.waveClear();
   if (wasBossWave) game.pulsar.setBossPlanetState("defeated");
   game.waveTransitioning = true;
-  // Summary panel (rows + drain animation + fade) is cosmetic on setTimeout; the
-  //   sim-clock driver owns the score drain + the deferred spawn so they land on
-  //   the recorded dt and reproduce in replays. Both derive the same schedule.
-  showWaveSummary(game, displayWave(completedWave), maxRhythm, finalRhythm, driftBonuses);
+  // One beat-grid schedule feeds both halves: the cosmetic panel (DOM timers +
+  //   beat cues) and the sim-clock driver that owns the score drain + deferred
+  //   spawn. beatTime is a deterministic sum of recorded musicDt, so the sim
+  //   half reproduces in replays; the snap in the builder is what puts the
+  //   whole summary on the same grid the bgBeat pulse plays on.
   const bonus = (maxRhythm + finalRhythm + driftBonuses) * 100;
-  beginWaveTransition(game, bonus, () => {
+  const schedule = buildSummarySchedule(game.beatTime, bonus);
+  showWaveSummary(game, schedule, displayWave(completedWave), maxRhythm, finalRhythm, driftBonuses);
+  beginWaveTransition(game, schedule, () => {
     game.wave = nextWave;
     // opening rocks' speed keys off the peak combo of the wave just cleared, not
     //   the live combo at spawn (which a death or whiff may have already reset).

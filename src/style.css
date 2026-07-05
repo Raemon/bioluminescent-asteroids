@@ -2454,6 +2454,14 @@ li.lb-self .lb-name-link:hover {
   animation: ws-panel-fade 2s ease-out forwards;
 }
 
+/* Applied for one forced-reflow beat while showWaveSummary/hideWaveSummary
+   reset the panel: rows must snap to hidden rather than transition, or the
+   previous wave's rows flash at full opacity when `fade-out` is removed. */
+#wave-summary.ws-reset,
+#wave-summary.ws-reset .ws-row {
+  transition: none;
+}
+
 @keyframes ws-panel-fade {
   from { opacity: 1; }
   to   { opacity: 0; }

@@ -132,7 +132,10 @@ const paintEntityLayers = (game: Game, focusedTarget: ReticuleTarget | null) => 
     for (const c of game.canisters) paintBeatFlash(ctx, c.pos, c.radius, beatFlash);
     for (const g of game.gems) if (!g.entering) paintBeatFlash(ctx, g.pos, g.radius, beatFlash);
   }
-  if (focusedTarget) paintFocusGlow(ctx, focusedTarget);
+  // An entering focused target isn't drawn in this layer — its glow rides the
+  // entrance image in paintEntrances instead, else a body-less glow cloud
+  // appears at the folded pos.
+  if (focusedTarget && !focusedTarget.entering) paintFocusGlow(ctx, focusedTarget);
   renderBassLightnings(ctx, game.bassLightnings, game.time * 0.001);
   renderDriftBursts(ctx, game.driftBursts, game.time * 0.001);
   game.particles.render(ctx);
@@ -146,7 +149,7 @@ const paintEntityLayers = (game: Game, focusedTarget: ReticuleTarget | null) => 
 // (entity folds, ship folds) keeps that product continuous — so they slide in
 // from the screen border and canvas clipping masks the offscreen part. Order
 // mirrors the world layer: trails → comets → asteroids → gems → aliens.
-const paintEntrances = (game: Game, camX: number, camY: number) => {
+const paintEntrances = (game: Game, camX: number, camY: number, focusedTarget: ReticuleTarget | null) => {
   const { ctx } = game;
   const entering =
     game.comets.some((c) => c.entering) ||
@@ -154,9 +157,9 @@ const paintEntrances = (game: Game, camX: number, camY: number) => {
     game.gems.some((g) => g.entering) ||
     game.aliens.some((al) => al.entering);
   if (!entering) return;
-  const atEntrance = (e: { enterOffX: number; enterOffY: number }, draw: () => void) => {
+  const atEntrance = (e: { enterOffX?: number; enterOffY?: number }, draw: () => void) => {
     ctx.save();
-    ctx.translate(e.enterOffX, e.enterOffY);
+    ctx.translate(e.enterOffX ?? 0, e.enterOffY ?? 0);
     draw();
     ctx.restore();
   };
@@ -175,6 +178,9 @@ const paintEntrances = (game: Game, camX: number, camY: number) => {
   for (const a of game.asteroids) if (a.entering) atEntrance(a, () => a.render(ctx, game.time, comboHalo));
   for (const g of game.gems) if (g.entering) atEntrance(g, () => g.render(ctx, game.time));
   for (const al of game.aliens) if (al.entering) atEntrance(al, () => al.render(ctx, game.time));
+  // Focus glow for an entering focused target rides its entrance image, on
+  // top of the body — mirrors the world layer's ordering.
+  if (focusedTarget?.entering) atEntrance(focusedTarget, () => paintFocusGlow(ctx, focusedTarget));
   ctx.restore();
 };
 
@@ -351,7 +357,7 @@ const paintScrollScene = (game: Game, shakeX: number, shakeY: number) => {
   tileCopies(camX, camY, () => paintEntityLayers(game, focusedTarget));
 
   // Entering bodies slide in over the world layer, under the foreground.
-  paintEntrances(game, camX, camY);
+  paintEntrances(game, camX, camY, focusedTarget);
 
   // Screen-pinned foreground: ship is locked dead-centre, so translate the world
   // by the camera offset and the reticule/preview (drawn relative to ship.pos)

@@ -1,6 +1,7 @@
 import type { Game } from "../Game";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
-import { BEAT_GRID } from "./rhythmConstants";
+import { BEAT_GRID, PULSE_LOOKAHEAD } from "./rhythmConstants";
+import { tickBeatCues } from "./beatCues";
 import { ENTITY_CONFIG } from "./entityConfig";
 import { TAU } from "../vec";
 
@@ -17,13 +18,6 @@ export const BASS_KIND_SOUND: Record<"bassA" | "bassB" | "bassC" | "bassD", "bas
 // gen-2 small drops a minor third so terminal pieces sit deeper but stay diatonic.
 // smalls land on A1/E2/D2/A2 → I/vi/V/ii flavour, pairs naturally with the C-F-G groundwork.
 export const BASS_SPLIT_PITCH_RATIO = [1, 1, 0.8409] as const;
-
-// How far ahead of the audio clock we schedule pulse hits. A frame stall up to
-// this long is absorbed silently: the beat was already handed to the audio
-// hardware with an absolute start time, so it sounds on the sample regardless
-// of when the next rAF frame lands. Too short and stalls leak through as lag;
-// too long and the pulse feels detached from on-screen gameplay.
-const PULSE_LOOKAHEAD = 0.12;
 
 // walks an eighth-note grid; sparkle tier adds lighter "and" hits between quarters
 // so sound + rhythm gate both double at high combo. Shares beatTime so slow-mo
@@ -138,6 +132,7 @@ export const tickBassBeats = (game: Game, musicDt: number, playbackRate = 1) => 
   tickBassAsteroids(game);
   tickWarbles(game);
   tickCometMelodies(game);
+  tickBeatCues(game, playbackRate);
 };
 
 // keeps bgBeat + comet melody ticking under the gameover parade

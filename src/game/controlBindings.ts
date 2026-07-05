@@ -221,15 +221,35 @@ const parseChord = (binding: string): Chord => {
   return { mods, main };
 };
 
-// Do the currently-held modifiers exactly match those this chord declares?
-//   Exact match is what suppresses bare bindings while a modifier is held:
-//   "arrowleft" (no mods) fails the moment shift goes down, so shift+arrow
-//   fires the chord alone. When the main key is itself a modifier ("control"
-//   for a hold), that key is expected held and excluded from the surplus check.
+// Does some active binding pair modifier m as a prefix with this exact main
+//   key? If so, a held m must suppress the bare `main` binding so the chord
+//   (e.g. shift+arrowleft = side thrust) wins the key instead. If not, a held m
+//   is incidental and leaves the bare binding alone — holding shift for side
+//   thrust must not also mask thrust (arrowup) or fire (space).
+const modifierClaimsMain = (m: string, main: string): boolean => {
+  const bindings = activeBindings();
+  for (const action in bindings) {
+    for (const binding of bindings[action as ControlAction]) {
+      const chord = parseChord(binding);
+      if (chord.main === main && chord.mods.includes(m)) return true;
+    }
+  }
+  return false;
+};
+
+// Do the currently-held modifiers match those this chord declares? A declared
+//   modifier must be held. A modifier the chord does NOT declare only forces a
+//   mismatch when it's held AND some other binding claims it as a prefix on the
+//   same main key (see modifierClaimsMain) — that per-key rule is what lets
+//   shift+arrow suppress bare arrow while leaving bare arrowup/space firing with
+//   shift held. When the main key is itself a modifier ("control" for a hold),
+//   that key is expected held and excluded from the surplus check.
 const modsMatch = (input: IInput, chord: Chord): boolean => {
   for (const m of MODIFIER_KEYS) {
     const wantHeld = chord.mods.includes(m) || m === chord.main;
-    if (input.down(m) !== wantHeld) return false;
+    if (input.down(m) === wantHeld) continue;
+    if (!wantHeld && !modifierClaimsMain(m, chord.main)) continue;
+    return false;
   }
   return true;
 };

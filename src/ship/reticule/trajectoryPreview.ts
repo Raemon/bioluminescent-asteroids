@@ -261,7 +261,17 @@ const TRAJECTORY_ENTRY_FLASH_PEAK_BOOST = 2.5;
 const TRAJECTORY_FADE_OUT_DURATION_SEC = 2;
 
 // target shape covers everything the reticule might lock onto (asteroids, comets, aliens, canisters).
-export type ReticuleTarget = { pos: Vec; vel: Vec; radius?: number };
+// Entrance fields (see game/entrance.ts) are present on entities that stage
+// entrances; canisters never do. Overlays anchored to a target's world pos
+// (focus glow) must draw at pos + enterOff while it's entering.
+export type ReticuleTarget = {
+  pos: Vec;
+  vel: Vec;
+  radius?: number;
+  entering?: boolean;
+  enterOffX?: number;
+  enterOffY?: number;
+};
 
 // snapshot the last in-cone state so fade-out can keep rendering even if the target dies/leaves.
 type TrajectorySnapshot = { posX: number; posY: number; velX: number; velY: number; radius: number };

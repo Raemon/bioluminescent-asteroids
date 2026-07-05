@@ -1,5 +1,11 @@
 // 0.5s quarter-note matches the smallest beat slot any bassteroid can occupy after two splits.
 export const BEAT_GRID = 0.5;
+// How far ahead of the audio clock beat-locked one-shots are scheduled. A frame
+// stall up to this long is absorbed silently: the hit was already handed to the
+// audio hardware with an absolute start time, so it sounds on the sample
+// regardless of when the next rAF frame lands. Too short and stalls leak
+// through as lag; too long and hits feel detached from on-screen gameplay.
+export const PULSE_LOOKAHEAD = 0.12;
 // ±80ms — wide enough to absorb the 50ms dt cap, narrow enough that timing still matters.
 export const BEAT_WINDOW = 0.11
 

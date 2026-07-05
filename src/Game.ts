@@ -29,6 +29,7 @@ import type { KillBucket } from "./game/killBuckets";
 import { ParadeEntry } from "./game/killedParade";
 import { HighlightTimeline } from "./game/highlightTimeline";
 import type { WaveTransition } from "./game/waveTransition";
+import type { BeatCue } from "./game/beatCues";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
 import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro, advanceIntroOverlay, unfreezeIntroWorld, togglePause, exitReplay } from "./game/lifecycle";
@@ -233,6 +234,9 @@ export class Game implements HudElements {
   //   summary panel's visuals/audio still run on setTimeout (cosmetic); this only
   //   carries the sim-affecting payouts. See game/waveTransition.ts.
   waveTransition: WaveTransition | null = null;
+  // Beat-grid audio cues awaiting their lookahead window (game/beatCues.ts).
+  //   Audio-only — never checkpointed, never read by the sim.
+  beatCues: BeatCue[] = [];
   // wave-1 instructional overlay. stage 1 holds until 3 on-beat fires land,
   //   stage 2 holds until 4x rhythm, stage 3 (the score-payoff line) auto-dismisses
   //   after a brief hold. once the player reaches 6x rhythm the tutorial is marked

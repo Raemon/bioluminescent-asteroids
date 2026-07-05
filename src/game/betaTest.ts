@@ -7,6 +7,7 @@ import { AlienSize } from "../Alien";
 import { PowerupKind, POWERUP_KINDS, spawnCanister } from "../Canister";
 import { syncHud, syncPowerupHud } from "./hud";
 import { stopParade } from "./killedParade";
+import { hideWaveSummary } from "./waveSummary";
 import { newWaveEventSchedule } from "./waveEvents";
 import {
   alignBassBeat,
@@ -303,6 +304,13 @@ const startBetaWave = (game: Game) => {
   game.lastBeatResnapAt = game.beatTime;
   game.beatPhaseCorrection = 0;
   game.lastBgBeatIndex = -1;
+  // A summary/transition in flight when the beta panel launches is keyed to
+  //   the old beatTime — left alone it would stall, then fire a rogue spawn
+  //   deep into the beta run once the fresh clock catches up to its slots.
+  hideWaveSummary(game);
+  game.waveTransitioning = false;
+  game.waveTransition = null;
+  game.beatCues = [];
   game.nextBeatToEvaluate = 0;
   game.beatCombo = 0;
   game.maxCombo = 0;

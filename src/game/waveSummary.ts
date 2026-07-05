@@ -1,6 +1,7 @@
 import type { Game } from "../Game";
 import { BEAT_GRID } from "./rhythmConstants";
 import { formatScore } from "./formatScore";
+import { cancelBeatCues, enqueueBeatCue } from "./beatCues";
 
 // end-of-wave summary text — one row appears per beat with a paired
 //   sound, then the bonus drains into the score at four ticks per beat with
@@ -8,8 +9,16 @@ import { formatScore } from "./formatScore";
 //   the drain ends, the panel holds for 1 second then fades over 2 seconds.
 //   Non-blocking: the next wave spawns immediately while this plays out
 //   over the playfield, anchored to the center of the screen.
+//
+// The whole timeline is built by buildSummarySchedule as absolute beatTime
+//   slots snapped to the beat grid, so the summary's beats land on the same
+//   grid the bgBeat pulse and halo music play on. Sounds ride the beat-cue
+//   scheduler (game/beatCues.ts, sample-accurate lookahead); DOM reveals sit
+//   on absolute setTimeouts from one anchor — approximate is fine for text,
+//   and nothing chains, so timer error never accumulates across the drain.
 
 const PANEL_ID = "wave-summary";
+const CUE_TAG = "waveSummary";
 
 // Drain schedule: the bonus is paid out in chunks that start at 50/each and
 //   double every 8 chunks (50, 50, ..., 100, 100, ..., 200, ...). The chunk
@@ -47,37 +56,47 @@ export const planDrainChunks = (total: number): number[] => {
   return chunks;
 };
 
-// BEAT_GRID is in seconds; everything in this file is in milliseconds.
-const BEAT_MS = BEAT_GRID * 1000; // 500ms at 120 BPM
 const TICKS_PER_BEAT = 4;
-const TICK_MS = BEAT_MS / TICKS_PER_BEAT; // 125ms
-
-// small lead-in before the first row so the entrance doesn't collide
-//   with the wave-clear chord that fires the same frame.
-const FIRST_ROW_DELAY_MS = BEAT_MS;
-
-// short pause after the last row lands before the drain begins, so the
-//   ear gets one clean beat to register the bonus number before it starts
-//   moving.
-const PAUSE_BEFORE_DRAIN_MS = BEAT_MS;
+const ROW_COUNT = 6;
 
 // per the spec — drain ends → hold 3 seconds → fade entire panel over
 //   2 seconds. The CSS transition matches the fade duration.
 const HOLD_BEFORE_FADE_MS = 3000;
 const FADE_OUT_MS = 2000;
 
-// Exported for the sim-clock transition driver (game/waveTransition.ts), which
-//   re-derives the same drain/spawn schedule in sim seconds so the score payout
-//   and next-wave spawn run on the recorded dt instead of these setTimeouts.
-export const WAVE_SUMMARY_BEAT_MS = BEAT_MS;
-export const WAVE_SUMMARY_TICK_MS = TICK_MS;
-export const WAVE_SUMMARY_FIRST_ROW_DELAY_MS = FIRST_ROW_DELAY_MS;
-export const WAVE_SUMMARY_PAUSE_BEFORE_DRAIN_MS = PAUSE_BEFORE_DRAIN_MS;
-export const WAVE_SUMMARY_HOLD_BEFORE_FADE_MS = HOLD_BEFORE_FADE_MS;
-export const WAVE_SUMMARY_FADE_OUT_MS = FADE_OUT_MS;
-// Number of summary rows revealed before the drain (wave / max / final / drift /
-//   bonus / score). The driver needs the count to place the drain start in time.
-export const WAVE_SUMMARY_ROW_COUNT = 6;
+// The shared timeline for one transition, in absolute beatTime seconds. Both
+//   halves consume it: the sim-clock driver (game/waveTransition.ts) pays the
+//   score and fires the spawn on these slots, and showWaveSummary hangs its
+//   cues and DOM timers on the same values — so panel, melody, and payout
+//   can't drift apart, and everything sits on the global beat grid.
+export type SummarySchedule = {
+  chunks: number[];          // per-tick score payouts (planDrainChunks)
+  rowBeats: number[];        // one reveal slot per summary row
+  drainStartBeat: number;    // first drain tick
+  drainTickBeats: number[];  // 16th-note grid, one per chunk
+  chimeBeat: number;         // downbeat after the final 16th (cadence)
+  spawnBeat: number;         // next-wave spawn, after hold + fade
+};
+
+export const buildSummarySchedule = (beatTimeNow: number, bonus: number): SummarySchedule => {
+  const chunks = planDrainChunks(bonus);
+  // Snap to the next beat boundary so every slot below lands on the grid the
+  //   bgBeat pulse is scheduled against, instead of counting from whatever
+  //   frame the last asteroid happened to die on.
+  const startBeat = Math.ceil(beatTimeNow / BEAT_GRID) * BEAT_GRID;
+  const rowBeats: number[] = [];
+  // one-beat lead-in keeps the first row clear of the wave-clear chord.
+  for (let i = 0; i < ROW_COUNT; i++) rowBeats.push(startBeat + (1 + i) * BEAT_GRID);
+  // one clean beat after the last row before the numbers start moving.
+  const drainStartBeat = startBeat + (2 + ROW_COUNT) * BEAT_GRID;
+  const tick = BEAT_GRID / TICKS_PER_BEAT;
+  const drainTickBeats = chunks.map((_, i) => drainStartBeat + i * tick);
+  // Chunk count is a multiple of 4, so this is always a downbeat — the slot
+  //   the phrase resolves on, one tick after the last blip.
+  const chimeBeat = drainStartBeat + chunks.length * tick;
+  const spawnBeat = chimeBeat + (HOLD_BEFORE_FADE_MS + FADE_OUT_MS) / 1000;
+  return { chunks, rowBeats, drainStartBeat, drainTickBeats, chimeBeat, spawnBeat };
+};
 
 type SummaryEls = {
   root: HTMLElement;
@@ -119,7 +138,13 @@ const buildPanel = (): SummaryEls => {
     `;
     document.body.appendChild(root);
   }
-  const rows = Array.from(root.querySelectorAll<HTMLElement>(".ws-row"));
+  // The extra-life row is not part of the beat-stagger reveal — it stays
+  //   hidden until revealExtraLife() fires after the drain completes, and
+  //   keeping it out of `rows` keeps rows.length in sync with ROW_COUNT
+  //   (the schedule builder's rowBeats length).
+  const rows = Array.from(
+    root.querySelectorAll<HTMLElement>(".ws-row:not(.ws-extra-life)"),
+  );
   return {
     root,
     rows,
@@ -192,19 +217,20 @@ const DRAIN_PITCHES = [
   1.0,    // A   (9th of G — leans back into the next loop's downbeat)
 ];
 
-// The summary panel is now purely cosmetic: the score drain and next-wave spawn
-//   run on the sim clock (game/waveTransition.ts) so they reproduce in replays.
-//   This still drives the staggered row reveals, the drain melody, and the panel
-//   fade on setTimeout, and it *reads* game.score (drained by the sim clock) to
-//   keep the bonus/score numbers in lockstep with the real payout.
+// The summary panel is purely cosmetic: the score drain and next-wave spawn
+//   run on the sim clock (game/waveTransition.ts) against the same
+//   SummarySchedule passed in here, and the panel *reads* game.score (drained
+//   by the sim clock) so its numbers stay in lockstep with the real payout.
 export const showWaveSummary = (
   game: Game,
+  schedule: SummarySchedule,
   completedWave: number,
   maxRhythm: number,
   finalRhythm: number,
   driftBonuses: number,
 ) => {
   cancelActiveTimers();
+  cancelBeatCues(game, CUE_TAG);
   const bonus = (maxRhythm + finalRhythm + driftBonuses) * 100;
   const { root, rows, bonusValueEl, scoreValueEl, extraLifeEl, extraLifeValueEl } = buildPanel();
   // Score the sim clock will drain the bonus on top of; the cosmetic numbers
@@ -218,18 +244,17 @@ export const showWaveSummary = (
   setRow(root, "bonus", formatScore(bonus));
   setRow(root, "score", formatScore(game.score));
 
-  // Reset visual state. Order matters: strip `in` from every row *before*
-  //   removing `fade-out`, and reflow in between. Otherwise removing
-  //   `fade-out` first un-hides the panel for a frame while the previous
-  //   wave's rows still carry `in` (a flash of all data) and then their
-  //   opacity transitions out — instead of the rows being at 0 the instant
-  //   the panel reappears, ready for the staggered entrance.
+  // Reset visual state with transitions suppressed (ws-reset), so the rows
+  //   snap to hidden instead of starting a visible 1→0 opacity transition
+  //   the instant removing `fade-out` un-hides the panel. The reflow commits
+  //   the snapped state before ws-reset comes off and transitions re-arm.
+  root.classList.add("ws-reset");
   for (const row of rows) row.classList.remove("in");
   extraLifeEl.classList.remove("in");
   extraLifeValueEl.textContent = "";
-  void root.offsetWidth;
   root.classList.remove("fade-out");
   void root.offsetWidth;
+  root.classList.remove("ws-reset");
 
   // Reveal the next-bonus-life teaser the moment the drain finishes, so the
   //   threshold reads against the just-paid score and the line blooms in right
@@ -240,80 +265,76 @@ export const showWaveSummary = (
     extraLifeEl.classList.add("in");
   };
 
-  // One row per beat, each with a paired sound.
+  // All DOM delays measured from the same beatTime the cue scheduler and sim
+  //   driver compare against, converted at rate 1 — approximate under slow-mo,
+  //   which is fine for text.
+  const msUntil = (slotBeat: number) => Math.max(0, (slotBeat - game.beatTime) * 1000);
+
+  // One row per beat; the paired sound rides the beat-cue scheduler so it
+  //   lands on the grid sample-accurately while the reveal approximates.
   rows.forEach((row, i) => {
-    const delay = FIRST_ROW_DELAY_MS + i * BEAT_MS;
-    const id = window.setTimeout(() => {
-      row.classList.add("in");
-      const cue = ROW_SOUNDS[i];
-      if (cue) game.sound.play(cue.name, cue.pitch);
-    }, delay);
+    const cue = ROW_SOUNDS[i];
+    if (cue) enqueueBeatCue(game, { at: schedule.rowBeats[i], name: cue.name, pitch: cue.pitch, tag: CUE_TAG });
+    const id = window.setTimeout(() => row.classList.add("in"), msUntil(schedule.rowBeats[i]));
     activeTimers.push(id);
   });
 
-  // After the rows have all landed, animate the drain. The sim clock owns the
-  //   actual game.score payout; this only animates the panel numbers (reading
-  //   game.score) and plays the drain melody.
-  const drainStartMs = FIRST_ROW_DELAY_MS + rows.length * BEAT_MS + PAUSE_BEFORE_DRAIN_MS;
-  const startDrain = window.setTimeout(() => {
-    if (bonus <= 0) {
+  if (schedule.chunks.length === 0) {
+    const id = window.setTimeout(() => {
       revealExtraLife();
       scheduleFadeOut(root);
-      return;
+    }, msUntil(schedule.drainStartBeat));
+    activeTimers.push(id);
+    return;
+  }
+
+  // Drain melody, enqueued up front on the 16th grid. Every 4th tick is a
+  //   downbeat — summaryDownbeat layers a rotating i-VI-III-VII chord over a
+  //   soft kick, and the pitch passed selects which harmony lands; the drain
+  //   melody's downbeat pitch is a chord tone of that voicing.
+  schedule.drainTickBeats.forEach((at, i) => {
+    enqueueBeatCue(game, { at, name: "scoreBlip", pitch: DRAIN_PITCHES[i % DRAIN_PITCHES.length], tag: CUE_TAG });
+    if (i % TICKS_PER_BEAT === 0) {
+      enqueueBeatCue(game, { at, name: "summaryDownbeat", pitch: (i / TICKS_PER_BEAT) % 4, tag: CUE_TAG });
     }
-    const chunks = planDrainChunks(bonus);
-    let tickIndex = 0;
-    bonusValueEl.classList.add("ws-draining");
+  });
+  // Cap the drain with the same C6+G6 chime the row sequence climbed to, on
+  //   the downbeat after the final 16th — where the phrase resolves. Chime is
+  //   harmonic (FM, C+G dyad) so it lands clean against the still-ringing
+  //   G-major pad — root + fifth of C resolves to the game's tonal anchor.
+  enqueueBeatCue(game, { at: schedule.chimeBeat, name: "chime", pitch: CHIME_C6, tag: CUE_TAG });
 
-    const step = () => {
-      // Read the sim-clock-drained score: remaining bonus = what hasn't yet
-      //   landed in game.score. Keeps the panel locked to the real payout even
-      //   though the two run on independent clocks.
-      const drained = Math.max(0, game.score - startScore);
-      const remaining = Math.max(0, bonus - drained);
-      bonusValueEl.textContent = formatScore(remaining);
-      scoreValueEl.textContent = formatScore(game.score);
-      pulseScore(scoreValueEl);
-
-      // Play the next note in the haunting minor melody. Every 4th tick is
-      //   a downbeat — summaryDownbeat layers a rotating i-VI-III-VII chord
-      //   over a soft kick, and the chord index passed in selects which
-      //   harmony lands. The drain melody's downbeat pitch is a chord tone
-      //   of that voicing.
-      const pitch = DRAIN_PITCHES[tickIndex % DRAIN_PITCHES.length];
-      game.sound.play("scoreBlip", pitch);
-      if (tickIndex % TICKS_PER_BEAT === 0) {
-        const chordIndex = (tickIndex / TICKS_PER_BEAT) % 4;
-        game.sound.play("summaryDownbeat", chordIndex);
-      }
-      tickIndex++;
-
-      if (tickIndex < chunks.length) {
-        const id = window.setTimeout(step, TICK_MS);
-        activeTimers.push(id);
-      } else {
-        bonusValueEl.classList.remove("ws-draining");
-        bonusValueEl.textContent = formatScore(Math.max(0, bonus - Math.max(0, game.score - startScore)));
-        scoreValueEl.textContent = formatScore(game.score);
-        // Cap the drain with the same C6+G6 chime the row sequence climbed
-        //   to. Chime is harmonic (FM, C+G dyad) so it lands clean against
-        //   the still-ringing G-major pad — root + fifth of C resolves the
-        //   phrase to the game's tonal anchor instead of clanging.
-        game.sound.play("chime", CHIME_C6);
-        revealExtraLife();
-        scheduleFadeOut(root);
-      }
-    };
-    step();
-  }, drainStartMs);
-  activeTimers.push(startDrain);
+  // Panel numbers: one absolute timer per tick, each reading the sim-clock-
+  //   drained score, so the display stays locked to the real payout even if
+  //   a timer fires a frame off its slot.
+  const drainVisualTick = () => {
+    const drained = Math.max(0, game.score - startScore);
+    const remaining = Math.max(0, bonus - drained);
+    bonusValueEl.textContent = formatScore(remaining);
+    scoreValueEl.textContent = formatScore(game.score);
+    pulseScore(scoreValueEl);
+  };
+  const startId = window.setTimeout(() => bonusValueEl.classList.add("ws-draining"), msUntil(schedule.drainStartBeat));
+  activeTimers.push(startId);
+  for (const at of schedule.drainTickBeats) {
+    const id = window.setTimeout(drainVisualTick, msUntil(at));
+    activeTimers.push(id);
+  }
+  const completeId = window.setTimeout(() => {
+    bonusValueEl.classList.remove("ws-draining");
+    bonusValueEl.textContent = formatScore(Math.max(0, bonus - Math.max(0, game.score - startScore)));
+    scoreValueEl.textContent = formatScore(game.score);
+    revealExtraLife();
+    scheduleFadeOut(root);
+  }, msUntil(schedule.chimeBeat));
+  activeTimers.push(completeId);
 };
 
 // Hold for HOLD_BEFORE_FADE_MS after the drain completes, then fade the
 // entire panel (rows + score) over FADE_OUT_MS. The fade-out class stays on
 // after the animation ends (forwards fill-mode) so the panel remains
 // invisible — the next showWaveSummary call clears it as part of its reset.
-// Purely cosmetic now — the next-wave spawn is fired by the sim-clock driver.
+// Purely cosmetic — the next-wave spawn is fired by the sim-clock driver.
 const scheduleFadeOut = (root: HTMLElement) => {
   const fadeStart = window.setTimeout(() => {
     root.classList.add("fade-out");
@@ -321,14 +342,18 @@ const scheduleFadeOut = (root: HTMLElement) => {
   activeTimers.push(fadeStart);
 };
 
-export const hideWaveSummary = () => {
+export const hideWaveSummary = (game: Game) => {
   cancelActiveTimers();
+  cancelBeatCues(game, CUE_TAG);
   const root = document.getElementById(PANEL_ID);
   if (root) {
+    root.classList.add("ws-reset");
     root.classList.remove("fade-out");
     const rows = root.querySelectorAll<HTMLElement>(".ws-row");
     for (const row of rows) row.classList.remove("in");
     const extraLife = root.querySelector<HTMLElement>(".ws-extra-life");
     if (extraLife) extraLife.classList.remove("in");
+    void root.offsetWidth;
+    root.classList.remove("ws-reset");
   }
 };

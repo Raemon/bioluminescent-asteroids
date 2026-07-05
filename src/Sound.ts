@@ -855,6 +855,20 @@ export class Sound {
   // of which rAF frame the decision was made on. Null = start immediately.
   private scheduledWhenForCall: number | null = null;
 
+  // Start time for live-synth voices: the pending scheduled start when the
+  // lookahead scheduler set one, else "now". Clamped so an already-past
+  // schedule still sounds (late) instead of silently misfiring.
+  private voiceTime(name: string): number {
+    const now = this.ctx!.currentTime;
+    const when = this.scheduledWhenForCall;
+    if (when === null) return now;
+    if (import.meta.env.DEV && when < now - 0.001) {
+      // eslint-disable-next-line no-console
+      console.warn(`[pulse-late] ${name} scheduled ${((now - when) * 1000).toFixed(1)}ms in the past`);
+    }
+    return Math.max(when, now);
+  }
+
   // Map a (channel, leg) pair to its underlying gain node. Used by
   // setChannelVolume so callers don't need to know about the live/baked
   // split.
@@ -4363,6 +4377,20 @@ export class Sound {
     this.scheduledWhenForCall = null;
   }
 
+  // Generic lookahead-scheduled one-shot: start any play()-dispatched voice
+  // at an absolute audio-clock time (from audioTimeForBeatDelta). Baked
+  // buffers honor it in playBaked; live-synth grid voices read voiceTime().
+  playAt(name: SoundName, pitchRatio: number, when: number, pos?: Pos) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    this.scheduledWhenForCall = when;
+    try {
+      this.play(name, pitchRatio, pos);
+    } finally {
+      this.scheduledWhenForCall = null;
+    }
+  }
+
   // Cached per requested duration. The samples are pure random noise — there's
   // no perceptible difference between "fresh noise every spawn" and a single
   // shared buffer, but allocating + filling a 6s buffer (264k samples) on every
@@ -6080,14 +6108,14 @@ export class Sound {
     } else {
       src.connect(this.bakedOut);
     }
-    src.start();
+    src.start(this.voiceTime("chime"));
   }
 
   // Lower bell with inharmonic partials — feels like a temple bell rather
   // than a wind-chime.
   private playBell(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    const t = this.voiceTime("bell");
     const fundamentalFreq = cfgN("bell", "fundamentalHz", 220) * pitchRatio;
     // when pitched (i.e. wave-summary use at C4), scale peak down so the
     //   tolling bell sits under the drain melody instead of overpowering it.
@@ -7050,7 +7078,7 @@ export class Sound {
   // (~0.32s) lets adjacent notes overlap into a continuous haunted line.
   private playScoreBlip(pitchRatio = 1) {
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    const t = this.voiceTime("scoreBlip");
     // Dropped an octave (E4 → E3) so the drain line sits in a baritone /
     //   cello register instead of music-box height. Upper-harmonic peaks
     //   pulled down so the bright triangle partial doesn't reintroduce the
@@ -7087,7 +7115,7 @@ export class Sound {
   // the two voices interlock instead of fighting.
   private playSummaryDownbeat(chordIndex = 0) {
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    const t = this.voiceTime("summaryDownbeat");
     // Body: sine at A1 (~55 Hz) with a tiny initial pitch snap for "thump".
     //   Dropped a major third lower than before so it sits under the deeper
     //   scoreBlip without crowding the melody register.
