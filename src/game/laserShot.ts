@@ -28,6 +28,7 @@ import { syncHud } from "./hud";
 import { prongOffsets } from "../ship/shipWeapons";
 import { FUEL_LASER_CHARGE_DRAIN, laserFireFuelCost, spendShipFuel } from "./fuel";
 import { emitLaserImpact } from "./particleBursts";
+import { scheduleLaserDots, cancelLaserChargeCues } from "./laserChargeCues";
 
 // Absolute charge-dot ceiling (one per beat held). The dots a player can
 // actually REACH is gated by rhythm via maxLaserDots().
@@ -190,6 +191,9 @@ export const resetLaserCharge = (ship: Ship) => {
   ship.laserChargeStartBeatTime = 0;
   ship.laserLastDotIndexFired = -1;
   ship.laserChargeFailedThisHold = false;
+  // both hold-ends (release + death) route through here — flush any queued
+  //   future accents so a released charge doesn't keep clicking on later beats.
+  cancelLaserChargeCues();
 };
 
 // Effective bullet life mirrors shipWeapons.launchBullet + reticule render
@@ -274,14 +278,14 @@ export const tickLaserShot = (game: Game, dt: number) => {
     // the reserve, so parking on a max charge isn't free. The release toll in
     // fireLaser stacks on top of this.
     spendShipFuel(ship, FUEL_LASER_CHARGE_DRAIN * dt);
-    // Per-dot charge tick — discrete C-chord pluck accent on each new dot, plus
-    // a step-up of the sustained crackle/chord bed so the build is felt.
-    const dots = laserDotCount(ship, game.beatTime, maxLaserDots(game));
-    if (dots > ship.laserLastDotIndexFired && dots > 0) {
-      ship.laserLastDotIndexFired = dots;
-      game.sound.playLaserCharge(dots);
-      game.sound.setLaserChargeTier(dots);
-    }
+    // Per-dot charge tick — discrete C-chord pluck accent on each new dot, plus a
+    // step-up of the sustained crackle/chord bed. The accent AUDIO is lookahead-
+    // scheduled (scheduleLaserDots → tickLaserChargeCues) so it lands ON the beat
+    // instead of a frame late; scheduleLaserDots pre-arms every dot up to the
+    // current cap, so a combo-driven cap bump mid-hold schedules cleanly too.
+    const maxDots = maxLaserDots(game);
+    scheduleLaserDots(ship, maxDots);
+    const dots = laserDotCount(ship, game.beatTime, maxDots);
     // Ambient glow ramps toward 1 as more dots arm; faint even at zero dots.
     const target = (dots + 1) / (LASER_MAX_DOTS + 1);
     game.laserChargeGlow = approachGlow(game.laserChargeGlow, target, dt);

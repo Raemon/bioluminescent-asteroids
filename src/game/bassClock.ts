@@ -2,6 +2,7 @@ import type { Game } from "../Game";
 import { BASS_MEASURE_LENGTH } from "../Asteroid";
 import { BEAT_GRID, PULSE_LOOKAHEAD } from "./rhythmConstants";
 import { tickBeatCues } from "./beatCues";
+import { tickLaserChargeCues } from "./laserChargeCues";
 import { ENTITY_CONFIG } from "./entityConfig";
 import { TAU } from "../vec";
 
@@ -133,6 +134,7 @@ export const tickBassBeats = (game: Game, musicDt: number, playbackRate = 1) => 
   tickWarbles(game);
   tickCometMelodies(game);
   tickBeatCues(game, playbackRate);
+  tickLaserChargeCues(game, playbackRate);
 };
 
 // keeps bgBeat + comet melody ticking under the gameover parade

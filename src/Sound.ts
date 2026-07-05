@@ -5676,7 +5676,7 @@ export class Sound {
   // already baked into each loop.
   setLaserChargeTier(dots: number) {
     if (!this.ctx || !this.laserChargeNode) return;
-    const t = this.ctx.currentTime;
+    const t = this.voiceTime("laserChargeTier");
     const tier = Math.max(0, Math.min(4, Math.floor(dots)));
     const { tierGains } = this.laserChargeNode;
     for (let i = 0; i < tierGains.length; i++) {
@@ -5686,6 +5686,21 @@ export class Sound {
       g.setValueAtTime(g.value, t);
       g.linearRampToValueAtTime(target, t + 0.12);
     }
+  }
+
+  // Lookahead-scheduled variants: dispatch the per-dot accent / tier crossfade at
+  //   an absolute audio-clock `when` (from audioTimeForBeatDelta) so the accent
+  //   lands sample-accurately on its beat slot instead of a frame late.
+  playLaserChargeAt(dotIndex: number, when: number) {
+    this.scheduledWhenForCall = when;
+    try { this.playLaserCharge(dotIndex); }
+    finally { this.scheduledWhenForCall = null; }
+  }
+
+  setLaserChargeTierAt(dots: number, when: number) {
+    this.scheduledWhenForCall = when;
+    try { this.setLaserChargeTier(dots); }
+    finally { this.scheduledWhenForCall = null; }
   }
 
   // Tear down the charge bed. Safe to call repeatedly and when never started.
@@ -6683,7 +6698,9 @@ export class Sound {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    // voiceTime honors a scheduled start (playLaserChargeAt) so the accent lands
+    //   on its beat slot; falls back to now for the immediate path.
+    const t = this.voiceTime("laserCharge");
     // C-major resolving climb: root, third, fifth, octave. The 4th dot lands on
     // C4 (the octave) so a maxed charge resolves rather than dangling on the 5th.
     const triad = [130.81, 164.81, 196.00, 261.63]; // C3, E3, G3, C4
