@@ -41,6 +41,7 @@ export class Comet {
   enterOffX = 0;
   enterOffY = 0;
   enterTraveled = 0;
+  enterMinOvershoot = 0;
   // Trail of past positions for the streak. Newest at index 0.
   trail: { pos: Vec; age: number }[] = [];
   // The current step in the melody. Advanced by the Game on each BEAT_GRID

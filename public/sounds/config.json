@@ -205,6 +205,12 @@
         "decay": 1.4
       }
     },
+    "drainChime": {
+      "universal": {
+        "volume": 1,
+        "pitch": 1
+      }
+    },
     "warble": {
       "universal": {
         "volume": 1,

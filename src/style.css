@@ -2552,13 +2552,18 @@ li.lb-self .lb-name-link:hover {
 }
 
 @keyframes ws-extra-life-flash {
-  0%   { opacity: 0;    transform: translateY(8px); }
-  100% { opacity: 0.85; transform: translateY(0);   }
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0);   }
+}
+
+#wave-summary .ws-extra-life .ws-label {
+  color: rgba(255, 255, 255, 0.4);
+  opacity: 1;
 }
 
 #wave-summary .ws-extra-life .ws-value {
-  color: #9be8ff;
-  text-shadow: 0 0 10px rgba(120, 220, 255, 0.6);
+  color: rgba(255, 255, 255, 0.4);
+  text-shadow: none;
 }
 
 #wave-summary .ws-pulse {

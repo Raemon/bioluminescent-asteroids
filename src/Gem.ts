@@ -46,6 +46,7 @@ export class Gem {
   enterOffX = 0;
   enterOffY = 0;
   enterTraveled = 0;
+  enterMinOvershoot = 0;
   // Optional drift-to-park: rhythm-aligned gems fly from the crystal's death
   // site to a solved spot on the player's one-beat aim ring, arriving exactly
   // when `parkAge` is reached, then freeze. `parkTarget` null = free drift.

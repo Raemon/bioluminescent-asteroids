@@ -42,6 +42,7 @@ import { snapshotShipKill } from "./killSnapshot";
 import { updatePopups, popupDriftBonus, popupDriftCombo } from "./popups";
 import { updateBassLightnings } from "./bassLightning";
 import { updateDriftBursts } from "./driftBurst";
+import { updateStreakBursts, endStreak, resetStreak, streakWindowClosed } from "./streakBurst";
 import { updateWormholes, spawnWormhole } from "./wormhole";
 import { tickPendingRhythmBonuses } from "./rhythmBonus";
 import { emitExplosion } from "./particleBursts";
@@ -647,15 +648,22 @@ const tickControlsGate = (game: Game) => {
   if (TUTORIAL_CONTROL_ACTIONS.every((action) => used[action])) {
     if (game.tutorialActive && game.firstWaveHintStage === 1) {
       setFirstWaveHintStage(game, 2);
-    } else if (game.controlsHintActive) {
-      game.controlsHintActive = false;
-      window.dispatchEvent(new CustomEvent("controls-hint:dismiss"));
-      // A first combo loss during the pane deferred its hint to here.
-      if (game.rhythmLossHintPending) {
-        game.rhythmLossHintPending = false;
-        window.dispatchEvent(new CustomEvent("rhythm-loss-hint:show"));
-      }
+    } else {
+      dismissControlsHint(game);
     }
+  }
+};
+
+// Fades the normal-mode start-of-run controls hint and releases whatever was
+//   waiting behind it: the deferred first-combo-loss hint fires here, and
+//   IntroSequence lifts its FIRE_HIT_HINT suppression on the dismiss event.
+const dismissControlsHint = (game: Game) => {
+  if (!game.controlsHintActive) return;
+  game.controlsHintActive = false;
+  window.dispatchEvent(new CustomEvent("controls-hint:dismiss"));
+  if (game.rhythmLossHintPending) {
+    game.rhythmLossHintPending = false;
+    window.dispatchEvent(new CustomEvent("rhythm-loss-hint:show"));
   }
 };
 
@@ -820,11 +828,13 @@ const updatePlaying = (game: Game, dt: number) => {
   game.popups = updatePopups(game.popups, dt);
   game.bassLightnings = updateBassLightnings(game.bassLightnings, dt);
   game.driftBursts = updateDriftBursts(game.driftBursts, dt);
+  game.streakBursts = updateStreakBursts(game.streakBursts, dt);
   // musicDt (not dt) so the portal opens/closes in lockstep with the body's
   // dive, which also runs on musicDt — under slow-mo both stretch together.
   game.wormholes = updateWormholes(game.wormholes, musicDt);
   tickPendingDriftBonuses(game);
   tickPendingRhythmBonuses(game);
+  tickStreakTimeout(game);
   runCollisionPasses(game);
   evaluateClosedBeats(game);
   recordHighlightFrame(game);
@@ -995,6 +1005,16 @@ export const registerOnBeatFire = (game: Game) => {
 export const registerOffBeatFire = (game: Game) => {
   game.firedOffBeatSinceLastBeat = false;
   loseCombo(game, game.ship.pos, "fire");
+};
+
+// End an active rhythm streak once no shot can extend it anymore — the ring's
+//   fade reaches zero at this same moment (streakWindowClosed drives both).
+//   perceivedBeatTime is replay-deterministic (beatOffset is recorded), so
+//   replays reproduce it. Runs before runCollisionPasses, which is safe: a hit
+//   this frame qualifies iff the window is still open at this same clock value.
+const tickStreakTimeout = (game: Game) => {
+  if (game.streakShots < 1) return;
+  if (streakWindowClosed(game)) endStreak(game);
 };
 
 // cheap respawn-grace — extend invuln if a rock is still inside the safe radius near the end.
@@ -1325,8 +1345,13 @@ const advanceWave = (game: Game) => {
   const completedWave = game.wave;
   const maxRhythm = Math.max(1, game.maxComboThisWave);
   const finalRhythm = Math.max(1, game.beatCombo);
+  const streakShots = game.streakShotsThisWave;
   const driftBonuses = game.driftBonusesThisWave;
   const nextWave = completedWave + 1;
+  // A player who clears Wave 1 without touching every control shouldn't keep
+  //   staring at the controls pane — force the fade (and release the hints
+  //   queued behind it) at the wave boundary.
+  if (displayWave(completedWave) >= 1) dismissControlsHint(game);
   game.sound.play("waveClear");
   game.sound.play("pulsarHum");
   game.pulsar.waveClear();
@@ -1337,9 +1362,9 @@ const advanceWave = (game: Game) => {
   //   spawn. beatTime is a deterministic sum of recorded musicDt, so the sim
   //   half reproduces in replays; the snap in the builder is what puts the
   //   whole summary on the same grid the bgBeat pulse plays on.
-  const bonus = (maxRhythm + finalRhythm + driftBonuses) * 100;
+  const bonus = (maxRhythm + finalRhythm + driftBonuses + streakShots) * 100;
   const schedule = buildSummarySchedule(game.beatTime, bonus);
-  showWaveSummary(game, schedule, displayWave(completedWave), maxRhythm, finalRhythm, driftBonuses);
+  showWaveSummary(game, schedule, displayWave(completedWave), maxRhythm, finalRhythm, streakShots, driftBonuses);
   beginWaveTransition(game, schedule, () => {
     game.wave = nextWave;
     // opening rocks' speed keys off the peak combo of the wave just cleared, not
@@ -1347,6 +1372,9 @@ const advanceWave = (game: Game) => {
     game.waveStartRhythm = game.maxComboThisWave;
     game.maxComboThisWave = game.beatCombo;
     game.driftBonusesThisWave = 0;
+    game.streakShotsThisWave = 0;
+    // clear any leftover trailing dots so a streak doesn't ride into the next wave.
+    resetStreak(game);
     game.pulsar.setWaveLevel(game.wave);
     updateBgBeatIntensity(game);
     spawnWave(game);

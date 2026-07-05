@@ -40,7 +40,7 @@ const FOCUSED_TARGET_BRIGHTNESS = 1.65;
 const TRAJECTORY_ALPHA = 1;
 const TRAJECTORY_PULSE_PERIOD_BEATS = 4;
 const TRAJECTORY_PULSE_MIN_ALPHA = 1;
-const TRAJECTORY_BEAT_DOT_RADIUS = 1;
+const TRAJECTORY_BEAT_DOT_RADIUS = 0;
 const TRAJECTORY_BEAT_DOT_ALPHA = 0.25;
 // doubletime: half-beat dots interleave fainter so on-beat dots stay dominant
 const TRAJECTORY_HALF_BEAT_DOT_ALPHA_FACTOR = 0.45;

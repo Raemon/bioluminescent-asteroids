@@ -326,6 +326,17 @@ const computeReticulePositions = (
   return { positions, primaryIndex, slotPositionIndices };
 };
 
+// Folded screen position of the primary ("shoot now to hit next beat") reticule —
+//   the anchor the streak orbs orbit. Falls back to the ship apex if no slot exists.
+export const primaryReticulePosition = (
+  ship: Ship, beatGrid: number, w: number, h: number, doubletime: boolean, superBoosted: boolean,
+): Vec => {
+  const { positions, primaryIndex } = computeReticulePositions(ship, beatGrid, w, h, doubletime, superBoosted);
+  const raw = primaryIndex >= 0 ? positions[primaryIndex]
+    : positions.length > 0 ? positions[0] : ship.pos;
+  return wrapReticuleVec(raw, w, h);
+};
+
 // Pure predicate: has the dashed lock ring finished building at this `elapsed`? This is the
 //   GAMEPLAY-relevant edge — it stamps completionBeatTime, which gates drift-shot eligibility
 //   (+1 combo). Extracted from paintHoverDotRing so the SIM can run the hover-lock state machine

@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 9;
+export const REPLAY_FORMAT_VERSION = 11;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -29,6 +29,13 @@ export const REPLAY_FORMAT_VERSION = 9;
 //   beatTime instead of summed dt, snapped to the beat grid — the payout and
 //   spawn land at different sim moments than v8, and now stretch under
 //   slow-mo, so v8 recordings would fail their checkpoints.
+// v10 force-completes an entrance whose image recedes/exits fully off-screen
+//   (the ship outran it). Entrance completion gates alien fire, so v9
+//   recordings with a receding alien re-sim into different bullets.
+// v11 rekeys the streak-end timeout: from raw beatTime since the last hit
+//   instant to perceivedBeatTime since the last hit's beat center, in the
+//   streak's own grid units (streakWindowClosed). Streak lifetime gates +1
+//   rhythm bonuses, so v10 recordings re-sim with different combo totals.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat

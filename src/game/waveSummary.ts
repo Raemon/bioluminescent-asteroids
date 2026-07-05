@@ -57,7 +57,15 @@ export const planDrainChunks = (total: number): number[] => {
 };
 
 const TICKS_PER_BEAT = 4;
-const ROW_COUNT = 6;
+const ROW_COUNT = 7;
+
+// Resonant hum-chime, once per full drain chord cycle, climbing the
+//   harmonic series over A3 — the root of the drain's i chord, so the
+//   chimes sit inside the harmony while staying far above the low end.
+//   The 5th/7th harmonics are skipped: their C#/G-flat color tones clash
+//   with the Am-F-C-G progression underneath.
+const TICKS_PER_CHIME = 16;
+const DRAIN_CHIME_HARMONICS = [1, 2, 3, 4, 6, 8];
 
 // per the spec — drain ends → hold 3 seconds → fade entire panel over
 //   2 seconds. The CSS transition matches the fade duration.
@@ -132,6 +140,7 @@ const buildPanel = (): SummaryEls => {
       <div class="ws-row ws-rhythm"><span class="ws-label">Max Rhythm</span> <span class="ws-value" data-row="max"></span></div>
       <div class="ws-row ws-rhythm"><span class="ws-label">Final Rhythm</span> <span class="ws-value" data-row="final"></span></div>
       <div class="ws-row ws-drift"><span class="ws-label">Drift Shot</span> <span class="ws-value" data-row="drift"></span></div>
+      <div class="ws-row ws-drift"><span class="ws-label">Streak Shot</span> <span class="ws-value" data-row="streak"></span></div>
       <div class="ws-row ws-bonus"><span class="ws-label">Bonus</span> <span class="ws-value" data-row="bonus"></span></div>
       <div class="ws-row ws-score"><span class="ws-label">Score</span> <span class="ws-value" data-row="score"></span></div>
       <div class="ws-row ws-extra-life" data-row="extra-life"><span class="ws-label">Next ship</span> <span class="ws-value" data-row="extra-life-value"></span></div>
@@ -178,6 +187,7 @@ const C_BELL = 1.189;
 const CHIME_C5 = 0.5;       // C5+G5
 const CHIME_D5 = 0.5612;    // D5+A5  (9th — passing tone)
 const CHIME_E5 = 0.6299;    // E5+B5  (major 3rd of C)
+const CHIME_F5 = 0.6674;    // F5+C6  (4th — passing tone into the 5th)
 const CHIME_G5 = 0.7491;    // G5+D6  (5th)
 const CHIME_C6 = 1.0;       // C6+G6  (baked)
 const ROW_SOUNDS: Array<{ name: "chime" | "bell"; pitch: number }> = [
@@ -185,6 +195,7 @@ const ROW_SOUNDS: Array<{ name: "chime" | "bell"; pitch: number }> = [
   { name: "chime", pitch: CHIME_C5 },
   { name: "chime", pitch: CHIME_D5 },
   { name: "chime", pitch: CHIME_E5 },
+  { name: "chime", pitch: CHIME_F5 },
   { name: "chime", pitch: CHIME_G5 },
   { name: "chime", pitch: CHIME_C6 },
 ];
@@ -227,11 +238,12 @@ export const showWaveSummary = (
   completedWave: number,
   maxRhythm: number,
   finalRhythm: number,
+  streakShots: number,
   driftBonuses: number,
 ) => {
   cancelActiveTimers();
   cancelBeatCues(game, CUE_TAG);
-  const bonus = (maxRhythm + finalRhythm + driftBonuses) * 100;
+  const bonus = (maxRhythm + finalRhythm + driftBonuses + streakShots) * 100;
   const { root, rows, bonusValueEl, scoreValueEl, extraLifeEl, extraLifeValueEl } = buildPanel();
   // Score the sim clock will drain the bonus on top of; the cosmetic numbers
   //   read game.score against this so the panel mirrors the real payout.
@@ -240,6 +252,7 @@ export const showWaveSummary = (
   setRow(root, "wave", String(completedWave));
   setRow(root, "max", `x${maxRhythm}`);
   setRow(root, "final", `x${finalRhythm}`);
+  setRow(root, "streak", String(streakShots));
   setRow(root, "drift", String(driftBonuses));
   setRow(root, "bonus", formatScore(bonus));
   setRow(root, "score", formatScore(game.score));
@@ -295,7 +308,14 @@ export const showWaveSummary = (
   schedule.drainTickBeats.forEach((at, i) => {
     enqueueBeatCue(game, { at, name: "scoreBlip", pitch: DRAIN_PITCHES[i % DRAIN_PITCHES.length], tag: CUE_TAG });
     if (i % TICKS_PER_BEAT === 0) {
-      enqueueBeatCue(game, { at, name: "summaryDownbeat", pitch: (i / TICKS_PER_BEAT) % 4, tag: CUE_TAG });
+      // Chime ticks duck the downbeat's chord pad (kick stays) so the
+      //   chime's multi-second hum gets clear air while it blooms.
+      const chimeTick = i % TICKS_PER_CHIME === 0;
+      enqueueBeatCue(game, { at, name: chimeTick ? "summaryDownbeatDucked" : "summaryDownbeat", pitch: (i / TICKS_PER_BEAT) % 4, tag: CUE_TAG });
+      if (chimeTick) {
+        const idx = Math.min(i / TICKS_PER_CHIME, DRAIN_CHIME_HARMONICS.length - 1);
+        enqueueBeatCue(game, { at, name: "drainChime", pitch: DRAIN_CHIME_HARMONICS[idx], tag: CUE_TAG });
+      }
     }
   });
   // Cap the drain with the same C6+G6 chime the row sequence climbed to, on
@@ -303,6 +323,12 @@ export const showWaveSummary = (
   //   harmonic (FM, C+G dyad) so it lands clean against the still-ringing
   //   G-major pad — root + fifth of C resolves to the game's tonal anchor.
   enqueueBeatCue(game, { at: schedule.chimeBeat, name: "chime", pitch: CHIME_C6, tag: CUE_TAG });
+  // The next harmonic in the chime series arrives with the closing chime, so
+  //   even a short drain (one mid-drain chime) hears the escalation land. A/E
+  //   sit as 6th/3rd against the C+G dyad — consonant with the cadence.
+  const chimeCount = Math.ceil(schedule.drainTickBeats.length / TICKS_PER_CHIME);
+  const finaleIdx = Math.min(chimeCount, DRAIN_CHIME_HARMONICS.length - 1);
+  enqueueBeatCue(game, { at: schedule.chimeBeat, name: "drainChime", pitch: DRAIN_CHIME_HARMONICS[finaleIdx], tag: CUE_TAG });
 
   // Panel numbers: one absolute timer per tick, each reading the sim-clock-
   //   drained score, so the display stays locked to the real payout even if

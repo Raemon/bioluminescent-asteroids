@@ -360,6 +360,7 @@ export class Alien {
   enterOffX = 0;
   enterOffY = 0;
   enterTraveled = 0;
+  enterMinOvershoot = 0;
   // Theremin-drone glow trail. Vibrato pulse mode lines up loosely with the
   // alien voice's amplitude LFO. See Trail.ts.
   trail: Trail;

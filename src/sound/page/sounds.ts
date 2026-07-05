@@ -328,6 +328,7 @@ export const OBJECTS: GameObject[] = [
       { verb: "wave clears", sound: "waveClear", trigger: beat(8), animation: "wave-summary" },
       { verb: "score drain tick", sound: "scoreBlip", trigger: beat(1, 0.5), animation: "wave-summary" },
       { verb: "score drain downbeat", sound: "summaryDownbeat", trigger: beat(4), animation: "wave-summary" },
+      { verb: "drain hum-chime (every 4th downbeat)", sound: "drainChime", trigger: beat(8), animation: "wave-summary" },
     ],
   },
 ];
@@ -388,14 +389,14 @@ const MENTIONED_SOUNDS = [
   // combo
   "comboSparkle", "comboLost", "comboLostFire",
   // wave summary UI
-  "waveClear", "scoreBlip", "summaryDownbeat",
+  "waveClear", "scoreBlip", "summaryDownbeat", "drainChime",
 ] as const;
 
 type MentionedSound = (typeof MENTIONED_SOUNDS)[number];
 
 // Add a sound here only if it's intentionally omitted from the page (e.g.
 // system-only sound that shouldn't appear as a checkbox).
-type IntentionallyOmitted = "bossPulse" | "bossHit" | "bossEyeOpenStinger" | "chargeBed";
+type IntentionallyOmitted = "bossPulse" | "bossHit" | "bossEyeOpenStinger" | "chargeBed" | "summaryDownbeatDucked";
 
 // Compile-time check: every SoundName must be in MENTIONED_SOUNDS or
 // IntentionallyOmitted. If you add a new SoundName and forget to wire it

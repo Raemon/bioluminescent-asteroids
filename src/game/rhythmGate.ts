@@ -3,6 +3,7 @@ import { Vec } from "../vec";
 import { BEAT_GRID, BEAT_WINDOW, DEBUG_BEAT_TIMING } from "./rhythmConstants";
 import { syncComboHud } from "./hud";
 import { popupBeatDebug, popupComboLost } from "./popups";
+import { endStreak } from "./streakBurst";
 
 // Two grid tiers, measured as the period between on-beat slots:
 //   combo 0–31       → quarter-notes (BEAT_GRID): the default groove.
@@ -101,6 +102,8 @@ export const loseCombo = (game: Game, sourcePos?: Vec, reason: "fire" | "hit" = 
   game.lastRhythmHitBeatCenter = -1;
   game.rhythmHitsThisBeat = 0;
   game.lastRhythmHitPos = null;
+  // a broken combo also ends any same-interval streak — flare its orbs.
+  endStreak(game);
   if (wasMeaningful) {
     // sharper sour wrrr for a mistimed press, deflating wrrr for an off-beat hit.
     game.sound.play(reason === "fire" ? "comboLostFire" : "comboLost");
@@ -113,8 +116,9 @@ export const loseCombo = (game: Game, sourcePos?: Vec, reason: "fire" | "hit" = 
     // FirstWaveHint owns the screen while a stage is up, so suppress then.
     // killEffects fires `rhythm-loss-hint:dismiss` on the next on-beat hit.
     if (!game.hasLostComboEver && game.firstWaveHintStage === 0) {
-      // If the start-of-run controls pane is still up, defer the hint instead of
-      //   stacking it on top — tickControlsGate fires it once the pane dismisses.
+      // If the start-of-run controls pane is still up, defer the hint instead
+      //   of stacking it on top — dismissControlsHint fires it once the pane
+      //   fades (all controls used, or Wave 1 ends first).
       if (game.controlsHintActive) game.rhythmLossHintPending = true;
       else window.dispatchEvent(new CustomEvent("rhythm-loss-hint:show"));
     }

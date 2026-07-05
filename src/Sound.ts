@@ -265,6 +265,8 @@ export type SoundName =
   | "crystalShatterSmall"
   | "scoreBlip"
   | "summaryDownbeat"
+  | "summaryDownbeatDucked"
+  | "drainChime"
   | "powerup"
   | "shieldPop"
   | "pulsarHum"
@@ -708,6 +710,8 @@ export class Sound {
       ["cometNote", cometIdxs],
       // Hold-to-charge laser bed: one committed loop per tier (pitchRatio=tier).
       ["chargeBed", [0, 1, 2, 3, 4]],
+      // Wave-summary drain chime: one variant per harmonic over A3.
+      ["drainChime", [1, 2, 3, 4, 6, 8]],
     ];
     for (const [name, pitches] of oneShots) {
       for (const p of pitches) {
@@ -1050,6 +1054,9 @@ export class Sound {
       bassPluck: 1.2,
       bassSnap: 0.9,
       chime: 2.0,
+      // drainChime: long hum decay + reverb tail; higher harmonics just
+      // carry trailing silence, which VBR mp3 compresses to almost nothing.
+      drainChime: 7.0,
       powerup: 1.6,
       waveClear: 2.4,
       // cometNote: longest decay (downbeat "1n" + 3.4s release) is ~4.4s + reverb tail.
@@ -1204,6 +1211,44 @@ export class Sound {
       case "chime": {
         const chime = wire(new Tone.PolySynth(Tone.FMSynth, { harmonicity: 3.5, modulationIndex: 8, oscillator: { type: "sine" }, envelope: { attack: 0.002, decay: 0.4, sustain: 0, release: 0.9 }, modulationEnvelope: { attack: 0.005, decay: 0.3, sustain: 0, release: 0.6 }, volume: -12 }), 0.6, 0.7);
         chime.triggerAttackRelease(["C6", "G6"], "8n", 0, 0.65);
+        break;
+      }
+      case "drainChime": {
+        // pitchRatio selects the harmonic over A3 — one true-pitch baked
+        // variant per harmonic, so each chime keeps its full natural tail.
+        const h = Math.max(1, Math.round(pitchRatio));
+        const f0 = 220 * h;
+        // higher chimes ring shorter and softer
+        const tailScale = Math.pow(h, -0.3);
+        const loudScale = Math.pow(h, -0.25);
+        // Glassy hum: a detuned unison pair (fixed-Hz offset so the beat
+        //   stays slow at every harmonic) over pure integer partials — no
+        //   clang ratios, nothing below the root, so the tail hums clean.
+        const partials = [
+          { freq: f0 - 0.7, peak: 0.085, decay: 5.0 },
+          { freq: f0 + 0.7, peak: 0.085, decay: 5.0 },
+          { freq: f0 * 2, peak: 0.05, decay: 3.6 },
+          { freq: f0 * 3, peak: 0.026, decay: 2.4 },
+          { freq: f0 * 4, peak: 0.013, decay: 1.6 },
+        ];
+        for (const { freq, peak, decay } of partials) {
+          const osc = new Tone.Oscillator({ type: "sine", frequency: freq }).start(0);
+          const env = new Tone.Gain(0);
+          const wet = new Tone.Gain(0.55);
+          osc.connect(env);
+          env.connect(toneMaster);
+          env.connect(wet);
+          wet.connect(reverbSend);
+          const tail = decay * tailScale;
+          env.gain.setValueAtTime(0.0001, 0);
+          env.gain.linearRampToValueAtTime(peak * loudScale, 0.03);
+          env.gain.exponentialRampToValueAtTime(0.0001, tail);
+          osc.stop(tail + 0.1);
+        }
+        // Faint glass tap so the onset lands on the grid without reading
+        //   as struck metal — the hum is the voice, not the strike.
+        const tap = wire(new Tone.FMSynth({ harmonicity: 1, modulationIndex: 2.5, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.09, sustain: 0, release: 0.08 }, modulationEnvelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.04 }, volume: -26 }), 0.7, 0.6);
+        tap.triggerAttackRelease(f0, "32n", 0, 0.4);
         break;
       }
       case "powerup": {
@@ -4483,6 +4528,8 @@ export class Sound {
       case "crystalShatterSmall": this.playCrystalShatter("small", effectivePitch); break;
       case "scoreBlip": this.playScoreBlip(effectivePitch); break;
       case "summaryDownbeat": this.playSummaryDownbeat(Math.round(pitchRatio)); break;
+      case "summaryDownbeatDucked": this.playSummaryDownbeat(Math.round(pitchRatio), true); break;
+      case "drainChime": this.playDrainChime(Math.round(pitchRatio)); break;
       case "powerup": this.playPowerup(); break;
       case "shieldPop": this.playShieldPop(); break;
       case "pulsarHum": this.playPulsarHum(); break;
@@ -6126,6 +6173,13 @@ export class Sound {
     src.start(this.voiceTime("chime"));
   }
 
+  // Resonant hum-chime over the wave-summary drain. pitch selects a
+  // harmonic over A3; each harmonic is baked as its own true-pitch variant
+  // so every chime keeps its full tail (no playbackRate chipmunking).
+  private playDrainChime(harmonic = 1) {
+    this.playBaked("drainChime", Math.max(1, Math.round(harmonic)));
+  }
+
   // Lower bell with inharmonic partials — feels like a temple bell rather
   // than a wind-chime.
   private playBell(pitchRatio = 1) {
@@ -7130,7 +7184,7 @@ export class Sound {
   // each phrase so every 4-beat segment lands on different harmonic ground.
   // The drain melody's downbeat notes are chord tones of these voicings, so
   // the two voices interlock instead of fighting.
-  private playSummaryDownbeat(chordIndex = 0) {
+  private playSummaryDownbeat(chordIndex = 0, duckPad = false) {
     if (!this.ctx || !this.master) return;
     const t = this.voiceTime("summaryDownbeat");
     // Body: sine at A1 (~55 Hz) with a tiny initial pitch snap for "thump".
@@ -7182,6 +7236,9 @@ export class Sound {
       [196.0, 293.7, 493.9], // VII — G major
     ];
     const chord = voicings[chordIndex % voicings.length];
+    // On deep-bell downbeats the pad steps back so the bell tail owns the
+    //   low end; the kick and click above stay at full strength.
+    const padScale = duckPad ? 0.55 : 1;
     // Chord notes use a slow attack (60ms) and long sustain (~1.4s) so each
     //   downbeat blooms under the four marimba-blip ticks that follow it,
     //   then fades just in time for the next downbeat's chord to take over.
@@ -7191,7 +7248,7 @@ export class Sound {
       const gain = this.ctx.createGain();
       osc.type = "sine";
       osc.frequency.value = freq;
-      const peak = 0.085 / (1 + i * 0.35); // root loudest, top of chord quietest
+      const peak = (0.085 / (1 + i * 0.35)) * padScale; // root loudest, top quietest
       gain.gain.setValueAtTime(0.0001, t);
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.06);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);

@@ -11,10 +11,16 @@ import { wrapMut } from "../vec";
 // completeEntrance on a positive test — so ANY weapon or contact path, current
 // or future, automatically ends the presentation before the hit lands and
 // effects/splits stay torus-true. Once body + trail are fully on-screen the
-// state clears anyway and the wrap-replicated world layer takes over.
+// state clears anyway and the wrap-replicated world layer takes over. The
+// torus equals the viewport, so a body whose entrance image recedes off-screen
+// (ship outran it) or exits the far side is a visibility HOLE — it exists,
+// collides, and takes a reticule, but draws nowhere. tickEntrances ends the
+// fiction the moment the image is fully clipped past its closest approach,
+// so the wrap copy surfaces flush at the opposite border instead.
 //
 // Giving a NEW entity type staged entrances means:
-//   1. add the EnteringEntity fields (entering/enterOffX/enterOffY/enterTraveled)
+//   1. add the EnteringEntity fields (entering/enterOffX/enterOffY/
+//      enterTraveled/enterMinOvershoot)
 //   2. fold via foldWithEntrance (not bare wrapMut) in its update
 //   3. call completeEntrance from its collidesWith on a positive test
 //   4. stage spawns with stageEntrance; register the array in
@@ -29,6 +35,7 @@ export type EnteringEntity = {
   enterOffX: number;
   enterOffY: number;
   enterTraveled: number;
+  enterMinOvershoot: number;
 };
 
 // Fold a spawn whose pos is in unfolded ship-frame coords and record the
@@ -39,6 +46,7 @@ export const stageEntrance = (game: Game, e: EnteringEntity) => {
   e.enterOffY = off ? -off.y : 0;
   e.entering = true;
   e.enterTraveled = 0;
+  e.enterMinOvershoot = imageOvershoot(game, e, game.w / 2 - game.ship.pos.x, game.h / 2 - game.ship.pos.y);
 };
 
 // A ship fold jumps the camera offset by ∓w/∓h in one frame; shift every
@@ -65,6 +73,7 @@ export const completeEntrance = (e: EnteringEntity) => {
   e.enterOffX = 0;
   e.enterOffY = 0;
   e.enterTraveled = 0;
+  e.enterMinOvershoot = 0;
 };
 
 // Fold an entity onto the torus, keeping its entrance image continuous when
@@ -88,12 +97,29 @@ const bodyInside = (game: Game, e: EnteringEntity, reach: number, camX: number, 
   return sx >= reach && sx <= game.w - reach && sy >= reach && sy <= game.h - reach;
 };
 
-// Force-completion budget: fully crossing the diagonal guarantees the body
-// swept the whole screen, so a spawn fleeing alongside the ship can't ride
-// the border half-drawn forever.
-const advance = (game: Game, e: EnteringEntity, dt: number, inside: boolean): boolean => {
+// How far the entrance image's centre sits outside the viewport (0 on-screen).
+const imageOvershoot = (game: Game, e: EnteringEntity, camX: number, camY: number): number => {
+  const sx = e.pos.x + e.enterOffX + camX;
+  const sy = e.pos.y + e.enterOffY + camY;
+  return Math.max(0, -sx, sx - game.w, -sy, sy - game.h);
+};
+
+const ENTRANCE_EXIT_SLACK = 24;
+
+// Two ways an entrance ends besides contact/full-on-screen:
+// • gone — the image receded past its closest approach and is fully clipped
+//   (>= reach can't fire with visible pixels; >= min+slack can't fire at
+//   spawn, and the running min lets a staggered flock straggler that never
+//   approached still hand off at the flush-border moment).
+// • budget — fully crossing the diagonal guarantees the body swept the whole
+//   screen, so a spawn pacing the ship (relative motion ~0, overshoot frozen)
+//   can't ride the border half-drawn forever.
+const advance = (game: Game, e: EnteringEntity, dt: number, inside: boolean, reach: number, camX: number, camY: number): boolean => {
   e.enterTraveled += Math.hypot(e.vel.x, e.vel.y) * dt;
-  if (inside || e.enterTraveled > Math.hypot(game.w, game.h)) {
+  const overshoot = imageOvershoot(game, e, camX, camY);
+  e.enterMinOvershoot = Math.min(e.enterMinOvershoot, overshoot);
+  const gone = overshoot >= Math.max(reach, e.enterMinOvershoot + ENTRANCE_EXIT_SLACK);
+  if (inside || gone || e.enterTraveled > Math.hypot(game.w, game.h)) {
     completeEntrance(e);
     return true;
   }
@@ -116,28 +142,32 @@ export const tickEntrances = (game: Game, dt: number) => {
   const camY = game.h / 2 - game.ship.pos.y;
   for (const a of game.asteroids) {
     if (!a.entering) continue;
+    const reach = a.radius * 2.4;
     const inside =
-      bodyInside(game, a, a.radius * 2.4, camX, camY) &&
+      bodyInside(game, a, reach, camX, camY) &&
       (a.trail ? a.trail.allInside(a.enterOffX + camX, a.enterOffY + camY, game.w, game.h) : true);
-    advance(game, a, dt, inside);
+    advance(game, a, dt, inside, reach, camX, camY);
   }
   for (const c of game.comets) {
     if (!c.entering) continue;
+    const reach = 70 * c.scale;
     const inside =
-      bodyInside(game, c, 70 * c.scale, camX, camY) &&
+      bodyInside(game, c, reach, camX, camY) &&
       cometTrailInside(game, c, c.enterOffX + camX, c.enterOffY + camY);
-    advance(game, c, dt, inside);
+    advance(game, c, dt, inside, reach, camX, camY);
   }
   for (const al of game.aliens) {
     if (!al.entering) continue;
+    const reach = al.radius * 2.2;
     const inside =
-      bodyInside(game, al, al.radius * 2.2, camX, camY) &&
+      bodyInside(game, al, reach, camX, camY) &&
       al.trail.allInside(al.enterOffX + camX, al.enterOffY + camY, game.w, game.h);
-    advance(game, al, dt, inside);
+    advance(game, al, dt, inside, reach, camX, camY);
   }
   for (const g of game.gems) {
     if (!g.entering) continue;
-    advance(game, g, dt, bodyInside(game, g, g.radius * 1.5, camX, camY));
+    const reach = g.radius * 1.5;
+    advance(game, g, dt, bodyInside(game, g, reach, camX, camY), reach, camX, camY);
   }
 };
 

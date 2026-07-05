@@ -819,6 +819,7 @@ export class Asteroid {
   enterOffX = 0;
   enterOffY = 0;
   enterTraveled = 0;
+  enterMinOvershoot = 0;
   // Pre-rendered offscreen sprite of the static body (halo, outline, interior,
   // filaments, baseline nucleus glow). Built once in the constructor. Per-frame
   // rendering is a single drawImage + a couple of cheap pulse/flash overlays.

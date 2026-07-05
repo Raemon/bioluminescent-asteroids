@@ -197,6 +197,28 @@ export const popupRapidRhythm = (pos: Vec): Popup =>
 export const popupTwinShot = (pos: Vec): Popup =>
   popupBonusLabel(pos, "TWIN SHOT", "#c9a6ff", "rgba(180, 140, 255, 0.85)");
 
+// fires when a same-interval combo-shot streak ends, over the detonating dots.
+//   Bigger streaks read louder: font + life grow with N so a long run announces
+//   itself. Cyan-white to match the streak-dot glow and stand apart from the gold
+//   combo readouts.
+export const popupStreakShots = (pos: Vec, n: number): Popup => {
+  const fontPx = Math.min(34, 20 + n);
+  const life = 1.4 + Math.min(0.8, n * 0.06);
+  return {
+    pos: { x: pos.x, y: pos.y - 20 },
+    vel: { x: rand(-8, 8), y: -50 },
+    life,
+    maxLife: life,
+    text: `${n} STREAK SHOT${n === 1 ? "" : "S"}`,
+    font: `800 ${fontPx}px 'Space Grotesk', system-ui, sans-serif`,
+    fill: "#bff4ff",
+    shadowColor: "rgba(140, 230, 255, 0.9)",
+    decayX: 0.94, decayY: 0.94,
+    popPeak: 0.5, popDuration: 0.18,
+    holdUntil: 0.3, fadeGain: 1.3,
+  };
+};
+
 // surfaces the streak break at the spot that caused it (ship fire / target hit).
 //   reason names which half of the rhythm gate failed so the player can correct it.
 //   Distinct hues so a glance tells you which: crimson = mistimed *press* (the
