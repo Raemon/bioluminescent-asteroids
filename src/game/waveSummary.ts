@@ -20,12 +20,13 @@ import { cancelBeatCues, enqueueBeatCue } from "./beatCues";
 const PANEL_ID = "wave-summary";
 const CUE_TAG = "waveSummary";
 
-// Drain schedule: the bonus is paid out in chunks that start at 50/each and
-//   double every 8 chunks (50, 50, ..., 100, 100, ..., 200, ...). The chunk
+// Drain schedule: the bonus is paid out in chunks whose size doubles every
+//   DRAIN_DOUBLE_EVERY chunks. Doubling matches TICKS_PER_CHIME, so each
+//   chime rung arrives exactly when the payout-per-blip doubles. The chunk
 //   count is rounded up to a multiple of 4 so the cascade always closes on a
 //   beat boundary. The last chunk is shrunk so the total equals the bonus.
 const DRAIN_BASE_CHUNK = 50;
-const DRAIN_DOUBLE_EVERY = 8;
+const DRAIN_DOUBLE_EVERY = 16;
 const DRAIN_CHUNK_GROUP = 4;
 const chunkSizeAt = (i: number) =>
   DRAIN_BASE_CHUNK * Math.pow(2, Math.floor(i / DRAIN_DOUBLE_EVERY));

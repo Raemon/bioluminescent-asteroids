@@ -1013,7 +1013,7 @@ export const registerOffBeatFire = (game: Game) => {
 //   replays reproduce it. Runs before runCollisionPasses, which is safe: a hit
 //   this frame qualifies iff the window is still open at this same clock value.
 const tickStreakTimeout = (game: Game) => {
-  if (game.streakShots < 1) return;
+  if (game.streakGrid <= 0) return;
   if (streakWindowClosed(game)) endStreak(game);
 };
 

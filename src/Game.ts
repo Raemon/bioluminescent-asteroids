@@ -109,7 +109,8 @@ export class Game implements HudElements {
   //   bonus xN pop separately. Fired by tickPendingRhythmBonuses.
   pendingRhythmBonuses: Array<{ fireAt: number; pos: { x: number; y: number } }> = [];
   // Rhythm-streak state (game/rhythmBonus.ts): rewards landing successive combo-shots
-  //   close together. Each shot adds an orb orbiting the reticule; the streak continues
+  //   close together. The first shot seeds silently; the 2nd in-window shot mints the
+  //   first orb orbiting the reticule and each further shot adds one; the streak continues
   //   as long as each shot lands within STREAK_MAX_GAP grid-beats of the last. A wider
   //   gap, a combo loss, or the extension window closing (streakWindowClosed — the ring
   //   fade reaches zero at the same moment) ends it and flares the orbs. The orbs spin
@@ -117,7 +118,7 @@ export class Game implements HudElements {
   //   perceivedBeatTime — no per-frame RNG or stored phase, so replays reproduce it.
   streakInterval = 0; // orbit rate in grid units (beats per revolution); 0 = no streak
   streakGrid = 0; // comboGrid value the streak runs on; a grid change breaks it
-  streakShots = 0; // orbs currently orbiting (the "N") — starts at 1 on the first shot
+  streakShots = 0; // orbs currently orbiting (the "N") — 0 while a seed awaits its 2nd shot
   streakEstablished = false; // has a 2nd in-window shot started counting toward the metric?
   streakLastBeatCenter = -1; // beat-center of the last streak shot; gap measurement + fade
   streakShotsThisWave = 0; // total ESTABLISHED streak shots this wave, for the summary metric

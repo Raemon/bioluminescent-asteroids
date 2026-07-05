@@ -7,7 +7,8 @@ import { endStreak, STREAK_MAX_GAP } from "./streakBurst";
 
 // A streak shot at this ordinal (or beyond) also pays a bonus rhythm — queued as
 //   a staggered xN flash after the shot's own combo popup, like a drift bonus.
-const STREAK_BONUS_FROM = 3;
+//   Ordinals count streak shots (the seed shot is #0): 2 = the 3rd landed shot.
+const STREAK_BONUS_FROM = 2;
 
 // Streak bonuses on top of the per-hit combo increment:
 //   Rapid Rhythm — combo hits on two back-to-back beats pays +1 rhythm.
@@ -28,12 +29,12 @@ const queueRhythmBonus = (game: Game, pos: Vec, order: number) => {
 //   interval, so the orbit speed is a single steady rate for every streak.
 const STREAK_ORBIT_BEATS = 4;
 
-// Begin a fresh streak from a single shot: one orb, steady 4-beat spin, not yet
-//   established (so it doesn't count toward the metric until a 2nd shot confirms).
+// Begin a fresh streak from a single shot: a silent seed — no orb, nothing on
+//   screen — waiting for a 2nd in-window shot to confirm the rhythm.
 const startStreak = (game: Game, grid: number, beatCenter: number) => {
   game.streakInterval = STREAK_ORBIT_BEATS;
   game.streakGrid = grid;
-  game.streakShots = 1;
+  game.streakShots = 0;
   game.streakEstablished = false;
   game.streakLastBeatCenter = beatCenter;
 };
@@ -46,7 +47,7 @@ const startStreak = (game: Game, grid: number, beatCenter: number) => {
 //   caller's, so the gap is in grid units and stays meaningful under doubletime.
 const trackStreak = (game: Game, grid: number, beatCenter: number, hitPos: Vec) => {
   // No streak in flight (or the ring already faded away): this shot seeds one.
-  if (game.streakShots < 1) {
+  if (game.streakGrid <= 0) {
     startStreak(game, grid, beatCenter);
     return;
   }
@@ -54,13 +55,14 @@ const trackStreak = (game: Game, grid: number, beatCenter: number, hitPos: Vec) 
   const gapBeats = Math.round((beatCenter - game.streakLastBeatCenter) / grid);
   const qualifies = gapBeats >= 1 && gapBeats <= STREAK_MAX_GAP && grid === game.streakGrid;
 
-  // First confirmation: the 2nd in-window shot establishes the streak — both shots
-  //   now count toward the metric.
+  // First confirmation: the 2nd in-window shot establishes the streak and mints
+  //   the first orb. The seed shot itself never counts — only 2nd-and-onward
+  //   shots are streak shots.
   if (qualifies && !game.streakEstablished) {
     game.streakEstablished = true;
-    game.streakShots = 2;
+    game.streakShots = 1;
     game.streakLastBeatCenter = beatCenter;
-    game.streakShotsThisWave += 2;
+    game.streakShotsThisWave += 1;
     game.sound.play("tink", 1, hitPos);
     return;
   }
@@ -71,8 +73,8 @@ const trackStreak = (game: Game, grid: number, beatCenter: number, hitPos: Vec) 
     game.streakLastBeatCenter = beatCenter;
     game.streakShotsThisWave += 1;
     game.sound.play("tink", 1, hitPos);
-    // 3rd orb onward also pays a bonus rhythm, flashed after the shot's own xN
-    //   (same staggered UI as a drift bonus).
+    // 2nd orb onward (3rd landed shot) also pays a bonus rhythm, flashed after
+    //   the shot's own xN (same staggered UI as a drift bonus).
     if (game.streakShots >= STREAK_BONUS_FROM) queueRhythmBonus(game, hitPos, 1);
     return;
   }

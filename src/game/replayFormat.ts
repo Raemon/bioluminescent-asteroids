@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 11;
+export const REPLAY_FORMAT_VERSION = 12;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -36,6 +36,10 @@ export const REPLAY_FORMAT_VERSION = 11;
 //   instant to perceivedBeatTime since the last hit's beat center, in the
 //   streak's own grid units (streakWindowClosed). Streak lifetime gates +1
 //   rhythm bonuses, so v10 recordings re-sim with different combo totals.
+// v12 stops counting a streak's seed shot: only 2nd-and-onward shots are
+//   streak shots, so streakShots (the orb count / metric) runs one lower.
+//   The metric feeds the wave bonus → score → bonus lives, so v11
+//   recordings re-sim into different runs.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat
