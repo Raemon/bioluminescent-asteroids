@@ -910,6 +910,11 @@ export class Asteroid {
   warbleOpacity = 1;
   warbleSolid = true;
   warblePhaseOffset = 0;
+  // Pre-baked blurred copy of the warble sprite, drawn (very faint) in place of
+  // the crisp body while phased out so the intangible window reads as "smeared
+  // out of this plane" rather than a solid rock. Baked once so we never run a
+  // blur filter per frame.
+  warbleBlurSprite: HTMLCanvasElement | null = null;
 
   // Which cathedral archetype this "bell" asteroid wears (lancet wall, rose
   // facade, spire tower, arcade, buttress ruin). Rolled at construction; picks
@@ -1173,6 +1178,7 @@ export class Asteroid {
     // Stagger each warble's phase so a field of them doesn't blink in lockstep.
     if (kind === "warble") this.warblePhaseOffset = rand(0, BASS_MEASURE_LENGTH);
     this.sprite = this.buildSprite();
+    if (kind === "warble" && this.sprite) this.warbleBlurSprite = this.buildWarbleBlurSprite(this.sprite);
     // Bassteroid wake. Gen-0 (large) wears no drone yet — it gets the slow
     // glow Trail as a "pristine charged thing drifting in space" wake.
     // Mediums/smalls (only spawned via split) have an active drone voice,
@@ -1612,6 +1618,20 @@ export class Asteroid {
       ctx.strokeStyle = `hsla(${this.hue + 18}, 70%, 64%, 0.85)`;
       ctx.stroke();
     }
+    return canvas;
+  }
+
+  // Bake a blurred copy of the crisp warble sprite once. Drawn in place of the
+  // sharp body while the rock is phased out, so the intangible window reads as a
+  // faint smear "out of phase" instead of a solid asteroid. The source sprite is
+  // padded (halo room), so the blur has margin and won't clip at the edges.
+  private buildWarbleBlurSprite(src: HTMLCanvasElement): HTMLCanvasElement {
+    const canvas = document.createElement("canvas");
+    canvas.width = src.width;
+    canvas.height = src.height;
+    const ctx = canvas.getContext("2d")!;
+    ctx.filter = `blur(${Math.max(3, this.radius * 0.35)}px)`;
+    ctx.drawImage(src, 0, 0);
     return canvas;
   }
 
@@ -3755,7 +3775,9 @@ export class Asteroid {
     // energy thread.
     if (this.kind === "torus") {
       const cfg = ENTITY_CONFIG.torus;
-      const ringRadius = this.radius * (1 - ENTITY_CONFIG.torus.tubeFrac / 2);
+      // The fragments settle onto a ring blown outward from the intact
+      // centreline (breakExpand), so the broken formation opens up.
+      const ringRadius = this.radius * (1 - cfg.tubeFrac / 2) * cfg.breakExpand;
       // Hand the broken ring a faint outward drift so the cluster keeps moving
       // across the field rather than freezing where it cracked.
       const group: TorusGroup = {
@@ -3767,10 +3789,10 @@ export class Asteroid {
         hue: this.hue,
         members: [],
       };
-      // Two half-rings: slots π apart, each spanning a bit under π so there's a
+      // Two half-rings: slots π apart, each spanning well under π so there's a
       // comfortably wide gap at the top + bottom for the ship to thread between
       // the two C's (as well as through the hole).
-      const span = Math.PI * 0.7;
+      const span = Math.PI * 0.6;
       const halves = [0, Math.PI].map((slot) => this.makeTorusArc(group, "large", slot, span));
       group.members = halves;
       return halves;
@@ -4240,20 +4262,22 @@ export class Asteroid {
 
     // A warble dims its whole body toward the void as it phases out. Under the
     // additive blend, a low globalAlpha reads as "fading into nothing" rather
-    // than going grey — which is exactly the ghosting we want.
+    // than going grey — which is exactly the ghosting we want. Once it crosses
+    // out of phase (warbleSolid === false) we swap the crisp body for a
+    // pre-baked blurred copy at very low opacity, so the intangible window reads
+    // as a faint smear rather than a solid rock.
     const isWarble = this.kind === "warble";
-    if (isWarble) ctx.globalAlpha = this.warbleOpacity;
-
-    if (this.sprite) {
+    if (isWarble && this.warbleBlurSprite) {
+      this.renderWarbleBody(ctx);
+    } else if (this.sprite) {
       ctx.drawImage(this.sprite, -this.spriteHalfSize, -this.spriteHalfSize);
     }
     ctx.globalCompositeOperation = "lighter";
 
     // Phase-ring overlay: concentric rings that bloom outward as the warble
-    // ghosts away, so the player reads "it's leaving this plane" — and a sharp
-    // intangible cue when it crosses fully out. Drawn on top of the dimmed body;
-    // manages its own alpha, then restores the body alpha for the overlays below.
-    if (isWarble) this.renderWarblePhase(ctx, time);
+    // ghosts away, so the player reads "it's leaving this plane". Skipped while
+    // phased out — there the blurry faint body carries the read on its own.
+    if (isWarble && this.warbleSolid) this.renderWarblePhase(ctx, time);
 
     // Glass prison: live eye-glow pulse over the baked silhouette. Two faint
     // red pinpricks where the captive's eyes sit, breathing in and out so the
@@ -4413,12 +4437,45 @@ export class Asteroid {
     ctx.restore();
   }
 
+  // Draw the warble body: the crisp baked sprite while solid, crossfading into
+  // the pre-baked blurred copy as it phases out, so out-of-phase reads as a
+  // faint smeared ghost. warbleOpacity runs 1 (peak) down to lowOpacity
+  // (trough); solidThreshold splits solid from phased-out. In the phased-out
+  // trough we drop the alpha well below warbleOpacity so it goes genuinely
+  // wispy, not merely dim. Leaves globalAlpha at the faint body level on exit
+  // (matching the old renderWarblePhase contract) so the nuclei / flash drawn
+  // afterward fade in step with the body.
+  private renderWarbleBody(ctx: CanvasRenderingContext2D) {
+    const dx = -this.spriteHalfSize;
+    const dy = -this.spriteHalfSize;
+    if (this.warbleSolid || !this.warbleBlurSprite) {
+      ctx.globalAlpha = this.warbleOpacity;
+      if (this.sprite) ctx.drawImage(this.sprite, dx, dy);
+      return;
+    }
+    const warble = ENTITY_CONFIG.warble;
+    const th = warble.solidThreshold;
+    // 0 at the threshold → 1 at the deepest trough; how far "out of phase" we are.
+    const phased = Math.max(0, Math.min(1, (th - this.warbleOpacity) / (th - warble.lowOpacity)));
+    // Ramp the whole body down to a faint smear at the trough, then split it
+    // between the fading crisp sprite and the rising blurred one.
+    const faint = this.warbleOpacity * (1 - 0.7 * phased);
+    if (this.sprite && phased < 1) {
+      ctx.globalAlpha = faint * (1 - phased);
+      ctx.drawImage(this.sprite, dx, dy);
+    }
+    ctx.globalAlpha = faint * (0.4 + 0.6 * phased);
+    ctx.drawImage(this.warbleBlurSprite, dx, dy);
+    // Leave the ambient alpha at the faint level for the overlays below.
+    ctx.globalAlpha = faint;
+  }
+
   // Warble phase overlay. Concentric rings ripple outward from the body and
   // intensify as the rock ghosts out, so "this thing is phasing between planes"
-  // reads at a glance. When it's actually intangible (warbleSolid === false) a
-  // brighter rim flickers so the player can see the window where shots pass
-  // through. Sets its own additive alpha and restores warbleOpacity on exit so
-  // the body overlays drawn after this stay dimmed in step with the body.
+  // reads at a glance. Only drawn while solid — once phased out the faint
+  // blurred body carries the read on its own. Sets its own additive alpha and
+  // restores warbleOpacity on exit so the body overlays drawn after this stay
+  // dimmed in step with the body.
   private renderWarblePhase(ctx: CanvasRenderingContext2D, time: number) {
     // 0 at solid peak → 1 at the dim trough. Drives ring bloom + brightness.
     const ghost = 1 - this.warbleOpacity;
@@ -4436,16 +4493,6 @@ export class Asteroid {
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, TAU);
-      ctx.stroke();
-    }
-    // Intangible cue: a brighter shivering rim while bullets pass through.
-    if (!this.warbleSolid) {
-      const flicker = 0.5 + 0.5 * Math.sin(time * 22);
-      ctx.globalAlpha = 0.35 + 0.25 * flicker;
-      ctx.strokeStyle = `hsl(${hue + 60}, 95%, 78%)`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(0, 0, this.radius * 1.05, 0, TAU);
       ctx.stroke();
     }
     ctx.globalAlpha = this.warbleOpacity;

@@ -283,6 +283,10 @@ export const ENTITY_CONFIG = {
     tubeFrac: 0.34,
     // Heavy mechanical mass: drifts in slower so the tough target is readable.
     spawnSpeedMul: 0.5,
+    // The killing hit blows the fragments outward onto a phantom ring this
+    // much wider than the intact ring's centreline, so the gaps in the broken
+    // formation are practical to fly through.
+    breakExpand: 1.3,
     // Chunks spalled off each half-ring when it breaks (besides the sliver).
     chunkCount: 2,
     // Phantom-ring spin rate (rad/s) the fragments orbit their shared centre at.
@@ -458,7 +462,7 @@ export const ENTITY_STATS: Partial<Record<AsteroidKind, EntityStats>> = {
   torus: {
     hp: 12,
     score: 1100,
-    radius: 78,
+    radius: 100,
     hue: 196,
   },
   // Half-ring at "large"; the shorter sliver it breaks into at "medium".

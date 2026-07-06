@@ -117,9 +117,10 @@ type SummaryEls = {
 };
 
 // The "Next ship" line fades in the instant the bonus finishes draining into
-//   the score, then stays at full opacity. It carries no fade-out of its own —
-//   nested inside the panel, it leaves with the rest of the summary when the
-//   panel runs its 2s fade-out, so it remains until the summary is fully gone.
+//   the score, at full opacity. Its arrival also fades out every other row
+//   (including the Wave title) via ws-others-out, leaving only Score and Next
+//   ship. Those two carry no fade-out of their own — nested inside the panel,
+//   they leave with the rest of the summary when it runs its 2s fade-out.
 
 let activeTimers: number[] = [];
 
@@ -268,6 +269,7 @@ export const showWaveSummary = (
   extraLifeEl.classList.remove("in");
   extraLifeValueEl.textContent = "";
   root.classList.remove("fade-out");
+  root.classList.remove("ws-others-out");
   void root.offsetWidth;
   root.classList.remove("ws-reset");
 
@@ -278,6 +280,9 @@ export const showWaveSummary = (
   const revealExtraLife = () => {
     extraLifeValueEl.textContent = formatScore(game.nextBonusLifeScore);
     extraLifeEl.classList.add("in");
+    // The instant Next ship blooms, fade every other row (including the Wave
+    //   title) — only Score and Next ship hold until the whole panel fades.
+    root.classList.add("ws-others-out");
   };
 
   // All DOM delays measured from the same beatTime the cue scheduler and sim
@@ -377,6 +382,7 @@ export const hideWaveSummary = (game: Game) => {
   if (root) {
     root.classList.add("ws-reset");
     root.classList.remove("fade-out");
+    root.classList.remove("ws-others-out");
     const rows = root.querySelectorAll<HTMLElement>(".ws-row");
     for (const row of rows) row.classList.remove("in");
     const extraLife = root.querySelector<HTMLElement>(".ws-extra-life");

@@ -2421,6 +2421,13 @@ li.lb-self .lb-name-link:hover {
   transform: translateY(0);
 }
 
+/* The moment the "Next ship" line blooms in, every row except Score and Next
+   ship fades away, leaving those two alone before the whole panel fades. */
+#wave-summary.ws-others-out .ws-row:not(.ws-score):not(.ws-extra-life) {
+  opacity: 0;
+  transition: opacity 1.2s ease-out;
+}
+
 /* Single-phase panel fade: after the drain finishes and a hold elapses, the
    whole panel (rows + score) fades together over 2s. Animation (with
    forwards fill mode) is more robust than a transition here — a transition
@@ -2520,10 +2527,10 @@ li.lb-self .lb-name-link:hover {
   opacity: 0;
 }
 
-/* Bloom in and hold: the line fades up as the bonus lands, then stays at full
-   opacity. It has no fade-out of its own — nested in the panel, it leaves with
-   the rest of the summary when the panel runs its 2s fade-out, so it remains
-   visible until the whole summary has finished disappearing. */
+/* Bloom in and hold: the line fades up at full opacity as the bonus lands, and
+   its arrival fades every other row away (ws-others-out) so only it and Score
+   remain. It has no fade-out of its own — nested in the panel, it leaves with
+   the rest of the summary when the panel runs its 2s fade-out. */
 #wave-summary .ws-extra-life.in {
   animation: ws-extra-life-flash 0.5s ease-out forwards;
 }
@@ -2534,13 +2541,13 @@ li.lb-self .lb-name-link:hover {
 }
 
 #wave-summary .ws-extra-life .ws-label {
-  color: rgba(255, 255, 255, 0.4);
+  color: #ffffff;
   opacity: 1;
 }
 
 #wave-summary .ws-extra-life .ws-value {
-  color: rgba(255, 255, 255, 0.4);
-  text-shadow: none;
+  color: #ffffff;
+  text-shadow: 0 0 10px rgba(200, 230, 255, 0.7);
 }
 
 #wave-summary .ws-pulse {
