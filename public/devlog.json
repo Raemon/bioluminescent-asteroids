@@ -1,5 +1,52 @@
 [
   {
+    "id": "2026-07-06-5b5d5f0",
+    "date": "2026-07-06",
+    "title": "Streak system, beat-accurate laser, torus collision fixes",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Rhythm streaks now reward escalating score bonuses for each successive on-beat shot, displayed as orbiting comet-sparks around the reticule.",
+          "Wave summary now shows your longest streak instead of total streak shots.",
+          "A new drain chime plays over the wave summary screen.",
+          "Laser charge dot accents now fire sample-accurately on the beat instead of arriving a frame late."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Asteroid knockback no longer stacks from repeated hits or armored deflections — momentum transfers once per bullet.",
+          "Boss beam, shockwave, and collision detection now correctly handle targets near or across the world seam.",
+          "Comet and alien trails no longer draw a screen-spanning streak when the entity wraps around the map edge.",
+          "Fuel orbs and canisters now wrap properly instead of occasionally blinking out."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Leaderboard now sorts by score by default instead of rhythm.",
+          "Tutorial side-thrust controls now display SHIFT key label for clarity."
+        ]
+      }
+    ],
+    "commits": [
+      "5b5d5f0",
+      "64d0144",
+      "58f34ce",
+      "63c7765",
+      "250391c",
+      "1f09d84",
+      "792d72a",
+      "4a129c2",
+      "41da481",
+      "376244e",
+      "8cb30b6",
+      "b79b40e",
+      "985293d"
+    ]
+  },
+  {
     "id": "2026-07-04-d35f382",
     "date": "2026-07-04",
     "title": "Hints expanded, meteors now expire, controls auto-sync",
