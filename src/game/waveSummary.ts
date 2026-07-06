@@ -141,7 +141,7 @@ const buildPanel = (): SummaryEls => {
       <div class="ws-row ws-rhythm"><span class="ws-label">Max Rhythm</span> <span class="ws-value" data-row="max"></span></div>
       <div class="ws-row ws-rhythm"><span class="ws-label">Final Rhythm</span> <span class="ws-value" data-row="final"></span></div>
       <div class="ws-row ws-drift"><span class="ws-label">Drift Shot</span> <span class="ws-value" data-row="drift"></span></div>
-      <div class="ws-row ws-drift"><span class="ws-label">Largest Streak</span> <span class="ws-value" data-row="streak"></span></div>
+      <div class="ws-row ws-drift"><span class="ws-label">Longest Streak</span> <span class="ws-value" data-row="streak"></span></div>
       <div class="ws-row ws-bonus"><span class="ws-label">Bonus</span> <span class="ws-value" data-row="bonus"></span></div>
       <div class="ws-row ws-score"><span class="ws-label">Score</span> <span class="ws-value" data-row="score"></span></div>
       <div class="ws-row ws-extra-life" data-row="extra-life"><span class="ws-label">Next ship</span> <span class="ws-value" data-row="extra-life-value"></span></div>
