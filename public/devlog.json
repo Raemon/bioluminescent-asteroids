@@ -1,5 +1,21 @@
 [
   {
+    "id": "2026-07-07-d24aa65",
+    "date": "2026-07-07",
+    "title": "Asteroid damage reduction tuned down",
+    "sections": [
+      {
+        "heading": "Tuning",
+        "items": [
+          "Asteroids absorb slightly less damage when hit."
+        ]
+      }
+    ],
+    "commits": [
+      "d24aa65"
+    ]
+  },
+  {
     "id": "2026-07-06-5b5d5f0",
     "date": "2026-07-06",
     "title": "Streak system, beat-accurate laser, torus collision fixes",
