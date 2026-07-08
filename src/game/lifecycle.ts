@@ -271,6 +271,9 @@ export const startCalibrationIntro = (game: Game) => {
   // because back-to-back decodes during the intro starve the audio
   // scheduler and skip beats.
   for (const variation of HALO_MUSIC_POOL) game.sound.preloadHaloMusic(variation);
+  // The streak sound's updraft roll needs its two loop stems decoded before
+  // the first streak forms (streaks can start seconds into wave 1).
+  game.sound.preloadStreakMusic();
   // Wave 1 is a full-halo wave when USE_FULL_HALO_MUSIC is on, so warm the
   // full-song layer stems too — its first 4x will start a full song, not a loop.
   if (USE_FULL_HALO_MUSIC) {

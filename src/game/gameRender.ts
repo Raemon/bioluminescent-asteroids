@@ -245,18 +245,20 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   ctx.globalCompositeOperation = "lighter";
   renderStreakOrbs(ctx, game, reticuleCenter);
   ctx.restore();
-  // Shimmery streak arpeggio: fast glassy pentatonic bells that ride the reticule hums, thickening
-  // with the streak's length. Holds off until streak 3 so a brief run doesn't trigger it, and dies
-  // once the extension window closes. intensity drives level + the note grid: 16ths at first,
-  // tightening to 32nds (and climbing the pentatonic pool) as the streak grows past ~streak 5.
+  // Streak sound: each streak rolls one of two escalating textures — the generative music-box
+  // arpeggio (16ths tightening to 32nds, climbing registers) or the looping updraft stems (a
+  // breathing pad whose rising-arpeggio layer blooms in). Holds off until streak 3 so a brief
+  // run doesn't trigger it, and dies once the extension window closes.
   const streakAlive = game.streakShots >= 3 && !streakWindowClosed(game);
   if (streakAlive) {
-    // 0.2 floor so streak 3 is already audible; crosses the 32nd threshold (0.35) just past streak
-    //   5 and reaches full at ~streak 15.
+    // 0.2 floor so streak 3 is already audible; crosses the escalation threshold (0.35) just past
+    //   streak 5 and reaches full at ~streak 15.
     const ramp = 1 - Math.pow(1 - Math.min((game.streakShots - 3) / 12, 1), 1.6);
-    game.sound.updateStreakShimmer(0.2 + 0.8 * ramp, BEAT_GRID);
+    // Seconds until the next beat boundary, so the loop set starts its downbeat on the grid.
+    const beatAlignDelay = (BEAT_GRID - (game.beatTime % BEAT_GRID)) % BEAT_GRID;
+    game.sound.updateStreakSound(0.2 + 0.8 * ramp, beatAlignDelay);
   } else {
-    game.sound.stopStreakShimmer();
+    game.sound.stopStreakSound();
   }
   // ship.lastThrustActiveAt is recorded in game.time/1000 units; pass the same clock so
   // the post-thrust fade doesn't get stuck after intro overlays (which advance beatTime
