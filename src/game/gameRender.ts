@@ -6,7 +6,7 @@ import { renderTrails } from "./trailsRender";
 import { renderPopups } from "./popups";
 import { renderBassLightnings } from "./bassLightning";
 import { renderDriftBursts } from "./driftBurst";
-import { renderStreakOrbs } from "./streakBurst";
+import { renderStreakOrbs, streakWindowClosed } from "./streakBurst";
 import { primaryReticulePosition } from "../ship/reticule/reticuleRender";
 import { renderWormholes } from "./wormhole";
 import { computeConeFrame, toroidalDelta } from "../ship/reticule/coneGeometry";
@@ -245,6 +245,19 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   ctx.globalCompositeOperation = "lighter";
   renderStreakOrbs(ctx, game, reticuleCenter);
   ctx.restore();
+  // Shimmery streak arpeggio: fast glassy pentatonic bells that ride the reticule hums, thickening
+  // with the streak's length. Holds off until streak 3 so a brief run doesn't trigger it, and dies
+  // once the extension window closes. intensity drives level + the note grid: 16ths at first,
+  // tightening to 32nds (and climbing the pentatonic pool) as the streak grows past ~streak 5.
+  const streakAlive = game.streakShots >= 3 && !streakWindowClosed(game);
+  if (streakAlive) {
+    // 0.2 floor so streak 3 is already audible; crosses the 32nd threshold (0.35) just past streak
+    //   5 and reaches full at ~streak 15.
+    const ramp = 1 - Math.pow(1 - Math.min((game.streakShots - 3) / 12, 1), 1.6);
+    game.sound.updateStreakShimmer(0.2 + 0.8 * ramp, BEAT_GRID);
+  } else {
+    game.sound.stopStreakShimmer();
+  }
   // ship.lastThrustActiveAt is recorded in game.time/1000 units; pass the same clock so
   // the post-thrust fade doesn't get stuck after intro overlays (which advance beatTime
   // without advancing game.time).

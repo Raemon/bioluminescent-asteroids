@@ -31,7 +31,7 @@ const RETICULE_HITBOX_PULSE_PERIOD_SEC = 2.0;
 // dim during fire cooldown so the player feels the rhythm window even with nothing in sight.
 const RETICULE_COOLDOWN_DIM = 0.3;
 const RETICULE_RADAR_PULSE_MAX = 1;
-const RETICULE_RADAR_PULSE_MIN = 0.4;
+const RETICULE_RADAR_PULSE_MIN = 0.7;
 const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
 
 // doubletime (rapid powerup or combo ≥ 12) fires every half-beat, so the off-beat bullet

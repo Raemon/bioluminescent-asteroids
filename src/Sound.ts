@@ -92,6 +92,26 @@ type BassDroneNode = {
   spatial?: SpatialNodes;
 };
 
+// Streak-shimmer: a fast glassy-bell arpeggio that fades in as a rhythm streak
+// grows. Real PITCHED notes (no noise — noise rattled in earlier versions),
+// drawn from C-major pentatonic so it stays melodic and consonant with every
+// C-rooted halo chord. A lookahead scheduler fires one tiny bell every 16th
+// note at first, tightening to 32nds once the streak is long, so it reads as a
+// shimmer texture rather than a drum. Each note has a soft-ish attack and a
+// short tail that OVERLAPS its neighbours — that overlap is the "sustain", so
+// nothing sits static (no drone) yet nothing strikes hard (not percussive). The
+// pitches random-walk (never a fixed tune) so it can fade in and out without a
+// recognisable melody being cut off. Level fades smoothly with streak length.
+type StreakShimmerNode = {
+  out: GainNode; // overall level — eased toward STREAK_SHIMMER_PEAK_GAIN * intensity
+  intensity: number; // latest streak intensity (0..1); the scheduler reads this
+  nextNoteTime: number; // audio-clock time of the next 16th/32nd bell to fire
+  walkIndex: number; // current position in the pentatonic pool (random-walks)
+  timer: ReturnType<typeof setInterval> | null; // JS-side lookahead pump
+  releasing: boolean;
+  releaseCleanupTimer: ReturnType<typeof setTimeout> | null;
+};
+
 // Per-comet shimmer pad. Underlies the comet melody for the entire lifetime
 // of one comet — a soft chord wash that thickens whenever a comet is on
 // screen. Set up once at spawn, torn down on despawn.
@@ -425,6 +445,8 @@ export class Sound {
   // Drift-tier-6 deep-root foundation hum (C2) — grounds the spread with the root an octave BELOW
   // the tier-2 sub root: a deep, chest-felt foundation that crowns the hold. Pure root, the floor.
   private firstDotHaloHum: FirstDotHumNode | null = null;
+  // Single streak-shimmer texture voice. Null while no rhythm streak is alive.
+  private streakShimmer: StreakShimmerNode | null = null;
   // Per-bassteroid ambient drone, keyed by the Asteroid instance. Only
   // populated for medium/small bass pieces (a large piece is "sealed" — it
   // hasn't been broken open yet).
@@ -1523,6 +1545,7 @@ export class Sound {
     if (!on) this.stopFirstDotNinthHum();
     if (!on) this.stopFirstDotSixthHum();
     if (!on) this.stopFirstDotHaloHum();
+    if (!on) this.stopStreakShimmer();
     if (!on) this.stopAllBassteroidDrones();
     if (!on) this.stopAllCometShimmers();
     if (!on) this.stopHaloAmbient();
@@ -2340,6 +2363,189 @@ export class Sound {
       try { node.vibratoLfo.stop(stopAt); } catch {}
       this.firstDotHaloHum = null;
     }, Math.ceil(Sound.FIRST_DOT_HALO_HUM_FAST_RELEASE_SEC * 1000) + 20);
+  }
+
+  // ── Streak shimmer ────────────────────────────────────────────────────
+  // A fast glassy-bell arpeggio that fades in with a rhythm streak (see the
+  // StreakShimmerNode type comment). Design constraints from the brief:
+  //   MELODIC — real pitched bells drawn from C-major pentatonic, not noise.
+  //   SUBTLE FADE — level eases with the streak, so gaining/losing streak just
+  //     brings the shimmer up/down; there's no hard on/off to jar.
+  //   32ND NOTES — the scheduler fires 16ths early on, tightening to 32nds once
+  //     the streak is long, so the texture is distinct from the game's other hums.
+  //   NOT PERCUSSIVE — each bell has a soft ~10ms attack and a tail that overlaps
+  //     the next note, so it glistens as a wash rather than striking like a drum.
+  //   SHIMMER — high register + tiny random detune per note + overlapping tails.
+  //   MATCHES THE CHORDS — C-major pentatonic sits consonantly on the C-rooted field.
+  //   NO DRONE — nothing sustains; the "body" is purely the overlapping bell tails.
+  //   NO RATTLE — no filtered noise anywhere (that was the old rattle).
+
+  // C-major pentatonic pool, C5..E7. The streak walks a WINDOW of this array:
+  //   low streak sits in the lower window, a long streak shifts the window up so
+  //   the shimmer climbs the pool as it grows (only after it reaches 32nds).
+  private static readonly STREAK_SHIMMER_POOL = [
+    523.25,  // C5
+    587.33,  // D5
+    659.25,  // E5
+    783.99,  // G5
+    880.00,  // A5
+    1046.50, // C6
+    1174.66, // D6
+    1318.51, // E6
+    1567.98, // G6
+    1760.00, // A6
+    2093.00, // C7
+    2349.32, // D7
+    2637.02, // E7
+  ];
+  // How many adjacent pool pitches the random-walk can reach at once. Small so it
+  //   drifts (mostly stepwise, occasional leap) rather than jumping octaves.
+  private static readonly STREAK_SHIMMER_WINDOW = 5;
+  // Peak level at full intensity — a gentle top sparkle that sits under the hums.
+  private static readonly STREAK_SHIMMER_PEAK_GAIN = 0.055;
+  private static readonly STREAK_SHIMMER_LEVEL_TC = 0.1;
+  // Streak fraction at/above which the grid tightens from 16ths to 32nds, and the
+  //   window starts climbing the pool. Below it: 16ths in the base register.
+  private static readonly STREAK_SHIMMER_TIGHTEN_AT = 0.35;
+  // Note grid in seconds (120 BPM, BEAT_GRID 0.5s → 16th = 0.125s, 32nd = 0.0625s).
+  private static readonly STREAK_SHIMMER_SIXTEENTH_SEC = 0.125;
+  private static readonly STREAK_SHIMMER_THIRTYSECOND_SEC = 0.0625;
+  // Per-bell bloom: soft attack (glisten, not strike) + tail long enough to
+  //   overlap the next note so the run reads as a shimmer wash, never separate plucks.
+  private static readonly STREAK_SHIMMER_ATTACK_SEC = 0.01;
+  private static readonly STREAK_SHIMMER_TAIL_SEC = 0.22;
+  // Lookahead pump: schedule any bells landing within this horizon each tick.
+  private static readonly STREAK_SHIMMER_LOOKAHEAD_SEC = 0.1;
+  private static readonly STREAK_SHIMMER_PUMP_MS = 25;
+  private static readonly STREAK_SHIMMER_RELEASE_SEC = 0.4;
+
+  // Drive while a streak is alive. intensity01 (0..1) is the streak's length eased
+  //   toward a ceiling by the caller: it sets level, the note grid (16th→32nd), and
+  //   how high in the pool the walk sits. The scheduler runs on its own timer.
+  updateStreakShimmer(intensity01: number, _beatGrid: number = 0) {
+    if (!this.enabled) return;
+    const i = Math.max(0, Math.min(1, intensity01));
+    if (i <= 0) { this.stopStreakShimmer(); return; }
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    if (!this.streakShimmer) {
+      this.streakShimmer = this.createStreakShimmer(t);
+      if (!this.streakShimmer) return;
+    }
+    const node = this.streakShimmer;
+    this.resumeStreakShimmerIfReleasing(node, t);
+    node.intensity = i;
+    node.out.gain.setTargetAtTime(Sound.STREAK_SHIMMER_PEAK_GAIN * i, t, Sound.STREAK_SHIMMER_LEVEL_TC);
+  }
+
+  // Build the shimmer bus (just an out gain into master) and start the lookahead
+  //   pump that schedules glassy bells. Notes themselves are transient voices
+  //   created per-bell in scheduleStreakShimmerNote, so nothing sustains.
+  private createStreakShimmer(t: number): StreakShimmerNode | null {
+    if (!this.ctx || !this.master) return null;
+    const out = this.ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t); // first update's setTargetAtTime swells it in
+    out.connect(this.master);
+    const node: StreakShimmerNode = {
+      out,
+      intensity: 0,
+      nextNoteTime: t + 0.05,
+      walkIndex: 0, // lower edge of the pool; the walk climbs from here
+      timer: null,
+      releasing: false,
+      releaseCleanupTimer: null,
+    };
+    node.timer = setInterval(() => this.pumpStreakShimmer(node), Sound.STREAK_SHIMMER_PUMP_MS);
+    return node;
+  }
+
+  // Lookahead scheduler: emit every bell whose onset falls within the horizon,
+  //   advancing the grid (16th vs 32nd) from the current intensity.
+  private pumpStreakShimmer(node: StreakShimmerNode) {
+    if (!this.enabled || !this.ctx || node.releasing) return;
+    const now = this.ctx.currentTime;
+    const horizon = now + Sound.STREAK_SHIMMER_LOOKAHEAD_SEC;
+    // don't let a backgrounded tab pile up a burst of overdue notes.
+    if (node.nextNoteTime < now - 0.2) node.nextNoteTime = now;
+    let guard = 0;
+    while (node.nextNoteTime < horizon && guard++ < 16) {
+      const i = node.intensity;
+      const tight = i >= Sound.STREAK_SHIMMER_TIGHTEN_AT;
+      const grid = tight ? Sound.STREAK_SHIMMER_THIRTYSECOND_SEC : Sound.STREAK_SHIMMER_SIXTEENTH_SEC;
+      this.scheduleStreakShimmerNote(node, node.nextNoteTime, i, tight);
+      node.nextNoteTime += grid;
+    }
+  }
+
+  // One glassy bell at time `at`. Picks the next pentatonic pitch by random-walk
+  //   inside a window that climbs the pool once the streak is long, then plays a
+  //   soft-attack triangle + quiet sine octave with a short overlapping tail.
+  private scheduleStreakShimmerNote(node: StreakShimmerNode, at: number, intensity: number, tight: boolean) {
+    if (!this.ctx) return;
+    const pool = Sound.STREAK_SHIMMER_POOL;
+    const win = Sound.STREAK_SHIMMER_WINDOW;
+    // Window base climbs the pool only once we've tightened to 32nds, and only
+    //   with the streak past that point — so pitch rises "only then", per the brief.
+    const climb = tight ? (intensity - Sound.STREAK_SHIMMER_TIGHTEN_AT) / (1 - Sound.STREAK_SHIMMER_TIGHTEN_AT) : 0;
+    const maxBase = pool.length - win;
+    const base = Math.round(Math.max(0, Math.min(maxBase, climb * maxBase)));
+    // random-walk: mostly ±1 step, occasional ±2 leap; clamp to the window.
+    const step = Math.random() < 0.75 ? (Math.random() < 0.5 ? -1 : 1) : (Math.random() < 0.5 ? -2 : 2);
+    node.walkIndex = Math.max(base, Math.min(base + win - 1, node.walkIndex + step));
+    const freq = pool[node.walkIndex];
+    // Tiny per-note detune → glassy chorus shimmer.
+    const detune = 1 + (Math.random() - 0.5) * 0.006;
+    // Louder notes toward the top of the pool so the shimmer sparkles as it climbs,
+    //   but always faint — the out gain (intensity) is the real level control.
+    const vel = 0.5 + 0.5 * (node.walkIndex / (pool.length - 1));
+    const tail = Sound.STREAK_SHIMMER_TAIL_SEC;
+    for (const [type, mult, lvl] of [["triangle", 1, vel], ["sine", 2, vel * 0.4]] as const) {
+      const osc = this.ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq * mult * detune, at);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(lvl, at + Sound.STREAK_SHIMMER_ATTACK_SEC); // soft attack, not a click
+      g.gain.exponentialRampToValueAtTime(0.0001, at + tail); // overlaps the next note
+      osc.connect(g);
+      g.connect(node.out);
+      osc.start(at);
+      osc.stop(at + tail + 0.03);
+    }
+  }
+
+  private resumeStreakShimmerIfReleasing(node: StreakShimmerNode, t: number) {
+    if (!node.releasing) return;
+    if (node.releaseCleanupTimer !== null) {
+      clearTimeout(node.releaseCleanupTimer);
+      node.releaseCleanupTimer = null;
+    }
+    if (node.timer === null) node.timer = setInterval(() => this.pumpStreakShimmer(node), Sound.STREAK_SHIMMER_PUMP_MS);
+    node.nextNoteTime = t + 0.05;
+    node.out.gain.cancelScheduledValues(t);
+    node.out.gain.setValueAtTime(node.out.gain.value, t);
+    node.releasing = false;
+  }
+
+  // Streak ended: stop scheduling new bells and fade the bus out over a soft tail
+  //   (a hard cut would click), letting the in-flight notes ring, then tear down.
+  stopStreakShimmer() {
+    if (!this.streakShimmer || !this.ctx) return;
+    const node = this.streakShimmer;
+    if (node.releasing) return;
+    const t = this.ctx.currentTime;
+    if (node.timer !== null) { clearInterval(node.timer); node.timer = null; }
+    const releaseEnd = t + Sound.STREAK_SHIMMER_RELEASE_SEC;
+    node.out.gain.cancelScheduledValues(t);
+    node.out.gain.setValueAtTime(node.out.gain.value, t);
+    node.out.gain.linearRampToValueAtTime(0.0001, releaseEnd);
+    node.releasing = true;
+    node.releaseCleanupTimer = setTimeout(() => {
+      if (this.streakShimmer !== node) return;
+      try { node.out.disconnect(); } catch {}
+      this.streakShimmer = null;
+    }, Math.ceil(Sound.STREAK_SHIMMER_RELEASE_SEC * 1000) + 30);
   }
 
   // Ambient drone played for the lifetime of a broken-open bassteroid. There

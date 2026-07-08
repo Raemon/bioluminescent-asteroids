@@ -2422,10 +2422,13 @@ li.lb-self .lb-name-link:hover {
 }
 
 /* The moment the "Next ship" line blooms in, every row except Score and Next
-   ship fades away, leaving those two alone before the whole panel fades. */
+   ship begins fading — but stretched so it lands exactly when the whole panel
+   fade finishes (HOLD_BEFORE_FADE_MS + FADE_OUT_MS = 5s), so the other rows
+   drift away for the entire hold rather than snapping out early. ease-in keeps
+   them present at first, then they trail off into the panel fade. */
 #wave-summary.ws-others-out .ws-row:not(.ws-score):not(.ws-extra-life) {
   opacity: 0;
-  transition: opacity 1.2s ease-out;
+  transition: opacity 5s ease-in;
 }
 
 /* Single-phase panel fade: after the drain finishes and a hold elapses, the
@@ -2538,16 +2541,6 @@ li.lb-self .lb-name-link:hover {
 @keyframes ws-extra-life-flash {
   0%   { opacity: 0; transform: translateY(8px); }
   100% { opacity: 1; transform: translateY(0);   }
-}
-
-#wave-summary .ws-extra-life .ws-label {
-  color: #ffffff;
-  opacity: 1;
-}
-
-#wave-summary .ws-extra-life .ws-value {
-  color: #ffffff;
-  text-shadow: 0 0 10px rgba(200, 230, 255, 0.7);
 }
 
 #wave-summary .ws-pulse {

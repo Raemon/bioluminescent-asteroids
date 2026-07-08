@@ -3,7 +3,7 @@ import { BULLET_HIT_RADIUS_ON_BEAT, BULLET_HIT_RADIUS_OFF_BEAT, ReticuleTarget, 
 import { toroidalDelta } from "./coneGeometry";
 
 // matches the ship trajectory chevron hue so the reticule reads as "yours"
-const RETICULE_DASH_HSL = "195, 100%, 75%";
+const RETICULE_DASH_HSL = "195, 100%, 90%";
 
 const RETICULE_LINE_DASH: [number, number] = [4, 4];
 // dashed crosshair sticking out past the outer disc — reads as "this is a targeting sight",
