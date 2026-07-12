@@ -18,6 +18,7 @@ import { renderBossBeams } from "./bossBeam";
 import { renderSlowMoTimerBar } from "./slowMoTimerBar";
 import { updateSpectrumVisualizer, paintSpectrumVisualizer } from "./spectrumVisualizer";
 import { cosmeticRng } from "./rng";
+import { traceCitadelHolePath } from "../Asteroid";
 
 // shake is purely cosmetic; isolate its math so render() reads top-down.
 // Uses the cosmetic RNG stream — render runs every animation frame live but NOT
@@ -126,7 +127,27 @@ const paintEntityLayers = (game: Game, focusedTarget: ReticuleTarget | null) => 
   // every wave body brightens on the beat then tapers over ~100ms (paints over the sprites above).
   const beatFlash = currentBeatFlash(game);
   if (beatFlash > 0) {
-    for (const a of game.asteroids) if (!a.entering) paintBeatFlash(ctx, a.pos, a.radius, beatFlash);
+    // Intangible bodies skip the beat flash — a dormant boss is masquerading as
+    // the near-black background planet, and a phased-out warble/citadel is a
+    // faint ghost mid-plane-shift; a bright pulse on either breaks that read.
+    // Same set the reticule + rotated pass already exclude.
+    for (const a of game.asteroids) {
+      if (a.entering || (a.isBoss() && a.bossPhase === "dormant") || a.isPhasedOut()) continue;
+      if (a.kind === "citadel") {
+        // The flash disc is brightest dead-centre — clip the escape hole out
+        // so it stays bare space instead of pulsing with the shell.
+        ctx.save();
+        ctx.beginPath();
+        const clipR = a.radius * BEAT_FLASH_RADIUS_MULT + 4;
+        ctx.rect(a.pos.x - clipR, a.pos.y - clipR, clipR * 2, clipR * 2);
+        traceCitadelHolePath(ctx, a.pos, a.rotation);
+        ctx.clip("evenodd");
+        paintBeatFlash(ctx, a.pos, a.radius, beatFlash);
+        ctx.restore();
+      } else {
+        paintBeatFlash(ctx, a.pos, a.radius, beatFlash);
+      }
+    }
     // warping-out comets/aliens skip the beat-flash — a full-size flash disc
     // would detach from the shrinking body diving down the portal throat.
     for (const c of game.comets) if (c.warpT === null && !c.entering) paintBeatFlash(ctx, c.pos, c.radius, beatFlash);

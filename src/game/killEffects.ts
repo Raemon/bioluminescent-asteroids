@@ -1,5 +1,5 @@
 import type { Game } from "../Game";
-import { Asteroid, isBurstGem } from "../Asteroid";
+import { Asteroid, isBurstGem, isPhasedKind } from "../Asteroid";
 import { Alien } from "../Alien";
 import { AlienBullet } from "../AlienBullet";
 import { Comet } from "../Comet";
@@ -60,7 +60,7 @@ const bumpKill = (game: Game, bucket: KillBucket) => {
 const asteroidBucket = (a: Asteroid): KillBucket => {
   if (a.kind === "boss" || a.isBossFragment()) return "boss";
   if (a.isBass()) return "bassteroid";
-  if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble") return a.kind;
+  if (a.kind === "chime" || a.kind === "bell" || a.kind === "warble" || a.kind === "citadel") return a.kind;
   if (a.kind === "asteroidWithGem") return "asteroidWithGem";
   if (isBurstGem(a.kind)) return "burstGem";
   if (a.kind === "solidCrystal" || a.kind === "solidCrystalSmall") return "solidCrystal";
@@ -76,6 +76,8 @@ export const hitSoundFor = (
   if (a.kind === "chime") return "chime";
   if (a.kind === "bell") return "bell";
   if (a.kind === "warble") return "warble";
+  // The citadel is a giant warble at heart — same phased ring on the kill.
+  if (a.kind === "citadel") return "warble";
   // Solid crystal asteroids shatter like cut glass — the whole body IS the
   // gem, so a noise explosion would feel wrong. Large parent + small frags
   // each get their own size-scaled shatter.
@@ -245,7 +247,7 @@ const finishAsteroidKillCore = (
     emitExplosion(game.particles, game.shards, a, isOnBeatHit);
   }
   if (a.isBass()) game.sound.stopBassteroidDrone(a);
-  if (a.kind === "warble") game.sound.stopWarbleDrone(a);
+  if (isPhasedKind(a.kind)) game.sound.stopWarbleDrone(a);
   const asteroidHit = hitSoundFor(a);
   // parade replays the bassteroid's *beat* voice (kick/pluck/boom/snap) rather than the
   //   death-only bassEcho, so the trophy row plays "the sound this rock made", not how it died.
@@ -295,6 +297,7 @@ const finishAsteroidKillCore = (
     impactPos,
     combo: game.beatCombo,
     onBeat: isOnBeatHit,
+    awayFrom: game.ship.pos,
   });
   // sibling fragments share one beat-claim set so the two pieces target
   //   *different* beats — otherwise the player can only combo one of them

@@ -4,6 +4,7 @@ import { Trail } from "./Trail";
 import { SoundwaveRadiator } from "./SoundwaveRadiator";
 import { rng, cosmeticRng } from "./game/rng";
 import { ENTITY_CONFIG, ENTITY_STATS, entityStat } from "./game/entityConfig";
+import { SHIP_BODY_RADIUS, SHIP_HALO_OFFSET, SHIP_NOSE_MUL, SHIP_WING_ANGLE } from "./ship/shipHitbox";
 import { drawGlow } from "./glow";
 
 const HUE_PALETTE = [185, 200, 220, 250, 280, 310, 330];
@@ -103,7 +104,64 @@ export type AsteroidSize = "huge" | "large" | "medium" | "small";
 // holds a fixed angular slot on it, so the pieces look like they're still
 // trying to reassemble into one ring. A flickering energy arc strings the
 // surviving fragments together around the ring. See split() / tickTorusGroup.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "asteroidWithGem" | "burstGemMedium" | "burstGemBig" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock" | "torus" | "torusArc" | "torusChunk";
+//
+// "citadel" is the warble's massive fortress cousin (display-level 11-19). A
+// slowly-rotating armoured shell with a ship-shaped escape hole through the
+// middle (always safe for the ship). It rides a much longer phase cycle than
+// the warble — solid for 16 beats, out of phase for 16 — and its outer shell
+// deflects all but the heaviest shots. The intended kill: drift into the hole
+// while it's phased out and shoot the unarmoured inner wall from inside (see
+// citadelInnerHit). Breaking it releases the warbles it was built from.
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "citadel" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "asteroidWithGem" | "burstGemMedium" | "burstGemBig" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock" | "torus" | "torusArc" | "torusChunk";
+
+// The two phased kinds share the warble opacity/solid state machine, the
+// blurred-ghost render path and the phase drone; they differ in cycle length
+// (bassClock drives both) and the citadel's armour + escape hole.
+export const isPhasedKind = (kind: AsteroidKind): boolean =>
+  kind === "warble" || kind === "citadel";
+
+// The citadel's escape hole: the ship's visible triangle (hull + halo, nose
+// along local +x) scaled up by holeScale. Built once — every citadel wears the
+// same hole, rotated with its body.
+const CITADEL_HOLE_VERTS: ReadonlyArray<Vec> = (() => {
+  const scale = ENTITY_CONFIG.citadel.holeScale;
+  const nose = (SHIP_BODY_RADIUS * SHIP_NOSE_MUL + SHIP_HALO_OFFSET) * scale;
+  const wing = (SHIP_BODY_RADIUS + SHIP_HALO_OFFSET) * scale;
+  return [
+    v(nose, 0),
+    v(Math.cos(SHIP_WING_ANGLE) * wing, Math.sin(SHIP_WING_ANGLE) * wing),
+    v(Math.cos(-SHIP_WING_ANGLE) * wing, Math.sin(-SHIP_WING_ANGLE) * wing),
+  ];
+})();
+
+// Append the escape-hole triangle to the current path. `pos`/`rotation`
+// place it in world space; omit both when already in citadel-local space.
+// Callers own beginPath so the hole can join evenodd fills and clips.
+export const traceCitadelHolePath = (ctx: CanvasRenderingContext2D, pos?: Vec, rotation = 0) => {
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+  const px = pos?.x ?? 0;
+  const py = pos?.y ?? 0;
+  for (let i = 0; i < CITADEL_HOLE_VERTS.length; i++) {
+    const p = CITADEL_HOLE_VERTS[i];
+    const x = px + p.x * cos - p.y * sin;
+    const y = py + p.x * sin + p.y * cos;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+};
+
+// Same-side sign test against each edge; works for either winding.
+const pointInTriangle = (px: number, py: number, tri: ReadonlyArray<Vec>): boolean => {
+  const [a, b, c] = tri;
+  const d1 = (px - b.x) * (a.y - b.y) - (a.x - b.x) * (py - b.y);
+  const d2 = (px - c.x) * (b.y - c.y) - (b.x - c.x) * (py - c.y);
+  const d3 = (px - a.x) * (c.y - a.y) - (c.x - a.x) * (py - a.y);
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(hasNeg && hasPos);
+};
 
 // The three ring-fragment kinds that orbit a shared TorusGroup. "torus" (the
 // whole ring) isn't a fragment — it spawns standalone and creates the group
@@ -1081,6 +1139,11 @@ export class Asteroid {
       // Slow majestic spin like a heavy mechanical body.
       this.rotSpeed = rand(-0.14, 0.14);
     }
+    if (kind === "citadel") {
+      // Never turns — line up with the escape hole once and stay lined up.
+      // (The spawn rotation above still randomizes which way the hole faces.)
+      this.rotSpeed = 0;
+    }
     if (kind === "torusArc" || kind === "torusChunk") {
       // Radius is set by split() from ring geometry; rotation by tickTorusGroup.
       this.rotSpeed = 0;
@@ -1145,12 +1208,14 @@ export class Asteroid {
     this.outlineSamples = ENTITY_STATS[kind]?.outlineSamples ?? this.outlineSamples;
     this.outline = this.computeOutline();
     this.nuclei = [];
-    const nucleusCount = size === "huge" ? 7 : size === "large" ? 5 : size === "medium" ? 3 : 2;
+    const nucleusCount = kind === "citadel" ? 9 : size === "huge" ? 7 : size === "large" ? 5 : size === "medium" ? 3 : 2;
+    // Citadel nuclei live out on the shell band, clear of the escape hole.
+    const [nucleusDistLo, nucleusDistHi] = kind === "citadel" ? [0.73, 0.86] : [0.15, 0.55];
     const nucleusIndices = Array.from({ length: nucleusCount }, (_, i) => i);
     for (const i of nucleusIndices) {
       this.nuclei.push({
         angle: (i / nucleusCount) * TAU + rand(-0.3, 0.3),
-        dist: rand(0.15, 0.55) * this.radius,
+        dist: rand(nucleusDistLo, nucleusDistHi) * this.radius,
         size: rand(2, 4) * (size === "huge" ? 1.6 : size === "large" ? 1.3 : 1),
         pulsePhase: rand(0, TAU),
         pulseSpeed: rand(1.2, 2.4),
@@ -1178,7 +1243,7 @@ export class Asteroid {
     // Stagger each warble's phase so a field of them doesn't blink in lockstep.
     if (kind === "warble") this.warblePhaseOffset = rand(0, BASS_MEASURE_LENGTH);
     this.sprite = this.buildSprite();
-    if (kind === "warble" && this.sprite) this.warbleBlurSprite = this.buildWarbleBlurSprite(this.sprite);
+    if (isPhasedKind(kind) && this.sprite) this.warbleBlurSprite = this.buildWarbleBlurSprite(this.sprite);
     // Bassteroid wake. Gen-0 (large) wears no drone yet — it gets the slow
     // glow Trail as a "pristine charged thing drifting in space" wake.
     // Mediums/smalls (only spawned via split) have an active drone voice,
@@ -1259,6 +1324,12 @@ export class Asteroid {
       // Wobbly elongated lobes: strong 3-fold + odd higher mode.
       freqs = [3, 5, 8];
       ampScale = 1.4;
+    } else if (kind === "citadel") {
+      // Fortress mass: the warble's lobed family resemblance at a fraction of
+      // the amplitude, so the huge shell reads solid and the escape hole
+      // stays comfortably inside the silhouette at every angle.
+      freqs = [3, 5, 8];
+      ampScale = 0.4;
     } else if (kind === "glassPrison") {
       // Strong 1-harmonic = tall asymmetric sarcophagus (one end wider than
       // the other). 3 and 5 jut individual facet vertices outward. The clamp
@@ -1338,7 +1409,10 @@ export class Asteroid {
     // down their own opaque body + rim, so skip the biolum halo / interior glow
     // / filament veins / nuclei cores that would otherwise make them "alive".
     const isArchitectural = this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
-    if (!isArchitectural) {
+    // The citadel lays down its own laminated armour body instead — the soft
+    // membrane/filament pass would read organic under the plate bands.
+    const isCitadel = this.kind === "citadel";
+    if (!isArchitectural && !isCitadel) {
     const halo = ctx.createRadialGradient(0, 0, this.radius * 0.7, 0, 0, haloRadius);
     halo.addColorStop(0, `hsla(${baseHue}, ${sHi}%, 60%, 0.12)`);
     halo.addColorStop(0.5, `hsla(${baseHue + 10}, ${sHi}%, 55%, 0.048)`);
@@ -1407,6 +1481,7 @@ export class Asteroid {
     }
 
     if (this.kind === "warble") this.paintWarbleBody(ctx);
+    if (isCitadel) this.paintCitadelShell(ctx);
     if (this.kind === "asteroidWithGem") this.paintEmbeddedGem(ctx);
     if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall") this.paintSolidCrystalBody(ctx);
     if (isBurstGem(this.kind)) this.paintBurstGemBody(ctx);
@@ -1416,8 +1491,179 @@ export class Asteroid {
     if (this.kind === "glassShard") this.paintGlassShardBody(ctx);
     if (this.kind === "columnDrum") this.paintColumnDrumBody(ctx);
     if (this.kind === "rubbleBlock") this.paintRubbleBlockBody(ctx);
+    // Cut last so the hole punches through every layer painted above.
+    if (this.kind === "citadel") this.paintCitadelHole(ctx);
 
     return canvas;
+  }
+
+  // Citadel shell — laminated carapace armour, distinct from the warble's
+  // soft membrane. Concentric plate bands step inward from the silhouette,
+  // each band's interior a shade darker so the shell funnels down toward the
+  // lit doorway; radial seams split the bands into plates and the baked
+  // nucleus glows sit on the band like rivet lights. Painted before
+  // paintCitadelHole so the escape hole punches through every layer.
+  private paintCitadelShell(ctx: CanvasRenderingContext2D) {
+    const H = this.hue;
+    const R = this.radius;
+    // Bake-stable jitter derived from already-rolled per-rock values — the
+    // bake must not consume fresh seeded draws.
+    const jitter01 = (i: number): number => {
+      const h = this.harmonics[i % this.harmonics.length];
+      return (Math.sin(h.phase * (3.1 + i) + this.membranePhase * (1.7 + i)) + 1) / 2;
+    };
+
+    // Presence halo, kept from the generic pass — a body this big glows.
+    const haloR = R * 1.9;
+    const halo = ctx.createRadialGradient(0, 0, R * 0.75, 0, 0, haloR);
+    halo.addColorStop(0, `hsla(${H}, 100%, 60%, 0.11)`);
+    halo.addColorStop(1, `hsla(${H}, 100%, 60%, 0)`);
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(0, 0, haloR, 0, TAU);
+    ctx.fill();
+
+    ctx.save();
+    ctx.globalCompositeOperation = "source-over";
+    this.tracePath(ctx, 1);
+    ctx.clip();
+
+    // Single up-left light: hue drifts warm on the lit shoulder, cool into
+    // the shadow side, so the armour reads lit rather than tinted.
+    const body = ctx.createRadialGradient(-R * 0.35, -R * 0.45, R * 0.1, 0, 0, R * 1.35);
+    body.addColorStop(0, `hsla(${H + 12}, 55%, 42%, 0.95)`);
+    body.addColorStop(0.55, `hsla(${H}, 50%, 24%, 0.92)`);
+    body.addColorStop(1, `hsla(${H - 14}, 45%, 11%, 0.9)`);
+    ctx.fillStyle = body;
+    ctx.fillRect(-R * 1.2, -R * 1.2, R * 2.4, R * 2.4);
+
+    // One bright-catch gradient shared by every plate edge: strong toward
+    // the light, dying past the terminator.
+    const catchGrad = ctx.createLinearGradient(-R, -R, R, R);
+    catchGrad.addColorStop(0, `hsla(${H + 30}, 90%, 78%, 0.75)`);
+    catchGrad.addColorStop(0.55, `hsla(${H + 30}, 90%, 78%, 0.14)`);
+    catchGrad.addColorStop(1, `hsla(${H + 30}, 90%, 78%, 0)`);
+
+    // Plate bands: inset echoes of the silhouette, each shifted a touch
+    // toward the shadow side so the stack reads as overlapping plates.
+    const laminaScales = [0.86, 0.72, 0.58];
+    for (let li = 0; li < laminaScales.length; li++) {
+      const off = R * 0.022 * (li + 1);
+      this.tracePath(ctx, laminaScales[li], off, off);
+      ctx.fillStyle = `hsla(${H - 6}, 45%, 8%, 0.16)`;
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = `hsla(${H}, 40%, 5%, 0.8)`;
+      ctx.stroke();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = catchGrad;
+      ctx.stroke();
+    }
+
+    // Radial seams split the bands into plates. Angles sit between the rivet
+    // lights, jittered so the plating doesn't read as a perfect wheel; each
+    // seam wears a thin lit edge beside its dark groove.
+    const seamCount = this.nuclei.length;
+    for (let i = 0; i < seamCount; i++) {
+      const a = ((i + 0.5) / seamCount) * TAU + (jitter01(i) - 0.5) * 0.3;
+      const idx = ((Math.round((a / TAU) * this.outlineSamples) % this.outlineSamples) + this.outlineSamples) % this.outlineSamples;
+      const rOut = this.outline[idx] * 0.99;
+      const rIn = rOut * 0.5;
+      const cosA = Math.cos(a);
+      const sinA = Math.sin(a);
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = `hsla(${H}, 40%, 5%, 0.75)`;
+      ctx.beginPath();
+      ctx.moveTo(cosA * rIn, sinA * rIn);
+      ctx.lineTo(cosA * rOut, sinA * rOut);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = catchGrad;
+      ctx.beginPath();
+      ctx.moveTo(cosA * rIn - sinA * 1.8, sinA * rIn + cosA * 1.8);
+      ctx.lineTo(cosA * rOut - sinA * 1.8, sinA * rOut + cosA * 1.8);
+      ctx.stroke();
+    }
+
+    // Specular catch on the lit shoulder — the one crisp "it's 3D" cue.
+    ctx.globalCompositeOperation = "lighter";
+    const spec = ctx.createRadialGradient(-R * 0.42, -R * 0.5, 0, -R * 0.42, -R * 0.5, R * 0.34);
+    spec.addColorStop(0, `hsla(${H + 40}, 95%, 92%, 0.45)`);
+    spec.addColorStop(0.4, `hsla(${H + 25}, 90%, 75%, 0.15)`);
+    spec.addColorStop(1, `hsla(${H + 25}, 90%, 75%, 0)`);
+    ctx.fillStyle = spec;
+    ctx.beginPath();
+    ctx.arc(-R * 0.42, -R * 0.5, R * 0.34, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // Outer rim: dark occlusion under a bright catch, straddling the edge.
+    ctx.globalCompositeOperation = "source-over";
+    this.tracePath(ctx, 1);
+    ctx.lineWidth = 4.5;
+    ctx.strokeStyle = `hsla(${H}, 35%, 6%, 0.9)`;
+    ctx.stroke();
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = `hsla(${H + 20}, 90%, 74%, 0.85)`;
+    ctx.stroke();
+
+    // Rivet lights on the shell band (the citadel's take on the generic
+    // baked-nuclei pass); render() pulses live cores over these.
+    ctx.globalCompositeOperation = "lighter";
+    for (const n of this.nuclei) {
+      const nx = Math.cos(n.angle) * n.dist;
+      const ny = Math.sin(n.angle) * n.dist;
+      const nr = n.size * 5;
+      const grad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
+      grad.addColorStop(0, `hsla(${H + 20}, 100%, 88%, 0.75)`);
+      grad.addColorStop(0.45, `hsla(${H}, 100%, 65%, 0.32)`);
+      grad.addColorStop(1, `hsla(${H}, 100%, 60%, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(nx, ny, nr, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  // Punch the ship-shaped escape hole out of the baked body, then dress its
+  // edge with the house double rim (dark occlusion + bright catch) and a soft
+  // interior bloom so the safe pocket reads as a lit doorway, not a paint gap.
+  private paintCitadelHole(ctx: CanvasRenderingContext2D) {
+    const H = this.hue;
+    const holePath = () => {
+      ctx.beginPath();
+      traceCitadelHolePath(ctx);
+    };
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    holePath();
+    ctx.fill();
+    ctx.restore();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = `hsla(${H}, 30%, 6%, 0.9)`;
+    holePath();
+    ctx.stroke();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = `hsla(${H + 35}, 95%, 80%, 0.95)`;
+    holePath();
+    ctx.stroke();
+    // Bloom hugging the inner wall — clipped to the body so it doesn't spill
+    // into the hole and muddy the "empty, safe" read.
+    const bloomR = CITADEL_HOLE_VERTS[0].x * 1.45;
+    ctx.save();
+    this.tracePath(ctx, 1);
+    traceCitadelHolePath(ctx);
+    ctx.clip("evenodd");
+    const bloom = ctx.createRadialGradient(0, 0, bloomR * 0.3, 0, 0, bloomR);
+    bloom.addColorStop(0, `hsla(${H + 30}, 90%, 70%, 0.30)`);
+    bloom.addColorStop(1, `hsla(${H + 30}, 90%, 70%, 0)`);
+    ctx.fillStyle = bloom;
+    ctx.beginPath();
+    ctx.arc(0, 0, bloomR, 0, TAU);
+    ctx.fill();
+    ctx.restore();
   }
 
   // Trace an annular-sector path (the "tube" of a torus, optionally only a
@@ -1630,8 +1876,22 @@ export class Asteroid {
     canvas.width = src.width;
     canvas.height = src.height;
     const ctx = canvas.getContext("2d")!;
-    ctx.filter = `blur(${Math.max(3, this.radius * 0.35)}px)`;
+    // Capped so the citadel's huge body smears without dissolving entirely.
+    ctx.filter = `blur(${Math.max(3, Math.min(20, this.radius * 0.35))}px)`;
     ctx.drawImage(src, 0, 0);
+    if (this.kind === "citadel") {
+      // The blur smears shell glow across the escape hole, and the phased-out
+      // window is exactly when the ship sits inside it — re-punch the hole so
+      // the ghost keeps showing bare space through the middle.
+      ctx.filter = "none";
+      ctx.save();
+      ctx.translate(src.width / 2, src.height / 2);
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.beginPath();
+      traceCitadelHolePath(ctx);
+      ctx.fill();
+      ctx.restore();
+    }
     return canvas;
   }
 
@@ -3071,11 +3331,38 @@ export class Asteroid {
     return r * this.radius;
   }
 
-  // A warble in its dim half of the measure is phased out: intangible to both
-  // bullets and the ship, just like a dormant boss. Driven by bassClock from
-  // the music clock so the ghost-window lines up with the visible fade.
+  // A phased rock (warble / citadel) in the dim stretch of its cycle is phased
+  // out: intangible to both bullets and the ship, just like a dormant boss.
+  // Driven by bassClock from the music clock so the ghost-window lines up with
+  // the visible fade. The citadel's inner wall is the one exception — see
+  // citadelInnerHit.
   isPhasedOut(): boolean {
-    return this.kind === "warble" && !this.warbleSolid;
+    return isPhasedKind(this.kind) && !this.warbleSolid;
+  }
+
+  // True when the point sits inside the citadel's ship-shaped escape hole
+  // (body-local, rotating with the shell). The hole is permanently safe: no
+  // collision for the ship or for bullets whose centre is still inside it.
+  citadelHoleContains(px: number, py: number): boolean {
+    const [dx, dy] = toroidalDelta(px - this.pos.x, py - this.pos.y, WORLD_W, WORLD_H);
+    const cos = Math.cos(-this.rotation);
+    const sin = Math.sin(-this.rotation);
+    return pointInTriangle(dx * cos - dy * sin, dx * sin + dy * cos, CITADEL_HOLE_VERTS);
+  }
+
+  // The citadel's intended kill: a bullet fired from within the escape hole
+  // strikes the unarmoured inner wall — even while the shell is phased out.
+  // Collision handlers use this alongside collidesWith; a true result also
+  // means the hit should bypass damageReduction.
+  citadelInnerHit(firePos: Vec | null, point: Vec, pointRadius: number): boolean {
+    if (this.kind !== "citadel" || !firePos) return false;
+    if (!this.citadelHoleContains(firePos.x, firePos.y)) return false;
+    // Still travelling inside the hole — no wall contact yet.
+    if (this.citadelHoleContains(point.x, point.y)) return false;
+    const [dx, dy] = toroidalDelta(point.x - this.pos.x, point.y - this.pos.y, WORLD_W, WORLD_H);
+    const distance = Math.hypot(dx, dy);
+    const surface = this.radiusAtAngle(Math.atan2(dy, dx) - this.rotation);
+    return distance < surface + pointRadius;
   }
 
   collidesWith(point: Vec, pointRadius: number): boolean {
@@ -3084,9 +3371,11 @@ export class Asteroid {
     // transition to "live" enables both at once on the same frame as the
     // eye opens.
     if (this.isBoss() && this.bossPhase === "dormant") return false;
-    // Phased-out warble: bullets and the ship pass clean through during the
-    // dim window.
+    // Phased-out warble/citadel: bullets and the ship pass clean through
+    // during the dim window.
     if (this.isPhasedOut()) return false;
+    // The citadel's escape hole is safe even while the shell is solid.
+    if (this.kind === "citadel" && this.citadelHoleContains(point.x, point.y)) return false;
     const hit = this.hitTest(point, pointRadius);
     // Real contact ends the entrance presentation so the impact and its
     // effects land at the true torus position (see game/entrance.ts).
@@ -3129,8 +3418,10 @@ export class Asteroid {
   // dealt so a 4-damage rhythm hit visibly cracks the asteroid harder than a
   // 1-damage plain hit, even if it didn't kill). Caller is responsible for
   // sound, particles, and split.
-  applyDamage(amount: number = 1): { killed: boolean; bounced: boolean; dealt: number } {
-    const dealt = Math.max(0, amount - this.damageReduction);
+  // `ignoreArmor` is the citadel inner-wall path: a shot from inside the
+  // escape hole lands its full damage regardless of damageReduction.
+  applyDamage(amount: number = 1, ignoreArmor: boolean = false): { killed: boolean; bounced: boolean; dealt: number } {
+    const dealt = Math.max(0, amount - (ignoreArmor ? 0 : this.damageReduction));
     if (dealt <= 0) return { killed: false, bounced: true, dealt: 0 };
     this.hp = Math.max(0, this.hp - dealt);
     this.flashAmount = 1;
@@ -3618,7 +3909,7 @@ export class Asteroid {
     return a;
   }
 
-  split(opts?: { impactDir?: Vec; impactPos?: Vec; combo?: number; onBeat?: boolean }): Asteroid[] {
+  split(opts?: { impactDir?: Vec; impactPos?: Vec; combo?: number; onBeat?: boolean; awayFrom?: Vec }): Asteroid[] {
     const impactDir = opts?.impactDir;
     // Boss whole-body: cracks open into two hemisphere halves + the iris
     // eye-core (3 mediums total, but with distinct identities). Cleavage
@@ -3802,6 +4093,10 @@ export class Asteroid {
       if (!this.torusGroup || this.kind === "torusChunk" || this.size !== "large") return [];
       const cfg = ENTITY_CONFIG.torus;
       const group = this.torusGroup;
+      // Each further break blows the shared phantom ring wider again, so the
+      // whole formation (this half's fragments AND any surviving siblings)
+      // spreads outward with every generation.
+      group.ringRadius *= cfg.breakExpand;
       const out: Asteroid[] = [];
       // One shorter sliver keeps the centre of the parent's slot.
       const sliverSpan = this.torusArcSpan * 0.6;
@@ -3918,6 +4213,36 @@ export class Asteroid {
     // Wraith: terminal — no split. The escaping puff is handled by
     // particle/sound effects in killEffects.
     if (this.kind === "wraith") return [];
+    // Citadel: the fortress shell breaks up into the phased rocks it was built
+    // from — a fan of full-size warbles thrown clear of the collapsing hole.
+    if (this.kind === "citadel") {
+      const baseAngle = impactDir
+        ? Math.atan2(impactDir.y, impactDir.x)
+        : Math.atan2(this.vel.y, this.vel.x);
+      const parentSpeed = Math.hypot(this.vel.x, this.vel.y);
+      const ejectDist = this.radius * 0.5;
+      const fragmentList: Asteroid[] = [];
+      for (let i = 0; i < 3; i++) {
+        // Spread evenly around the full shell, anchored on the killing shot.
+        const childAngle = baseAngle + i * (TAU / 3) + rand(-0.2, 0.2);
+        const childPos = {
+          x: this.pos.x + Math.cos(childAngle) * ejectDist,
+          y: this.pos.y + Math.sin(childAngle) * ejectDist,
+        };
+        // The intended kill is fired from inside the hole with the ship right
+        // there — every piece flies radially away from the shooter so none of
+        // the shell collapses back over the player.
+        let flyAngle = childAngle;
+        if (opts?.awayFrom) {
+          const [ax, ay] = toroidalDelta(childPos.x - opts.awayFrom.x, childPos.y - opts.awayFrom.y, WORLD_W, WORLD_H);
+          if (ax !== 0 || ay !== 0) flyAngle = Math.atan2(ay, ax);
+        }
+        const speedMag = parentSpeed * rand(0.9, 1.3) + rand(55, 95);
+        const child = new Asteroid(childPos, fromAngle(flyAngle, speedMag), "large", this.hue, "warble");
+        fragmentList.push(child);
+      }
+      return fragmentList;
+    }
     // Solid crystal: large shatters into 2 fast-moving small crystal
     // fragments fanning around the bullet's heading. Smalls don't split
     // further — they're the terminal tier.
@@ -4266,7 +4591,7 @@ export class Asteroid {
     // out of phase (warbleSolid === false) we swap the crisp body for a
     // pre-baked blurred copy at very low opacity, so the intangible window reads
     // as a faint smear rather than a solid rock.
-    const isWarble = this.kind === "warble";
+    const isWarble = isPhasedKind(this.kind);
     if (isWarble && this.warbleBlurSprite) {
       this.renderWarbleBody(ctx);
     } else if (this.sprite) {
@@ -4325,7 +4650,13 @@ export class Asteroid {
       ctx.fillStyle = `hsla(${baseHue + 30}, ${nSat}%, 95%, ${this.flashAmount * 0.25})`;
       ctx.beginPath();
       ctx.arc(0, 0, this.radius * 1.1, 0, TAU);
-      ctx.fill();
+      if (this.kind === "citadel") {
+        // The escape hole is bare space — the hit flash must not fill it.
+        traceCitadelHolePath(ctx);
+        ctx.fill("evenodd");
+      } else {
+        ctx.fill();
+      }
     }
 
     this.renderCracks(ctx);
@@ -4453,18 +4784,23 @@ export class Asteroid {
       if (this.sprite) ctx.drawImage(this.sprite, dx, dy);
       return;
     }
-    const warble = ENTITY_CONFIG.warble;
+    const warble = this.kind === "citadel" ? ENTITY_CONFIG.citadel : ENTITY_CONFIG.warble;
     const th = warble.solidThreshold;
     // 0 at the threshold → 1 at the deepest trough; how far "out of phase" we are.
     const phased = Math.max(0, Math.min(1, (th - this.warbleOpacity) / (th - warble.lowOpacity)));
+    // The citadel's phased-out window is when the player lines up with the
+    // escape hole, so its trough stays brighter and keeps a healthy share of
+    // the crisp sprite — the warble goes properly wispy.
+    const troughDrop = this.kind === "citadel" ? 0.25 : 0.7;
+    const blurMix = this.kind === "citadel" ? 0.55 * phased : phased;
     // Ramp the whole body down to a faint smear at the trough, then split it
     // between the fading crisp sprite and the rising blurred one.
-    const faint = this.warbleOpacity * (1 - 0.7 * phased);
-    if (this.sprite && phased < 1) {
-      ctx.globalAlpha = faint * (1 - phased);
+    const faint = this.warbleOpacity * (1 - troughDrop * phased);
+    if (this.sprite && blurMix < 1) {
+      ctx.globalAlpha = faint * (1 - blurMix);
       ctx.drawImage(this.sprite, dx, dy);
     }
-    ctx.globalAlpha = faint * (0.4 + 0.6 * phased);
+    ctx.globalAlpha = faint * (0.4 + 0.6 * blurMix);
     ctx.drawImage(this.warbleBlurSprite, dx, dy);
     // Leave the ambient alpha at the faint level for the overlays below.
     ctx.globalAlpha = faint;
@@ -4645,7 +4981,8 @@ export class Asteroid {
   // union of all module polygons (each module is a subpath); for organic
   // asteroids it's the lumpy Fourier outline. Use this to draw silhouette-
   // shaped pulses, halos, or hit flashes instead of a generic circle.
-  tracePath(ctx: CanvasRenderingContext2D, scale: number) {
+  // `offX`/`offY` shift the whole path (the citadel's stacked plate bands).
+  tracePath(ctx: CanvasRenderingContext2D, scale: number, offX = 0, offY = 0) {
     ctx.beginPath();
     if (this.isBass() && this.bassShip) {
       for (const module of this.bassShip.modules) {
@@ -4662,8 +4999,8 @@ export class Asteroid {
     for (let i = 0; i < this.outlineSamples; i++) {
       const angle = (i / this.outlineSamples) * TAU;
       const r = this.outline[i] * scale;
-      const x = Math.cos(angle) * r;
-      const y = Math.sin(angle) * r;
+      const x = offX + Math.cos(angle) * r;
+      const y = offY + Math.sin(angle) * r;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
@@ -4707,7 +5044,13 @@ export class Asteroid {
     if (cracksToDraw <= 0) return;
     ctx.save();
     this.tracePath(ctx, 1);
-    ctx.clip();
+    if (this.kind === "citadel") {
+      // Keep the fractures on the shell — the escape hole stays bare space.
+      traceCitadelHolePath(ctx);
+      ctx.clip("evenodd");
+    } else {
+      ctx.clip();
+    }
     const crackScale = 0.7;
     for (let i = 0; i < cracksToDraw; i++) {
       const crack = this.cracks[i];

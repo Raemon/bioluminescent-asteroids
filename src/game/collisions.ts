@@ -130,7 +130,11 @@ const handleBulletAsteroidHits = (game: Game) => {
 const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
   for (const b of game.bullets) {
     if (b.life <= 0) continue;
-    if (!a.collidesWith(b.pos, b.hitRadius())) continue;
+    // Citadel inner wall: a shot fired from within the escape hole lands even
+    // while the shell is phased out, and bypasses the armour entirely — the
+    // intended way to break the fortress open from inside.
+    const innerHit = a.citadelInnerHit(b.firedFrom, b.pos, b.hitRadius());
+    if (!innerHit && !a.collidesWith(b.pos, b.hitRadius())) continue;
     const onBeat = isHitOnBeat(game, b);
     // drift tier scales the bonus: tier1→2× … tier6→7× damage (was a flat 4×).
     const driftTier = onBeat ? b.driftTierAtHit() : 0;
@@ -138,13 +142,13 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     // Peek at the outcome before consuming the bullet: a hit too weak to break
     // the target's armour deflects instead of landing — no damage, no combo,
     // and the shot ricochets off the surface so it can travel on.
-    if (dmg <= a.damageReduction) {
+    if (!innerHit && dmg <= a.damageReduction) {
       deflectBulletOff(game, b, a, dmg);
       return null;
     }
     consumeBullet(b);
     logBulletHit(game, "HIT asteroid", b);
-    const { killed } = a.applyDamage(dmg);
+    const { killed } = a.applyDamage(dmg, innerHit);
     game.shake = Math.min(game.shake + (killed ? 0.4 : 0.2), 1.2);
     applyHitToCombo(game, onBeat, b.pos);
     if (!killed) {

@@ -74,10 +74,10 @@ const makeElement = () => makeStub({
 const makeAudioNode = () => makeStub({
   connect: (n) => n ?? makeAudioNode(), disconnect() {}, start() {}, stop() {},
   gain: { value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {}, setTargetAtTime() {} },
-  frequency: { value: 440, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} },
+  frequency: { value: 440, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, setTargetAtTime() {} },
   detune: { value: 0, setValueAtTime() {} },
   Q: { value: 1, setValueAtTime() {} },
-  pan: { value: 0, setValueAtTime() {} },
+  pan: { value: 0, setValueAtTime() {}, setTargetAtTime() {} },
   type: "sine", buffer: null,
   getByteFrequencyData(a) { if (a && a.fill) a.fill(0); },
   getByteTimeDomainData(a) { if (a && a.fill) a.fill(128); },

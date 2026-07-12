@@ -6,7 +6,7 @@ import { Sound } from "./Sound";
 import { PowerupKind } from "./Canister";
 import { FUEL_MAX } from "./game/fuel";
 import { BEAT_GRID } from "./game/rhythmConstants";
-import { haloVertices, hitDistanceToward } from "./ship/shipHitbox";
+import { haloVertices, hitDistanceToward, SHIP_BODY_RADIUS, SHIP_HALO_OFFSET } from "./ship/shipHitbox";
 import { tickShip } from "./ship/shipPhysics";
 import { fireBullets, applyPowerup } from "./ship/shipWeapons";
 import { setComboFromValue } from "./ship/shipComboHalo";
@@ -58,9 +58,9 @@ export class Ship {
   // drag is 0 so the ship coasts; thrust + retro are the only velocity inputs (Newtonian feel).
   drag = 0;
   maxSpeed = 460;
-  radius = 14;
+  radius = SHIP_BODY_RADIUS;
   // outer halo sits past the hull and IS the collision silhouette (matches what the player sees).
-  baseHaloOffset = 8;
+  baseHaloOffset = SHIP_HALO_OFFSET;
   get haloOffset() { return this.baseHaloOffset; }
   // shield draws an additional ring this far outside the ship's normal perimeter (purely cosmetic).
   shieldRingOffset = 12;

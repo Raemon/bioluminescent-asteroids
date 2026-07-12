@@ -118,10 +118,12 @@ export class Pulsar {
   // emits an expanding ring that the game uses as a cue to shatter every
   // asteroid and shudder the ship. Phases:
   //   "idle"       — no shockwave in flight
-  //   "vibrating"  — visible jitter ramps up over ~1.2s; nothing else fires
+  //   "pending"    — armed; waits for the next beat tick so the rumble
+  //                  always starts on the music grid
+  //   "vibrating"  — visible jitter ramps up; nothing else fires
   //   "flashing"   — single-frame trigger: emit the ring, signal callers
   //   "expanding"  — ring grows out to cover the screen, then we go idle
-  shockPhase: "idle" | "vibrating" | "flashing" | "expanding" = "idle";
+  shockPhase: "idle" | "pending" | "vibrating" | "flashing" | "expanding" = "idle";
   shockTimer = 0;
   // Extra spin contribution added on top of the music-locked spin during the
   // windup. Integrates an accelerating angular velocity so the pulsar
@@ -137,9 +139,13 @@ export class Pulsar {
   // Game polls this each frame: true exactly once, on the frame the shock
   // ring is born, so the game can apply impact effects atomically.
   shockJustFired = false;
+  // Same contract as shockJustFired, but for the pending→vibrating beat-tick
+  // transition — the game keys the charge sound off it so audio starts with
+  // the rumble, not when the event was scheduled.
+  shockVibrateJustStarted = false;
   // Tuning constants. The long vibrate-then-flash beat is the tension build —
   // the bass-drop white-flash detonation is the payoff.
-  static readonly SHOCK_VIBRATE_DURATION = 5.0;
+  static readonly SHOCK_VIBRATE_DURATION = 12.0;
   static readonly SHOCK_FLASH_DURATION = 0.42;
   static readonly SHOCK_EXPAND_DURATION = 1.5;
 
@@ -245,12 +251,13 @@ export class Pulsar {
     this.flare = 1;
   }
 
-  // Begin a shockwave sequence: vibrate → flash → expanding ring. Idempotent:
-  // calling it again while one is in flight is ignored so the game can
-  // schedule freely without tracking state itself.
+  // Arm a shockwave sequence: pending → vibrate → flash → expanding ring.
+  // The vibrate itself begins on the next beat tick. Idempotent: calling it
+  // again while one is in flight is ignored so the game can schedule freely
+  // without tracking state itself.
   triggerShockwave() {
     if (this.shockPhase !== "idle") return;
-    this.shockPhase = "vibrating";
+    this.shockPhase = "pending";
     this.shockTimer = 0;
     this.shockSpinExtra = 0;
   }
@@ -282,7 +289,8 @@ export class Pulsar {
     this.flare = Math.max(0, this.flare - dt / 20);
 
     this.shockJustFired = false;
-    if (this.shockPhase !== "idle") {
+    this.shockVibrateJustStarted = false;
+    if (this.shockPhase !== "idle" && this.shockPhase !== "pending") {
       this.shockTimer += dt;
       // Spin-up: integrate an accelerating angular velocity so the pulsar
       // visibly winds itself up over the vibrate window. Quadratic in t
@@ -348,6 +356,11 @@ export class Pulsar {
     if (idx > this.lastBeatIndex) {
       this.lastBeatIndex = idx;
       this.beat();
+      if (this.shockPhase === "pending") {
+        this.shockPhase = "vibrating";
+        this.shockTimer = 0;
+        this.shockVibrateJustStarted = true;
+      }
     }
   }
 

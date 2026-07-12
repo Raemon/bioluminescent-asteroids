@@ -8,10 +8,10 @@ import { ENTITY_CONFIG } from "./entityConfig";
 
 const SW = ENTITY_CONFIG.shockwave;
 
-// pulsar.shockJustFired flips a frame after this, so we kick off the vibrate sequence here.
+// Arms the pulsar; the rumble itself starts on the next beat tick, at which
+// point pulsar.shockVibrateJustStarted flips and the charge sound plays.
 export const startShockwave = (game: Game) => {
   game.pulsar.triggerShockwave();
-  game.sound.play("shockwaveCharge");
 };
 
 // instant-killing the boss via environment would feel cheap; we still nudge it for feedback.

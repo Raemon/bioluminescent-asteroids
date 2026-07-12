@@ -1,11 +1,19 @@
 import type { Ship } from "../Ship";
 
+// Ship triangle geometry, shared with anything that needs the hull shape
+// without a live Ship instance (e.g. the citadel's ship-shaped escape hole).
+// Ship.ts seeds its radius/baseHaloOffset fields from these.
+export const SHIP_BODY_RADIUS = 14;
+export const SHIP_HALO_OFFSET = 8;
+export const SHIP_NOSE_MUL = 1.4;
+export const SHIP_WING_ANGLE = Math.PI * 0.78;
+
 // collisions test the visible halo outline, not a bounding circle, so the outline IS the hitbox.
 export const haloVertices = (ship: Ship, offset: number = ship.haloOffset): Array<[number, number]> => {
   const hull: Array<[number, number]> = [
-    [Math.cos(ship.heading) * ship.radius * 1.4, Math.sin(ship.heading) * ship.radius * 1.4],
-    [Math.cos(ship.heading + Math.PI * 0.78) * ship.radius * 1.0, Math.sin(ship.heading + Math.PI * 0.78) * ship.radius * 1.0],
-    [Math.cos(ship.heading - Math.PI * 0.78) * ship.radius * 1.0, Math.sin(ship.heading - Math.PI * 0.78) * ship.radius * 1.0],
+    [Math.cos(ship.heading) * ship.radius * SHIP_NOSE_MUL, Math.sin(ship.heading) * ship.radius * SHIP_NOSE_MUL],
+    [Math.cos(ship.heading + SHIP_WING_ANGLE) * ship.radius, Math.sin(ship.heading + SHIP_WING_ANGLE) * ship.radius],
+    [Math.cos(ship.heading - SHIP_WING_ANGLE) * ship.radius, Math.sin(ship.heading - SHIP_WING_ANGLE) * ship.radius],
   ];
   const s = polygonOutwardSign(hull);
   const halo: Array<[number, number]> = [];

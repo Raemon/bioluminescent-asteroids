@@ -71,6 +71,7 @@ const ASTEROID_TILES: Record<AsteroidKind, AsteroidTile | null> = {
   chime: { label: "Chime", group: "Special Rock" },
   bell: { label: "Bell", group: "Special Rock" },
   warble: { label: "Warble", group: "Special Rock" },
+  citadel: { label: "Citadel", group: "Special Rock" },
   asteroidWithGem: { label: "Gold Rock", group: "Special Rock" },
   burstGemMedium: { label: "Burst Gem", group: "Special Rock" },
   burstGemBig: { label: "Burst Gem (big)", group: "Special Rock" },

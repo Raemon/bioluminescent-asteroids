@@ -12,6 +12,7 @@ import { newWaveEventSchedule, maybeSchedule, scheduleAt } from "./waveEvents";
 import { startShockwave } from "./shockwave";
 import { emitCrackParticles } from "./particleBursts";
 import { alignVelocityToRhythm, BeatClaimSet, newBeatClaimSet } from "./rhythmTrajectory";
+import { citadelCycleLen, citadelFadeLen } from "./bassClock";
 import { ENTITY_CONFIG as CFG } from "./entityConfig";
 
 // snap each fresh edge-spawn so its crossing of the player's natural
@@ -47,6 +48,10 @@ const spawnSpeedRange = (a: Asteroid): [number, number] => {
   }
   if (a.kind === "torus") {
     const m = CFG.torus.spawnSpeedMul;
+    return [lo * m, hi * m];
+  }
+  if (a.kind === "citadel") {
+    const m = CFG.citadel.spawnSpeedMul;
     return [lo * m, hi * m];
   }
   return [lo, hi];
@@ -254,6 +259,14 @@ export const spawnAsteroidAway = (
   if (a.kind === "torus") {
     a.vel.x *= CFG.torus.spawnSpeedMul;
     a.vel.y *= CFG.torus.spawnSpeedMul;
+  }
+  if (a.kind === "citadel") {
+    a.vel.x *= CFG.citadel.spawnSpeedMul;
+    a.vel.y *= CFG.citadel.spawnSpeedMul;
+    // Phase-align so the shell arrives freshly solid: the player watches the
+    // full 16 solid beats, then gets the 16-beat phased-out window to enter.
+    const cycleLen = citadelCycleLen();
+    a.warblePhaseOffset = (((citadelFadeLen() - game.beatTime) % cycleLen) + cycleLen) % cycleLen;
   }
   alignIncomingToRhythm(game, a, claimed);
   applyRhythmSpeed(game, a.vel, waveStartSpeedMul(game));
@@ -685,12 +698,18 @@ const redistributeNormalMass = (largeCount: number, allowHuge: boolean): Asteroi
 
 // Wave 0 (internal wave 1): a single large rock — a gentle warm-up before density ramps.
 // Wave 1+ (internal wave 2+): 3, 3, 4, 4, 5, 5... per-wave count gives the player a wave to consolidate before density bumps.
+// Post-boss (display 11+): the ramp resets to CFG.postBoss.waveCount and
+//   climbs again on the same two-wave cadence, with the new special kinds
+//   layering difficulty on top of the density.
 //   A single `claimed` set is shared across the wave's spawns (including the
 //   standalone solidCrystalSmall roll below — see spawnWave) so each rock
 //   targets a distinct beat slot, giving the player a sustainable
 //   beat-by-beat target procession.
 const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boolean) => {
-  const baseCount = game.wave === 1 ? 1 : 3 + Math.floor((game.wave - 2) / 2);
+  const baseCount = game.wave === 1 ? 1
+    : game.wave >= CFG.postBoss.firstWave
+      ? CFG.postBoss.waveCount + Math.floor((game.wave - CFG.postBoss.firstWave) / 2)
+    : 3 + Math.floor((game.wave - 2) / 2);
   const swarm = CFG.meteorShower.swarmWave;
   // The swarm wave thins its asteroid field so the meteor flock is the headline.
   const totalCount = game.wave === swarm.wave ? Math.max(1, Math.round(baseCount * swarm.asteroidCountMul)) : baseCount;
@@ -704,8 +723,13 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
   // are checked first — when one fires, the slot can't also become a gem rock.
   const slotKinds: AsteroidKind[] = [];
   for (let i = 0; i < normalCount; i++) {
-    // Glass prison gated on its firstWave (post-boss). Rolled first so a
-    // prison slot can't also pick up a gem or be downgraded to a solid crystal.
+    // Phase citadel — the headline fortress of the post-boss arc, retired
+    // after its lastWave. Rolled first so a citadel slot keeps its identity.
+    const isCitadel = game.wave >= CFG.citadel.firstWave && game.wave <= CFG.citadel.lastWave
+      && rng() < CFG.citadel.perSpawnChance;
+    if (isCitadel) { slotKinds.push("citadel"); continue; }
+    // Glass prison gated on its firstWave (post-boss). Rolled before the rest
+    // so a prison slot can't also pick up a gem or be downgraded to a solid crystal.
     const isPrison = game.wave >= CFG.glassPrison.firstWave && rng() < CFG.glassPrison.perSpawnChance;
     if (isPrison) { slotKinds.push("glassPrison"); continue; }
     // Phased warble — post-boss arc (display-level 11+). Rolled before solid/gem

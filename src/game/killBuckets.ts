@@ -11,6 +11,7 @@ export type KillBucket =
   | "chime"
   | "bell"
   | "warble"
+  | "citadel"
   | "asteroidWithGem"
   | "burstGem"
   | "solidCrystal"

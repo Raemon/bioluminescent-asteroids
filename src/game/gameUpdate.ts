@@ -2,7 +2,7 @@ import type { Game } from "../Game";
 import type { ReplayPlayer } from "./replayPlayer";
 import { getRngSeed } from "./rng";
 import { dist, nearestImageOf } from "../vec";
-import { Asteroid, tickTorusGroups } from "../Asteroid";
+import { Asteroid, tickTorusGroups, isPhasedKind } from "../Asteroid";
 import { Alien, ALIEN_FIRE_PATTERN_BEATS, bigAlienBurstAngleOffset } from "../Alien";
 import { AlienBullet } from "../AlienBullet";
 import { ENTITY_CONFIG } from "./entityConfig";
@@ -1040,6 +1040,7 @@ const graceFrameNearAsteroids = (game: Game) => {
 const tickWavePhase = (game: Game, dt: number, _musicDt: number) => {
   game.waveElapsed += dt;
   tickWaveEvents(game.waveEvents, game.waveElapsed);
+  if (game.pulsar.shockVibrateJustStarted) game.sound.play("shockwaveCharge");
   if (game.pulsar.shockJustFired) detonateShockwave(game);
 };
 
@@ -1142,9 +1143,11 @@ const updatePositionalAudio = (game: Game) => {
     if (a.isBass() && (a.size === "medium" || a.size === "small")) {
       game.sound.updateBassteroidDrone(a, audiblePos(a));
     }
-    if (a.kind === "warble") {
+    if (isPhasedKind(a.kind)) {
       // Lazily open the voice (guards against dupes) and ride the phase morph:
       // ghost = 1 - opacity, so the hum warbles harder as the rock fades out.
+      // The citadel shares the warble's voice — its slow cycle just morphs it
+      // over 16-beat stretches instead of every measure.
       game.sound.startWarbleDrone(a, audiblePos(a));
       game.sound.updateWarbleDrone(a, audiblePos(a));
       game.sound.setWarbleDronePhase(a, 1 - a.warbleOpacity);

@@ -63,6 +63,9 @@ export class Bullet {
   // Recorded by Game when stamping new bullets so debug logging at hit time
   // can report the original fire offset, not just the impact offset.
   firedAtBeatTime = 0;
+  // Muzzle position, frozen at fire time. The citadel reads it to tell an
+  // inside-the-escape-hole shot (armour-bypassing) from an outside one.
+  firedFrom: Vec;
   // life-remaining threshold below which the bullet fades to 0 opacity. Set by
   // shipWeapons at fire-time to the gap between maxLife and the farthest beat
   // reticule, so the visible bullet dims out across the post-reticule tail
@@ -81,6 +84,7 @@ export class Bullet {
 
   constructor(pos: Vec, vel: Vec, life: number) {
     this.pos = { ...pos };
+    this.firedFrom = { ...pos };
     this.vel = vel;
     this.life = life;
     this.maxLife = life;

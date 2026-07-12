@@ -28,6 +28,14 @@ export const ENTITY_CONFIG = {
     range: [10, 36] as [number, number],
   },
 
+  // Post-boss arc (display-level 11+): the per-wave entity count resets to
+  // waveCount and re-ramps on the pre-boss two-wave cadence, with the new
+  // kinds (prison / warble / torus / citadel) stacking on top.
+  postBoss: {
+    firstWave: 12,
+    waveCount: 3,
+  },
+
   asteroid: {
     // "huge" is the twice-as-big tier: 2× a large rock's radius, 8 HP, and it
     // cleaves into a mass-conserving combo of large/medium/small (the 2-2-2-2
@@ -80,6 +88,33 @@ export const ENTITY_CONFIG = {
     // the rock is phased out. Sits a little above lowOpacity so the
     // intangible window is the genuinely-faint trough, not the whole dim half.
     solidThreshold: 0.5,
+  },
+
+  // Phase citadel — the warble's massive slow-turning cousin (display-level
+  // 11-19). A heavily-armoured phased shell with a ship-shaped escape hole
+  // through the middle. It phases out for a long stretch of the music, then
+  // back in for an equally long stretch; the intended kill is to drift into
+  // the hole while the shell is out of phase and shoot the unarmoured inner
+  // wall from inside. The hole is always safe for the ship; the outer shell's
+  // damageReduction (in ENTITY_STATS) deflects all but the heaviest outside
+  // shots.
+  citadel: {
+    firstWave: 12,
+    lastWave: 20,
+    perSpawnChance: 0.15,
+    // Ponderous mass — drifts in far slower than its size band.
+    spawnSpeedMul: 0.4,
+    // Phase cycle: solid for solidBeats, out of phase for outBeats, with a
+    // fadeBeats-wide crossfade centred on each transition.
+    solidBeats: 16,
+    outBeats: 16,
+    fadeBeats: 2,
+    lowOpacity: 0.5,
+    // Opacity at the exact solid↔out transition (the fade midpoint) — kept in
+    // config so the render crossfade and the tick's solid flip stay aligned.
+    solidThreshold: 0.75,
+    // Escape hole = the ship's visible triangle scaled up by this factor.
+    holeScale: 3.4,
   },
 
   canister: {
@@ -283,14 +318,15 @@ export const ENTITY_CONFIG = {
     tubeFrac: 0.34,
     // Heavy mechanical mass: drifts in slower so the tough target is readable.
     spawnSpeedMul: 0.5,
-    // The killing hit blows the fragments outward onto a phantom ring this
-    // much wider than the intact ring's centreline, so the gaps in the broken
-    // formation are practical to fly through.
+    // Every break blows the phantom ring this much wider than before (first
+    // relative to the intact ring's centreline, then again each time a
+    // half-ring shatters), so the broken formation keeps opening up and the
+    // gaps stay practical to fly through.
     breakExpand: 1.3,
     // Chunks spalled off each half-ring when it breaks (besides the sliver).
     chunkCount: 2,
     // Phantom-ring spin rate (rad/s) the fragments orbit their shared centre at.
-    ringSpin: 0.5,
+    ringSpin: 0.17,
   },
 
   // Combat stats (hp/score/radius/hue/damageReduction) for the whole boss and
@@ -367,6 +403,17 @@ export const ENTITY_STATS: Partial<Record<AsteroidKind, EntityStats>> = {
   },
   warble: {
     hue: 130,
+  },
+
+  // The warble's fortress cousin. Low HP behind heavy armour: a shot from
+  // inside the escape hole bypasses the armour entirely (see citadelInnerHit),
+  // so one rhythm bullet from within breaks it up.
+  citadel: {
+    hp: 4,
+    score: 2200,
+    radius: 140,
+    hue: 150,
+    damageReduction: 8,
   },
 
   // Boss family — six distinct pieces. The whole-body boss ladders by size so

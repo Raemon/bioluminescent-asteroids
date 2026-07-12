@@ -7,6 +7,13 @@ import { ENTITY_CONFIG } from "./entityConfig";
 import { TAU } from "../vec";
 
 const WARBLE = ENTITY_CONFIG.warble;
+const CITADEL = ENTITY_CONFIG.citadel;
+
+// Citadel phase-cycle geometry in seconds (BEAT_GRID = one beat). waveDirector
+// uses these to align a fresh citadel's offset so it spawns just-solid.
+export const citadelSolidLen = () => CITADEL.solidBeats * BEAT_GRID;
+export const citadelCycleLen = () => (CITADEL.solidBeats + CITADEL.outBeats) * BEAT_GRID;
+export const citadelFadeLen = () => CITADEL.fadeBeats * BEAT_GRID;
 
 // kick (C2), pluck (G2), boom (F2), snap (C3) — I-IV-V-percussion worst case stays musical.
 export const BASS_KIND_SOUND: Record<"bassA" | "bassB" | "bassC" | "bassD", "bassKick" | "bassPluck" | "bassBoom" | "bassSnap"> = {
@@ -102,13 +109,28 @@ const tickBassAsteroids = (game: Game) => {
 // warblePhaseOffset spreads a field out of unison.
 const tickWarbles = (game: Game) => {
   for (const a of game.asteroids) {
-    if (a.kind !== "warble") continue;
-    // 0→1 progress through the rock's own measure; 0/1 = solid peak, 0.5 = trough.
-    const phase = ((game.beatTime + a.warblePhaseOffset) % BASS_MEASURE_LENGTH) / BASS_MEASURE_LENGTH;
-    // cosine: 1 at the ends, 0 at the middle of the measure.
-    const present = 0.5 + 0.5 * Math.cos(phase * TAU);
-    a.warbleOpacity = WARBLE.lowOpacity + (1 - WARBLE.lowOpacity) * present;
-    a.warbleSolid = a.warbleOpacity > WARBLE.solidThreshold;
+    if (a.kind === "warble") {
+      // 0→1 progress through the rock's own measure; 0/1 = solid peak, 0.5 = trough.
+      const phase = ((game.beatTime + a.warblePhaseOffset) % BASS_MEASURE_LENGTH) / BASS_MEASURE_LENGTH;
+      // cosine: 1 at the ends, 0 at the middle of the measure.
+      const present = 0.5 + 0.5 * Math.cos(phase * TAU);
+      a.warbleOpacity = WARBLE.lowOpacity + (1 - WARBLE.lowOpacity) * present;
+      a.warbleSolid = a.warbleOpacity > WARBLE.solidThreshold;
+    } else if (a.kind === "citadel") {
+      // The citadel rides a far longer square-ish cycle than the warble:
+      // solid for solidBeats, out for outBeats, with a fadeBeats crossfade
+      // centred on each flip. `d` is the signed distance (seconds) into the
+      // solid window — positive while solid, negative while out — so presence
+      // ramps 0→1 across the fade and the solid flip lands exactly on the
+      // 16-beat boundary.
+      const cycleLen = citadelCycleLen();
+      const solidLen = citadelSolidLen();
+      const t = (((game.beatTime + a.warblePhaseOffset) % cycleLen) + cycleLen) % cycleLen;
+      const d = t < solidLen ? Math.min(t, solidLen - t) : -Math.min(t - solidLen, cycleLen - t);
+      const present = Math.max(0, Math.min(1, 0.5 + d / citadelFadeLen()));
+      a.warbleOpacity = CITADEL.lowOpacity + (1 - CITADEL.lowOpacity) * present;
+      a.warbleSolid = d > 0;
+    }
   }
 };
 

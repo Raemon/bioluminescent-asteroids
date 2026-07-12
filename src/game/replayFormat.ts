@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 15;
+export const REPLAY_FORMAT_VERSION = 21;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -54,6 +54,25 @@ export const REPLAY_FORMAT_VERSION = 15;
 //   and lets a bullet transfer momentum at most once, ever (repeat deflections
 //   and later pierce hits shove nothing). Asteroid velocities → positions →
 //   the whole run diverge, so v14 recordings re-sim into different runs.
+// v16 resets the post-boss per-wave entity count to a flat 3 and adds the
+//   phase citadel (its own spawn roll + seeded construction draws), so v15
+//   recordings re-sim with a different wave roster from display-level 11 on.
+// v17 lengthens the shockwave rumble (vibrate window before detonation) and
+//   defers its start to the next beat tick, so the field-shatter + ship kick
+//   land at a different sim moment and v16 recordings re-sim into different
+//   runs.
+// v18 reworks the citadel: no rotation (fewer constructor rng draws), a wider
+//   escape hole (collision surface), and break-up warbles ejected away from
+//   the ship, so v17 recordings with a citadel re-sim into different runs.
+// v19 (retired before shipping — the slot is kept so v20 numbering stands)
+//   briefly added a wave-skip wormhole; the feature was pulled and is being
+//   rebuilt, so no v19 recordings exist.
+// v20 re-ramps the post-boss per-wave entity count (3, 3, 4, 4, ... on the
+//   pre-boss cadence instead of a flat 3), so v19 recordings re-sim with a
+//   different wave roster from display-level 13 on.
+// v21 widens the citadel's escape hole again (collision surface: the ship-safe
+//   pocket and the inner-hit fire test both grow), so v20 recordings with a
+//   citadel re-sim into different runs.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat

@@ -112,8 +112,8 @@ type StreakShimmerNode = {
   releaseCleanupTimer: ReturnType<typeof setTimeout> | null;
 };
 
-// Which sound a rhythm streak plays. Rolled at random each time a streak
-// starts, so long sessions alternate between two entirely different rewards:
+// Which sound a rhythm streak plays. Every streak now uses "updraft"; the
+// "tines" path is kept in the union (and its code below) but never selected:
 //   "tines"   — the generative music-box arpeggio above (per-note baked
 //               buffers driven by a real-time scheduler; no stems anywhere)
 //   "updraft" — a pair of pre-rendered ElevenLabs 16s loop stems (glassy
@@ -2452,12 +2452,11 @@ export class Sound {
   private static readonly STREAK_SHIMMER_RELEASE_SEC = 0.4;
 
   // ── Streak sound slot ──────────────────────────────────────────────────
-  // The public entry the renderer drives every frame a streak is alive. Each
-  //   new streak rolls one of two interchangeable sounds (see StreakSoundSet):
-  //   the generative tine arpeggio or the updraft loop stems. beatAlignDelay is
-  //   the seconds until the next beat-grid boundary, so the loop set can start
-  //   its downbeat in time with the bass clock; the tines ignore it (their
-  //   scheduler free-runs on 16th/32nd offsets from "now").
+  // The public entry the renderer drives every frame a streak is alive. Every
+  //   streak plays the updraft loop stems (the tine arpeggio path is kept but
+  //   no longer selected — see StreakSoundSet). beatAlignDelay is the seconds
+  //   until the next beat-grid boundary, so the loop set can start its
+  //   downbeat in time with the bass clock.
   updateStreakSound(intensity01: number, beatAlignDelay: number = 0) {
     if (!this.enabled) return;
     const i = Math.max(0, Math.min(1, intensity01));
@@ -2465,10 +2464,11 @@ export class Sound {
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     if (!this.streakSet) {
-      // Roll once per streak. The tines are always available (rendered
-      //   locally); the updraft stems need their fetch+decode to have landed,
-      //   so fall back to tines (and kick the load) if the roll loses the race.
-      this.streakSet = Math.random() < 0.5 && this.streakLoopBuffersReady() ? "updraft" : "tines";
+      // The updraft stems need their fetch+decode to have landed; until then
+      //   the streak stays silent (the readiness check kicks the load), and we
+      //   retry each frame so the sound joins as soon as the buffers arrive.
+      if (!this.streakLoopBuffersReady()) return;
+      this.streakSet = "updraft";
     }
     if (this.streakSet === "updraft") this.updateStreakLoop(i, beatAlignDelay);
     else this.updateStreakShimmer(i);
@@ -5298,7 +5298,7 @@ export class Sound {
   }
 
   // Long tension-building windup played while the pulsar vibrates and spins
-  // itself up. Length matches Pulsar.SHOCK_VIBRATE_DURATION (5.0s) so it
+  // itself up. Length matches Pulsar.SHOCK_VIBRATE_DURATION so it
   // tops out exactly as the flash fires. Layers a deep sub that holds low
   // then climbs into the drop, a near-DC sine for chest pressure, an
   // accelerating "spin-up whine" whose frequency tracks the pulsar's
@@ -5307,7 +5307,7 @@ export class Sound {
   private playShockwaveCharge() {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
-    const duration = 5.0;
+    const duration = 12.0;
 
     // Sub carrier — held low for the first 60% of the windup then sweeps up
     // sharply so the tension peak lands right before the drop.
