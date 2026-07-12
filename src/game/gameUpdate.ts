@@ -1378,7 +1378,14 @@ export const advanceWave = (game: Game, targetWave?: number, extraSpawnDelaySec 
   const finalRhythm = Math.max(1, game.beatCombo);
   const bestStreak = game.bestStreakThisWave;
   const driftBonuses = game.driftBonusesThisWave;
-  const nextWave = targetWave ?? completedWave + 1;
+  // Rookie warm-up: clearing the single rock (stage 1) holds at internal wave 1
+  //   to show the single crystal (stage 2); clearing that advances normally.
+  //   Both clears are titled "Wave Complete" with no number. A wave-skip
+  //   (explicit targetWave) never counts as a warm-up clear.
+  const inWarmup = targetWave === undefined && completedWave === 1 && game.warmupCrystalStage !== 0;
+  const nextStage = inWarmup && game.warmupCrystalStage === 1 ? 2 : 0;
+  const holdForWarmupCrystal = inWarmup && game.warmupCrystalStage === 1;
+  const nextWave = targetWave ?? (holdForWarmupCrystal ? completedWave : completedWave + 1);
   // A player who clears Wave 1 without touching every control shouldn't keep
   //   staring at the controls pane — force the fade (and release the hints
   //   queued behind it) at the wave boundary.
@@ -1398,9 +1405,12 @@ export const advanceWave = (game: Game, targetWave?: number, extraSpawnDelaySec 
   //   whole summary on the same grid the bgBeat pulse plays on.
   const bonus = (maxRhythm + finalRhythm + driftBonuses + bestStreak) * 100;
   const schedule = buildSummarySchedule(game.beatTime, bonus, extraSpawnDelaySec);
-  showWaveSummary(game, schedule, displayWave(completedWave), maxRhythm, finalRhythm, bestStreak, driftBonuses);
+  showWaveSummary(game, schedule, displayWave(completedWave), maxRhythm, finalRhythm, bestStreak, driftBonuses, inWarmup);
   beginWaveTransition(game, schedule, () => {
     game.wave = nextWave;
+    // Step the warm-up stage before spawnWave so it spawns the right target
+    //   (crystal on stage 2), then clears so wave 2+ behave normally.
+    if (inWarmup) game.warmupCrystalStage = nextStage;
     // opening rocks' speed keys off the peak combo of the wave just cleared, not
     //   the live combo at spawn (which a death or whiff may have already reset).
     game.waveStartRhythm = game.maxComboThisWave;
@@ -1412,7 +1422,9 @@ export const advanceWave = (game: Game, targetWave?: number, extraSpawnDelaySec 
     game.pulsar.setWaveLevel(game.wave);
     updateBgBeatIntensity(game);
     spawnWave(game);
-    showWaveAnnounce(game);
+    // The single-target warm-ups carry no numbered banner (the summary already
+    //   read "Wave Complete"); the density waves announce their number as usual.
+    if (!holdForWarmupCrystal) showWaveAnnounce(game);
     syncHud(game);
     game.waveTransitioning = false;
   });

@@ -441,7 +441,7 @@ const laserTargetGroups = (game: Game): LaserTargetGroup[] => [
       // so the bossHit gate in killEffects won't catch it).
       if (a.isBossFamily()) game.sound.play("bossHit", 1, a.pos);
       const onBeat = beamHitOnBeat(game, fakeBullet);
-      const { killed } = a.applyDamage(beam.damage);
+      const { killed } = a.applyDamage(beam.damage, false, fakeBullet.pos);
       game.shake = Math.min(game.shake + (killed ? 0.3 : 0.15), 1.2);
       applyHitToCombo(game, onBeat, fakeBullet.pos);
       if (!killed) {

@@ -16,6 +16,18 @@ const MAX_AIM_TURN_PER_BEAT = 0.32;
 // line slews smoothly across the discrete per-beat steps (~150ms to close).
 const AIM_DISPLAY_TAU = 0.07;
 
+// Boss laser timing, as phase offsets within the 8.0s rhythm cycle.
+// The aim windup ticks the sightline onto the player across LASER_AIM_START..
+// LASER_AIM_END (beats 4..7); the aim then holds. After a beat of hold the
+// pre-fire wind-up surge runs across the final 3 beats up to LASER_FIRE_T,
+// escalating the eye's charge glow so the shot is heavily telegraphed.
+const LASER_AIM_START = 1.5;
+const LASER_AIM_END = 3.5;
+// Fire moved 4 beats later than the old beat-8 (t=3.5) shot: now beat 12.
+const LASER_FIRE_T = 5.5;
+// The wind-up surge covers the 3 beats immediately before the fire.
+const LASER_WINDUP_START = LASER_FIRE_T - 1.5;
+
 // Lazy-init so the first cursor pick comes from the seeded RNG (after startGame
 // calls seedRng) rather than module-load Math.random — replays would diverge.
 let huePaletteCursor = -1;
@@ -920,6 +932,8 @@ export class Asteroid {
   // True once a bullet has glanced off this rock's armour and we've shown the
   // "Insufficient damage" tip for it — so the hint fires at most once per rock.
   glanceTipShown = false;
+  // Same, for the "aim a longer drift shot" variant a bounced drift shot earns.
+  driftGlanceTipShown = false;
   // Asteroids wrap at the screen edge forever, so this stays true for their
   // whole life; the game-loop prune still honours it as a defensive guard.
   alive = true;
@@ -1060,6 +1074,10 @@ export class Asteroid {
   // Laser charge ramp (0 → 1 across the windup). Renderer reads this to
   // crescendo the pupil core glow before the bolt leaves.
   bossLaserCharge = 0;
+  // Pre-fire wind-up surge (0 → 1 across the final 3 beats before the shot).
+  // Layered on top of bossLaserCharge to visibly wind the eye up as it commits
+  // — a shudder + spooling glow that reads as "the barrel is about to fire".
+  bossLaserWindup = 0;
   // Latest ship position cached by trackPlayer each tick — so the per-beat
   // re-aim inside tickBossRhythm can snap the targeting line to the player
   // without tickBossRhythm needing its own ship handle.
@@ -3410,18 +3428,33 @@ export class Asteroid {
     this.flashAmount = 1;
   }
 
-  // Apply `amount` damage to this asteroid. `damageReduction` is subtracted
-  // first; a hit that doesn't break through deals no HP loss and reports
-  // `bounced` so the caller can deflect the shot instead of consuming it as a
-  // real hit. Decrements HP and returns whether it's now dead. Non-killing
-  // hits reveal one or more cracks (the number revealed scales with the damage
-  // dealt so a 4-damage rhythm hit visibly cracks the asteroid harder than a
-  // 1-damage plain hit, even if it didn't kill). Caller is responsible for
-  // sound, particles, and split.
+  // Effective armour for a hit landing at `point`. The boss hemisphere's
+  // armour is directional: the rounded outer shell keeps its damage reduction
+  // while the freshly-cut flat face is bare molten interior. Side test is the
+  // sign of the hit's local x — the half-disc body lives on +x (see
+  // renderBossHemisphere). Every other kind (or a caller with no hit
+  // position) gets the flat damageReduction.
+  damageReductionAt(point: Vec | null): number {
+    if (this.kind !== "bossHemisphere" || !point) return this.damageReduction;
+    const [dx, dy] = toroidalDelta(point.x - this.pos.x, point.y - this.pos.y, WORLD_W, WORLD_H);
+    const facing = this.rotation + this.bossFragmentAngle;
+    return dx * Math.cos(facing) + dy * Math.sin(facing) > 0 ? this.damageReduction : 0;
+  }
+
+  // Apply `amount` damage to this asteroid. Armour is subtracted first —
+  // resolved through damageReductionAt when the caller passes the hit
+  // position, so the hemisphere's bare cut face takes full damage; a hit that
+  // doesn't break through deals no HP loss and reports `bounced` so the
+  // caller can deflect the shot instead of consuming it as a real hit.
+  // Decrements HP and returns whether it's now dead. Non-killing hits reveal
+  // one or more cracks (the number revealed scales with the damage dealt so a
+  // 4-damage rhythm hit visibly cracks the asteroid harder than a 1-damage
+  // plain hit, even if it didn't kill). Caller is responsible for sound,
+  // particles, and split.
   // `ignoreArmor` is the citadel inner-wall path: a shot from inside the
   // escape hole lands its full damage regardless of damageReduction.
-  applyDamage(amount: number = 1, ignoreArmor: boolean = false): { killed: boolean; bounced: boolean; dealt: number } {
-    const dealt = Math.max(0, amount - (ignoreArmor ? 0 : this.damageReduction));
+  applyDamage(amount: number = 1, ignoreArmor: boolean = false, hitPoint: Vec | null = null): { killed: boolean; bounced: boolean; dealt: number } {
+    const dealt = Math.max(0, amount - (ignoreArmor ? 0 : this.damageReductionAt(hitPoint)));
     if (dealt <= 0) return { killed: false, bounced: true, dealt: 0 };
     this.hp = Math.max(0, this.hp - dealt);
     this.flashAmount = 1;
@@ -3550,28 +3583,28 @@ export class Asteroid {
   // so the sightline slews around like a turret rather than snapping onto a
   // moving target. The cap means a player who keeps circling the boss can
   // outrun the sweep — the shot only lands if you let the line catch you.
-  // Beat 7 (index 3) is the final tick; the aim then holds for the beat-8
+  // Beat 7 (index 3) is the final tick; the aim then holds all the way to the
   // fire, so juking after the last tick slips the shot. Outside the windup
   // the aim tracks the player each frame so an idle eye still looks alive.
   // `tNow` is the phase within the 8.0s cycle.
   private tickLaserAim(tNow: number) {
     // The aim re-targets only on the 4 windup beats (t = 1.5, 2.0, 2.5, 3.0).
-    // From the last tick it must HOLD through the fire (t=3.5) so the shot
-    // commits to the telegraphed line, not to wherever the ship slipped to by
-    // the fire frame — that hold is what lets a running player slip the shot.
-    // Only once the cycle has wrapped back into its early "idle" stretch
-    // (before the next windup) do we resume tracking the live ship position so
-    // an idle eye still looks alive.
-    const inWindup = tNow >= 1.5 && tNow < 3.5;
-    const inIdle = tNow < 1.5;
+    // From the last tick it must HOLD through the fire so the shot commits to
+    // the telegraphed line, not to wherever the ship slipped to by the fire
+    // frame — that hold is what lets a running player slip the shot. Only once
+    // the cycle has wrapped back into its early "idle" stretch (before the next
+    // windup) do we resume tracking the live ship position so an idle eye still
+    // looks alive.
+    const inWindup = tNow >= LASER_AIM_START && tNow < LASER_AIM_END;
+    const inIdle = tNow < LASER_AIM_START;
     if (inIdle) {
       this.bossAimBeatIndex = -1;
       this.bossEyeAimX = this.bossTrackedShipX;
       this.bossEyeAimY = this.bossTrackedShipY;
       return;
     }
-    if (!inWindup) return; // post-fire hold: keep the locked aim frozen
-    const beatIndex = Math.floor((tNow - 1.5) / 0.5);
+    if (!inWindup) return; // post-aim hold: keep the locked aim frozen to fire
+    const beatIndex = Math.floor((tNow - LASER_AIM_START) / 0.5);
     if (beatIndex > this.bossAimBeatIndex) {
       this.bossAimBeatIndex = beatIndex;
       // Current aim direction and the direction to the player, both as angles.
@@ -3675,11 +3708,12 @@ export class Asteroid {
   // beatTime = game.beatTime in seconds. The 8.0s cycle:
   //   beat 1 (t=0.0) top hemisphere flashes (post-break: top fires plasma)
   //   beat 3 (t=1.0) bottom hemisphere flashes (post-break: bottom fires)
-  //   beat 4 (t=1.5) laser charge ramp begins + aim locks (4-beat windup)
+  //   beat 4 (t=1.5) laser aim windup begins (4-beat aim slew onto the player)
   //   beat 5 (t=2.0) brass iris ring flashes
-  //   beat 7 (t=3.0) pupil flash #1
-  //   beat 8 (t=3.5) pupil flash #2 + laser fires
-  //   beats 9-16 (t=4.0-8.0) rest, so the laser fires once per 8s block
+  //   beat 7 (t=3.0) pupil flash #1 + aim locks
+  //   beats 9-11 (t=4.0-5.0) pre-fire wind-up surge — eye spools up, 3 beats
+  //   beat 12 (t=5.5) pupil flash #2 + laser fires
+  //   beats 13-16 (t=6.0-8.0) rest, so the laser fires once per 8s block
   // The live whole-body boss runs every slot. Post-break hemispheres run
   // only their assigned half; bossEye runs iris + pupil + laser.
   tickBossRhythm(beatTime: number): {
@@ -3712,7 +3746,7 @@ export class Asteroid {
       this.bossDidBottom = tNow >= 1.0;
       this.bossDidIris = tNow >= 2.0;
       this.bossDidPupil1 = tNow >= 3.0;
-      this.bossDidPupil2 = tNow >= 3.5;
+      this.bossDidPupil2 = tNow >= LASER_FIRE_T;
       this.bossPlasmaFired = tNow >= 0.0 && tNow < 1.0 ? false : tNow >= 1.0;
       return events;
     }
@@ -3725,12 +3759,25 @@ export class Asteroid {
       this.bossDidPupil2 = false;
       this.bossPlasmaFired = false;
     }
-    // 4-beat windup: the telegraph wedge ramps from beat 4 (t=1.5) to the
-    // beat-8 fire (t=3.5), giving the player 2s of warning before it commits.
-    // After the fire the telegraph drops quickly so it doesn't hang over the
-    // live sweep beam.
-    if (tNow >= 1.5 && tNow < 3.5) this.bossLaserCharge = (tNow - 1.5) / 2.0;
-    else this.bossLaserCharge = Math.max(0, this.bossLaserCharge - 0.16);
+    // Aim windup: the sightline telegraph ramps from beat 4 (t=1.5) through the
+    // aim lock, giving the player a long read before the shot commits. The
+    // charge eases up to a plateau across the aim windup, then the pre-fire
+    // wind-up surge (below) carries the eye the rest of the way to full.
+    if (tNow >= LASER_AIM_START && tNow < LASER_FIRE_T) {
+      const aimFrac = Math.min(1, (tNow - LASER_AIM_START) / (LASER_AIM_END - LASER_AIM_START));
+      this.bossLaserCharge = 0.35 + 0.4 * aimFrac;
+    } else {
+      // After the fire the telegraph drops quickly so it doesn't hang over the
+      // live sweep beam.
+      this.bossLaserCharge = Math.max(0, this.bossLaserCharge - 0.16);
+    }
+    // Pre-fire wind-up surge across the final 3 beats — a steep escalation on
+    // top of the charge plateau so the eye visibly spools up before it fires.
+    if (tNow >= LASER_WINDUP_START && tNow < LASER_FIRE_T) {
+      this.bossLaserWindup = (tNow - LASER_WINDUP_START) / (LASER_FIRE_T - LASER_WINDUP_START);
+    } else {
+      this.bossLaserWindup = Math.max(0, this.bossLaserWindup - 0.25);
+    }
 
     const role = this.bossRhythmRole();
     if (role === "whole" || role === "eye") this.tickLaserAim(tNow);
@@ -3773,7 +3820,7 @@ export class Asteroid {
       }
       this.bossDidPupil1 = true;
     }
-    if (!this.bossDidPupil2 && tNow >= 3.5) {
+    if (!this.bossDidPupil2 && tNow >= LASER_FIRE_T) {
       if (role === "whole" || role === "eye") {
         this.bossPupilFlash = 1;
         events.pupilFlash = true;
@@ -3984,6 +4031,7 @@ export class Asteroid {
       eye.bossDidPupil1 = this.bossDidPupil1;
       eye.bossDidPupil2 = this.bossDidPupil2;
       eye.bossLaserCharge = this.bossLaserCharge;
+      eye.bossLaserWindup = this.bossLaserWindup;
       eye.bossRhythmInit = true;
       fragmentList.push(eye);
       return fragmentList;
@@ -5707,7 +5755,7 @@ export class Asteroid {
     // Eye — sits at the body center, iris rotates to track player. Drawn
     // last (above architecture + cracks) so it always reads as the primary
     // focal point. Iris/pupil flashes + laser charge layer on top.
-    this.paintBossEyeAt(ctx, 0, 0, this.bossEyeRadius, baseHue, this.bossIrisAngle, this.bossLaserCharge, t, this.bossIrisFlash, this.bossPupilFlash);
+    this.paintBossEyeAt(ctx, 0, 0, this.bossEyeRadius, baseHue, this.bossIrisAngle, this.bossLaserCharge, t, this.bossIrisFlash, this.bossPupilFlash, this.bossLaserWindup);
 
     // Outline rim — glints with the same incommensurate-sines shimmer the
     // bassteroid rims use, so boss and rocks share one rhythm at the edge.
@@ -5800,6 +5848,7 @@ export class Asteroid {
   paintBossLaserChargeBeam(ctx: CanvasRenderingContext2D) {
     const charge = this.bossLaserCharge;
     if (charge <= 0.02) return;
+    const windup = this.bossLaserWindup;
     const a = this.eyeAimAngle();
     const startR = (this.kind === "bossEye" ? this.radius : this.bossEyeRadius) * 1.05;
     const aimDist = Math.hypot(this.bossEyeAimX - this.pos.x, this.bossEyeAimY - this.pos.y);
@@ -5813,10 +5862,11 @@ export class Asteroid {
     const ey = this.pos.y + Math.sin(a) * reach;
 
     ctx.save();
-    // Soft underlay along the line — widens slightly as the charge completes
-    // so the sightline thickens into "about to fire" without becoming a beam.
-    ctx.strokeStyle = `hsla(${this.hue}, 100%, 60%, ${0.12 * charge})`;
-    ctx.lineWidth = 4 + 6 * charge;
+    // Soft underlay along the line — widens with the charge, then surges hard
+    // in the final 3 beats so the sightline visibly thickens into "about to
+    // fire" as the wind-up completes, without yet becoming a live beam.
+    ctx.strokeStyle = `hsla(${this.hue}, 100%, ${60 + 20 * windup}%, ${(0.12 * charge + 0.16 * windup).toFixed(3)})`;
+    ctx.lineWidth = 4 + 6 * charge + 14 * windup;
     ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(sx, sy);
@@ -5839,8 +5889,10 @@ export class Asteroid {
     // exact target reads unmistakably.
     const tx = this.pos.x + Math.cos(a) * Math.max(startR + 30, aimDist);
     const ty = this.pos.y + Math.sin(a) * Math.max(startR + 30, aimDist);
-    const ringR = 26 - 14 * charge;
-    ctx.lineWidth = 1.4;
+    // Contracts across the charge, then clamps tight for the wind-up so the
+    // lock reads as fully acquired while the shot spools up.
+    const ringR = 26 - 14 * charge - 6 * windup;
+    ctx.lineWidth = 1.4 + 1.6 * windup;
     ctx.beginPath();
     ctx.arc(tx, ty, ringR, 0, TAU);
     ctx.stroke();
@@ -5852,6 +5904,27 @@ export class Asteroid {
       ctx.moveTo(tx + Math.cos(ang) * tickIn, ty + Math.sin(ang) * tickIn);
       ctx.lineTo(tx + Math.cos(ang) * tickOut, ty + Math.sin(ang) * tickOut);
       ctx.stroke();
+    }
+    // Wind-up: four converging chevrons closing onto the lock — a countdown
+    // that visibly draws inward across the final 3 beats before the shot.
+    if (windup > 0.02) {
+      const converge = 44 * (1 - windup);
+      ctx.strokeStyle = `hsla(${this.hue}, 100%, 80%, ${(0.7 * windup).toFixed(3)})`;
+      ctx.lineWidth = 1.6;
+      for (let k = 0; k < 4; k++) {
+        const ang = a + Math.PI / 4 + (k * TAU) / 4;
+        const cd = ringR + 6 + converge;
+        const cx = tx + Math.cos(ang) * cd;
+        const cy = ty + Math.sin(ang) * cd;
+        const wing = 5;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang + 2.4) * wing, cy + Math.sin(ang + 2.4) * wing);
+        ctx.lineTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(ang - 2.4) * wing, cy + Math.sin(ang - 2.4) * wing);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = `hsla(${this.hue}, 100%, ${62 + 30 * charge}%, ${alpha})`;
+      ctx.lineWidth = 1.4 + 1.2 * charge;
     }
     ctx.fillStyle = `hsla(${this.hue}, 100%, ${60 + 35 * charge}%, ${alpha})`;
     ctx.beginPath();
@@ -6117,9 +6190,18 @@ export class Asteroid {
     t: number,
     irisFlashAmp: number = 0,
     pupilFlashAmp: number = 0,
+    windupT: number = 0,
   ) {
     ctx.save();
     ctx.translate(x, y);
+    // Pre-fire wind-up: a fast shudder that jitters the whole eye harder as the
+    // shot nears, so the barrel visibly rattles under the load before it fires.
+    if (windupT > 0.01) {
+      const shudder = eyeR * 0.05 * windupT * windupT;
+      const jx = Math.sin(t * 0.09) * shudder;
+      const jy = Math.cos(t * 0.113) * shudder;
+      ctx.translate(jx, jy);
+    }
 
     // Brass aperture rim — a wide ring framing the iris. Brass = warm
     // ochre, distinct from the body's red so the eye reads as a fitted
@@ -6182,10 +6264,12 @@ export class Asteroid {
     // white-hot ball on beat 8. Independent of pupilFlashAmp so the charge
     // is visible across the entire beat-7→beat-8 window, not just on the
     // beat hits themselves.
-    if (chargeT > 0.02 || pupilFlashAmp > 0.05) {
-      const amp = Math.max(chargeT, pupilFlashAmp);
+    if (chargeT > 0.02 || pupilFlashAmp > 0.05 || windupT > 0.02) {
+      // Wind-up drives the core the rest of the way past the charge plateau, so
+      // the eye visibly spools brighter and larger across the final 3 beats.
+      const amp = Math.max(chargeT, pupilFlashAmp, chargeT + windupT * 0.55);
       ctx.globalCompositeOperation = "lighter";
-      const coreR = slitW * (0.8 + 2.4 * amp);
+      const coreR = slitW * (0.8 + 2.4 * amp) * (1 + 0.5 * windupT);
       const core = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR);
       core.addColorStop(0, `hsla(48, 100%, 98%, ${0.95 * amp})`);
       core.addColorStop(0.45, `hsla(${hue + 35}, 100%, 75%, ${0.7 * amp})`);
@@ -6204,6 +6288,16 @@ export class Asteroid {
         ctx.beginPath();
         ctx.moveTo(0, -spike);
         ctx.lineTo(0, spike);
+        ctx.stroke();
+      }
+      // Spooling energy ring that contracts inward as the wind-up completes —
+      // a shrinking aperture drawing the charge into the barrel before the shot.
+      if (windupT > 0.02) {
+        const ringR = eyeR * (0.9 - 0.55 * windupT);
+        ctx.strokeStyle = `hsla(48, 100%, 95%, ${0.5 * windupT})`;
+        ctx.lineWidth = 1 + 2 * windupT;
+        ctx.beginPath();
+        ctx.arc(0, 0, ringR, 0, TAU);
         ctx.stroke();
       }
     }
@@ -6240,9 +6334,11 @@ export class Asteroid {
   // which is driven by bossLaserCharge from the 8-beat rhythm.)
 
   // Hemisphere fragment: a half-disc with the freshly-revealed inner
-  // cross-section facing the cut axis. The straight edge (the diameter)
-  // shows a glowing interior — molten core glimpse — while the curved limb
-  // wears its share of the equatorial Bassteroid ring.
+  // cross-section facing the cut axis. The straight edge (the diameter) is
+  // the unarmoured molten interior — strata, hot core, spilling furnace
+  // light — while the curved limb wears its share of the equatorial
+  // Bassteroid ring under a heavy plated rim. The visual armour split
+  // matches the mechanical one in damageReductionAt.
   renderBossHemisphere(ctx: CanvasRenderingContext2D, t: number) {
     const baseHue = this.hue;
     const damageT = 1 - this.hp / Math.max(1, this.maxHp);
@@ -6318,18 +6414,111 @@ export class Asteroid {
     ctx.restore();
 
     // The cut cross-section — the flat diameter face of the broken planet.
-    // Glowing molten interior so the freshly-revealed inside reads as
-    // "this thing was alive inside". Draw on top, only along the diameter.
+    // This is the unarmoured side (see damageReductionAt), so it has to read
+    // as soft exposed viscera against the plated shell: furnace light spills
+    // off the open face, molten mantle strata layer into the body, a
+    // white-hot core sits at the centre, and heat veins crawl into the rock.
+    // The whole face breathes, flares when this half fires its plasma, and
+    // burns angrier as the hemisphere takes damage.
+    const facePulse = 0.5 + 0.5 * Math.sin(t * 0.004 + this.membranePhase);
+    const fireFlare = Math.max(this.bossTopFlash, this.bossBottomFlash);
+    const heat = Math.min(1, 0.55 + 0.25 * facePulse + 0.6 * fireFlare + 0.3 * damageT);
+
+    // Furnace light escaping the wound — additive half-glow on the bare side
+    // only, so the open face casts light where the shell casts none.
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    const cutGlow = ctx.createLinearGradient(-r * 0.05, 0, r * 0.3, 0);
-    cutGlow.addColorStop(0, `hsla(${baseHue + 25}, 100%, 75%, 0.95)`);
-    cutGlow.addColorStop(0.4, `hsla(${baseHue + 12}, 100%, 55%, 0.75)`);
-    cutGlow.addColorStop(1, `hsla(${baseHue}, 100%, 40%, 0)`);
-    ctx.fillStyle = cutGlow;
-    ctx.fillRect(-r * 0.04, -r, r * 0.3, r * 2);
-    // Bright thin seam right at x=0
-    ctx.strokeStyle = `hsla(${baseHue + 30}, 100%, 90%, 0.9)`;
+    const spillR = r * (0.5 + 0.14 * facePulse + 0.3 * fireFlare);
+    const spill = ctx.createRadialGradient(0, 0, r * 0.04, 0, 0, spillR);
+    spill.addColorStop(0, `hsla(${baseHue + 22}, 100%, 62%, ${0.5 * heat})`);
+    spill.addColorStop(0.5, `hsla(${baseHue + 10}, 100%, 52%, ${0.25 * heat})`);
+    spill.addColorStop(1, `hsla(${baseHue}, 100%, 45%, 0)`);
+    ctx.fillStyle = spill;
+    ctx.beginPath();
+    ctx.arc(0, 0, spillR, Math.PI / 2, Math.PI * 1.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Exposed interior, clipped to the body so the strata stop at the shell.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, r, -Math.PI / 2, Math.PI / 2);
+    ctx.lineTo(0, -r);
+    ctx.closePath();
+    ctx.clip();
+
+    // Mantle strata: nested half-ellipses reaching into the body, each layer
+    // hotter and brighter than the one wrapping it — the sliced planet's
+    // insides laid bare. Each stratum fades with depth so the face stays the
+    // hottest edge.
+    const strata = [
+      { depth: 0.44, span: 0.97, hueOff: 0, light: 26 },
+      { depth: 0.3, span: 0.78, hueOff: 10, light: 40 },
+      { depth: 0.18, span: 0.55, hueOff: 20, light: 54 },
+    ];
+    for (const s of strata) {
+      const molten = ctx.createLinearGradient(0, 0, r * s.depth, 0);
+      molten.addColorStop(0, `hsla(${baseHue + s.hueOff + 8}, 100%, ${s.light + 10}%, ${0.95 * heat})`);
+      molten.addColorStop(1, `hsla(${baseHue + s.hueOff - 4}, 95%, ${s.light - 8}%, ${0.8 * heat})`);
+      ctx.fillStyle = molten;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, r * s.depth, r * s.span, 0, -Math.PI / 2, Math.PI / 2);
+      ctx.closePath();
+      ctx.fill();
+      // Hairline seam where this stratum meets the cooler one around it.
+      ctx.strokeStyle = `hsla(${baseHue + s.hueOff + 24}, 100%, 72%, ${0.35 * heat})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, r * s.depth, r * s.span, 0, -Math.PI / 2, Math.PI / 2);
+      ctx.stroke();
+    }
+
+    ctx.globalCompositeOperation = "lighter";
+
+    // White-hot core — the softest spot, breathing at the heart of the face.
+    const coreR = r * (0.16 + 0.05 * facePulse + 0.12 * fireFlare);
+    const core = ctx.createRadialGradient(r * 0.05, 0, coreR * 0.1, r * 0.06, 0, coreR);
+    core.addColorStop(0, `hsla(${baseHue + 38}, 100%, 95%, ${heat})`);
+    core.addColorStop(0.5, `hsla(${baseHue + 24}, 100%, 68%, ${0.75 * heat})`);
+    core.addColorStop(1, `hsla(${baseHue + 10}, 100%, 50%, 0)`);
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(r * 0.05, 0, coreR, 0, TAU);
+    ctx.fill();
+
+    // Heat veins crawling off the face into the rock — brightest at the cut,
+    // dying out where the armoured depth begins. Deterministic zig-zags (pure
+    // functions of the vein index) so the render draws nothing from the rng.
+    for (let v = 0; v < 5; v++) {
+      const vy = (v / 4 - 0.5) * 2 * r * 0.7;
+      const reach = r * (0.34 + 0.22 * Math.abs(Math.sin(v * 2.4 + 1.7)));
+      const shimmer = (0.4 + 0.35 * Math.sin(t * 0.005 + v * 1.9)) * heat;
+      const vein = ctx.createLinearGradient(0, vy, reach, vy);
+      vein.addColorStop(0, `hsla(${baseHue + 26}, 100%, 70%, ${shimmer})`);
+      vein.addColorStop(1, `hsla(${baseHue + 8}, 100%, 50%, 0)`);
+      ctx.strokeStyle = vein;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(r * 0.02, vy);
+      for (let k = 1; k <= 3; k++) {
+        ctx.lineTo((k / 3) * reach, vy + r * 0.05 * Math.sin(v * 3.1 + k * 2.3));
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Molten seam at the cut itself: a soft hot flank under a thin white-hot
+    // line — the glowing lip of the wound.
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = `hsla(${baseHue + 18}, 100%, 60%, ${0.5 * heat})`;
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.lineTo(0, r);
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${baseHue + 32}, 100%, 92%, ${0.6 + 0.4 * heat})`;
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.moveTo(0, -r);
@@ -6337,8 +6526,14 @@ export class Asteroid {
     ctx.stroke();
     ctx.restore();
 
-    // Outline rim — curved limb only (the half-circle arc on +x)
+    // Armoured limb rim — dark occlusion stroke under a bright catch, so the
+    // curved shell reads as heavy plating against the soft open face.
     ctx.save();
+    ctx.strokeStyle = `hsla(${baseHue}, 45%, 7%, 0.9)`;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
     ctx.globalCompositeOperation = "lighter";
     ctx.strokeStyle = `hsla(${baseHue + 15}, 100%, 75%, 0.85)`;
     ctx.lineWidth = 1.8;
@@ -6403,7 +6598,7 @@ export class Asteroid {
     // Iris/pupil — full eye-core uses the same painter, with the eye
     // occupying its entire body. Beat-5 iris + beat-7/8 pupil flashes are
     // forwarded so the detached eye-core keeps its rhythm post-break.
-    this.paintBossEyeAt(ctx, 0, 0, r, baseHue, this.bossIrisAngle, this.bossLaserCharge, t, this.bossIrisFlash, this.bossPupilFlash);
+    this.paintBossEyeAt(ctx, 0, 0, r, baseHue, this.bossIrisAngle, this.bossLaserCharge, t, this.bossIrisFlash, this.bossPupilFlash, this.bossLaserWindup);
 
     // Damage cracks
     this.renderBossCracks(ctx, damageT);

@@ -1,10 +1,10 @@
 import type { Game } from "../Game";
-import { toroidalDelta } from "../vec";
+import { toroidalDelta, cosmeticRand } from "../vec";
 import { rng } from "./rng";
 import { Asteroid } from "../Asteroid";
 import { Alien } from "../Alien";
 import { Comet } from "../Comet";
-import { Bullet } from "../Bullet";
+import { Bullet, BULLET_DAMAGE_BEAT_BOOSTED } from "../Bullet";
 import { AlienBullet } from "../AlienBullet";
 import { Canister } from "../Canister";
 import {
@@ -64,6 +64,25 @@ const findFirstHittingBullet = (bullets: Bullet[], target: CollidableTarget): Bu
 // pierce keeps the bullet alive so a single shot can punch through a row of targets.
 const consumeBullet = (b: Bullet) => { if (!b.pierce) b.life = 0; };
 
+// Picks the hint line under the INSUFFICIENT DAMAGE headline. A bounced drift
+// shot means the player already knows the mechanic — hold longer. Otherwise
+// "gain more rhythm" is only offered when it could actually work: a max-rhythm
+// (boosted) shot must beat this armour, and something soft must be on screen
+// to build that rhythm against. Failing either, only a drift shot can help.
+// Cosmetic-stream rand so the coin flip can't touch the gameplay RNG.
+const insufficientDamageHint = (game: Game, a: Asteroid, wasDriftShot: boolean): string => {
+  // The hemisphere's armour is directional — teach the flank, not the drift.
+  if (a.kind === "bossHemisphere") return "HIT THE MOLTEN FACE";
+  if (wasDriftShot) return "AIM A LONGER DRIFT SHOT";
+  const softTargetOnScreen =
+    game.aliens.length > 0 ||
+    game.comets.length > 0 ||
+    game.asteroids.some((o) => o.damageReduction <= 0);
+  const rhythmCanCrack = a.damageReduction < BULLET_DAMAGE_BEAT_BOOSTED;
+  if (!softTargetOnScreen || !rhythmCanCrack) return "AIM A CAREFUL DRIFT SHOT";
+  return cosmeticRand(0, 1) < 0.5 ? "GAIN MORE RHYTHM" : "AIM A CAREFUL DRIFT SHOT";
+};
+
 // A shot that can't break the target's armour ricochets: velocity reflects about
 // the surface normal (center→bullet), drops to half speed (the crystal eats the
 // rest), the bullet is shoved just clear of the hitbox so it doesn't re-trigger
@@ -71,7 +90,7 @@ const consumeBullet = (b: Bullet) => { if (!b.pierce) b.life = 0; };
 // tier — a bounced on-beat shot is still on-beat if it goes on to land elsewhere.
 // Half the momentum the blocked damage *would* have transferred still shoves the
 // crystal, so a fully-armoured rock can still be nudged by sustained fire.
-const deflectBulletOff = (game: Game, b: Bullet, a: Asteroid, blockedDmg: number) => {
+const deflectBulletOff = (game: Game, b: Bullet, a: Asteroid, blockedDmg: number, wasDriftShot: boolean) => {
   let [nx, ny] = toroidalDelta(b.pos.x - a.pos.x, b.pos.y - a.pos.y, game.w, game.h);
   const len = Math.hypot(nx, ny) || 1;
   nx /= len;
@@ -108,10 +127,12 @@ const deflectBulletOff = (game: Game, b: Bullet, a: Asteroid, blockedDmg: number
   a.flashAmount = Math.max(a.flashAmount, 0.5 * impact);
   game.sound.play("tink", 0.5 + 0.4 * impact, a.pos);
   emitBounceSparks(game.particles, b.pos, { x: nx, y: ny }, a.hue, impact);
-  // first glance off this rock teaches the player that weak hits bounce.
-  if (!a.glanceTipShown) {
+  // first glance off this rock teaches the player that weak hits bounce; a
+  // bounced drift shot earns the "longer" variant once more on top of that.
+  if (wasDriftShot ? !a.driftGlanceTipShown : !a.glanceTipShown) {
     a.glanceTipShown = true;
-    game.popups.push(popupInsufficientDamage(b.pos));
+    if (wasDriftShot) a.driftGlanceTipShown = true;
+    game.popups.push(popupInsufficientDamage(b.pos, insufficientDamageHint(game, a, wasDriftShot)));
   }
 };
 
@@ -141,14 +162,15 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     const dmg = b.damage() * (driftTier > 0 ? driftTier + 1 : 1);
     // Peek at the outcome before consuming the bullet: a hit too weak to break
     // the target's armour deflects instead of landing — no damage, no combo,
-    // and the shot ricochets off the surface so it can travel on.
-    if (!innerHit && dmg <= a.damageReduction) {
-      deflectBulletOff(game, b, a, dmg);
+    // and the shot ricochets off the surface so it can travel on. Armour is
+    // resolved at the impact point (the hemisphere's shell-only armour).
+    if (!innerHit && dmg <= a.damageReductionAt(b.pos)) {
+      deflectBulletOff(game, b, a, dmg, driftTier > 0);
       return null;
     }
     consumeBullet(b);
     logBulletHit(game, "HIT asteroid", b);
-    const { killed } = a.applyDamage(dmg, innerHit);
+    const { killed } = a.applyDamage(dmg, innerHit, b.pos);
     game.shake = Math.min(game.shake + (killed ? 0.4 : 0.2), 1.2);
     applyHitToCombo(game, onBeat, b.pos);
     if (!killed) {
@@ -187,7 +209,7 @@ export const shipAsteroidHit = (game: Game, a: Asteroid): boolean => {
 // encapsulates the in-place splice when a ram kills, so the outer loop stays a simple sweep.
 const handleSingleShipAsteroidImpact = (game: Game, a: Asteroid, asteroidIdx: number) => {
   const ramDamage = 4;
-  const { killed } = a.applyDamage(ramDamage);
+  const { killed } = a.applyDamage(ramDamage, false, game.ship.pos);
   if (killed) {
     const children = onAsteroidKilledByRam(game, a, game.ship.vel);
     for (const c of children) game.asteroids.push(c);
@@ -282,7 +304,7 @@ const alienBulletDamagesAsteroid = (game: Game, ab: AlienBullet): boolean => {
     const a = game.asteroids[i];
     if (a === ab.owner) continue;
     if (!a.collidesWith(ab.pos, ab.radius)) continue;
-    const { killed } = a.applyDamage(1);
+    const { killed } = a.applyDamage(1, false, ab.pos);
     game.shake = Math.min(game.shake + (killed ? 0.3 : 0.15), 1.2);
     if (killed) {
       const children = onAsteroidKilledByRam(game, a, ab.vel);

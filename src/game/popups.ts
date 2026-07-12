@@ -144,11 +144,11 @@ export const popupDriftBonus = (pos: Vec, tier = 1, withSubtitle = false): Popup
   };
 };
 
-// shown the first time a shot glances off an armoured crystal — teaches the
-//   player that under-powered hits bounce, and that Rhythm is how you hit harder.
-//   Red label over a cyan "gain more Rhythm" prompt, mirroring DRIFT SHOT's two-line shape.
+// shown when a shot glances off an armoured crystal — teaches the player that
+//   under-powered hits bounce. Red label over a cyan hint line, mirroring
+//   DRIFT SHOT's two-line shape; the caller picks the hint (see collisions.ts).
 const INSUFFICIENT_DAMAGE_POPUP_LIFE = 4;
-export const popupInsufficientDamage = (pos: Vec): Popup => {
+export const popupInsufficientDamage = (pos: Vec, hint: string): Popup => {
   const labelFont = "700 17px 'Space Grotesk', system-ui, sans-serif";
   const subFont = "600 13px 'Space Grotesk', system-ui, sans-serif";
   const fill = "#ff6a6a";
@@ -158,7 +158,7 @@ export const popupInsufficientDamage = (pos: Vec): Popup => {
     vel: { x: rand(-8, 8), y: -55 },
     life: INSUFFICIENT_DAMAGE_POPUP_LIFE,
     maxLife: INSUFFICIENT_DAMAGE_POPUP_LIFE,
-    text: "INSUFFICIENT DAMAGE",
+    text: "INSUFFICIENT DAMAGE",  
     font: labelFont,
     fill,
     shadowColor: shadow,
@@ -174,7 +174,7 @@ export const popupInsufficientDamage = (pos: Vec): Popup => {
       ctx.font = subFont;
       ctx.fillStyle = "#9be8ff";
       ctx.shadowColor = "rgba(120, 220, 255, 0.85)";
-      ctx.fillText("GAIN MORE RHYTHM", 0, 12);
+      ctx.fillText(hint, 0, 12);
     },
   };
 };

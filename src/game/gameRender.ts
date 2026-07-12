@@ -291,7 +291,10 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   // the post-thrust fade doesn't get stuck after intro overlays (which advance beatTime
   // without advancing game.time).
   if (!warping) renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.time / 1000, game.w, game.h);
-  game.ship.render(ctx, game.time, currentBeatPulse(game));
+  // During a skip warp the ship dives into (and later climbs out of) a portal —
+  // pass that portal so its far lip crops the hull as it sinks down the throat.
+  const cropPortal = game.waveSkip?.cropPortal ?? null;
+  game.ship.render(ctx, game.time, currentBeatPulse(game), cropPortal, game.w, game.h);
   if (!warping) {
     renderLaserReticule(ctx, game, game.beatTime);
     renderLaserChargeDots(ctx, game, game.beatTime);

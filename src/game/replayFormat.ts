@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 24;
+export const REPLAY_FORMAT_VERSION = 27;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -84,6 +84,16 @@ export const REPLAY_FORMAT_VERSION = 24;
 // v24 adds the lasershot refire lockout (a shot rejects new charge presses
 //   until LASER_REFIRE_BEATS after the fire beat), so v23 recordings whose
 //   presses land inside the lockout re-sim without those shots.
+// v25 inserts a second rookie warm-up (a single solid crystal at internal
+//   wave 1, after the single rock) for non-veteran Start-button runs, so a
+//   v24 non-veteran recording's post-warm-up wave sequence and rng draws shift.
+// v26 delays the boss laser fire 4 beats (beat 8 → beat 12, t=3.5 → t=5.5)
+//   with a 3-beat pre-fire wind-up, so the sweep beam spawns at a later sim
+//   moment and a v25 recording of a boss fight re-sims into different beams.
+// v27 makes the boss hemispheres' armour directional (the rounded shell
+//   deflects what the bare cut face lets through, resolved at the impact
+//   point), so a v26 recording's post-break boss fight re-sims with different
+//   deflections, damage, and knockback.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat

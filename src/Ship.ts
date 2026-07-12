@@ -13,6 +13,7 @@ import { setComboFromValue } from "./ship/shipComboHalo";
 import { renderShipBody } from "./ship/shipRender";
 import { renderShipReticules, tickHoverLockState, ReticuleHoverProbe } from "./ship/reticule/reticuleRender";
 import { ReticuleTarget, TrajectoryTrackMap } from "./ship/reticule/trajectoryPreview";
+import { Wormhole, clipBehindPortalFarLip } from "./game/wormhole";
 
 // BEAT_GRID is re-exported from Game.ts for backwards compatibility; Ship code reads it directly here.
 export { BEAT_GRID };
@@ -207,8 +208,14 @@ export class Ship {
     tickHoverLockState(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRings: this.hoverDotRingStates }, beatGrid, w, h, targets, beatTime, doubletime, superBoosted, hoverProbes, sound, emit);
   }
 
-  // hull + thrust + retro + shield + combo halo all composite together in one save/restore block.
-  render(ctx: CanvasRenderingContext2D, t: number, beatPulse: number = 0) {
+  // hull + thrust + retro + shield + combo halo all composite together in one
+  // save/restore block. `cropPortal` (the skip portal the ship is diving into)
+  // clips the hull behind the hole's far lip so it reads as sinking down the
+  // throat rather than shrinking on top of it; screenW/H bound that clip.
+  render(
+    ctx: CanvasRenderingContext2D, t: number, beatPulse: number = 0,
+    cropPortal: Wormhole | null = null, screenW = 0, screenH = 0,
+  ) {
     const k = this.skipWarpT;
     if (k === null) {
       renderShipBody(ctx, this, t, beatPulse);
@@ -220,6 +227,9 @@ export class Ship {
     const scale = (1 + 0.25 * Math.sin(k * Math.PI)) * (1 - k * k);
     if (scale < 0.02) return;
     ctx.save();
+    // Crop first, in the untransformed world frame, so the far lip masks the
+    // hull however it's scaled/spun below.
+    if (cropPortal) clipBehindPortalFarLip(ctx, cropPortal, screenW, screenH);
     ctx.translate(this.pos.x, this.pos.y);
     ctx.rotate(k * 6);
     ctx.scale(scale, scale);

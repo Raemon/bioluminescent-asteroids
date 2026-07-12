@@ -3,13 +3,20 @@ import type { Vec } from "../vec";
 // gameplay RNG draw count and desyncs replays.
 import { cosmeticRng as rng } from "./rng";
 
-// A 3D departure portal: comets that time out and aliens that fly past the far
+// A departure portal: comets that time out and aliens that fly past the far
 // edge leave THROUGH this instead of fading/popping off. Distinct from the
 // canister upgrade's flat radial-streak vortex (Canister.renderWarp) — that one
-// is a head-on swirl of spokes collapsing to a point. This is a perspective-
-// tilted iris with a tunnel of depth-rings receding INTO the screen, a swirling
-// event horizon, and a bright rim, so you read a hole punched in space that the
-// body shrinks down through.
+// is a head-on swirl of spokes collapsing to a point. This is a round hole in
+// space — an outer bezel RIM ringing an INNER iris with a swirling event horizon
+// and a tunnel of depth-rings receding into the screen — so a body reads as
+// dropping down a shaft, and it reads the same from every approach because its
+// slight tilt is fixed to the SCREEN, not to the body's line of flight.
+//
+// Aesthetic: it shares the aliens' crimson-manta bioluminescence — the rim is
+// carved with radial rib ticks like the manta's wing seams, and the whole thing
+// glows in the same blood-red band the aliens live in — so an alien diving home
+// reads as returning to something of its own kind. (Recolour hooks stay live so
+// the wave-skip portals can wear their distinct emerald.)
 //
 // The effect is purely cosmetic and self-contained (same lifecycle shape as
 // DriftBurst): spawn → update(dt) prunes by life → render() draws additively.
@@ -27,34 +34,45 @@ const HOLD = 0.42;
 const CLOSE = 0.4;
 export const WORMHOLE_LIFE = OPEN + HOLD + CLOSE;
 
-// Perspective tilt: the portal is an ellipse, not a circle, so it reads as a
-// ring lying at an angle in 3D rather than a flat target painted on the screen.
-const TILT = 0.46; // vertical squash of the ellipse (1 = head-on circle)
+// Screen-fixed tilt: the hole is an ellipse squashed on the vertical so it reads
+// as a round shaft seen from slightly above rather than a flat disc — but the
+// squash is ALWAYS along the screen's y-axis, never rotated to the body's
+// heading, so the portal looks identical no matter which way a body approached.
+const TILT = 0.6; // vertical squash of the ellipse (1 = head-on circle)
+
+// The inner iris (the actual hole) sits inside the outer bezel rim, which frames
+// it. This is the inner iris's fraction of the full long axis; the gap out to 1
+// is the rim's width.
+const INNER_FRAC = 0.74;
 
 // Long axis (px) of a portal torn by a body of this radius. The floor keeps a
 // tiny body from punching an invisibly small hole. spawnWormhole and the
 // entity's dive-anchor both go through this so the body always falls toward the
 // portal's actual throat.
-export const portalLongAxis = (bodyRadius: number): number => Math.max(34, bodyRadius * 1.85);
+export const portalLongAxis = (bodyRadius: number): number => Math.max(40, bodyRadius * 2.0);
 
-// Screen offset from the portal centre to its vanishing-point throat, for a body
-// of the given radius flying along `heading`. The entity eases its dive toward
-// this point; renderWormholes paints the throat spark at the same spot.
+// Screen offset from the portal centre to its vanishing-point throat. Because
+// the tilt is screen-fixed the throat always sits straight up-screen from the
+// centre (up the minor axis), independent of the body's heading — every body
+// dives "up and back" into the same visible shaft. The entity eases its dive
+// toward this point; renderWormholes paints the throat spark at the same spot.
 export const warpAnchorOffset = (
-  bodyRadius: number, heading: number,
+  bodyRadius: number, _heading: number,
 ): { dx: number; dy: number } => {
-  const d = portalLongAxis(bodyRadius) * 0.55 * TILT; // = -ringCenterY at depth 1
-  return { dx: Math.sin(heading) * d, dy: -Math.cos(heading) * d };
+  const d = portalLongAxis(bodyRadius) * INNER_FRAC * 0.55 * TILT; // = -ringCenterY at depth 1
+  return { dx: 0, dy: -d };
 };
 
 // Depth tunnel: concentric rings shrinking toward a vanishing point, each pushed
 // "back" so the eye falls into a receding throat rather than a flat disc.
 const TUNNEL_RINGS = 7;
 
-// Hue band for the portal's own light — a cold violet-blue event horizon that
-// won't be mistaken for the warm gold of the upgrade warp or a kill explosion.
-const RIM_HUE = 268;
-const THROAT_HUE = 210;
+// Hue band for the portal's own light — the aliens' blood-red crimson so a
+// departing manta reads as returning to something of its own kind. The rim runs
+// a touch warmer (toward orange-red) than the deep-red throat, echoing the
+// alien family's own big→small hue drift.
+const RIM_HUE = 6;
+const THROAT_HUE = 354;
 
 export type Wormhole = {
   x: number;
@@ -62,8 +80,10 @@ export type Wormhole = {
   // Long axis of the ellipse (px) at full open — scaled from the body's radius
   // so a big alien tears a bigger hole than a comet.
   radius: number;
-  // Orientation of the ellipse's long axis: aligned to the body's heading so the
-  // portal looks punched along its line of flight.
+  // Vestigial: the portal's tilt is now screen-fixed, so nothing rotates the
+  // frame by this. Kept as a small per-portal phase so the rim ticks and swirl
+  // don't all line up between simultaneous portals. spawnWormhole seeds it from
+  // the heading purely so replays stay deterministic.
   angle: number;
   hueShift: number; // small per-portal hue jitter so they don't all match
   seed: number;
@@ -117,10 +137,49 @@ export const wormholeEnterable = (wh: Wormhole): boolean =>
   wh.maxLife - wh.life >= OPEN && wh.life > CLOSE;
 
 // Absolute position of the portal's vanishing-point throat — the point a
-// diving body eases toward (mirrors warpAnchorOffset for a live portal).
+// diving body eases toward (mirrors warpAnchorOffset for a live portal). The
+// tilt is screen-fixed, so the throat sits straight up-screen from the centre.
 export const throatPointOf = (wh: Wormhole): { x: number; y: number } => {
-  const d = wh.radius * 0.55 * TILT;
-  return { x: wh.x + Math.sin(wh.angle) * d, y: wh.y - Math.cos(wh.angle) * d };
+  const d = wh.radius * INNER_FRAC * 0.55 * TILT;
+  return { x: wh.x, y: wh.y - d };
+};
+
+// Clip the current context so that anything drawn afterward is HIDDEN where it
+// crosses behind the far (upper) lip of the portal's inner iris — the ship
+// sinking into the hole vanishes down the throat instead of floating over it.
+//
+// The mask is the whole viewport MINUS the far half of the inner iris: the top
+// half of the tilted iris ellipse, from its horizontal centre-line up. A hull
+// pixel up-screen of that centre-line and inside the iris falls in the hole and
+// is masked away; the near (lower) lip never hides anything, so the ship reads
+// as tucking under the far rim while its near side still overlaps the mouth.
+//
+// Coords are world-space — call it inside the same camera-translated frame the
+// ship draws in. `screenW/H` bound the "keep everything" outer rect (generous
+// padding covers shake); `open` mirrors renderWormholes so the iris the crop
+// uses matches the one on screen exactly.
+export const clipBehindPortalFarLip = (
+  ctx: CanvasRenderingContext2D, wh: Wormhole, screenW: number, screenH: number,
+): void => {
+  const elapsed = wh.maxLife - wh.life;
+  const open = mouthOpen(elapsed, wh.life);
+  if (open < 0.02) return;
+  const inner = wh.radius * INNER_FRAC * open;
+  const ry = inner * TILT;
+  // Outer rect spans well past the viewport in every direction (the frame is
+  // camera-translated, so 0,0 isn't the screen origin) — it's the "show this".
+  const pad = Math.max(screenW, screenH);
+  ctx.beginPath();
+  ctx.rect(wh.x - screenW - pad, wh.y - screenH - pad, (screenW + pad) * 2, (screenH + pad) * 2);
+  // Far-half of the iris as its own closed sub-path: the upper semicircle of the
+  // tilted ellipse (canvas −y is up-screen, so π→2π sweeps the top edge), closed
+  // along its diameter. moveTo starts it fresh so no stray chord links it to the
+  // rect. evenodd punches this hole out of the rect → everything but the far lip
+  // survives.
+  ctx.moveTo(wh.x - inner, wh.y);
+  ctx.ellipse(wh.x, wh.y, inner, ry, 0, Math.PI, TAU);
+  ctx.closePath();
+  ctx.clip("evenodd");
 };
 
 // Mouth-open factor 0→1→0. Opens over the first OPEN seconds, collapses over
@@ -140,25 +199,26 @@ const mouthOpen = (elapsed: number, life: number): number => {
   return open;
 };
 
-// Centre of the tunnel ring at a given depth, in the portal's rotated frame
-// (caller has already rotated by wh.angle). Rings march from the mouth (depth 0,
-// centred on origin) up the minor axis toward the vanishing point, so the stack
-// bores back-and-"up" into the screen.
-const ringCenterY = (long: number, depth: number): number => -long * 0.55 * TILT * depth;
+// Centre of the tunnel ring at a given depth, in the portal's (unrotated,
+// screen-fixed) frame. Rings march from the inner-iris mouth (depth 0, centred
+// on origin) straight up-screen toward the vanishing point, so the stack bores
+// back-and-"up" into the screen the same way from every approach. `inner` is the
+// inner iris's long axis (= long * INNER_FRAC).
+const ringCenterY = (inner: number, depth: number): number => -inner * 0.55 * TILT * depth;
 
-// Build the ellipse path for one tunnel ring at the given depth (0 = mouth,
-// 1 = vanishing point), in the rotated frame. Deeper rings shrink (perspective
-// falloff), slide up toward the vanishing point, and twist — so the stack reads
-// as a corkscrew throat, not nested flat circles.
+// Build the ellipse path for one tunnel ring at the given depth (0 = inner mouth,
+// 1 = vanishing point), squashed on the screen y-axis. Deeper rings shrink
+// (perspective falloff), slide up toward the vanishing point, and twist — so the
+// stack reads as a corkscrew throat, not nested flat circles.
 const ringPath = (
-  ctx: CanvasRenderingContext2D, long: number, depth: number, swirl: number,
+  ctx: CanvasRenderingContext2D, inner: number, depth: number, swirl: number,
 ): void => {
   // Receding scale: a perspective-ish 1/(1+kd) falloff packs the far rings
   // tight near the vanishing point.
   const scale = 1 / (1 + depth * 2.4);
-  const rx = long * scale;
-  const ry = long * TILT * scale;
-  const cy = ringCenterY(long, depth);
+  const rx = inner * scale;
+  const ry = inner * TILT * scale;
+  const cy = ringCenterY(inner, depth);
   const twist = swirl * depth;
   ctx.beginPath();
   const SAMP = 40;
@@ -169,6 +229,76 @@ const ringPath = (
     if (i === 0) ctx.moveTo(px, py);
     else ctx.lineTo(px, py);
   }
+};
+
+// Trace a screen-fixed tilted ellipse of the given long axis into the current
+// path — the shared silhouette of the outer bezel and the inner iris.
+const ellipsePath = (ctx: CanvasRenderingContext2D, long: number): void => {
+  ctx.beginPath();
+  ctx.ellipse(0, 0, long, long * TILT, 0, 0, TAU);
+};
+
+// Number of radial rib ticks carved around the outer bezel — the manta-wing
+// seam vocabulary borrowed onto the rim so the hole reads as the aliens' own
+// architecture rather than a generic vortex.
+const RIM_TICKS = 22;
+
+// Paint the outer bezel rim: a raised ring framing the inner iris, carved with
+// radial rib ticks like the alien wings' structural seams, lit in the crimson
+// band. `long` is the full long axis, `inner` the iris long axis it frames.
+const renderRim = (
+  ctx: CanvasRenderingContext2D,
+  long: number, inner: number, rimHue: number, open: number, shimmer: number,
+  swirl: number,
+): void => {
+  // 1) Bezel band — a soft glowing annulus between the iris edge and the outer
+  //    lip, brightest along its mid-line so it reads as a rounded raised rim.
+  ctx.save();
+  ctx.scale(1, TILT);
+  const mid = (long + inner) * 0.5;
+  const band = ctx.createRadialGradient(0, 0, inner * 0.92, 0, 0, long);
+  band.addColorStop(0, `hsla(${rimHue - 6}, 90%, 30%, 0)`);
+  band.addColorStop((mid - inner * 0.92) / (long - inner * 0.92), `hsla(${rimHue}, 95%, 55%, ${0.5 * open * shimmer})`);
+  band.addColorStop(1, `hsla(${rimHue + 6}, 85%, 34%, 0)`);
+  ctx.fillStyle = band;
+  ctx.beginPath();
+  ctx.arc(0, 0, long, 0, TAU);
+  ctx.arc(0, 0, inner * 0.92, 0, TAU, true);
+  ctx.fill("evenodd");
+  ctx.restore();
+
+  // 2) Radial rib ticks — short spokes bridging the iris edge to the outer lip,
+  //    evenly spaced around the bezel like the manta's wing seams. The swirl
+  //    phase drifts them so the rim slowly turns.
+  ctx.lineCap = "round";
+  for (let i = 0; i < RIM_TICKS; i++) {
+    const a = (i / RIM_TICKS) * TAU + swirl * 0.15;
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    const x0 = ca * inner;
+    const y0 = sa * inner * TILT;
+    const x1 = ca * long;
+    const y1 = sa * long * TILT;
+    // Ticks catch the light unevenly — a slow per-tick shimmer keeps the rim
+    // crackling with the same bioluminescent flicker the alien ribs have.
+    const flick = 0.55 + 0.45 * Math.sin(swirl * 2.2 + i * 1.7);
+    ctx.strokeStyle = `hsla(${rimHue + 8}, 100%, 62%, ${0.5 * open * flick})`;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
+
+  // 3) Outer lip — a bright thin ring bounding the whole hole, with a soft wide
+  //    glow underneath, so the bezel has a clean crackling edge.
+  ellipsePath(ctx, long);
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = `hsla(${rimHue}, 95%, 68%, ${0.28 * open * shimmer})`;
+  ctx.stroke();
+  ctx.lineWidth = 1.8;
+  ctx.strokeStyle = `hsla(${rimHue + 6}, 100%, 88%, ${0.7 * open * shimmer})`;
+  ctx.stroke();
 };
 
 export const renderWormholes = (
@@ -183,6 +313,7 @@ export const renderWormholes = (
     const open = mouthOpen(elapsed, wh.life);
     if (open < 0.02) continue;
     const long = wh.radius * open;
+    const inner = long * INNER_FRAC;
     const rimHue = (wh.rimHue ?? RIM_HUE) + wh.hueShift;
     const throatHue = (wh.throatHue ?? THROAT_HUE) + wh.hueShift;
     // Slow rotation of the whole swirl, plus a fast shimmer on the rim.
@@ -191,62 +322,65 @@ export const renderWormholes = (
 
     ctx.save();
     ctx.translate(wh.x, wh.y);
-    // One rotated frame for the whole portal: the long axis follows the body's
-    // heading, the minor axis is the tilt direction the throat bores along.
-    ctx.rotate(wh.angle);
+    // No frame rotation: the tilt is screen-fixed so the hole reads identically
+    // regardless of the direction the departing body came from.
 
-    // 1) Throat glow — a soft elliptical wash filling the mouth so the hole
+    // 1) Throat glow — a soft elliptical wash filling the inner iris so the hole
     //    reads as lit-from-within depth rather than an empty outline. Squash y
     //    to draw the ellipse with a plain radial gradient.
     ctx.save();
     ctx.scale(1, TILT);
-    const throat = ctx.createRadialGradient(0, 0, 0, 0, 0, long);
-    throat.addColorStop(0, `hsla(${throatHue}, 90%, 70%, ${0.5 * open})`);
-    throat.addColorStop(0.55, `hsla(${rimHue}, 85%, 52%, ${0.28 * open})`);
-    throat.addColorStop(1, `hsla(${rimHue}, 80%, 30%, 0)`);
+    const throat = ctx.createRadialGradient(0, 0, 0, 0, 0, inner);
+    throat.addColorStop(0, `hsla(${throatHue}, 90%, 62%, ${0.5 * open})`);
+    throat.addColorStop(0.55, `hsla(${rimHue}, 88%, 44%, ${0.3 * open})`);
+    throat.addColorStop(1, `hsla(${rimHue}, 85%, 24%, 0)`);
     ctx.fillStyle = throat;
     ctx.beginPath();
-    ctx.arc(0, 0, long, 0, TAU);
+    ctx.arc(0, 0, inner, 0, TAU);
     ctx.fill();
     ctx.restore();
 
     // 2) Depth tunnel — receding twisted rings boring into the screen. Far
-    //    rings are dimmer and bluer (atmospheric depth); the swirl twist makes
-    //    the stack corkscrew so the eye falls in.
+    //    rings are dimmer and deeper-red (atmospheric depth); the swirl twist
+    //    makes the stack corkscrew so the eye falls in.
     for (let r = 0; r < TUNNEL_RINGS; r++) {
       const depth = r / (TUNNEL_RINGS - 1);
       const fade = (1 - depth * 0.78) * open;
       if (fade < 0.03) continue;
-      ringPath(ctx, long, depth, swirl);
+      ringPath(ctx, inner, depth, swirl);
       ctx.lineWidth = 1.1 + (1 - depth) * 1.6;
-      const l = 78 - depth * 34; // brighter at the mouth, dim down the throat
-      ctx.strokeStyle = `hsla(${throatHue + depth * 30}, 90%, ${l}%, ${0.55 * fade})`;
+      const l = 74 - depth * 32; // brighter at the mouth, dim down the throat
+      ctx.strokeStyle = `hsla(${throatHue - depth * 18}, 92%, ${l}%, ${0.55 * fade})`;
       ctx.stroke();
     }
 
-    // 3) Event-horizon rim — the bright leading lip of the mouth. A wide soft
-    //    glow stroke with a hot thin core on top, both swept by the shimmer so
-    //    the rim crackles with energy.
-    ringPath(ctx, long, 0, swirl);
-    ctx.lineWidth = 7;
-    ctx.strokeStyle = `hsla(${rimHue}, 95%, 72%, ${0.3 * open * shimmer})`;
+    // 3) Event-horizon lip — the bright leading edge of the inner iris. A wide
+    //    soft glow stroke with a hot thin core on top, both swept by the shimmer
+    //    so the iris edge crackles with energy.
+    ringPath(ctx, inner, 0, swirl);
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = `hsla(${throatHue}, 95%, 70%, ${0.3 * open * shimmer})`;
     ctx.stroke();
     ctx.lineWidth = 2;
-    ctx.strokeStyle = `hsla(${rimHue}, 100%, 90%, ${0.85 * open * shimmer})`;
+    ctx.strokeStyle = `hsla(${throatHue + 6}, 100%, 90%, ${0.85 * open * shimmer})`;
     ctx.stroke();
 
     // 4) Vanishing-point spark — a tiny hot point deep in the throat the body
     //    falls toward (the same point beginWarpOut aims the body at). Brightest
     //    mid-life, gone by collapse.
-    const vy = ringCenterY(long, 1);
+    const vy = ringCenterY(inner, 1);
     const spark = open * shimmer;
-    const sg = ctx.createRadialGradient(0, vy, 0, 0, vy, long * 0.3);
+    const sg = ctx.createRadialGradient(0, vy, 0, 0, vy, inner * 0.3);
     sg.addColorStop(0, `hsla(${throatHue}, 100%, 96%, ${0.9 * spark})`);
     sg.addColorStop(1, `hsla(${throatHue}, 100%, 80%, 0)`);
     ctx.fillStyle = sg;
     ctx.beginPath();
-    ctx.arc(0, vy, long * 0.3, 0, TAU);
+    ctx.arc(0, vy, inner * 0.3, 0, TAU);
     ctx.fill();
+
+    // 5) Outer bezel rim — the raised, rib-carved frame around the iris. Drawn
+    //    last so its lip sits proud in front of the throat glow.
+    renderRim(ctx, long, inner, rimHue, open, shimmer, swirl);
 
     ctx.restore();
   }

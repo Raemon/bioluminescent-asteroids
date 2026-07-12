@@ -209,6 +209,11 @@ export class Game implements HudElements {
   tutorialActive = false;
   tutorialHoverDone = false;
   tutorialFireHitDone = false;
+  // Non-veteran Start-button warm-up runs two single-target waves before the
+  //   first real density wave: 1 = single rock (internal wave 1), 2 = single
+  //   solid crystal (still internal wave 1), 0 = warm-up done / veteran skip.
+  //   Both warm-up clears show "Wave Complete" instead of a wave number.
+  warmupCrystalStage: 0 | 1 | 2 = 0;
   // chosen at the title screen: Start button → false, Tutorial button → true.
   //   beginFirstWaveByTutorialFlag reads this to decide whether to spawn the
   //   guided practice rock or the regular wave 1.

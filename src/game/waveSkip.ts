@@ -52,6 +52,11 @@ export type WaveSkipState = {
   t: number;
   diveFrom: { x: number; y: number };
   diveTo: { x: number; y: number };
+  // The portal the ship is riding — the dive portal on the way in, swapped to
+  // the emerge portal on the way out. The renderer clips the diving hull behind
+  // this hole's far lip so it reads as sinking down the throat. null while the
+  // ship is fully hidden between the two.
+  cropPortal: Wormhole | null;
   // One announce per skipped-past wave (internal numbering), ascending. The
   // landing wave's own announce fires with its spawn, as on any wave.
   titles: Array<{ atBeat: number; wave: number }>;
@@ -163,6 +168,7 @@ const beginWaveSkip = (game: Game, portal: SkipPortal) => {
     t: 0,
     diveFrom: { x: ship.pos.x, y: ship.pos.y },
     diveTo: { x: ship.pos.x + tdx, y: ship.pos.y + tdy },
+    cropPortal: portal.wormhole,
     titles,
     emergePortalBeat: schedule.spawnBeat + skipCfg().emergeDelayBeats * BEAT_GRID,
     emergeShipBeat: schedule.spawnBeat + (skipCfg().emergeDelayBeats + skipCfg().emergeRideBeats) * BEAT_GRID,
@@ -216,16 +222,18 @@ export const tickWaveSkip = (game: Game, musicDt: number) => {
     if (warp.t >= 1) {
       warp.phase = "hidden";
       ship.skipWarpT = null;
+      warp.cropPortal = null;
     }
     return;
   }
   if (warp.phase === "hidden") {
     if (!warp.emergePortalSpawned && game.beatTime >= warp.emergePortalBeat) {
-      spawnWormhole(game.wormholes, ship.pos, skipCfg().emergePortalBodyRadius, ship.heading, {
+      const emerge = spawnWormhole(game.wormholes, ship.pos, skipCfg().emergePortalBodyRadius, ship.heading, {
         holdSec: skipCfg().emergeRideBeats * BEAT_GRID + skipCfg().emergeSec + 0.5,
         rimHue: skipCfg().rimHue,
         throatHue: skipCfg().throatHue,
       });
+      warp.cropPortal = emerge;
       game.sound.play("canisterAppear", 1, ship.pos);
       warp.emergePortalSpawned = true;
     }

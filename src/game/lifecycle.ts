@@ -402,6 +402,10 @@ export const finalizeIntroToPlay = (game: Game) => {
 //   direct startGame path so the two stay in sync.
 const beginFirstWaveByTutorialFlag = (game: Game, tutorial: boolean, veteran: boolean) => {
   game.tutorialControlsUsed = emptyTutorialControlsUsed();
+  // Rookie Start-button runs get the two single-target warm-ups (rock, then
+  //   crystal); tutorial + veteran runs skip them. Set unconditionally so a
+  //   restart never inherits a mid-warm-up stage from the previous run.
+  game.warmupCrystalStage = !tutorial && !veteran ? 1 : 0;
   if (tutorial) {
     game.tutorialActive = true;
     spawnTutorialSmall(game);

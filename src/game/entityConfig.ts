@@ -131,6 +131,8 @@ export const ENTITY_CONFIG = {
   alien: {
     firstWave: 4,
     chancePerWave: 1 / 3,
+    // alien size rolls only pick up a rhythm bonus once combo clears this.
+    rhythmComboThreshold: 12,
     spawnWindow: [5, 22] as [number, number],
     radius: { big: 76, medium: 48, small: 32 } as Record<AlienSize, number>,
     hp: { big: 4, medium: 2, small: 1 } as Record<AlienSize, number>,
@@ -382,9 +384,8 @@ export const ENTITY_CONFIG = {
   },
 
   alienSizeShare: (wave: number, size: AlienSize): number => {
-    if (wave < 6) return size === "small" ? 0.7 : size === "medium" ? 0.3 : 0;
-    if (wave < 10) return size === "small" ? 0.45 : size === "medium" ? 0.4 : 0.15;
-    return size === "small" ? 0.3 : size === "medium" ? 0.35 : 0.35;
+    if (wave < 5) return size === "small" ? 0.6 : size === "medium" ? 0.4 : 0;
+    return size === "small" ? 0.4 : size === "medium" ? 0.35 : 0.25;
   },
 } as const;
 
@@ -450,17 +451,20 @@ export const ENTITY_STATS: Partial<Record<AsteroidKind, EntityStats>> = {
   // Boss family — six distinct pieces. The whole-body boss ladders by size so
   // its split children can reuse the band; the fragments are single-size.
   boss: {
-    hp: { huge: 60, large: 60, medium: 18, small: 6 },
+    hp: { huge: 48, large: 48, medium: 18, small: 6 },
     score: { huge: 2500, large: 2500, medium: 800, small: 300 },
     radius: { huge: 132, large: 132, medium: 104, small: 30 },
     hue: 12,
-    damageReduction: 3,
+    damageReduction: 4,
   },
+  // Hemisphere armour is directional: the rounded shell keeps the reduction,
+  // the exposed cut face has none (see Asteroid.damageReductionAt).
   bossHemisphere: {
     hp: 18,
     score: 800,
     radius: 104,
     hue: 12,
+    damageReduction: 4,
   },
   bossEye: {
     hp: 10,

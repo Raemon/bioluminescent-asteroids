@@ -244,6 +244,7 @@ export const showWaveSummary = (
   finalRhythm: number,
   bestStreak: number,
   driftBonuses: number,
+  warmup = false,
 ) => {
   cancelActiveTimers();
   cancelBeatCues(game, CUE_TAG);
@@ -253,7 +254,9 @@ export const showWaveSummary = (
   //   read game.score against this so the panel mirrors the real payout.
   const startScore = game.score;
 
-  setRow(root, "wave", String(completedWave));
+  // Rookie warm-up clears keep the normal "Completed" / "Wave" two-tier title,
+  //   just with the number dropped — so they read the same as every other level.
+  setRow(root, "wave", warmup ? "" : String(completedWave));
   setRow(root, "max", `x${maxRhythm}`);
   setRow(root, "final", `x${finalRhythm}`);
   // shown count includes the seed shot, so a 1-counted streak reads as 2.

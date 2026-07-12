@@ -123,6 +123,9 @@ export const rhythmSpeedMul = (game: Game): number => 1 + game.beatCombo * CFG.r
 //   so a strong run makes the *next* wave fast even before the player rebuilds combo.
 const waveStartSpeedMul = (game: Game): number => 1 + game.waveStartRhythm * CFG.rhythm.speedPerCombo;
 const rhythmChanceBonus = (game: Game): number => game.beatCombo * CFG.rhythm.chancePerCombo;
+// Alien size rolls only feel rhythm once combo clears the alienGate's early-wave threshold.
+const alienRhythmChanceBonus = (game: Game): number =>
+  Math.max(0, game.beatCombo - CFG.alien.rhythmComboThreshold) * CFG.rhythm.chancePerCombo;
 
 // predicates let the wave director read declaratively, not as inline boolean expressions.
 export const isBossWave = (wave: number): boolean => CFG.boss.waves.includes(wave);
@@ -505,10 +508,11 @@ const rollHeadlineEvents = (game: Game) => {
   // Rhythm additively boosts the alien-size rolls and the shockwave roll.
   //   Comet is left on its existing curve — only aliens + shockwave were asked for.
   const bonus = rhythmChanceBonus(game);
+  const alienBonus = alienRhythmChanceBonus(game);
   const alienGate = game.wave >= 10 || (game.wave < 10 && game.beatCombo >= 12);
   const alienSizeRoll = (size: AlienSize): HeadlineRoll => ({
     gate: alienGate && CFG.alienSizeShare(game.wave, size) > 0,
-    baseChance: CFG.alien.chancePerWave * CFG.alienSizeShare(game.wave, size) + bonus,
+    baseChance: CFG.alien.chancePerWave * CFG.alienSizeShare(game.wave, size) + alienBonus,
     fire: () => {
       maybeSchedule(game.waveEvents, 1, CFG.alien.spawnWindow, () => spawnAlien(game, size));
       return true;
@@ -775,6 +779,11 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
   // splits-into-orbiting-arcs mechanic right away.
   if (game.wave === CFG.torus.firstWave && normalCount > 0 && !slotKinds.includes("torus")) {
     slotKinds[Math.floor(rng() * normalCount)] = "torus";
+  }
+  // Rookie warm-up stage 2: the lone wave-1 rock is a single solid crystal —
+  // a gentle first look at the tough faceted kind before the density wave.
+  if (game.wave === 1 && game.warmupCrystalStage === 2 && normalCount > 0) {
+    slotKinds[0] = "solidCrystal";
   }
 
   // Build the concrete spawn descriptors. Special slots (gem / solid / prison)
