@@ -87,7 +87,9 @@ export type SummarySchedule = {
   spawnBeat: number;         // next-wave spawn, after hold + fade
 };
 
-export const buildSummarySchedule = (beatTimeNow: number, bonus: number): SummarySchedule => {
+// `extraSpawnDelaySec` (wave-skip path) pushes only the spawn out past the
+//   panel's fade — the inserted gap is where the skipped-wave titles play.
+export const buildSummarySchedule = (beatTimeNow: number, bonus: number, extraSpawnDelaySec = 0): SummarySchedule => {
   const chunks = planDrainChunks(bonus);
   // Snap to the next beat boundary so every slot below lands on the grid the
   //   bgBeat pulse is scheduled against, instead of counting from whatever
@@ -103,7 +105,7 @@ export const buildSummarySchedule = (beatTimeNow: number, bonus: number): Summar
   // Chunk count is a multiple of 4, so this is always a downbeat — the slot
   //   the phrase resolves on, one tick after the last blip.
   const chimeBeat = drainStartBeat + chunks.length * tick;
-  const spawnBeat = chimeBeat + (HOLD_BEFORE_FADE_MS + FADE_OUT_MS) / 1000;
+  const spawnBeat = chimeBeat + (HOLD_BEFORE_FADE_MS + FADE_OUT_MS) / 1000 + extraSpawnDelaySec;
   return { chunks, rowBeats, drainStartBeat, drainTickBeats, chimeBeat, spawnBeat };
 };
 

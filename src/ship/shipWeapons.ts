@@ -10,6 +10,12 @@ const PRONG_ANGLE_STEP = Math.PI / 4;
 
 // prongCount n yields n+1 shots fanned symmetrically about the heading (centred on the front).
 // count 0 → [0]; 1 → ±22.5°; 2 → -45,0,+45; 3 → ±22.5,±67.5; 7 → full ring every 45°.
+//
+// INVARIANT: a weapon's fire loop and its reticule must iterate the SAME fan —
+// every entry fires a shot AND draws an aim glyph. Don't compute a single aim
+// point from ship.heading in a sight; expose a fan-shaped aim helper next to
+// the fire code and have both consume it (see laserAimFan in laserShot.ts;
+// the bullet path fans inside computeReticulePositions).
 export const prongOffsets = (prongCount: number): number[] => {
   const shots = prongCount + 1;
   const start = -((shots - 1) / 2) * PRONG_ANGLE_STEP;

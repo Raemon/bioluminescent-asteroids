@@ -27,6 +27,8 @@ import { HighlightTimeline } from "./highlightTimeline";
 import { resetHuePaletteCursor } from "../Asteroid";
 import { getBindings, normalizeBindings, setReplayBindings, emptyTutorialControlsUsed, type TutorialControlsUsed } from "./controlBindings";
 import { precomputeRhythmHistogram } from "./gameUpdate";
+import { resetWaveSkip } from "./waveSkip";
+import { FIRST_BONUS_LIFE_SCORE } from "./bonusLife";
 import { shiftEntranceFrames } from "./entrance";
 
 // React-side <FirstWaveHint> subscribes to this so the canvas/game loop stays
@@ -286,7 +288,7 @@ export const startCalibrationIntro = (game: Game) => {
   game.score = 0;
   game.wave = 1;
   game.lives = 3;
-  game.nextBonusLifeScore = 50000;
+  game.nextBonusLifeScore = FIRST_BONUS_LIFE_SCORE;
   game.waveTransitioning = false;
   resetRunTimers(game);
   resetRunCollections(game);
@@ -487,7 +489,7 @@ export const startGame = (game: Game, overrides?: {
   game.score = 0;
   game.wave = 1;
   game.lives = 3;
-  game.nextBonusLifeScore = 50000;
+  game.nextBonusLifeScore = FIRST_BONUS_LIFE_SCORE;
   game.waveTransitioning = false;
   resetRunTimers(game);
   resetRunCollections(game);
@@ -556,6 +558,7 @@ const resetRunTimers = (game: Game) => {
   game.beatIntensityRamp = null;
   game.hasSpawnedFirstLevel = false;
   game.replayDyingTimer = null;
+  resetWaveSkip(game);
   // Drop any in-flight end-of-wave drain/spawn so a stale schedule from the prior
   //   run (or a torn-down replay) can't fire into this fresh world. Beat cues are
   //   keyed to the old beatTime, so they'd be far-future garbage after the reset.
@@ -582,6 +585,8 @@ const resetRunCollections = (game: Game) => {
   game.aliens = [];
   game.alienBullets = [];
   game.bossBeams = [];
+  // Skip portals can outlive their wave by design — never a run boundary.
+  game.wormholes = [];
   game.waveEvents = newWaveEventSchedule();
 };
 

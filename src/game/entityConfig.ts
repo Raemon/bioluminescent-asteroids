@@ -143,6 +143,37 @@ export const ENTITY_CONFIG = {
     bulletSpeed: { big: 110, medium: 140, small: 200 } as Record<AlienSize, number>,
   },
 
+  // Wave-skip portal a player-killed alien tears open at its death spot. Fly
+  // into it to end the wave on the spot and jump ahead — bigger aliens tear
+  // holes that reach further. Never past a boss wave (see waveSkip.ts).
+  skipWormhole: {
+    // [min, max] waves skipped past the normal next wave, rolled per size.
+    skips: {
+      small: [1, 1],
+      medium: [2, 3],
+      big: [3, 5],
+    } as Record<AlienSize, [number, number]>,
+    // Beats the mouth stays enterable before irising shut on its own.
+    lifetimeBeats: 24,
+    // Fraction of the mouth's long axis that counts as flying in.
+    entryRadiusFrac: 0.8,
+    // Beats between successive skipped-wave title announces.
+    titleCadenceBeats: 4,
+    // Beats after the landing wave spawns before the return portal blooms.
+    emergeDelayBeats: 4,
+    // Beats between the return portal blooming and the ship flying out.
+    emergeRideBeats: 1,
+    // Seconds for the cosmetic fly-out scale/spin.
+    emergeSec: 0.5,
+    invulnOnEmerge: 2.0,
+    // Body radius fed to portalLongAxis for the return portal.
+    emergePortalBodyRadius: 30,
+    // Emerald light so "fly in here" never reads as the violet departure
+    // portal or the warm gold upgrade warp.
+    rimHue: 148,
+    throatHue: 126,
+  },
+
   comet: {
     firstWave: 3,
     chancePerWave: 0.6,

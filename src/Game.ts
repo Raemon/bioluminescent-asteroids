@@ -18,9 +18,11 @@ import { Alien, AlienSize } from "./Alien";
 import { AlienBullet } from "./AlienBullet";
 import { v, WORLD_W, WORLD_H } from "./vec";
 import { Popup } from "./game/popups";
+import { FIRST_BONUS_LIFE_SCORE } from "./game/bonusLife";
 import type { BassLightning } from "./game/bassLightning";
 import type { DriftBurst } from "./game/driftBurst";
 import type { Wormhole } from "./game/wormhole";
+import type { SkipPortal, WaveSkipState } from "./game/waveSkip";
 import { LaserBeam } from "./game/laserShot";
 import { BossBeam } from "./game/bossBeam";
 import { KilledSnapshot } from "./game/killSnapshot";
@@ -87,6 +89,13 @@ export class Game implements HudElements {
   //   suck-in lives on the entity; this holds the portal visual — see
   //   game/wormhole.ts.
   wormholes: Wormhole[] = [];
+  // Wave-skip portals torn open by player-killed aliens: each record pairs a
+  //   wormhole visual (shared with the list above) with its rolled skip depth.
+  //   Entering one starts the warp below — see game/waveSkip.ts.
+  skipPortals: SkipPortal[] = [];
+  // Wave-skip warp in flight: dive → hidden (summary + title cascade) →
+  //   emerge. null = flying normally. game/waveSkip.ts owns the lifecycle.
+  waveSkip: WaveSkipState | null = null;
   // on-beat hits while a hover ring is locked queue a deferred rhythm bonus here. `amount` is the
   //   flat +1 combo added a beat later (tier no longer scales rhythm); `tier` drives the popup's
   //   colour + the damage-mult readout; `showDamageMult` is set when this hit beat the run's prior
@@ -122,9 +131,9 @@ export class Game implements HudElements {
   score = 0;
   wave = 1;
   lives = 3;
-  // Next score threshold at which the player earns a bonus life. Advances
-  //   by BONUS_LIFE_INTERVAL each time it's crossed.
-  nextBonusLifeScore = 50000;
+  // Next score threshold at which the player earns a bonus life. Doubles
+  //   each time it's crossed.
+  nextBonusLifeScore = FIRST_BONUS_LIFE_SCORE;
   state: GameState = "title";
   dyingTimer = 0;
   // Replay mirror of dyingTimer: live play flips to "dying" and respawns from

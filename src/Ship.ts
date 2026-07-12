@@ -71,6 +71,10 @@ export class Ship {
   get hitRadius() { return this.radius * 1.4 + this.haloOffset + this.hitPad + this.hitFrontBonus; }
   alive = true;
   invuln = 2.0;
+  // Wave-skip warp progress for the render transform (0 = full size, 1 = gone
+  // down the throat); null = not warping. Purely cosmetic — the sim side of
+  // the warp is game.waveSkip (see game/waveSkip.ts).
+  skipWarpT: number | null = null;
   // Fold the ship's position took this frame (0 when it didn't wrap) — the
   // entrance state shifts every entering entity's frame by it so entrance
   // images stay continuous when the camera jumps. See game/entrance.ts.
@@ -110,6 +114,9 @@ export class Ship {
   // Set when an off-beat fire press is rejected so the fail sound only plays
   //   once per hold — cleared when the player releases and re-presses.
   laserChargeFailedThisHold = false;
+  // Quarter-note beat index when the refire lockout from the last shot ends;
+  //   charge presses before it are rejected. See LASER_REFIRE_BEATS.
+  laserCooldownEndBeat = 0;
 
   // Super-laser charge — gained by flying the ship through the flickering energy
   //   thread strung between a broken torus ring's orbiting fragments. While
@@ -202,6 +209,22 @@ export class Ship {
 
   // hull + thrust + retro + shield + combo halo all composite together in one save/restore block.
   render(ctx: CanvasRenderingContext2D, t: number, beatPulse: number = 0) {
+    const k = this.skipWarpT;
+    if (k === null) {
+      renderShipBody(ctx, this, t, beatPulse);
+      return;
+    }
+    // Mid-warp: the same swell-then-squeeze dive the comets and aliens do,
+    // pivoted on the hull so the ship corkscrews down (or up out of) the
+    // portal throat.
+    const scale = (1 + 0.25 * Math.sin(k * Math.PI)) * (1 - k * k);
+    if (scale < 0.02) return;
+    ctx.save();
+    ctx.translate(this.pos.x, this.pos.y);
+    ctx.rotate(k * 6);
+    ctx.scale(scale, scale);
+    ctx.translate(-this.pos.x, -this.pos.y);
     renderShipBody(ctx, this, t, beatPulse);
+    ctx.restore();
   }
 }

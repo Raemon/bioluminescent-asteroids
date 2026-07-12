@@ -29,6 +29,7 @@ import {
 import { snapshotAsteroidKill, snapshotAlienKill, snapshotCometKill } from "./killSnapshot";
 import { alignBassBeat, alignSplitChildToRhythm, newBeatClaimSet, markVeteranPilot } from "./waveDirector";
 import { BASS_KIND_SOUND } from "./bassClock";
+import { maybeSpawnSkipPortal } from "./waveSkip";
 import type { KillBucket } from "./killBuckets";
 
 // Last-gasp plasma bolt fired by an eye-core in the same frame it dies —
@@ -390,6 +391,9 @@ export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boo
   game.sound.play("alienExplode", 1, al.pos);
   game.sound.stopAlienDrone(al);
   emitAlienExplosion(game.particles, al);
+  // The kill tears open a lingering wave-skip portal — fly into it to end the
+  // wave and jump ahead. See game/waveSkip.ts.
+  maybeSpawnSkipPortal(game, al);
   const snap = snapshotAlienKill(al, "alienExplode", scoreEarned);
   if (snap) {
     if (isOnBeatHit && comboAtKill >= 1) snap.rhythmHit = { combo: comboAtKill };

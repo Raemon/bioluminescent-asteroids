@@ -20,7 +20,7 @@ import { BASS_KIND_SOUND, BASS_SPLIT_PITCH_RATIO, tickBassBeats, tickAuxBeats } 
 import { tickWaveEvents } from "./waveEvents";
 import { detonateShockwave } from "./shockwave";
 import { spawnWave, isBossWave, updateBgBeatIntensity, spawnTutorialSmall, spawnTutorialBig, rhythmSpeedMul, displayWave } from "./waveDirector";
-import { showWaveSummary, hideWaveSummary, buildSummarySchedule } from "./waveSummary";
+import { showWaveSummary, hideWaveSummary, buildSummarySchedule, SummarySchedule } from "./waveSummary";
 import { beginWaveTransition, tickWaveTransition } from "./waveTransition";
 import {
   handleCollisions,
@@ -44,6 +44,7 @@ import { updateBassLightnings } from "./bassLightning";
 import { updateDriftBursts } from "./driftBurst";
 import { resetStreak, streakWindowClosed } from "./streakBurst";
 import { updateWormholes, spawnWormhole } from "./wormhole";
+import { tickWaveSkip, collapseSkipPortals } from "./waveSkip";
 import { tickPendingRhythmBonuses, flushPendingRhythmBonuses } from "./rhythmBonus";
 import { emitExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
@@ -816,6 +817,10 @@ const updatePlaying = (game: Game, dt: number) => {
   tickBassBeats(game, musicDt, beatPlaybackRate);
   // after tickBassBeats so the payout compares this frame's advanced beatTime.
   tickWaveTransition(game);
+  // Wave-skip warp: portal entry + the dive/hidden/emerge sequence. After
+  //   tickWaveTransition so the landing spawn always fires before the emerge
+  //   beats anchored past it are checked.
+  tickWaveSkip(game, musicDt);
   // pulsar runs against perceivedBeatTime so its flash lands with the *heard* bass voices.
   game.pulsar.update(dt, game.perceivedBeatTime, BEAT_GRID);
   game.ship.tickComboHalo(musicDt, currentBeatPulse(game));
@@ -1331,7 +1336,10 @@ const runCollisionPasses = (game: Game) => {
 
 // Fade "Wave N" into the centre of the screen so it picks up directly from
 // where the previous wave's "Completed Wave N" title sat in the summary panel.
-const showWaveAnnounce = (game: Game) => {
+// The wave-skip cascade retriggers it once per skipped wave, so the hide timer
+// is tracked — a stale timer from title N must not cut title N+1 short.
+let waveAnnounceHideTimer = 0;
+export const showWaveAnnounce = (game: Game, wave = game.wave) => {
   let el = document.getElementById("wave-announce");
   if (!el) {
     el = document.createElement("div");
@@ -1341,11 +1349,12 @@ const showWaveAnnounce = (game: Game) => {
     document.body.appendChild(el);
   }
   const inner = el.firstElementChild as HTMLSpanElement;
-  inner.textContent = `Wave ${displayWave(game.wave)}`;
+  inner.textContent = `Wave ${displayWave(wave)}`;
   el.classList.remove("show");
   void el.offsetWidth;
   el.classList.add("show");
-  window.setTimeout(() => { el?.classList.remove("show"); }, 2800);
+  window.clearTimeout(waveAnnounceHideTimer);
+  waveAnnounceHideTimer = window.setTimeout(() => { el?.classList.remove("show"); }, 2800);
 };
 
 // the wave-clear cue (sound + pulsar pulse + boss state) fires
@@ -1353,7 +1362,11 @@ const showWaveAnnounce = (game: Game) => {
 //   summary panel has fully faded — the empty-asteroids playfield serves as
 //   the breathing room while the player reads their bonus. waveTransitioning
 //   gates the empty-asteroids check in the update loop so this only fires once.
-const advanceWave = (game: Game) => {
+// The wave-skip path lands the spawn on a farther `targetWave` and pushes it
+//   out by `extraSpawnDelaySec` (the skipped-title cascade rides that gap);
+//   the summary/payout flow is identical, and the returned schedule lets the
+//   skip sequencer anchor its cascade + emergence to the same beats.
+export const advanceWave = (game: Game, targetWave?: number, extraSpawnDelaySec = 0): SummarySchedule => {
   const wasBossWave = isBossWave(game.wave);
   const completedWave = game.wave;
   // The wave-ending hit's staged bonuses (drift / rapid-rhythm / twin-shot)
@@ -1365,7 +1378,7 @@ const advanceWave = (game: Game) => {
   const finalRhythm = Math.max(1, game.beatCombo);
   const bestStreak = game.bestStreakThisWave;
   const driftBonuses = game.driftBonusesThisWave;
-  const nextWave = completedWave + 1;
+  const nextWave = targetWave ?? completedWave + 1;
   // A player who clears Wave 1 without touching every control shouldn't keep
   //   staring at the controls pane — force the fade (and release the hints
   //   queued behind it) at the wave boundary.
@@ -1375,13 +1388,16 @@ const advanceWave = (game: Game) => {
   game.pulsar.waveClear();
   if (wasBossWave) game.pulsar.setBossPlanetState("defeated");
   game.waveTransitioning = true;
+  // The wave is over — every open skip portal irises shut, so one can never
+  //   be entered while the transition below is in flight.
+  collapseSkipPortals(game);
   // One beat-grid schedule feeds both halves: the cosmetic panel (DOM timers +
   //   beat cues) and the sim-clock driver that owns the score drain + deferred
   //   spawn. beatTime is a deterministic sum of recorded musicDt, so the sim
   //   half reproduces in replays; the snap in the builder is what puts the
   //   whole summary on the same grid the bgBeat pulse plays on.
   const bonus = (maxRhythm + finalRhythm + driftBonuses + bestStreak) * 100;
-  const schedule = buildSummarySchedule(game.beatTime, bonus);
+  const schedule = buildSummarySchedule(game.beatTime, bonus, extraSpawnDelaySec);
   showWaveSummary(game, schedule, displayWave(completedWave), maxRhythm, finalRhythm, bestStreak, driftBonuses);
   beginWaveTransition(game, schedule, () => {
     game.wave = nextWave;
@@ -1401,4 +1417,5 @@ const advanceWave = (game: Game) => {
     game.waveTransitioning = false;
   });
   syncHud(game);
+  return schedule;
 };

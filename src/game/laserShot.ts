@@ -41,6 +41,19 @@ export const LASER_MAX_DOTS = 4;
 export const laserDamage = (dots: number): number =>
   Math.round(5 * Math.pow(2.2, Math.min(dots, LASER_MAX_DOTS)));
 
+// Refire period in quarter-note beats: after a shot, the beats in between are
+// locked out and a fresh charge press can only land once this many beats have
+// passed since the fire beat.
+export const LASER_REFIRE_BEATS = 4;
+
+// Fraction of the refire lockout still pending — 1 right after a shot, easing
+// to 0 as the next allowed fire beat approaches. Drives the reticule's
+// re-arming dim so the lockout is visible, not just a dead trigger.
+export const laserCooldownFrac = (game: Game): number => {
+  const remaining = game.ship.laserCooldownEndBeat - game.perceivedBeatTime / BEAT_GRID;
+  return Math.max(0, Math.min(1, remaining / LASER_REFIRE_BEATS));
+};
+
 // The rhythm-gated cap on reachable charge dots. Higher combo unlocks deeper
 // charge tiers, so a long beam is something rhythm earns.
 export const maxLaserDots = (game: Game): number => {
@@ -163,19 +176,35 @@ export class LaserBeam {
 }
 
 // Beam origin: the ship's muzzle, a touch ahead of the hull, along the beam's
-// (possibly prong-offset) heading.
-export const laserMuzzle = (ship: Ship, headingOffset = 0): Vec => {
+// (possibly prong-offset) heading. Module-private: single-direction beam
+// geometry never leaves this file — aim points only exit via laserAimFan.
+const muzzleOf = (ship: Ship, headingOffset = 0): Vec => {
   const dir = fromAngle(ship.heading + headingOffset, 1);
   return add(ship.pos, mul(dir, ship.radius + 4));
 };
-const muzzleOf = laserMuzzle;
 
-// World position of a beam's far endpoint — same origin + length the renderer
-// and fireLaser use so the laser reticule lands on the actual beam tip.
-export const laserBeamEndpointAt = (ship: Ship, length: number, headingOffset = 0): Vec => {
+// World position of one beam's far endpoint — same origin + length fireLaser
+// uses so the laser reticule lands on the actual beam tip.
+const laserBeamEndpointAt = (ship: Ship, length: number, headingOffset: number): Vec => {
   const dir = fromAngle(ship.heading + headingOffset, 1);
-  return add(laserMuzzle(ship, headingOffset), mul(dir, length));
+  return add(muzzleOf(ship, headingOffset), mul(dir, length));
 };
+
+// The laser's aim fan: one entry per beam a fire press will spawn (prong adds
+// beams). fireLaser, fireSuperLaser and renderLaserReticule all iterate THIS
+// list, so the sight can never show fewer aim points than the weapon fires —
+// the prong/reticule contract lives here, not in each caller.
+export type LaserAim = {
+  headingOffset: number;
+  dir: Vec;
+  endpointAt: (length: number) => Vec;
+};
+export const laserAimFan = (ship: Ship): LaserAim[] =>
+  prongOffsets(ship.prongCount).map((headingOffset) => ({
+    headingOffset,
+    dir: fromAngle(ship.heading + headingOffset, 1),
+    endpointAt: (length: number) => laserBeamEndpointAt(ship, length, headingOffset),
+  }));
 
 // Number of dots currently charged (0..maxDots). One dot ticks in per beat
 // held; maxDots is the rhythm-gated cap (see maxLaserDots). Public so the
@@ -253,6 +282,15 @@ export const tickLaserShot = (game: Game, dt: number) => {
 
   if (firePressed) {
     if (!ship.laserChargeActive && !ship.laserChargeFailedThisHold) {
+      // Refire lockout: the last shot rejects charge presses until its end
+      // beat. Fails the whole hold (release and re-press to retry) but leaves
+      // the streak alone — a locked-out weapon isn't a timing mistake.
+      if (Math.round(game.perceivedBeatTime / BEAT_GRID) < ship.laserCooldownEndBeat) {
+        ship.laserChargeFailedThisHold = true;
+        game.sound.playLaserChargeFail();
+        game.laserChargeGlow = approachGlow(game.laserChargeGlow, 0, dt);
+        return;
+      }
       // Charge must START on-beat. The release can land anywhere — that's just
       // how many dots you held for. Rejecting only the start gives the player
       // a clear, learnable rule without making release timing punishing.
@@ -319,9 +357,12 @@ const fireLaser = (game: Game, ship: Ship, dots: number) => {
   const firedOnBeat = isInBeatWindow(game, game.perceivedBeatTime);
   if (firedOnBeat) registerOnBeatFire(game);
   else registerOffBeatFire(game);
-  // Prong fires one beam per fan direction, matching the bullet prong fan.
-  for (const offset of prongOffsets(ship.prongCount)) {
-    const beam = new LaserBeam(ship, length, damage, dots, game, offset);
+  // Arm the refire lockout, anchored to the fire's nearest beat so the next
+  // allowed press sits on a clean beat regardless of where the release landed.
+  ship.laserCooldownEndBeat = Math.round(game.perceivedBeatTime / BEAT_GRID) + LASER_REFIRE_BEATS;
+  // One beam per aim-fan entry — the exact fan the laser reticule draws.
+  for (const aim of laserAimFan(ship)) {
+    const beam = new LaserBeam(ship, length, damage, dots, game, aim.headingOffset);
     beam.firedOnBeat = firedOnBeat;
     game.lasers.push(beam);
   }
@@ -356,10 +397,10 @@ export const fireSuperLaser = (game: Game, ship: Ship) => {
   const firedOnBeat = isInBeatWindow(game, game.perceivedBeatTime);
   if (firedOnBeat) registerOnBeatFire(game);
   else registerOffBeatFire(game);
-  for (const offset of prongOffsets(ship.prongCount)) {
+  for (const aim of laserAimFan(ship)) {
     // Top dot tier so it inherits all the high-charge render layers, plus the
     // `super` flag pushes thickness/aura past the normal ceiling.
-    const beam = new LaserBeam(ship, length, SUPER_LASER_DAMAGE, LASER_MAX_DOTS, game, offset);
+    const beam = new LaserBeam(ship, length, SUPER_LASER_DAMAGE, LASER_MAX_DOTS, game, aim.headingOffset);
     beam.isSuper = true;
     beam.firedOnBeat = firedOnBeat;
     game.lasers.push(beam);

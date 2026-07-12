@@ -17,6 +17,7 @@ import {
   updateBgBeatIntensity,
 } from "./waveDirector";
 import { startShockwave } from "./shockwave";
+import { FIRST_BONUS_LIFE_SCORE } from "./bonusLife";
 import { SLOW_MO_DURATION } from "./slowMo";
 
 // beta panel exposes every spawnable + powerup so a tester can dial in any combination
@@ -300,7 +301,7 @@ const startBetaWave = (game: Game) => {
   game.score = 0;
   game.wave = 1;
   game.lives = 3;
-  game.nextBonusLifeScore = 50000;
+  game.nextBonusLifeScore = FIRST_BONUS_LIFE_SCORE;
   game.beatTime = 0;
   game.lastBeatResnapAt = game.beatTime;
   game.beatPhaseCorrection = 0;

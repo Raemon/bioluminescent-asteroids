@@ -245,6 +245,10 @@ export const targetsForReticule = (game: Game) => [
 // (Popups moved to the world layer — they anchor at world positions, not glass.)
 const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => {
   const { ctx } = game;
+  // Mid-skip-warp the ship isn't aiming at anything: the reticule, streak
+  // orbs, trajectory preview, and laser chrome hide for the whole sequence
+  // (the alive gates cover most of it — this also spans the emerge scale-in).
+  const warping = game.waveSkip !== null;
   const doubletime = comboGrid(game) < BEAT_GRID;
   // highlight the reticule + first-beat dot while the tutorial wants the player on a
   //   target: the drift/hover gate (3), the fire-and-hit sub-line (4), and build-to-4x (5).
@@ -259,13 +263,15 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   const superBoosted = game.beatCombo >= 12;
   // gold crystals are stationary (or near-stationary) "First Dot" probes — they need a direct
   // proximity pass since the trajectory walk skips speed<1 targets.
-  game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime, superBoosted, game.gems);
-  // Streak orbs orbit the primary "next-beat" reticule.
-  const reticuleCenter = primaryReticulePosition(game.ship, BEAT_GRID, game.w, game.h, doubletime, superBoosted);
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  renderStreakOrbs(ctx, game, reticuleCenter);
-  ctx.restore();
+  if (!warping) {
+    game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime, superBoosted, game.gems);
+    // Streak orbs orbit the primary "next-beat" reticule.
+    const reticuleCenter = primaryReticulePosition(game.ship, BEAT_GRID, game.w, game.h, doubletime, superBoosted);
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    renderStreakOrbs(ctx, game, reticuleCenter);
+    ctx.restore();
+  }
   // Streak sound: each streak rolls one of two escalating textures — the generative music-box
   // arpeggio (16ths tightening to 32nds, climbing registers) or the looping updraft stems (a
   // breathing pad whose rising-arpeggio layer blooms in). Holds off until streak 3 so a brief
@@ -284,10 +290,12 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   // ship.lastThrustActiveAt is recorded in game.time/1000 units; pass the same clock so
   // the post-thrust fade doesn't get stuck after intro overlays (which advance beatTime
   // without advancing game.time).
-  renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.time / 1000, game.w, game.h);
+  if (!warping) renderShipTrajectoryPreview(ctx, game.ship, BEAT_GRID, game.time / 1000, game.w, game.h);
   game.ship.render(ctx, game.time, currentBeatPulse(game));
-  renderLaserReticule(ctx, game, game.beatTime);
-  renderLaserChargeDots(ctx, game, game.beatTime);
+  if (!warping) {
+    renderLaserReticule(ctx, game, game.beatTime);
+    renderLaserChargeDots(ctx, game, game.beatTime);
+  }
 };
 
 // ── Scroll mode (locked-center): live wrap-replicated paint ───────────────────

@@ -69,21 +69,37 @@ export type Wormhole = {
   seed: number;
   life: number;
   maxLife: number;
+  // Hue overrides for recoloured portals (the wave-skip kind). The defaults
+  // reproduce the classic violet departure portal.
+  rimHue?: number;
+  throatHue?: number;
+};
+
+export type WormholeOpts = {
+  holdSec?: number;
+  rimHue?: number;
+  throatHue?: number;
 };
 
 export const spawnWormhole = (
   list: Wormhole[], pos: Vec, bodyRadius: number, heading: number,
-): void => {
-  list.push({
+  opts?: WormholeOpts,
+): Wormhole => {
+  const life = OPEN + (opts?.holdSec ?? HOLD) + CLOSE;
+  const wh: Wormhole = {
     x: pos.x,
     y: pos.y,
     radius: portalLongAxis(bodyRadius),
     angle: heading,
     hueShift: (rng() - 0.5) * 24,
     seed: rng() * TAU,
-    life: WORMHOLE_LIFE,
-    maxLife: WORMHOLE_LIFE,
-  });
+    life,
+    maxLife: life,
+    rimHue: opts?.rimHue,
+    throatHue: opts?.throatHue,
+  };
+  list.push(wh);
+  return wh;
 };
 
 export const updateWormholes = (list: Wormhole[], dt: number): Wormhole[] => {
@@ -91,16 +107,37 @@ export const updateWormholes = (list: Wormhole[], dt: number): Wormhole[] => {
   return list.filter((wh) => wh.life > 0);
 };
 
-// Mouth-open factor 0→1→0 across the three phases. The hold sits at 1 so the
-// portal is steadily gaping while the body falls in.
-const mouthOpen = (elapsed: number): number => {
+// Seconds a portal spends collapsing at the end of its life. Exported so the
+// wave-skip code can cut a portal's remaining life to exactly the collapse.
+export const WORMHOLE_CLOSE = CLOSE;
+
+// A portal can swallow the ship only while the mouth is properly gaping —
+// not during the iris-open and not once the collapse has begun.
+export const wormholeEnterable = (wh: Wormhole): boolean =>
+  wh.maxLife - wh.life >= OPEN && wh.life > CLOSE;
+
+// Absolute position of the portal's vanishing-point throat — the point a
+// diving body eases toward (mirrors warpAnchorOffset for a live portal).
+export const throatPointOf = (wh: Wormhole): { x: number; y: number } => {
+  const d = wh.radius * 0.55 * TILT;
+  return { x: wh.x + Math.sin(wh.angle) * d, y: wh.y - Math.cos(wh.angle) * d };
+};
+
+// Mouth-open factor 0→1→0. Opens over the first OPEN seconds, collapses over
+// the final CLOSE seconds of remaining life, holds at 1 between — expressed
+// off both ends of the lifetime so a portal whose life is cut short (skip
+// portals collapse early at wave end) still irises shut instead of popping.
+const mouthOpen = (elapsed: number, life: number): number => {
+  let open = 1;
   if (elapsed < OPEN) {
     const p = elapsed / OPEN; // ease-out so it snaps wide then settles
-    return 1 - (1 - p) * (1 - p);
+    open = 1 - (1 - p) * (1 - p);
   }
-  if (elapsed < OPEN + HOLD) return 1;
-  const p = (elapsed - OPEN - HOLD) / CLOSE; // ease-in collapse to a slit
-  return 1 - p * p;
+  if (life < CLOSE) {
+    const p = 1 - life / CLOSE; // ease-in collapse to a slit
+    open = Math.min(open, 1 - p * p);
+  }
+  return open;
 };
 
 // Centre of the tunnel ring at a given depth, in the portal's rotated frame
@@ -143,11 +180,11 @@ export const renderWormholes = (
   ctx.lineJoin = "round";
   for (const wh of list) {
     const elapsed = wh.maxLife - wh.life;
-    const open = mouthOpen(elapsed);
+    const open = mouthOpen(elapsed, wh.life);
     if (open < 0.02) continue;
     const long = wh.radius * open;
-    const rimHue = RIM_HUE + wh.hueShift;
-    const throatHue = THROAT_HUE + wh.hueShift;
+    const rimHue = (wh.rimHue ?? RIM_HUE) + wh.hueShift;
+    const throatHue = (wh.throatHue ?? THROAT_HUE) + wh.hueShift;
     // Slow rotation of the whole swirl, plus a fast shimmer on the rim.
     const swirl = tSec * 1.8 + wh.seed;
     const shimmer = 0.78 + 0.22 * Math.sin(tSec * 18 + wh.seed);

@@ -192,7 +192,9 @@ const applyBeatScale = (ctx: CanvasRenderingContext2D, beatPulse: number) => {
 };
 
 export const renderShipBody = (ctx: CanvasRenderingContext2D, ship: Ship, t: number, beatPulse: number) => {
-  if (!ship.alive) return;
+  // A wave-skip dive keeps painting the hull while alive is off — the warp
+  // transform in Ship.render shrinks it down the portal throat.
+  if (!ship.alive && ship.skipWarpT === null) return;
   const invuln = invulnFlicker(ship, t);
   const verts = shipHullVertices(ship);
   ctx.save();

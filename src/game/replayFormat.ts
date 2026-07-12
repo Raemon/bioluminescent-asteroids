@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 21;
+export const REPLAY_FORMAT_VERSION = 24;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -73,6 +73,17 @@ export const REPLAY_FORMAT_VERSION = 21;
 // v21 widens the citadel's escape hole again (collision surface: the ship-safe
 //   pocket and the inner-hit fire test both grow), so v20 recordings with a
 //   citadel re-sim into different runs.
+// v22 adds the alien wave-skip wormhole: player-killed aliens roll a seeded
+//   skip depth and leave an enterable portal; entering it sweeps the field,
+//   ends the wave toward a farther target, and holds the ship absent through
+//   a title cascade before it re-emerges. New rng draws per alien kill plus
+//   the changed wave roster mean v21 recordings re-sim into different runs.
+// v23 makes each bonus-life score threshold double the previous one instead
+//   of advancing by a fixed interval, so v22 recordings that cross the second
+//   threshold re-sim with fewer lives and fail their checkpoints.
+// v24 adds the lasershot refire lockout (a shot rejects new charge presses
+//   until LASER_REFIRE_BEATS after the fire beat), so v23 recordings whose
+//   presses land inside the lockout re-sim without those shots.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat
