@@ -38,15 +38,15 @@ type AlienDroneNode = {
 
 // Per-warble continuous voice. A soft sustained hum while the rock is phased
 // in (solid), morphing toward a deeper, wider, faster vibrato — "warblier" —
-// as it phases out (intangible). setWarbleDronePhase rides the morph each
-// frame from the rock's ghost amount. Held for the lifetime of the piece.
+// as it phases out (intangible). The two endpoint states (phased-in,
+// phased-out) are baked seamless loops (buildWarbleDroneGraph);
+// setWarbleDronePhase rides the morph each frame from the rock's ghost
+// amount by crossfading the two loops' gains — sources[0]/phaseGains[0] is
+// the phased-in loop, sources[1]/phaseGains[1] the phased-out loop. Held for
+// the lifetime of the piece.
 type WarbleDroneNode = {
-  oscA: OscillatorNode;
-  oscB: OscillatorNode;
-  baseFreq: number;
-  vibratoLfo: OscillatorNode;
-  vibratoDepth: GainNode;
-  filter: BiquadFilterNode;
+  sources: AudioBufferSourceNode[];
+  phaseGains: GainNode[];
   mainGain: GainNode;
   spatial?: SpatialNodes;
 };
@@ -361,7 +361,14 @@ export type SoundName =
   // keyed by pitchRatio = hum index. Built by buildFirstDotHumGraph, not the
   // Tone path. The bandpass filter / pulseGain (beat accent) / mainGain
   // (hover swell) stay live downstream of the loop — see createHumVoice.
-  | "firstDotHum";
+  | "firstDotHum"
+  // Warble continuous drone. Two committed seamless loops — the phased-in
+  // endpoint (pitchRatio=0) and phased-out endpoint (pitchRatio=1) — built by
+  // buildWarbleDroneGraph, not the Tone path. setWarbleDronePhase crossfades
+  // live between the two loops each frame as the rock's ghost01 rides the
+  // continuous morph in between; only the crossfade gains and mainGain stay
+  // live, the oscillator/vibrato/filter synthesis is baked into each endpoint.
+  | "warbleDrone";
   // Note: "thrust" / "reverseThrust" / "sideThrust" are declared above (with
   // the rest of the play() switch names) but are ALSO baked one-shots now —
   // each is one committed seamless loop, pitchRatio unused (always 1). Built
@@ -612,6 +619,7 @@ export class Sound {
     this.prerenderBassteroidDrones();
     this.prerenderAlienDrones();
     this.prerenderFirstDotHums();
+    this.prerenderWarbleDrones();
     this.loadGuitarSample();
     // Kick off the baked-mp3 fetch + decode for every voice that has a baked
     // recipe. The title screen awaits bakedCacheReady() before letting the
@@ -798,6 +806,8 @@ export class Sound {
       ["alienDrone", [0, 1, 2]],
       // First-dot hum drone tone: one committed loop per hum instance.
       ["firstDotHum", Sound.FIRST_DOT_HUM_PITCH.map((_, i) => i)],
+      // Warble drone: one committed loop per morph endpoint (phased-in/out).
+      ["warbleDrone", [0, 1]],
       // Wave-summary drain chime: one variant per harmonic over A3.
       ["drainChime", [1, 2, 3, 4, 6, 8]],
     ];
@@ -1210,6 +1220,17 @@ export class Sound {
       const len = Math.ceil(sr * Sound.FIRST_DOT_HUM_LOOP_LEN[index]);
       const offline = new OACearly(1, len, sr);
       this.buildFirstDotHumGraph(offline, offline.destination, index);
+      return offline.startRendering();
+    }
+    // warbleDrone is a pure-WebAudio seamless loop (no Tone, no reverb bus):
+    // one committed mp3 per morph endpoint, keyed by pitchRatio = phaseState
+    // (0=phased-in, 1=phased-out). setWarbleDronePhase crossfades live
+    // between the two loops for the continuous ghost01 in between.
+    if (name === "warbleDrone") {
+      const phaseState = Math.max(0, Math.min(1, Math.round(pitchRatio))) as 0 | 1;
+      const len = Math.ceil(sr * Sound.WARBLE_DRONE_LOOP_LEN[phaseState]);
+      const offline = new OACearly(1, len, sr);
+      this.buildWarbleDroneGraph(offline, offline.destination, phaseState);
       return offline.startRendering();
     }
 
@@ -2124,74 +2145,133 @@ export class Sound {
     for (const key of Array.from(this.alienDrones.keys())) this.stopAlienDrone(key);
   }
 
-  // Open a warble's sustained voice. Two near-unison sines through a lowpass,
-  // pitched to G3 so a field of warbles layers consonantly over the C-rooted
-  // bass bed. The vibrato LFO is the morph axis: setWarbleDronePhase widens its
-  // depth and speeds it up as the rock phases out, turning a smooth hum into a
-  // seasick "warble". Held until stopWarbleDrone.
+  // Base pitch for the warble drone — G3, a fifth above C, consonant with
+  // the C-rooted bass bed. Shared by both baked endpoint states.
+  private static readonly WARBLE_DRONE_BASE_FREQ = 196;
+  // Seamless-loop length (s) per endpoint state, index 0=phased-in,
+  // 1=phased-out. Each length is a whole number of cycles of that state's
+  // vibrato LFO rate (4Hz phased-in, 11Hz phased-out) so the loop tiles
+  // without a click: 2.0s = 8 cycles at 4Hz, and also 22 cycles at 11Hz —
+  // both endpoints happen to share the same loop length here, but they don't
+  // have to (each is baked and looped independently).
+  private static readonly WARBLE_DRONE_LOOP_LEN: [number, number] = [2.0, 2.0];
+  private static readonly WARBLE_DRONE_VIBRATO_RATE: [number, number] = [4, 4 + 7];
+
+  // Renders one endpoint of the warble drone's morph into `ctx`: phaseState
+  // 0 = fully phased in (smooth hum), 1 = fully phased out (deep, wide, fast
+  // warble). Exact original synthesis graph (two near-unison sines through a
+  // vibrato LFO into a lowpass) evaluated at ghost01 = phaseState, since
+  // that's the only two states ever baked. Nothing here reads live state, so
+  // it renders identically every time.
+  private buildWarbleDroneGraph(ctx: BaseAudioContext, dest: AudioNode, phaseState: 0 | 1) {
+    const len = Sound.WARBLE_DRONE_LOOP_LEN[phaseState];
+    const g = phaseState; // 0 or 1 — the two morph endpoints
+    const baseFreq = Sound.WARBLE_DRONE_BASE_FREQ;
+    const freq = baseFreq * (1 - 0.12 * g); // dip ~a tone as it ghosts out
+
+    const oscA = ctx.createOscillator();
+    const oscB = ctx.createOscillator();
+    oscA.type = "sine";
+    oscB.type = "sine";
+    oscA.frequency.value = freq;
+    oscB.frequency.value = freq * 1.004;
+
+    const vibratoLfo = ctx.createOscillator();
+    vibratoLfo.type = "sine";
+    vibratoLfo.frequency.value = Sound.WARBLE_DRONE_VIBRATO_RATE[phaseState];
+    const vibratoDepth = ctx.createGain();
+    vibratoDepth.gain.value = baseFreq * (0.004 + 0.05 * g);
+    vibratoLfo.connect(vibratoDepth);
+    vibratoDepth.connect(oscA.frequency);
+    vibratoDepth.connect(oscB.frequency);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = 4;
+    filter.frequency.value = 700 + 700 * g;
+
+    oscA.connect(filter);
+    oscB.connect(filter);
+    filter.connect(dest);
+
+    oscA.start(0);
+    oscB.start(0);
+    vibratoLfo.start(0);
+    oscA.stop(len);
+    oscB.stop(len);
+    vibratoLfo.stop(len);
+  }
+
+  // Warm both committed warble-drone endpoint loops (phased-in, phased-out).
+  private prerenderWarbleDrones() {
+    void this.queueBake("warbleDrone", 0);
+    void this.queueBake("warbleDrone", 1);
+  }
+
+  // Open a warble's sustained voice: two baked endpoint loops (phased-in,
+  // phased-out — see buildWarbleDroneGraph) summed through their own
+  // crossfade gains into a shared mainGain. setWarbleDronePhase crossfades
+  // between them each frame to ride the rock's continuous ghost amount.
+  // Held until stopWarbleDrone.
   startWarbleDrone(key: object, pos?: Pos) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     if (this.warbleDrones.has(key)) return;
+    const bufIn = this.bakedBuffers.get(this.bakedKey("warbleDrone", 0));
+    const bufOut = this.bakedBuffers.get(this.bakedKey("warbleDrone", 1));
+    if (!bufIn || !bufOut) {
+      // Bake hasn't landed yet (or failed) — kick it for next time and bail.
+      this.prerenderWarbleDrones();
+      return;
+    }
     const t = this.ctx.currentTime;
     const spatial = pos ? this.makeSpatial(pos, this.master) : null;
     const sink: AudioNode = spatial ? spatial.panner : this.master;
 
-    const baseFreq = 196; // G3 — sits a fifth above C, consonant with the bass bed
-    const oscA = this.ctx.createOscillator();
-    const oscB = this.ctx.createOscillator();
-    oscA.type = "sine";
-    oscB.type = "sine";
-    oscA.frequency.value = baseFreq;
-    oscB.frequency.value = baseFreq * 1.004;
-
-    // Vibrato — shallow + slow when phased in, set live by setWarbleDronePhase.
-    const vibratoLfo = this.ctx.createOscillator();
-    vibratoLfo.type = "sine";
-    vibratoLfo.frequency.value = 4;
-    const vibratoDepth = this.ctx.createGain();
-    vibratoDepth.gain.value = baseFreq * 0.004;
-    vibratoLfo.connect(vibratoDepth);
-    vibratoDepth.connect(oscA.frequency);
-    vibratoDepth.connect(oscB.frequency);
-
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.Q.value = 4;
-    filter.frequency.value = 700;
-
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
     mainGain.gain.exponentialRampToValueAtTime(0.06, t + 0.6);
-
-    oscA.connect(filter);
-    oscB.connect(filter);
-    filter.connect(mainGain);
     mainGain.connect(sink);
 
-    oscA.start(t);
-    oscB.start(t);
-    vibratoLfo.start(t);
+    const bufs = [bufIn, bufOut];
+    const sources: AudioBufferSourceNode[] = [];
+    const phaseGains: GainNode[] = [];
+    for (let i = 0; i < 2; i++) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = bufs[i];
+      src.loop = true;
+      const gain = this.ctx.createGain();
+      // Only the phased-in loop audible at the start; phased-out crossfades in.
+      gain.gain.setValueAtTime(i === 0 ? 1 : 0.0001, t);
+      src.connect(gain);
+      gain.connect(mainGain);
+      src.start(t);
+      sources.push(src);
+      phaseGains.push(gain);
+    }
 
-    this.warbleDrones.set(key, { oscA, oscB, baseFreq, vibratoLfo, vibratoDepth, filter, mainGain, spatial: spatial ?? undefined });
+    this.warbleDrones.set(key, { sources, phaseGains, mainGain, spatial: spatial ?? undefined });
   }
 
   // Morph a warble's voice each frame. ghost01: 0 = fully phased in (smooth
-  // hum), 1 = fully phased out (deep, wide, fast warble). Pitch dips a tone,
-  // vibrato widens and quickens, and the lowpass opens so the wobble reads.
+  // hum), 1 = fully phased out (deep, wide, fast warble). Linearly crossfades
+  // the two baked endpoint loops — this family only has two anchor states
+  // spanning the whole range, so a direct 2-point crossfade is the correct
+  // interpolation (unlike chargeBed's snap-to-nearest-of-5-tiers).
   setWarbleDronePhase(key: object, ghost01: number) {
     const node = this.warbleDrones.get(key);
     if (!node || !this.ctx) return;
     const g = Math.max(0, Math.min(1, ghost01));
     const t = this.ctx.currentTime;
-    const tc = 0.05;
-    const freq = node.baseFreq * (1 - 0.12 * g); // dip ~a tone as it ghosts out
-    node.oscA.frequency.setTargetAtTime(freq, t, tc);
-    node.oscB.frequency.setTargetAtTime(freq * 1.004, t, tc);
-    node.vibratoLfo.frequency.setTargetAtTime(4 + 7 * g, t, tc);
-    node.vibratoDepth.gain.setTargetAtTime(node.baseFreq * (0.004 + 0.05 * g), t, tc);
-    node.filter.frequency.setTargetAtTime(700 + 700 * g, t, tc);
+    const ramp = 0.12;
+    const [phaseInGain, phaseOutGain] = node.phaseGains;
+    phaseInGain.gain.cancelScheduledValues(t);
+    phaseInGain.gain.setValueAtTime(phaseInGain.gain.value, t);
+    phaseInGain.gain.linearRampToValueAtTime(1 - g, t + ramp);
+    phaseOutGain.gain.cancelScheduledValues(t);
+    phaseOutGain.gain.setValueAtTime(phaseOutGain.gain.value, t);
+    phaseOutGain.gain.linearRampToValueAtTime(g, t + ramp);
   }
 
   updateWarbleDrone(key: object, pos: Pos) {
@@ -2208,9 +2288,7 @@ export class Sound {
     node.mainGain.gain.cancelScheduledValues(t);
     node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
     node.mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
-    node.oscA.stop(t + 0.22);
-    node.oscB.stop(t + 0.22);
-    node.vibratoLfo.stop(t + 0.22);
+    for (const src of node.sources) src.stop(t + 0.22);
     this.warbleDrones.delete(key);
   }
 
