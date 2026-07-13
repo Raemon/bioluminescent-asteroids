@@ -19,12 +19,22 @@ const togglePlay = () => window.dispatchEvent(new CustomEvent("replay:togglePlay
 
 const exitReplay = () => window.dispatchEvent(new CustomEvent("replay:exit"));
 
+// Starts the offline MP4 export, or cancels the one in flight (the game side
+//   treats it as a toggle).
+const requestDownload = () => window.dispatchEvent(new CustomEvent("replay:download"));
+
+// WebCodecs is a hard requirement for export (no MediaRecorder fallback);
+//   without it the button renders disabled with an explanatory title.
+const WEBCODECS_OK = typeof VideoEncoder !== "undefined";
+
 export const ReplayScrubber = () => {
   const [active, setActive] = useState(false);
   const [position, setPosition] = useState(0);
   const [total, setTotal] = useState(0);
   const [speed, setSpeedState] = useState(1);
   const [waveStarts, setWaveStarts] = useState<{ frame: number; wave: number }[]>([]);
+  // Export progress fraction (0..1) while an MP4 export runs; null when idle.
+  const [exportFrac, setExportFrac] = useState<number | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const histCanvasRef = useRef<HTMLCanvasElement>(null);
   const rhythmRef = useRef<number[]>([]);
@@ -49,13 +59,19 @@ export const ReplayScrubber = () => {
       setWaveStarts(d.waveStarts);
       drawHistogram();
     };
+    const onExportProgress = (e: Event) => {
+      const d = (e as CustomEvent<{ frac: number; phase: string }>).detail;
+      setExportFrac(d.phase === "done" ? null : d.frac);
+    };
     window.addEventListener("game:state", onState as EventListener);
     window.addEventListener("replay:progress", onProgress as EventListener);
     window.addEventListener("replay:rhythm", onRhythm as EventListener);
+    window.addEventListener("replay:export-progress", onExportProgress as EventListener);
     return () => {
       window.removeEventListener("game:state", onState as EventListener);
       window.removeEventListener("replay:progress", onProgress as EventListener);
       window.removeEventListener("replay:rhythm", onRhythm as EventListener);
+      window.removeEventListener("replay:export-progress", onExportProgress as EventListener);
     };
   }, []);
 
@@ -189,6 +205,26 @@ export const ReplayScrubber = () => {
           </button>
         ))}
       </div>
+      <button
+        type="button"
+        className="replay-scrubber__download"
+        aria-label={exportFrac !== null ? "Cancel export" : "Download as MP4"}
+        title={
+          !WEBCODECS_OK
+            ? "Video export needs WebCodecs, which this browser doesn't support"
+            : exportFrac !== null
+              ? "Cancel export"
+              : "Download as MP4"
+        }
+        disabled={!WEBCODECS_OK}
+        onClick={requestDownload}
+      >
+        {exportFrac !== null ? (
+          <span className="replay-scrubber__export-pct">{Math.round(exportFrac * 100)}%</span>
+        ) : (
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10M7.5 10.5L12 15l4.5-4.5M5 19h14" /></svg>
+        )}
+      </button>
       <button
         type="button"
         className="replay-scrubber__exit"

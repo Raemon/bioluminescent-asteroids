@@ -60,6 +60,9 @@ import { driftTierForRing } from "../ship/reticule/reticuleRender";
 
 // single dispatcher means main.ts has one update entry; per-state branches live below.
 export const updateGame = (game: Game, dt: number) => {
+  // The MP4 exporter (game/videoExport.ts) owns stepping while it runs; the
+  //   rAF tick must not consume replay frames underneath it.
+  if (game.replayExporting) return;
   // Replay drives the sim from recorded frames rather than live dt. The
   //   scrubber sets a wall-clock multiplier (paused → 0, 1x → real time,
   //   2x/4x/0.5x → scaled); runReplay spends liveDt × speed of time budget
@@ -102,8 +105,9 @@ const advanceFrame = (game: Game, dt: number) => {
 
 // Pull the next recorded frame and advance the sim one step. Returns false
 //   when the stream is exhausted (the caller decides whether that ends the
-//   replay or just stops a seek at the last frame).
-const stepReplayFrame = (game: Game): boolean => {
+//   replay or just stops a seek at the last frame). Exported for the MP4
+//   exporter's frame-by-frame sweep (game/videoExport.ts).
+export const stepReplayFrame = (game: Game): boolean => {
   const replayDt = game.replayPlayer!.nextFrame();
   if (replayDt === null) return false;
   advanceFrame(game, replayDt);

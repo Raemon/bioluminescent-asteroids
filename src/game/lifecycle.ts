@@ -845,6 +845,10 @@ export const restartReplayWorld = (game: Game): void => {
   game.highlightLoop = loop;
   if (chrome) restoreGameOverChrome(game, chrome);
   game.state = "replaying";
+  // startGame above broadcast a transient "playing"; re-broadcast the truth
+  //   (with the restored highlight flag) so game:state listeners — notably the
+  //   scrubber's visibility — don't latch the intermediate state.
+  emitGameState(game);
 };
 
 // Snapshot the game-over overlay's visibility classes + score-form state so a

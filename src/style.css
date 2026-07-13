@@ -3225,6 +3225,48 @@ li.lb-self .lb-name-link:hover {
   filter: drop-shadow(0 0 4px rgba(106, 215, 255, 0.8));
 }
 
+.replay-scrubber__download {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #6ad7ff;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+.replay-scrubber__download:hover { opacity: 1; }
+
+.replay-scrubber__download:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.replay-scrubber__download svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px rgba(106, 215, 255, 0.8));
+}
+
+.replay-scrubber__export-pct {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: #d8f3ff;
+  text-shadow: 0 0 4px rgba(106, 215, 255, 0.8);
+}
+
 .replay-scrubber__exit {
   flex: 0 0 auto;
   display: flex;

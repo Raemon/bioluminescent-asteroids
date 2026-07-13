@@ -588,6 +588,30 @@ export class Sound {
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AC) return;
     this.ctx = new AC();
+    this.buildMixGraph();
+    // Pre-fill the noise-buffer cache so the first bassteroid/comet spawn
+    // doesn't pay the 6-8s buffer allocation mid-gameplay. AudioBuffers can't
+    // be created before the context exists, so this is the earliest we can do
+    // it — runs once, on first user interaction.
+    this.prewarmNoiseBuffers();
+    this.prerenderLaserShots();
+    this.prerenderChargeBeds();
+    this.prerenderStreakShimmerNotes();
+    this.loadGuitarSample();
+    // Kick off the baked-mp3 fetch + decode for every voice that has a baked
+    // recipe. The title screen awaits bakedCacheReady() before letting the
+    // player start so playBaked is guaranteed to hit cache. In dev, missing
+    // mp3s fall through to a live Tone render via bakeSound and are POSTed
+    // back to disk so prod fetches stay 200-only.
+    this.warmBakedCache();
+  }
+
+  // Master bus + channel mixer, built on whatever this.ctx currently is.
+  //   Shared by ensureContext (live AudioContext) and beginExportCapture
+  //   (offline capture context) so the export renders through the exact
+  //   compressor/limiter/channel chain the player hears.
+  private buildMixGraph() {
+    if (!this.ctx) return;
     // liveSum / bakedSum are the two summing buses every channel feeds into.
     // liveSum runs through the master compressor + limiter (live voices need
     // it; their dynamics aren't pre-baked); bakedSum goes straight to
@@ -656,21 +680,6 @@ export class Sound {
     // connects to those fields) lands on the SFX bus with no rewiring.
     this.master = this.chSfxLive;
     this.bakedOut = this.chSfxBaked;
-    // Pre-fill the noise-buffer cache so the first bassteroid/comet spawn
-    // doesn't pay the 6-8s buffer allocation mid-gameplay. AudioBuffers can't
-    // be created before the context exists, so this is the earliest we can do
-    // it — runs once, on first user interaction.
-    this.prewarmNoiseBuffers();
-    this.prerenderLaserShots();
-    this.prerenderChargeBeds();
-    this.prerenderStreakShimmerNotes();
-    this.loadGuitarSample();
-    // Kick off the baked-mp3 fetch + decode for every voice that has a baked
-    // recipe. The title screen awaits bakedCacheReady() before letting the
-    // player start so playBaked is guaranteed to hit cache. In dev, missing
-    // mp3s fall through to a live Tone render via bakeSound and are POSTed
-    // back to disk so prod fetches stay 200-only.
-    this.warmBakedCache();
   }
 
   // Every duration ever passed to makeNoiseBuffer across the codebase. Grep
@@ -1595,11 +1604,169 @@ export class Sound {
     this.setEnabled(prior);
   }
 
+  // ── Export capture ─────────────────────────────────────────────────────
+  // Third state alongside enabled/disabled: voices compute and schedule
+  //   normally, but this.ctx is a CaptureAudioContext (audioCapture.ts) whose
+  //   nodes live on an OfflineAudioContext and whose currentTime is the export
+  //   clock. The snapshot below holds the live graph for restore. Null when
+  //   not capturing.
+  private exportRestore: {
+    ctx: AudioContext | null;
+    master: GainNode | null;
+    bakedOut: GainNode | null;
+    liveSum: GainNode | null;
+    bakedSum: GainNode | null;
+    masterAnalyser: AnalyserNode | null;
+    analyserBins: Uint8Array<ArrayBuffer> | null;
+    analyserWave: Uint8Array<ArrayBuffer> | null;
+    chBasePulseLive: GainNode | null;
+    chBasePulseBaked: GainNode | null;
+    chSfxLive: GainNode | null;
+    chSfxBaked: GainNode | null;
+    chMusicLive: GainNode | null;
+    chMusicBaked: GainNode | null;
+    chVocalsLive: GainNode | null;
+    chVocalsBaked: GainNode | null;
+    enabled: boolean;
+    volume: number;
+    pauseFadeFactor: number;
+  } | null = null;
+
+  get exportCapturing(): boolean {
+    return this.exportRestore !== null;
+  }
+
+  // Voice fields whose teardown is deferred to a wall-clock setTimeout (hum
+  //   releases, streak fades) can still be mid-release when the context swaps;
+  //   any later update would "resume" a node that belongs to the other
+  //   context, wedging its gain automation. Force-finalize them now: cancel
+  //   the pending cleanup, stop the sources shortly after the release tail,
+  //   and null the owning fields so the next update builds fresh voices on
+  //   the current context.
+  private abandonReleasingVoices() {
+    const t = this.ctx ? this.ctx.currentTime : 0;
+    const stopAt = t + 0.9;
+    const hums = [
+      this.firstDotHum, this.firstDotOctaveHum, this.firstDotLockHum,
+      this.firstDotHarmonyHum, this.firstDotSubHum, this.firstDotShimmerHum,
+      this.firstDotNinthHum, this.firstDotSixthHum, this.firstDotHaloHum,
+    ];
+    for (const node of hums) {
+      if (!node) continue;
+      if (node.releaseCleanupTimer !== null) clearTimeout(node.releaseCleanupTimer);
+      try { node.oscA.stop(stopAt); } catch {}
+      try { node.oscB.stop(stopAt); } catch {}
+      try { node.vibratoLfo.stop(stopAt); } catch {}
+    }
+    this.firstDotHum = null;
+    this.firstDotOctaveHum = null;
+    this.firstDotLockHum = null;
+    this.firstDotHarmonyHum = null;
+    this.firstDotSubHum = null;
+    this.firstDotShimmerHum = null;
+    this.firstDotNinthHum = null;
+    this.firstDotSixthHum = null;
+    this.firstDotHaloHum = null;
+    if (this.streakShimmer) {
+      const node = this.streakShimmer;
+      if (node.timer !== null) clearInterval(node.timer);
+      if (node.releaseCleanupTimer !== null) clearTimeout(node.releaseCleanupTimer);
+      try { node.out.gain.setTargetAtTime(0.0001, t, 0.1); } catch {}
+      this.streakShimmer = null;
+    }
+    if (this.streakLoop) {
+      const node = this.streakLoop;
+      if (node.releaseCleanupTimer !== null) clearTimeout(node.releaseCleanupTimer);
+      for (const src of node.srcs) { try { src.stop(stopAt); } catch {} }
+      this.streakLoop = null;
+    }
+    this.streakSet = null;
+  }
+
+  // Silence every persistent voice on the current context and clear the
+  //   fields that hold their nodes, so no reference crosses a context swap.
+  //   The synchronous stop* paths already null their fields; the timer-based
+  //   ones are force-finalized above.
+  private stopVoicesForContextSwap() {
+    const wasEnabled = this.enabled;
+    this.setEnabled(false);
+    this.stopHaloFullMusic();
+    this.stopLaserCharge();
+    this.abandonReleasingVoices();
+    this.enabled = wasEnabled;
+  }
+
+  // Swap the engine onto the capture context. Rebuilds the full mix graph
+  //   (compressor + limiter + channel legs at the player's per-channel
+  //   volumes) on the offline destination, with the overall volume pinned to
+  //   a fixed neutral level regardless of the live slider/mute.
+  beginExportCapture(captureCtx: AudioContext) {
+    if (this.exportRestore || !this.ctx) return;
+    this.stopVoicesForContextSwap();
+    this.exportRestore = {
+      ctx: this.ctx,
+      master: this.master,
+      bakedOut: this.bakedOut,
+      liveSum: this.liveSum,
+      bakedSum: this.bakedSum,
+      masterAnalyser: this.masterAnalyser,
+      analyserBins: this.analyserBins,
+      analyserWave: this.analyserWave,
+      chBasePulseLive: this.chBasePulseLive,
+      chBasePulseBaked: this.chBasePulseBaked,
+      chSfxLive: this.chSfxLive,
+      chSfxBaked: this.chSfxBaked,
+      chMusicLive: this.chMusicLive,
+      chMusicBaked: this.chMusicBaked,
+      chVocalsLive: this.chVocalsLive,
+      chVocalsBaked: this.chVocalsBaked,
+      enabled: this.enabled,
+      volume: this.volume,
+      pauseFadeFactor: this.pauseFadeFactor,
+    };
+    this.ctx = captureCtx;
+    this.volume = 1;
+    this.pauseFadeFactor = 1;
+    this.buildMixGraph();
+    this.enabled = true;
+  }
+
+  // Release everything still sounding INTO the offline graph (so the render
+  //   carries clean tails), then restore the live graph exactly as saved.
+  endExportCapture() {
+    const saved = this.exportRestore;
+    if (!saved) return;
+    this.stopVoicesForContextSwap();
+    this.exportRestore = null;
+    this.ctx = saved.ctx;
+    this.master = saved.master;
+    this.bakedOut = saved.bakedOut;
+    this.liveSum = saved.liveSum;
+    this.bakedSum = saved.bakedSum;
+    this.masterAnalyser = saved.masterAnalyser;
+    this.analyserBins = saved.analyserBins;
+    this.analyserWave = saved.analyserWave;
+    this.chBasePulseLive = saved.chBasePulseLive;
+    this.chBasePulseBaked = saved.chBasePulseBaked;
+    this.chSfxLive = saved.chSfxLive;
+    this.chSfxBaked = saved.chSfxBaked;
+    this.chMusicLive = saved.chMusicLive;
+    this.chMusicBaked = saved.chMusicBaked;
+    this.chVocalsLive = saved.chVocalsLive;
+    this.chVocalsBaked = saved.chVocalsBaked;
+    this.volume = saved.volume;
+    this.pauseFadeFactor = saved.pauseFadeFactor;
+    this.enabled = saved.enabled;
+  }
+
   // Scales the global summing buses (liveSum for live voices, bakedSum for
   // pre-baked buffers) by the volume multiplier. Per-channel mixers sit
   // upstream, so this slider rides every channel uniformly. v = 0 disables
   // playback so per-voice early-outs gate any in-flight starts; v > 0 re-enables.
   setVolume(v: number) {
+    // Export capture pins its own mix; a live slider move mid-export would
+    //   write into the offline graph and be lost on restore anyway.
+    if (this.exportRestore) return;
     this.volume = Math.max(0, Math.min(2, v));
     if (this.liveSum)  this.liveSum.gain.value  = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
     if (this.bakedSum) this.bakedSum.gain.value = Sound.BAKED_BASE_GAIN  * this.volume * this.pauseFadeFactor;
@@ -1611,6 +1778,7 @@ export class Sound {
   // "exponentialRampToValueAtTime can't hit 0" foot-gun, we use a short
   // linear ramp instead.
   setChannelVolume(channel: AudioChannel, v: number) {
+    if (this.exportRestore) return;
     const value = Math.max(0, Math.min(1, v));
     const live = this.channelLeg(channel, "live");
     const baked = this.channelLeg(channel, "baked");
@@ -1629,6 +1797,7 @@ export class Sound {
   // the player's volume slider. cancelScheduledValues clears any in-flight
   // ramp so back-to-back pause/resume taps don't fight each other.
   fadeForPause(target: number, duration: number) {
+    if (this.exportRestore) return;
     this.pauseFadeFactor = Math.max(0, Math.min(1, target));
     if (!this.ctx || !this.liveSum || !this.bakedSum) return;
     const t = this.ctx.currentTime;

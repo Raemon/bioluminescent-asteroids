@@ -46,6 +46,13 @@ const game = new Game(canvas);
 //   sweep also stashes its own snapshot at window.__replayDivergences). Empty
 //   array = no desync detected so far; null = no replay running.
 (window as any).__divergences = () => game.replayPlayer?.divergences ?? null;
+// Verification hook for the offline exporter's audio path: capture + render
+//   the currently-open replay's soundtrack and download it as a WAV, for
+//   by-ear A/B against live replay playback.
+(window as any).__exportReplayAudio = async () => {
+  const { exportReplayAudioWav } = await import("./game/videoExport");
+  await exportReplayAudioWav(game);
+};
 installBetaTest(game);
 installInstructionsDemos();
 

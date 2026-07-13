@@ -37,6 +37,7 @@ import { HudElements, bindHudElements } from "./game/hud";
 import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro, advanceIntroOverlay, unfreezeIntroWorld, togglePause, exitReplay } from "./game/lifecycle";
 import { updateGame } from "./game/gameUpdate";
 import { renderGame } from "./game/gameRender";
+import { toggleReplayExport, cancelReplayExport } from "./game/videoExport";
 import { loadBeatOffset, applyBeatOffset } from "./game/beatCalibration";
 import { TutorialControlsUsed, emptyTutorialControlsUsed } from "./game/controlBindings";
 
@@ -333,6 +334,10 @@ export class Game implements HudElements {
   replaySpeed = 1;
   replaySeekTarget: number | null = null;
   replayStepAccumulator = 0;
+  // True while the offline MP4 exporter (game/videoExport.ts) owns the replay
+  //   loop: gates the rAF update/render and the scrubber transport events, and
+  //   turns exit/Escape into export-cancel instead of leaving the replay.
+  replayExporting = false;
   // Highlight-clip mode: a looping sub-range of the recording played on the
   //   game-over screen (best rhythm chain, 4s pre-roll → rhythm lost). When set,
   //   the replay loop plays start→end then rebuilds + fast-forwards back to start
@@ -580,22 +585,28 @@ export class Game implements HudElements {
     // Replay scrubber (React <ReplayScrubber>) → game. Speed 0 pauses playback;
     //   seek sets a target frame consumed on the next replay tick.
     window.addEventListener("replay:setSpeed", (e) => {
-      if (!this.replayPlayer) return;
+      if (!this.replayPlayer || this.replayExporting) return;
       this.replaySpeed = (e as CustomEvent).detail.speed as number;
     });
     window.addEventListener("replay:seek", (e) => {
-      if (!this.replayPlayer) return;
+      if (!this.replayPlayer || this.replayExporting) return;
       this.replaySeekTarget = (e as CustomEvent).detail.frame as number;
     });
     window.addEventListener("replay:togglePlay", () => {
-      if (!this.replayPlayer) return;
+      if (!this.replayPlayer || this.replayExporting) return;
       this.replaySpeed = this.replaySpeed > 0 ? 0 : 1;
       window.dispatchEvent(new CustomEvent("replay:progress", {
         detail: { position: this.replayPlayer.position(), total: this.replayPlayer.total(), speed: this.replaySpeed },
       }));
     });
     window.addEventListener("replay:exit", () => {
+      // Mid-export, exit means "abort the export" — the replay stays open.
+      if (this.replayExporting) { cancelReplayExport(); return; }
       if (this.replayPlayer && this.highlightClip === null) exitReplay(this);
+    });
+    // Scrubber download button → offline MP4 export (or cancel if in flight).
+    window.addEventListener("replay:download", () => {
+      if (this.replayPlayer && this.highlightClip === null) toggleReplayExport(this);
     });
     // <FirstWaveHint> owns its own stage-3 auto-dismiss timer; when it fades
     //   out it asks the game to clear the stage.
@@ -614,18 +625,27 @@ export class Game implements HudElements {
       //   for the game-over highlight clip — there Space/Enter mean "continue",
       //   handled by tickHighlightGameOverInput, and there's no scrubber.
       if (this.replayPlayer && this.highlightClip === null) {
-        const SEEK_FRAMES = 120;
-        if (k === "arrowleft" || k === "arrowright") {
-          e.preventDefault();
-          const dir = k === "arrowright" ? 1 : -1;
-          const from = this.replaySeekTarget ?? this.replayPlayer.position();
-          this.replaySeekTarget = from + dir * SEEK_FRAMES;
-        } else if (k === " " || k === "spacebar") {
-          e.preventDefault();
-          window.dispatchEvent(new CustomEvent("replay:togglePlay"));
-        } else if (k === "escape") {
-          e.preventDefault();
-          exitReplay(this);
+        if (this.replayExporting) {
+          // Export in flight: Escape aborts it; everything else is ignored so
+          //   a stray seek can't fight the exporter's frame sweep.
+          if (k === "escape") {
+            e.preventDefault();
+            cancelReplayExport();
+          }
+        } else {
+          const SEEK_FRAMES = 120;
+          if (k === "arrowleft" || k === "arrowright") {
+            e.preventDefault();
+            const dir = k === "arrowright" ? 1 : -1;
+            const from = this.replaySeekTarget ?? this.replayPlayer.position();
+            this.replaySeekTarget = from + dir * SEEK_FRAMES;
+          } else if (k === " " || k === "spacebar") {
+            e.preventDefault();
+            window.dispatchEvent(new CustomEvent("replay:togglePlay"));
+          } else if (k === "escape") {
+            e.preventDefault();
+            exitReplay(this);
+          }
         }
       }
       if (k === "`") {
@@ -676,6 +696,9 @@ export class Game implements HudElements {
 
   update(dt: number) { updateGame(this, dt); }
   render() {
+    // The exporter renders each stepped frame itself; a rAF repaint between
+    //   its yields would only redraw the same state.
+    if (this.replayExporting) return;
     renderGame(this);
     if (this.debugMode) this.renderDebugOverlay();
   }
