@@ -2030,6 +2030,11 @@ export class Sound {
   private static readonly ALIEN_DRONE_FILTER_FREQ: Record<"big" | "medium" | "small", number> = {
     big: 380, medium: 560, small: 820,
   };
+  // Headroom scale rendered into each loop's PCM — the detuned pair beats
+  // to twice a single sine, so the raw graph exceeds full scale and
+  // encodeWav's 16-bit clamp would hard-clip it into a buzz. Playback
+  // divides this back out (startAlienDrone) so loudness is unchanged.
+  private static readonly ALIEN_DRONE_BAKE_TRIM = 0.3;
   // Per-size base loudness. Big saucers are quieter on a per-voice basis
   // because the sub frequency takes up more sonic real estate; small
   // saucers can be a touch louder without crowding.
@@ -2101,13 +2106,8 @@ export class Sound {
     filter.Q.value = 3;
     filter.frequency.value = Sound.ALIEN_DRONE_FILTER_FREQ[size];
 
-    // Headroom trim: the live graph fed straight into this.master, which
-    // routes through the master compressor/limiter — that safety net doesn't
-    // exist on the baked-buffer path, so the filter's Q=3 resonant boost near
-    // cutoff could clip the rendered buffer (measured on "medium"). A fixed
-    // trim here keeps every size's peak comfortably under 0dBFS.
     const trim = ctx.createGain();
-    trim.gain.value = 0.85;
+    trim.gain.value = Sound.ALIEN_DRONE_BAKE_TRIM;
     oscA.connect(filter);
     oscB.connect(filter);
     filter.connect(pulseGain);
@@ -2154,7 +2154,7 @@ export class Sound {
 
     const { src, startOffset } = this.makeBakedLoopSource(buf, Sound.ALIEN_DRONE_LOOP_LEN);
 
-    const peak = Sound.ALIEN_DRONE_PEAK[size];
+    const peak = Sound.ALIEN_DRONE_PEAK[size] / Sound.ALIEN_DRONE_BAKE_TRIM;
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
     mainGain.gain.exponentialRampToValueAtTime(peak, t + 0.6);
@@ -2199,6 +2199,11 @@ export class Sound {
   // endpoints share the length so the live crossfade pair stays phase-locked.
   private static readonly WARBLE_DRONE_LOOP_LEN: [number, number] = [4.0, 4.0];
   private static readonly WARBLE_DRONE_VIBRATO_RATE: [number, number] = [4, 4 + 7];
+  // Headroom scale rendered into each loop's PCM — the detuned pair beats
+  // to twice a single sine, so the raw graph exceeds full scale and
+  // encodeWav's 16-bit clamp would hard-clip it into a buzz. Playback
+  // divides this back out (startWarbleDrone) so loudness is unchanged.
+  private static readonly WARBLE_DRONE_BAKE_TRIM = 0.3;
 
   // Renders one endpoint of the warble drone's morph into `ctx`: phaseState
   // 0 = fully phased in (smooth hum), 1 = fully phased out (deep, wide, fast
@@ -2234,9 +2239,12 @@ export class Sound {
     filter.Q.value = 4;
     filter.frequency.value = 700 + 700 * g;
 
+    const trim = ctx.createGain();
+    trim.gain.value = Sound.WARBLE_DRONE_BAKE_TRIM;
     oscA.connect(filter);
     oscB.connect(filter);
-    filter.connect(dest);
+    filter.connect(trim);
+    trim.connect(dest);
 
     oscA.start(0);
     oscB.start(0);
@@ -2275,7 +2283,7 @@ export class Sound {
 
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
-    mainGain.gain.exponentialRampToValueAtTime(0.06, t + 0.6);
+    mainGain.gain.exponentialRampToValueAtTime(0.06 / Sound.WARBLE_DRONE_BAKE_TRIM, t + 0.6);
     mainGain.connect(sink);
 
     const bufs = [bufIn, bufOut];
@@ -2382,6 +2390,12 @@ export class Sound {
   // INSIDE the loop — the drift-hold stack keeps evolving instead of repeating a clipped swell.
   private static readonly FIRST_DOT_HUM_LOOP_LEN = 8.0;
 
+  // Headroom scale rendered into each loop's PCM — the detuned pair beats
+  // to twice a single sine, which would hard-clip in encodeWav's 16-bit
+  // clamp. Playback divides this back out (createHumVoice's makeup gain)
+  // so the level into the live bandpass matches the original live graph.
+  private static readonly FIRST_DOT_HUM_BAKE_TRIM = 0.4;
+
   // Renders one seamless first-dot-hum drone-tone loop for hum instance `humIndex` into `ctx`:
   // two detuned sines (chorus beating) + a slow vibrato LFO pitch-bending both. This is only the
   // raw tone — the bandpass formant, beat pulse and hover-swell gain all stay live (built fresh in
@@ -2406,16 +2420,8 @@ export class Sound {
     vibratoLfo.connect(vibratoDepth);
     vibratoDepth.connect(oscA.frequency);
     vibratoDepth.connect(oscB.frequency);
-    // The original live graph summed oscA+oscB straight into the (also-live)
-    // bandpass filter with no gain staging — headroom came for free because
-    // nothing downstream ever captured the raw sum as a fixed-amplitude
-    // buffer. Baking that same unattenuated sum clips: two full-scale sines
-    // can peak near ±2.0, and even a 0.5 trim (unity at worst-case in-phase
-    // alignment) measured only a few dB of headroom in practice — the live
-    // pulseGain/mainGain chain downstream still shapes final loudness exactly
-    // as before, so trimming further only removes clipping, not character.
     const trim = ctx.createGain();
-    trim.gain.value = 0.4;
+    trim.gain.value = Sound.FIRST_DOT_HUM_BAKE_TRIM;
     oscA.connect(trim);
     oscB.connect(trim);
     trim.connect(dest);
@@ -2447,6 +2453,8 @@ export class Sound {
     }
     const t = this.ctx.currentTime;
     const { src, startOffset } = this.makeBakedLoopSource(buf, Sound.FIRST_DOT_HUM_LOOP_LEN);
+    const makeup = this.ctx.createGain();
+    makeup.gain.value = 1 / Sound.FIRST_DOT_HUM_BAKE_TRIM;
     const filter = this.ctx.createBiquadFilter();
     filter.type = "bandpass";
     filter.frequency.value = filterStartHz;
@@ -2455,7 +2463,8 @@ export class Sound {
     pulseGain.gain.setValueAtTime(Sound.FIRST_DOT_HUM_PULSE_TROUGH, t);
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
-    src.connect(filter);
+    src.connect(makeup);
+    makeup.connect(filter);
     filter.connect(pulseGain);
     pulseGain.connect(mainGain);
     mainGain.connect(this.master);
@@ -3360,6 +3369,14 @@ export class Sound {
     bassA: 1 / 11, bassB: 2 / 15, bassC: 1 / 14, bassD: 1 / 6,
   };
 
+  // Headroom scale rendered into each loop's PCM. The raw graph exceeds
+  // full scale (bassB's detuned pair beats to twice a single sine, and the
+  // lowpass adds resonant gain on top), and encodeWav's 16-bit clamp would
+  // hard-clip that into a periodic buzz — the live graph never clipped
+  // because mainGain scaled it down while still in float. Playback divides
+  // this back out (startBassteroidDrone) so loudness is unchanged.
+  private static readonly BASS_DRONE_BAKE_TRIM = 0.25;
+
   // Encode (kind, size) into the single pitchRatio slot bakedKey offers:
   // kindIndex (0..3 for bassA..bassD) * 2 + sizeIndex (0=medium, 1=small).
   private static bassDroneIndex(kind: "bassA" | "bassB" | "bassC" | "bassD", size: "medium" | "small"): number {
@@ -3401,13 +3418,8 @@ export class Sound {
     pulseLfo.connect(pulseDepth);
     pulseDepth.connect(pulseGain.gain);
 
-    // Headroom trim: the live graph fed straight into this.master, which
-    // routes through the master compressor/limiter — that safety net doesn't
-    // exist on the baked-buffer path, so bassC's root+fifth (plus the filter's
-    // Q=1.2 resonant boost near cutoff) could clip the rendered buffer. A
-    // fixed trim here keeps every kind's peak comfortably under 0dBFS.
     const trim = ctx.createGain();
-    trim.gain.value = 0.7;
+    trim.gain.value = Sound.BASS_DRONE_BAKE_TRIM;
     filter.connect(pulseGain);
     pulseGain.connect(trim);
     trim.connect(dest);
@@ -3528,7 +3540,8 @@ export class Sound {
     // medium that splits gives 2 smalls, two mediums give 4 smalls, etc.),
     // so each voice is intentionally quiet. Mediums get a touch more body
     // than smalls so the lower octave still anchors the mix when present.
-    const peakBase = size === "medium" ? 0.035 : 0.022;
+    // Dividing the bake trim back out restores the live graph's level.
+    const peakBase = (size === "medium" ? 0.035 : 0.022) / Sound.BASS_DRONE_BAKE_TRIM;
 
     const { src, startOffset } = this.makeBakedLoopSource(buf, Sound.BASS_DRONE_LOOP_LEN[kind]);
 
@@ -6482,6 +6495,12 @@ export class Sound {
   // no discontinuity at the seam.
   private static THRUST_LOOP_LEN = 4.0;
 
+  // Headroom scale rendered into the thrust/reverse/side loops' PCM — the
+  // three summed oscillators exceed full scale when they align, and
+  // encodeWav's 16-bit clamp would hard-clip that into a rasp. Playback
+  // divides this back out (the startX functions) so loudness is unchanged.
+  private static readonly THRUST_BAKE_TRIM = 0.2;
+
   // Builds the forward-thrust drone graph into `ctx`, summed into `dest`, all
   // scheduled relative to offline time 0. Nothing here reads live state, so
   // it renders identically every time — see bakeSound's "thrust" case.
@@ -6514,12 +6533,8 @@ export class Sound {
     lfo.connect(lfoDepth);
     lfoDepth.connect(tremoloGain.gain);
 
-    // Headroom trim: the live graph fed straight into this.master, which
-    // routes through the master compressor/limiter — that safety net doesn't
-    // exist on the baked-buffer path, so summing 3 full-scale oscillators
-    // could clip the rendered buffer. A fixed trim keeps the peak under 0dBFS.
     const trim = ctx.createGain();
-    trim.gain.value = 0.85;
+    trim.gain.value = Sound.THRUST_BAKE_TRIM;
     tri1.connect(filter);
     tri2.connect(filter);
     sub.connect(filter);
@@ -6559,7 +6574,7 @@ export class Sound {
 
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
-    mainGain.gain.exponentialRampToValueAtTime(0.16, t + 0.08);
+    mainGain.gain.exponentialRampToValueAtTime(0.16 / Sound.THRUST_BAKE_TRIM, t + 0.08);
 
     src.connect(mainGain);
     mainGain.connect(this.master);
@@ -6886,12 +6901,8 @@ export class Sound {
     lfo.connect(lfoDepth);
     lfoDepth.connect(tremoloGain.gain);
 
-    // Headroom trim: the live graph fed straight into this.master, which
-    // routes through the master compressor/limiter — that safety net doesn't
-    // exist on the baked-buffer path, so summing 3 full-scale oscillators
-    // could clip the rendered buffer. A fixed trim keeps the peak under 0dBFS.
     const trim = ctx.createGain();
-    trim.gain.value = 0.85;
+    trim.gain.value = Sound.THRUST_BAKE_TRIM;
     tri1.connect(filter);
     tri2.connect(filter);
     sub.connect(filter);
@@ -6928,7 +6939,7 @@ export class Sound {
 
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
-    mainGain.gain.exponentialRampToValueAtTime(0.16, t + 0.08);
+    mainGain.gain.exponentialRampToValueAtTime(0.16 / Sound.THRUST_BAKE_TRIM, t + 0.08);
 
     src.connect(mainGain);
     mainGain.connect(this.master);
@@ -6988,12 +6999,8 @@ export class Sound {
     lfo.connect(lfoDepth);
     lfoDepth.connect(tremoloGain.gain);
 
-    // Headroom trim: the live graph fed straight into this.master, which
-    // routes through the master compressor/limiter — that safety net doesn't
-    // exist on the baked-buffer path, so summing 3 full-scale oscillators
-    // could clip the rendered buffer. A fixed trim keeps the peak under 0dBFS.
     const trim = ctx.createGain();
-    trim.gain.value = 0.85;
+    trim.gain.value = Sound.THRUST_BAKE_TRIM;
     tri1.connect(filter);
     tri2.connect(filter);
     sub.connect(filter);
@@ -7030,7 +7037,7 @@ export class Sound {
 
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
-    mainGain.gain.exponentialRampToValueAtTime(0.14, t + 0.06);
+    mainGain.gain.exponentialRampToValueAtTime(0.14 / Sound.THRUST_BAKE_TRIM, t + 0.06);
 
     src.connect(mainGain);
     mainGain.connect(this.master);
