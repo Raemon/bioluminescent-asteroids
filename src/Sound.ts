@@ -6,8 +6,10 @@ import { toroidalDelta } from "./vec";
 import { cfgN, cfgU } from "./soundConfig";
 import { getChannelVolume, type AudioChannel } from "./game/audioPrefs";
 import { musicGain, loadMusicConfig, type MusicLayer } from "./musicConfig";
-import { FULL_HALO_TIER_THRESHOLDS, type FullHaloSong } from "./game/haloFullMusicConfig";
+import { FULL_HALO_TIER_THRESHOLDS, FULL_HALO_SONGS, type FullHaloSong } from "./game/haloFullMusicConfig";
 import { fullHaloLayerOffset, loadHaloFullConfig } from "./haloFullConfig";
+import { cosmeticRng } from "./game/rng";
+import { HALO_MUSIC_POOL, HAUNTING_MUSIC_POOL, BOSS_MUSIC_VARIATION } from "./game/haloMusicConfig";
 
 type ToneModule = typeof import("tone");
 let toneModulePromise: Promise<ToneModule> | null = null;
@@ -339,7 +341,19 @@ export type SoundName =
   | "bossEyeOpenStinger"
   // Hold-to-charge laser bed. One committed loop per tier (0..4), keyed by
   // pitchRatio = tier. Built by buildChargeBedGraph, not the Tone path.
-  | "chargeBed";
+  | "chargeBed"
+  // Laser-shot thunderclap. One committed one-shot per charge tier (0..4),
+  // keyed by pitchRatio = tier. Built by buildLaserShotGraph, not the Tone path.
+  | "laserShot"
+  // Streak-shimmer music-box tine. One committed one-shot per pool pitch
+  // index (0..STREAK_SHIMMER_POOL.length-1), keyed by pitchRatio = index.
+  // Built by buildStreakShimmerNoteGraph, not the Tone path.
+  | "streakShimmer";
+  // Note: "thrust" / "reverseThrust" / "sideThrust" are declared above (with
+  // the rest of the play() switch names) but are ALSO baked one-shots now —
+  // each is one committed seamless loop, pitchRatio unused (always 1). Built
+  // by buildThrustGraph / buildReverseThrustGraph / buildSideThrustGraph,
+  // not the Tone path.
 
 // Combo-milestone vocal pools. Each milestone (x6, x12) has its own folder
 // under /sounds/vocals/in-use/. When the player hits the milestone, one file
@@ -363,23 +377,11 @@ export class Sound {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
   thrustNode: {
-    tri1: OscillatorNode;
-    tri2: OscillatorNode;
-    sub: OscillatorNode;
-    lfo: OscillatorNode;
-    lfoDepth: GainNode;
-    filter: BiquadFilterNode;
-    tremoloGain: GainNode;
+    src: AudioBufferSourceNode;
     mainGain: GainNode;
   } | null = null;
   reverseThrustNode: {
-    tri1: OscillatorNode;
-    tri2: OscillatorNode;
-    sub: OscillatorNode;
-    lfo: OscillatorNode;
-    lfoDepth: GainNode;
-    filter: BiquadFilterNode;
-    tremoloGain: GainNode;
+    src: AudioBufferSourceNode;
     mainGain: GainNode;
   } | null = null;
   // Sustained hold-to-charge bed: five pre-baked tier loops (chord + crackle +
@@ -393,13 +395,7 @@ export class Sound {
   // Side engines (Z/X) — third engine voice; pitch sits between forward thrust
   // and retro so the player hears it as a distinct vector.
   sideThrustNode: {
-    tri1: OscillatorNode;
-    tri2: OscillatorNode;
-    sub: OscillatorNode;
-    lfo: OscillatorNode;
-    lfoDepth: GainNode;
-    filter: BiquadFilterNode;
-    tremoloGain: GainNode;
+    src: AudioBufferSourceNode;
     mainGain: GainNode;
   } | null = null;
   enabled = true;
@@ -597,6 +593,9 @@ export class Sound {
     this.prerenderLaserShots();
     this.prerenderChargeBeds();
     this.prerenderStreakShimmerNotes();
+    this.prerenderThrust();
+    this.prerenderReverseThrust();
+    this.prerenderSideThrust();
     this.loadGuitarSample();
     // Kick off the baked-mp3 fetch + decode for every voice that has a baked
     // recipe. The title screen awaits bakedCacheReady() before letting the
@@ -769,6 +768,14 @@ export class Sound {
       ["cometNote", cometIdxs],
       // Hold-to-charge laser bed: one committed loop per tier (pitchRatio=tier).
       ["chargeBed", [0, 1, 2, 3, 4]],
+      // Laser-shot thunderclap: one committed one-shot per tier (pitchRatio=tier).
+      ["laserShot", [0, 1, 2, 3, 4]],
+      // Streak-shimmer tine: one committed one-shot per pool pitch index.
+      ["streakShimmer", Sound.STREAK_SHIMMER_POOL.map((_, i) => i)],
+      // Engine drones: single committed loop each (pitchRatio unused).
+      ["thrust", [1]],
+      ["reverseThrust", [1]],
+      ["sideThrust", [1]],
       // Wave-summary drain chime: one variant per harmonic over A3.
       ["drainChime", [1, 2, 3, 4, 6, 8]],
     ];
@@ -1090,6 +1097,52 @@ export class Sound {
     const sr = this.ctx.sampleRate;
     const OACearly = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
     if (!OACearly) return null;
+
+    // laserShot and streakShimmer are pure-WebAudio one-shots (no Tone, no
+    // reverb bus) whose graphs are already a pure function of a small
+    // discrete parameter — render them on their own path and skip the Tone
+    // fx-bus setup the one-shot recipes need.
+    if (name === "laserShot") {
+      const tier = Math.max(0, Math.min(4, Math.round(pitchRatio)));
+      const len = Math.ceil(sr * this.laserShotBufferLen(tier));
+      const offline = new OACearly(1, len, sr);
+      this.buildLaserShotGraph(offline, offline.destination, tier);
+      return offline.startRendering();
+    }
+    // thrust/reverseThrust/sideThrust are seamless-loop engine drones (no
+    // Tone, no reverb bus, no live modulation): one committed loop each,
+    // rendered on their own path like chargeBed.
+    if (name === "thrust") {
+      const len = Math.ceil(sr * Sound.THRUST_LOOP_LEN);
+      const offline = new OACearly(1, len, sr);
+      this.buildThrustGraph(offline, offline.destination);
+      return offline.startRendering();
+    }
+    if (name === "reverseThrust") {
+      const len = Math.ceil(sr * Sound.REVERSE_THRUST_LOOP_LEN);
+      const offline = new OACearly(1, len, sr);
+      this.buildReverseThrustGraph(offline, offline.destination);
+      return offline.startRendering();
+    }
+    if (name === "sideThrust") {
+      const len = Math.ceil(sr * Sound.SIDE_THRUST_LOOP_LEN);
+      const offline = new OACearly(1, len, sr);
+      this.buildSideThrustGraph(offline, offline.destination);
+      return offline.startRendering();
+    }
+    if (name === "streakShimmer") {
+      const idx = Math.max(0, Math.min(Sound.STREAK_SHIMMER_POOL.length - 1, Math.round(pitchRatio)));
+      const len = Math.ceil(sr * Sound.STREAK_SHIMMER_NOTE_SEC);
+      const offline = new OACearly(1, len, sr);
+      this.buildStreakShimmerNoteGraph(offline, offline.destination, Sound.STREAK_SHIMMER_POOL[idx]);
+      const buf = await offline.startRendering();
+      // The exponential decay never quite reaches zero — fade the last few
+      // ms to true silence so the buffer end can't tick.
+      const data = buf.getChannelData(0);
+      const fade = Math.min(data.length, Math.floor(sr * 0.05));
+      for (let s = 0; s < fade; s++) data[data.length - 1 - s] *= s / fade;
+      return buf;
+    }
 
     // chargeBed is a pure-WebAudio seamless loop (no Tone, no reverb bus): one
     // committed mp3 per tier, keyed by pitchRatio = tier. Render it on its own
@@ -1757,6 +1810,45 @@ export class Sound {
     this.volume = saved.volume;
     this.pauseFadeFactor = saved.pauseFadeFactor;
     this.enabled = saved.enabled;
+  }
+
+  // Fetch + decode every lazily-loaded voice the sim could reach — halo music
+  //   (standard/haunting/boss pools), full-halo songs, Pilot's Log milestones,
+  //   and the big-alien guitar sample — and await all of it. Live play spreads
+  //   these loads over real wall-clock minutes (preloadHaloMusicSequential's
+  //   setTimeout gaps, background fetches players may not even wait out) so a
+  //   cache miss just costs one voice a frame of latency. The exporter instead
+  //   steps frames as fast as the CPU allows: a miss mid-sweep means the fetch
+  //   resolves against a clock.now that has already raced far past the moment
+  //   the voice needed to start, so it starts late/misscheduled (an audible
+  //   glitch) while the awaited decode work stalls frame production (a visible
+  //   slowdown). Called once before the export's frame-stepping loop begins so
+  //   every voice the recording touches is already cached.
+  async prewarmForExport(): Promise<void> {
+    this.ensureContext();
+    await this.bakedCacheReady();
+    const haloVariations = new Set<HaloMusicVariation>([
+      ...HALO_MUSIC_POOL, ...HAUNTING_MUSIC_POOL, BOSS_MUSIC_VARIATION,
+    ]);
+    const loads: Promise<unknown>[] = [];
+    for (const variation of haloVariations) {
+      if (variation === "none") continue;
+      loads.push(this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient")));
+      loads.push(this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic")));
+      loads.push(this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3")));
+    }
+    for (const song of Object.keys(FULL_HALO_SONGS) as FullHaloSongId[]) {
+      for (let i = 1; i <= 6; i++) loads.push(this.loadHaloMusicBuffer(this.haloFullMusicUrl(song, i)));
+    }
+    loads.push(this.loadHaloMusicBuffer(Sound.STREAK_LOOP_BASE_URL));
+    loads.push(this.loadHaloMusicBuffer(Sound.STREAK_LOOP_RISE_URL));
+    for (const milestone of [6, 12]) {
+      for (const url of pilotLogUrlsForIndex(milestone)) loads.push(this.loadPilotLogBuffer(url));
+    }
+    loads.push(this.loadGuitarSample());
+    void loadMusicConfig();
+    void loadHaloFullConfig();
+    await Promise.allSettled(loads);
   }
 
   // Scales the global summing buses (liveSum for live voices, bakedSum for
@@ -2725,7 +2817,7 @@ export class Sound {
     // rising cycle: step up through the window, wrapping back to its base — the
     //   same one-octave figure over and over, lifting registers as it climbs.
     node.walkIndex = node.walkIndex < base || node.walkIndex >= base + win - 1 ? base : node.walkIndex + 1;
-    const buf = this.streakShimmerBuffers[node.walkIndex];
+    const buf = this.bakedBuffers.get(this.bakedKey("streakShimmer", node.walkIndex));
     if (!buf) {
       // Render hasn't landed yet (or failed) — kick it and skip this note.
       this.prerenderStreakShimmerNotes();
@@ -2746,37 +2838,13 @@ export class Sound {
     src.start(at);
   }
 
-  // One pre-rendered tine buffer per pool pitch. Filled lazily by
-  //   prerenderStreakShimmerNotes; null until that pitch's render resolves.
-  private streakShimmerBuffers: (AudioBuffer | null)[] = [];
-  private streakShimmerRendering: boolean[] = [];
-
-  // Renders every pool pitch once into an AudioBuffer via OfflineAudioContext
-  //   and caches it, so each shimmer note is a cheap buffer playback. Fire-and-
-  //   forget; the scheduler silent-skips notes until a render lands. Re-runnable:
-  //   skips pitches already cached or in flight.
+  // Warm the committed streak-shimmer tine one-shots (one mp3 per pool pitch
+  //   index, keyed by pitchRatio = index). Each goes through queueBake: fetch
+  //   the committed mp3, and only in dev fall back to a
+  //   buildStreakShimmerNoteGraph offline render that gets dumped to disk.
+  //   Fire-and-forget; queueBake de-dupes in-flight/cached.
   private prerenderStreakShimmerNotes() {
-    if (!this.ctx) return;
-    const OAC = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
-    if (!OAC) return;
-    const sr = this.ctx.sampleRate;
-    const pool = Sound.STREAK_SHIMMER_POOL;
-    for (let i = 0; i < pool.length; i++) {
-      if (this.streakShimmerBuffers[i] || this.streakShimmerRendering[i]) continue;
-      this.streakShimmerRendering[i] = true;
-      const length = Math.ceil(sr * Sound.STREAK_SHIMMER_NOTE_SEC);
-      const offline = new OAC(1, length, sr);
-      this.buildStreakShimmerNoteGraph(offline, offline.destination, pool[i]);
-      offline.startRendering().then((buf) => {
-        // The exponential decay never quite reaches zero — fade the last few
-        //   ms to true silence so the buffer end can't tick.
-        const data = buf.getChannelData(0);
-        const fade = Math.min(data.length, Math.floor(sr * 0.05));
-        for (let s = 0; s < fade; s++) data[data.length - 1 - s] *= s / fade;
-        this.streakShimmerBuffers[i] = buf;
-        this.streakShimmerRendering[i] = false;
-      }).catch(() => { this.streakShimmerRendering[i] = false; });
-    }
+    for (let i = 0; i < Sound.STREAK_SHIMMER_POOL.length; i++) void this.queueBake("streakShimmer", i);
   }
 
   // Music-box tine voice: a sine fundamental with a slow decay plus two
@@ -4976,7 +5044,10 @@ export class Sound {
     if (!this.ctx || !this.chVocalsBaked) return 0;
     const urls = pilotLogUrlsForIndex(milestone);
     if (urls.length === 0) return 0;
-    const url = urls[Math.floor(Math.random() * urls.length)];
+    // Cosmetic draw (see game/rng.ts) — which take plays doesn't affect
+    //   sim state, but it must still be deterministic so a replay/export
+    //   re-sim picks the exact take the original run played.
+    const url = urls[Math.floor(cosmeticRng() * urls.length)];
     const targetStartTime = this.ctx.currentTime + Math.max(0, delaySec);
     const buf = await this.loadPilotLogBuffer(url);
     if (!buf || !this.ctx || !this.chVocalsBaked) return 0;
@@ -6048,67 +6119,98 @@ export class Sound {
     }
   }
 
-  private startThrust() {
-    if (!this.ctx || !this.master) return;
-    if (this.thrustNode) return;
-    const t = this.ctx.currentTime;
+  // Length (s) of the rendered thrust loop. 2.0s = exactly 10 cycles of the
+  // 5Hz tremolo LFO, so the buffer tiles with no discontinuity at the seam.
+  private static THRUST_LOOP_LEN = 2.0;
 
-    const tri1 = this.ctx.createOscillator();
+  // Builds the forward-thrust drone graph into `ctx`, summed into `dest`, all
+  // scheduled relative to offline time 0. Nothing here reads live state, so
+  // it renders identically every time — see bakeSound's "thrust" case.
+  private buildThrustGraph(ctx: BaseAudioContext, dest: AudioNode) {
+    const len = Sound.THRUST_LOOP_LEN;
+    const tri1 = ctx.createOscillator();
     tri1.type = "triangle";
     tri1.frequency.value = 110.0;
-    const tri2 = this.ctx.createOscillator();
+    const tri2 = ctx.createOscillator();
     tri2.type = "triangle";
     tri2.frequency.value = 110.7;
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.value = 55.0;
 
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.frequency.value = 1200;
     filter.Q.value = 0.7;
 
-    const tremoloGain = this.ctx.createGain();
+    const tremoloGain = ctx.createGain();
     tremoloGain.gain.value = 1.0;
 
-    const lfo = this.ctx.createOscillator();
+    const lfo = ctx.createOscillator();
     lfo.type = "sine";
     lfo.frequency.value = 5;
-    const lfoDepth = this.ctx.createGain();
+    const lfoDepth = ctx.createGain();
     lfoDepth.gain.value = 0.08;
     lfo.connect(lfoDepth);
     lfoDepth.connect(tremoloGain.gain);
-
-    const mainGain = this.ctx.createGain();
-    mainGain.gain.setValueAtTime(0.0001, t);
-    mainGain.gain.exponentialRampToValueAtTime(0.16, t + 0.08);
 
     tri1.connect(filter);
     tri2.connect(filter);
     sub.connect(filter);
     filter.connect(tremoloGain);
-    tremoloGain.connect(mainGain);
+    tremoloGain.connect(dest);
+
+    tri1.start(0);
+    tri2.start(0);
+    sub.start(0);
+    lfo.start(0);
+    tri1.stop(len);
+    tri2.stop(len);
+    sub.stop(len);
+    lfo.stop(len);
+  }
+
+  // Warm the committed thrust loop (single buffer, pitchRatio unused). Goes
+  // through queueBake: fetch the committed mp3, and only in dev fall back to
+  // a buildThrustGraph offline render that gets dumped to disk.
+  private prerenderThrust() {
+    void this.queueBake("thrust", 1);
+  }
+
+  private startThrust() {
+    if (!this.ctx || !this.master) return;
+    if (this.thrustNode) return;
+    const buf = this.bakedBuffers.get(this.bakedKey("thrust", 1));
+    if (!buf) {
+      // Bake hasn't landed yet (or failed) — kick it for next time and bail.
+      this.prerenderThrust();
+      return;
+    }
+    const t = this.ctx.currentTime;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.setValueAtTime(0.0001, t);
+    mainGain.gain.exponentialRampToValueAtTime(0.16, t + 0.08);
+
+    src.connect(mainGain);
     mainGain.connect(this.master);
+    src.start(t);
 
-    tri1.start(t);
-    tri2.start(t);
-    sub.start(t);
-    lfo.start(t);
-
-    this.thrustNode = { tri1, tri2, sub, lfo, lfoDepth, filter, tremoloGain, mainGain };
+    this.thrustNode = { src, mainGain };
   }
 
   stopThrust() {
     if (!this.ctx || !this.thrustNode) return;
     const t = this.ctx.currentTime;
-    const { tri1, tri2, sub, lfo, mainGain } = this.thrustNode;
+    const { src, mainGain } = this.thrustNode;
     mainGain.gain.cancelScheduledValues(t);
     mainGain.gain.setValueAtTime(mainGain.gain.value, t);
     mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
-    tri1.stop(t + 0.1);
-    tri2.stop(t + 0.1);
-    sub.stop(t + 0.1);
-    lfo.stop(t + 0.1);
+    src.stop(t + 0.1);
     this.thrustNode = null;
   }
 
@@ -6374,138 +6476,190 @@ export class Sound {
     this.laserChargeNode = null;
   }
 
-  // Deeper sibling of startThrust — same architecture, lower oscillator
-  // frequencies and a darker filter cutoff so the retro-jets read as a
-  // heavier, lower-pitched rumble than the forward thrusters.
-  private startReverseThrust() {
-    if (!this.ctx || !this.master) return;
-    if (this.reverseThrustNode) return;
-    const t = this.ctx.currentTime;
+  // Length (s) of the rendered reverse-thrust loop. 5.0s = exactly 21 cycles
+  // of the 4.2Hz tremolo LFO, so the buffer tiles with no seam discontinuity.
+  private static REVERSE_THRUST_LOOP_LEN = 5.0;
 
-    const tri1 = this.ctx.createOscillator();
+  // Deeper sibling of buildThrustGraph — same architecture, lower oscillator
+  // frequencies and a darker filter cutoff so the retro-jets read as a
+  // heavier, lower-pitched rumble than the forward thrusters. Nothing here
+  // reads live state, so it renders identically every time.
+  private buildReverseThrustGraph(ctx: BaseAudioContext, dest: AudioNode) {
+    const len = Sound.REVERSE_THRUST_LOOP_LEN;
+    const tri1 = ctx.createOscillator();
     tri1.type = "triangle";
     tri1.frequency.value = 72.0;
-    const tri2 = this.ctx.createOscillator();
+    const tri2 = ctx.createOscillator();
     tri2.type = "triangle";
     tri2.frequency.value = 72.5;
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.value = 36.0;
 
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.frequency.value = 800;
     filter.Q.value = 0.7;
 
-    const tremoloGain = this.ctx.createGain();
+    const tremoloGain = ctx.createGain();
     tremoloGain.gain.value = 1.0;
 
-    const lfo = this.ctx.createOscillator();
+    const lfo = ctx.createOscillator();
     lfo.type = "sine";
     lfo.frequency.value = 4.2;
-    const lfoDepth = this.ctx.createGain();
+    const lfoDepth = ctx.createGain();
     lfoDepth.gain.value = 0.08;
     lfo.connect(lfoDepth);
     lfoDepth.connect(tremoloGain.gain);
+
+    tri1.connect(filter);
+    tri2.connect(filter);
+    sub.connect(filter);
+    filter.connect(tremoloGain);
+    tremoloGain.connect(dest);
+
+    tri1.start(0);
+    tri2.start(0);
+    sub.start(0);
+    lfo.start(0);
+    tri1.stop(len);
+    tri2.stop(len);
+    sub.stop(len);
+    lfo.stop(len);
+  }
+
+  // Warm the committed reverse-thrust loop (single buffer, pitchRatio unused).
+  private prerenderReverseThrust() {
+    void this.queueBake("reverseThrust", 1);
+  }
+
+  private startReverseThrust() {
+    if (!this.ctx || !this.master) return;
+    if (this.reverseThrustNode) return;
+    const buf = this.bakedBuffers.get(this.bakedKey("reverseThrust", 1));
+    if (!buf) {
+      this.prerenderReverseThrust();
+      return;
+    }
+    const t = this.ctx.currentTime;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
 
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
     mainGain.gain.exponentialRampToValueAtTime(0.16, t + 0.08);
 
-    tri1.connect(filter);
-    tri2.connect(filter);
-    sub.connect(filter);
-    filter.connect(tremoloGain);
-    tremoloGain.connect(mainGain);
+    src.connect(mainGain);
     mainGain.connect(this.master);
+    src.start(t);
 
-    tri1.start(t);
-    tri2.start(t);
-    sub.start(t);
-    lfo.start(t);
-
-    this.reverseThrustNode = { tri1, tri2, sub, lfo, lfoDepth, filter, tremoloGain, mainGain };
+    this.reverseThrustNode = { src, mainGain };
   }
 
   stopReverseThrust() {
     if (!this.ctx || !this.reverseThrustNode) return;
     const t = this.ctx.currentTime;
-    const { tri1, tri2, sub, lfo, mainGain } = this.reverseThrustNode;
+    const { src, mainGain } = this.reverseThrustNode;
     mainGain.gain.cancelScheduledValues(t);
     mainGain.gain.setValueAtTime(mainGain.gain.value, t);
     mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
-    tri1.stop(t + 0.1);
-    tri2.stop(t + 0.1);
-    sub.stop(t + 0.1);
-    lfo.stop(t + 0.1);
+    src.stop(t + 0.1);
     this.reverseThrustNode = null;
   }
+
+  // Length (s) of the rendered side-thrust loop. 2.0s = exactly 13 cycles of
+  // the 6.5Hz tremolo LFO, so the buffer tiles with no seam discontinuity.
+  private static SIDE_THRUST_LOOP_LEN = 2.0;
 
   // Side engines — third engine voice. Architecture mirrors thrust/retro, but
   // pitch sits between the two (90Hz/45Hz here vs 110/55 forward and 72/36 retro)
   // and the filter cutoff opens slightly brighter so the side jet reads as
-  // a tighter, more agile burst than either main thruster.
-  private startSideThrust() {
-    if (!this.ctx || !this.master) return;
-    if (this.sideThrustNode) return;
-    const t = this.ctx.currentTime;
-
-    const tri1 = this.ctx.createOscillator();
+  // a tighter, more agile burst than either main thruster. Nothing here reads
+  // live state, so it renders identically every time.
+  private buildSideThrustGraph(ctx: BaseAudioContext, dest: AudioNode) {
+    const len = Sound.SIDE_THRUST_LOOP_LEN;
+    const tri1 = ctx.createOscillator();
     tri1.type = "triangle";
     tri1.frequency.value = 90.0;
-    const tri2 = this.ctx.createOscillator();
+    const tri2 = ctx.createOscillator();
     tri2.type = "triangle";
     tri2.frequency.value = 90.7;
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.value = 45.0;
 
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.frequency.value = 1500;
     filter.Q.value = 0.7;
 
-    const tremoloGain = this.ctx.createGain();
+    const tremoloGain = ctx.createGain();
     tremoloGain.gain.value = 1.0;
 
-    const lfo = this.ctx.createOscillator();
+    const lfo = ctx.createOscillator();
     lfo.type = "sine";
     lfo.frequency.value = 6.5;
-    const lfoDepth = this.ctx.createGain();
+    const lfoDepth = ctx.createGain();
     lfoDepth.gain.value = 0.1;
     lfo.connect(lfoDepth);
     lfoDepth.connect(tremoloGain.gain);
-
-    const mainGain = this.ctx.createGain();
-    mainGain.gain.setValueAtTime(0.0001, t);
-    mainGain.gain.exponentialRampToValueAtTime(0.14, t + 0.06);
 
     tri1.connect(filter);
     tri2.connect(filter);
     sub.connect(filter);
     filter.connect(tremoloGain);
-    tremoloGain.connect(mainGain);
+    tremoloGain.connect(dest);
+
+    tri1.start(0);
+    tri2.start(0);
+    sub.start(0);
+    lfo.start(0);
+    tri1.stop(len);
+    tri2.stop(len);
+    sub.stop(len);
+    lfo.stop(len);
+  }
+
+  // Warm the committed side-thrust loop (single buffer, pitchRatio unused).
+  private prerenderSideThrust() {
+    void this.queueBake("sideThrust", 1);
+  }
+
+  private startSideThrust() {
+    if (!this.ctx || !this.master) return;
+    if (this.sideThrustNode) return;
+    const buf = this.bakedBuffers.get(this.bakedKey("sideThrust", 1));
+    if (!buf) {
+      this.prerenderSideThrust();
+      return;
+    }
+    const t = this.ctx.currentTime;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.setValueAtTime(0.0001, t);
+    mainGain.gain.exponentialRampToValueAtTime(0.14, t + 0.06);
+
+    src.connect(mainGain);
     mainGain.connect(this.master);
+    src.start(t);
 
-    tri1.start(t);
-    tri2.start(t);
-    sub.start(t);
-    lfo.start(t);
-
-    this.sideThrustNode = { tri1, tri2, sub, lfo, lfoDepth, filter, tremoloGain, mainGain };
+    this.sideThrustNode = { src, mainGain };
   }
 
   stopSideThrust() {
     if (!this.ctx || !this.sideThrustNode) return;
     const t = this.ctx.currentTime;
-    const { tri1, tri2, sub, lfo, mainGain } = this.sideThrustNode;
+    const { src, mainGain } = this.sideThrustNode;
     mainGain.gain.cancelScheduledValues(t);
     mainGain.gain.setValueAtTime(mainGain.gain.value, t);
     mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
-    tri1.stop(t + 0.09);
-    tri2.stop(t + 0.09);
-    sub.stop(t + 0.09);
-    lfo.stop(t + 0.09);
+    src.stop(t + 0.09);
     this.sideThrustNode = null;
   }
 
@@ -7290,36 +7444,16 @@ export class Sound {
     }
   }
 
-  // Renders the thunderclap once per charge tier (0..4) into an AudioBuffer via
-  // OfflineAudioContext and caches it, so playLaserShot is a cheap buffer
-  // playback instead of allocating ~10 nodes per shot. Fire-and-forget; until a
-  // tier's render lands playLaserShot silent-misses that one shot (rare — the
-  // upgrade isn't active at context start). Re-runnable: skips tiers already
-  // cached or in flight.
+  // Warm the committed laser-shot thunderclap one-shots (one mp3 per tier
+  // 0..4, keyed by pitchRatio = tier). Each goes through queueBake: fetch the
+  // committed mp3, and only in dev fall back to a buildLaserShotGraph offline
+  // render that gets dumped to disk. Fire-and-forget; queueBake de-dupes
+  // in-flight/cached.
   private prerenderLaserShots() {
-    if (!this.ctx) return;
-    const OAC = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
-    if (!OAC) return;
-    const sr = this.ctx.sampleRate;
-    for (let tier = 0; tier <= 4; tier++) {
-      if (this.laserShotBuffers[tier] || this.laserShotRendering[tier]) continue;
-      this.laserShotRendering[tier] = true;
-      const length = Math.ceil(sr * this.laserShotBufferLen(tier));
-      const offline = new OAC(1, length, sr);
-      this.buildLaserShotGraph(offline, offline.destination, tier);
-      offline.startRendering().then((buf) => {
-        this.laserShotBuffers[tier] = buf;
-        this.laserShotRendering[tier] = false;
-      }).catch(() => { this.laserShotRendering[tier] = false; });
-    }
+    for (let tier = 0; tier <= 4; tier++) void this.queueBake("laserShot", tier);
   }
 
-  // One pre-rendered thunderclap buffer per charge tier (index 0..4). Filled
-  // lazily by prerenderLaserShots; null until that tier's render resolves.
-  private laserShotBuffers: (AudioBuffer | null)[] = [null, null, null, null, null];
-  private laserShotRendering: boolean[] = [false, false, false, false, false];
-
-  // Laser-shot weapon (the "lasershot" upgrade). A pre-rendered THUNDERCLAP —
+  // Laser-shot weapon (the "lasershot" upgrade). A pre-baked THUNDERCLAP —
   // see buildLaserShotGraph for the synth and prerenderLaserShots for the
   // bake. This path just plays the cached per-tier buffer with a per-shot
   // playbackRate wobble (so a burst never sounds machine-stamped) and a small
@@ -7330,9 +7464,9 @@ export class Sound {
     this.ensureContext();
     if (!this.ctx || !this.bakedOut) return;
     const tier = Math.max(0, Math.min(4, Math.floor(dots)));
-    const buf = this.laserShotBuffers[tier];
+    const buf = this.bakedBuffers.get(this.bakedKey("laserShot", tier));
     if (!buf) {
-      // Render hasn't landed yet (or failed) — kick it for next time and bail.
+      // Bake hasn't landed yet (or failed) — kick it for next time and bail.
       this.prerenderLaserShots();
       return;
     }
