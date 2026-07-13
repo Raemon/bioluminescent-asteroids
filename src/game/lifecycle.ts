@@ -15,6 +15,7 @@ import { clearPlayerFilter, hideScoreEntry, isScoreEntryBlockingEnter, showLeade
 import { BOSS_MUSIC_VARIATION, HALO_MUSIC_POOL, HAUNTING_MUSIC_POOL } from "./haloMusicConfig";
 import { FULL_HALO_SONGS, USE_FULL_HALO_MUSIC, type FullHaloSong } from "./haloFullMusicConfig";
 import { hideWaveSummary } from "./waveSummary";
+import { hideWaveAnnounce } from "./gameUpdate";
 import { hideGameOverIntro, showGameOverIntro } from "./gameOverIntro";
 import { hasCalibrated, CALIBRATION_BEAT_INTENSITY, loadBeatOffset } from "./beatCalibration";
 import { pickIntroHints } from "./introHints";
@@ -839,6 +840,11 @@ export const restartReplayWorld = (game: Game): void => {
   const clip = game.highlightClip;
   const loop = game.highlightLoop;
   const chrome = clip ? captureGameOverChrome(game) : null;
+  // Kill any wave-announce/summary timers left over from before the rewind —
+  //   they were scheduled against the pre-seek "now" and would otherwise pop
+  //   back up mid-flight, detached from the rewound sim's position.
+  hideWaveAnnounce();
+  hideWaveSummary(game);
   player.rewindToStart();
   seedReplayWorld(game, player);
   game.highlightClip = clip;

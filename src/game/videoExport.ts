@@ -14,7 +14,7 @@ import { renderGame } from "./gameRender";
 import { CaptureAudioContext, ExportClock, encodeWavBlob } from "./audioCapture";
 import { Muxer, ArrayBufferTarget } from "mp4-muxer";
 
-export type ExportPhase = "render" | "audio" | "mux" | "done";
+export type ExportPhase = "prewarm" | "render" | "audio" | "mux" | "done";
 
 const MAX_OUT_W = 1920;
 const MAX_OUT_H = 1080;
@@ -315,6 +315,15 @@ const runVideoExport = async (game: Game): Promise<void> => {
       compositeCtx.imageSmoothingQuality = "high";
     }
 
+    // Every lazily-fetched voice (halo music variations, Pilot's Log takes,
+    //   the guitar sample) must be cached before the frame sweep starts: a
+    //   cache miss mid-sweep means the fetch resolves against a clock.now
+    //   that has already raced past the moment the voice needed to start —
+    //   an audible glitch plus the decode work stalling frame production.
+    emitProgress(0, "prewarm");
+    await game.sound.prewarmForExport();
+    if (state.cancelled) return;
+
     const duration = replayDurationSec(player);
     const clock = new ExportClock();
     const offline = new OfflineAudioContext(
@@ -399,6 +408,9 @@ export const exportReplayAudioWav = async (game: Game): Promise<void> => {
 
   try {
     const sampleRate = liveCtx.sampleRate;
+    emitProgress(0, "prewarm");
+    await game.sound.prewarmForExport();
+    if (state.cancelled) return;
     const duration = replayDurationSec(player);
     const clock = new ExportClock();
     const offline = new OfflineAudioContext(

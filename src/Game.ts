@@ -334,6 +334,12 @@ export class Game implements HudElements {
   replaySpeed = 1;
   replaySeekTarget: number | null = null;
   replayStepAccumulator = 0;
+  // True while a seek or the open-time histogram sweep is synchronously
+  //   fast-stepping through many recorded frames in one JS tick. Cosmetic-only
+  //   DOM triggers (wave announce/summary) check this so a scrub crossing
+  //   several wave boundaries doesn't schedule a pile of real-time timers
+  //   against a "now" that has nothing to do with where playback resumes.
+  replayFastForwarding = false;
   // True while the offline MP4 exporter (game/videoExport.ts) owns the replay
   //   loop: gates the rAF update/render and the scrubber transport events, and
   //   turns exit/Escape into export-cancel instead of leaving the replay.

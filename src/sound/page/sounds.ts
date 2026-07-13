@@ -396,7 +396,11 @@ type MentionedSound = (typeof MENTIONED_SOUNDS)[number];
 
 // Add a sound here only if it's intentionally omitted from the page (e.g.
 // system-only sound that shouldn't appear as a checkbox).
-type IntentionallyOmitted = "bossPulse" | "bossHit" | "bossEyeOpenStinger" | "chargeBed" | "summaryDownbeatDucked";
+type IntentionallyOmitted =
+  | "bossPulse" | "bossHit" | "bossEyeOpenStinger" | "chargeBed" | "summaryDownbeatDucked"
+  // Baked internal voices of sounds already listed above (drone/one-shot
+  // variants dispatched by the play paths, not directly triggerable).
+  | "laserShot" | "streakShimmer" | "bassteroidDrone" | "alienDrone" | "firstDotHum" | "warbleDrone";
 
 // Compile-time check: every SoundName must be in MENTIONED_SOUNDS or
 // IntentionallyOmitted. If you add a new SoundName and forget to wire it

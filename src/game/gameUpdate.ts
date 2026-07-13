@@ -179,10 +179,12 @@ const seekReplayToTarget = (game: Game) => {
   const target = Math.max(0, Math.min(game.replaySeekTarget!, game.replayPlayer!.total()));
   game.replaySeekTarget = null;
   const muted = game.sound.beginSeekMute();
+  game.replayFastForwarding = true;
   if (target < game.replayPlayer!.position()) restartReplayWorld(game);
   while (game.replayPlayer!.position() < target) {
     if (!stepReplayFrame(game)) break;
   }
+  game.replayFastForwarding = false;
   game.sound.endSeekMute(muted);
   emitReplayProgress(game);
 };
@@ -196,6 +198,7 @@ export const precomputeRhythmHistogram = (game: Game) => {
   const player = game.replayPlayer;
   if (!player) return;
   const muted = game.sound.beginSeekMute();
+  game.replayFastForwarding = true;
   // Quiet the per-frame divergence spam during the sweep — the end-of-sweep audit
   //   is the clean summary. Divergences still accumulate into player.divergences.
   player.logDivergences = false;
@@ -206,6 +209,7 @@ export const precomputeRhythmHistogram = (game: Game) => {
   reportReplayAudit(player);
   player.logDivergences = true;
   restartReplayWorld(game);
+  game.replayFastForwarding = false;
   game.sound.endSeekMute(muted);
 };
 
@@ -1342,8 +1346,13 @@ const runCollisionPasses = (game: Game) => {
 // where the previous wave's "Completed Wave N" title sat in the summary panel.
 // The wave-skip cascade retriggers it once per skipped wave, so the hide timer
 // is tracked — a stale timer from title N must not cut title N+1 short.
+// Replay seeks and the open-time histogram sweep fast-step through many wave
+//   boundaries in one synchronous burst (game.replayFastForwarding) — skip the
+//   DOM/timer work then, or it fires a pile of announcements that land at real
+//   times unrelated to where playback actually resumes.
 let waveAnnounceHideTimer = 0;
 export const showWaveAnnounce = (game: Game, wave = game.wave) => {
+  if (game.replayFastForwarding) return;
   let el = document.getElementById("wave-announce");
   if (!el) {
     el = document.createElement("div");
@@ -1359,6 +1368,14 @@ export const showWaveAnnounce = (game: Game, wave = game.wave) => {
   el.classList.add("show");
   window.clearTimeout(waveAnnounceHideTimer);
   waveAnnounceHideTimer = window.setTimeout(() => { el?.classList.remove("show"); }, 2800);
+};
+
+// Cancel any in-flight announce timer and hide the title immediately. Called
+//   when a replay seek rebuilds the world, so a title queued against the
+//   pre-seek "now" can't pop back up mid-flight after the rewind.
+export const hideWaveAnnounce = () => {
+  window.clearTimeout(waveAnnounceHideTimer);
+  document.getElementById("wave-announce")?.classList.remove("show");
 };
 
 // the wave-clear cue (sound + pulsar pulse + boss state) fires

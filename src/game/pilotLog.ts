@@ -39,7 +39,12 @@ const showUnlockToast = (label: string) => {
 // Fire the combo-x6 unlock: HUD toast immediately, vocal cue on the next
 // downbeat so it locks to the pad's phrase grid. Guarded so a stutter at the
 // threshold can't re-trigger the line mid-playback.
+// The fast-forward check must come before the unlocked-flag check: a replay
+//   seek/precompute sweep crossing x6 would otherwise latch the flag and
+//   permanently skip the toast/vocal for the rest of that viewing, even once
+//   real playback later reaches the milestone on its own.
 export const tryUnlockPilotLog1 = (game: Game) => {
+  if (game.replayFastForwarding) return;
   if (game.pilotLog1Unlocked) return;
   if (game.beatCombo < 6) return;
   game.pilotLog1Unlocked = true;
@@ -58,6 +63,7 @@ export const tryUnlockPilotLog1 = (game: Game) => {
 // player has to hit x12 again to hear it. Acceptable: the trigger gates on
 // flag *and* mutex so retrying is allowed until it actually plays.
 export const tryUnlockPilotLog3 = (game: Game) => {
+  if (game.replayFastForwarding) return;
   if (game.pilotLog3Unlocked) return;
   if (game.beatCombo < 12) return;
   if (game.sound.pilotLogPlaying) return;

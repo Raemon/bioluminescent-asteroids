@@ -1070,6 +1070,45 @@ export class Sound {
     }
   }
 
+  // Extra audio rendered on BOTH sides of every baked drone loop's seamless
+  // window. MP3 can't reconstruct a file's first/last frames exactly (the
+  // codec's overlapping windows have no neighbor to lean on there), so a
+  // loop that plays the decoded buffer end-to-start clicks even when the
+  // rendered PCM tiles perfectly. Instead the loop window sits this far
+  // inside the buffer (src.loopStart/loopEnd, playback starts at loopStart)
+  // and the smeared edge frames never sound. Also swallows filter ring-in
+  // at the head of the render and gapless-trim differences across decoders.
+  private static readonly LOOP_BAKE_PAD = 0.25;
+
+  // Snap a periodic rate to a whole number of cycles per loopLen. EVERY
+  // oscillator and LFO baked into a loop must land exactly back on its
+  // starting phase at the seam or the buffer clicks when it repeats — the
+  // loop lengths here were originally chosen for the LFOs only, which left
+  // the audio-rate oscillators mid-cycle at the seam. The nudge is at most
+  // 1/(2·loopLen) Hz; detune pairs snapped to the same grid keep beating,
+  // with the beat cycle itself completing whole cycles per loop.
+  private static snapToLoop(freqHz: number, loopLen: number): number {
+    return Math.round(freqHz * loopLen) / loopLen;
+  }
+
+  // Wrap a baked drone loop in a source that loops the interior seamless
+  // window (see LOOP_BAKE_PAD). Callers should start playback at
+  // `startOffset` so the smeared mp3 head never sounds. Buffers shorter
+  // than a padded render (stale pre-padding mp3s) fall back to whole-buffer
+  // looping rather than looping a truncated window.
+  private makeBakedLoopSource(buf: AudioBuffer, loopLen: number): { src: AudioBufferSourceNode; startOffset: number } {
+    const src = this.ctx!.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const pad = Sound.LOOP_BAKE_PAD;
+    if (buf.duration >= loopLen + pad * 1.5) {
+      src.loopStart = pad;
+      src.loopEnd = pad + loopLen;
+      return { src, startOffset: pad };
+    }
+    return { src, startOffset: 0 };
+  }
+
   // Play a pre-rendered buffer through the live master bus. Returns true if
   // a baked buffer was found and played; false if the caller should fall
   // back to live synthesis (typically while the first bake is still running).
@@ -1145,19 +1184,19 @@ export class Sound {
     // Tone, no reverb bus, no live modulation): one committed loop each,
     // rendered on their own path like chargeBed.
     if (name === "thrust") {
-      const len = Math.ceil(sr * Sound.THRUST_LOOP_LEN);
+      const len = Math.ceil(sr * (Sound.THRUST_LOOP_LEN + 2 * Sound.LOOP_BAKE_PAD));
       const offline = new OACearly(1, len, sr);
       this.buildThrustGraph(offline, offline.destination);
       return offline.startRendering();
     }
     if (name === "reverseThrust") {
-      const len = Math.ceil(sr * Sound.REVERSE_THRUST_LOOP_LEN);
+      const len = Math.ceil(sr * (Sound.REVERSE_THRUST_LOOP_LEN + 2 * Sound.LOOP_BAKE_PAD));
       const offline = new OACearly(1, len, sr);
       this.buildReverseThrustGraph(offline, offline.destination);
       return offline.startRendering();
     }
     if (name === "sideThrust") {
-      const len = Math.ceil(sr * Sound.SIDE_THRUST_LOOP_LEN);
+      const len = Math.ceil(sr * (Sound.SIDE_THRUST_LOOP_LEN + 2 * Sound.LOOP_BAKE_PAD));
       const offline = new OACearly(1, len, sr);
       this.buildSideThrustGraph(offline, offline.destination);
       return offline.startRendering();
@@ -1181,7 +1220,7 @@ export class Sound {
     // path and skip the Tone fx-bus setup the one-shot recipes need.
     if (name === "chargeBed") {
       const tier = Math.max(0, Math.min(4, Math.round(pitchRatio)));
-      const len = Math.ceil(sr * (Sound.CHARGE_LOOP_LEN + 0.05));
+      const len = Math.ceil(sr * (Sound.CHARGE_LOOP_LEN + 2 * Sound.LOOP_BAKE_PAD));
       const offline = new OACearly(2, len, sr);
       this.buildChargeBedGraph(offline, offline.destination, tier);
       return offline.startRendering();
@@ -1195,7 +1234,7 @@ export class Sound {
       const sizeIndex = index % 2;
       const kind = Sound.BASS_DRONE_KINDS[kindIndex];
       const size = Sound.BASS_DRONE_SIZES[sizeIndex];
-      const len = Math.ceil(sr * Sound.BASS_DRONE_LOOP_LEN[kind]);
+      const len = Math.ceil(sr * (Sound.BASS_DRONE_LOOP_LEN[kind] + 2 * Sound.LOOP_BAKE_PAD));
       const offline = new OACearly(1, len, sr);
       this.buildBassteroidDroneGraph(offline, offline.destination, kind, size);
       return offline.startRendering();
@@ -1206,7 +1245,7 @@ export class Sound {
     if (name === "alienDrone") {
       const index = Math.max(0, Math.min(Sound.ALIEN_DRONE_SIZES.length - 1, Math.round(pitchRatio)));
       const size = Sound.ALIEN_DRONE_SIZES[index];
-      const len = Math.ceil(sr * Sound.ALIEN_DRONE_LOOP_LEN);
+      const len = Math.ceil(sr * (Sound.ALIEN_DRONE_LOOP_LEN + 2 * Sound.LOOP_BAKE_PAD));
       const offline = new OACearly(1, len, sr);
       this.buildAlienDroneGraph(offline, offline.destination, size);
       return offline.startRendering();
@@ -1217,7 +1256,7 @@ export class Sound {
     // (0..8, see FIRST_DOT_HUM_PITCH).
     if (name === "firstDotHum") {
       const index = Math.max(0, Math.min(Sound.FIRST_DOT_HUM_PITCH.length - 1, Math.round(pitchRatio)));
-      const len = Math.ceil(sr * Sound.FIRST_DOT_HUM_LOOP_LEN[index]);
+      const len = Math.ceil(sr * (Sound.FIRST_DOT_HUM_LOOP_LEN + 2 * Sound.LOOP_BAKE_PAD));
       const offline = new OACearly(1, len, sr);
       this.buildFirstDotHumGraph(offline, offline.destination, index);
       return offline.startRendering();
@@ -1228,7 +1267,7 @@ export class Sound {
     // between the two loops for the continuous ghost01 in between.
     if (name === "warbleDrone") {
       const phaseState = Math.max(0, Math.min(1, Math.round(pitchRatio))) as 0 | 1;
-      const len = Math.ceil(sr * Sound.WARBLE_DRONE_LOOP_LEN[phaseState]);
+      const len = Math.ceil(sr * (Sound.WARBLE_DRONE_LOOP_LEN[phaseState] + 2 * Sound.LOOP_BAKE_PAD));
       const offline = new OACearly(1, len, sr);
       this.buildWarbleDroneGraph(offline, offline.destination, phaseState);
       return offline.startRendering();
@@ -1997,15 +2036,12 @@ export class Sound {
   private static readonly ALIEN_DRONE_PEAK: Record<"big" | "medium" | "small", number> = {
     big: 0.11, medium: 0.09, small: 0.08,
   };
-  // Seamless-loop length (s), shared by all three sizes: 50/7 ≈ 7.1429s is
-  // exactly 5 cycles of the 0.7Hz pulse LFO (no retuning needed there). The
-  // per-size vibrato LFO (1.8/2.4/3.2Hz) is retuned by <1.2% to the nearest
-  // rate that also lands on a whole number of cycles in that span —
-  // inaudible for a slow pitch wobble:
-  //   big:    1.82Hz (was 1.8Hz)  — 13 vibrato cycles, 5 pulse cycles
-  //   medium: 2.38Hz (was 2.4Hz) — 17 vibrato cycles, 5 pulse cycles
-  //   small:  3.22Hz (was 3.2Hz) — 23 vibrato cycles, 5 pulse cycles
-  private static readonly ALIEN_DRONE_LOOP_LEN = 50 / 7;
+  // Seamless-loop length (s), shared by all three sizes. A whole number of
+  // seconds so the integer-Hz carriers (110/165/220) land exactly on their
+  // starting phase at the seam; every other rate in the graph (detuned
+  // partner, vibrato, pulse LFO) is snapped to whole cycles per loop by
+  // snapToLoop inside buildAlienDroneGraph.
+  private static readonly ALIEN_DRONE_LOOP_LEN = 7.0;
   private static readonly ALIEN_DRONE_VIBRATO_RATE: Record<"big" | "medium" | "small", number> = {
     big: 1.82, medium: 2.38, small: 3.22,
   };
@@ -2023,6 +2059,7 @@ export class Sound {
   // renders identically every time.
   private buildAlienDroneGraph(ctx: BaseAudioContext, dest: AudioNode, size: "big" | "medium" | "small") {
     const len = Sound.ALIEN_DRONE_LOOP_LEN;
+    const renderLen = len + 2 * Sound.LOOP_BAKE_PAD;
     const baseFreq = Sound.ALIEN_DRONE_BASE_FREQ[size];
     // Detune just enough for the slow-beating "wobbly sine" theremin feel.
     const detuneRatio = 1.006;
@@ -2031,14 +2068,14 @@ export class Sound {
     const oscB = ctx.createOscillator();
     oscA.type = "sine";
     oscB.type = "sine";
-    oscA.frequency.value = baseFreq;
-    oscB.frequency.value = baseFreq * detuneRatio;
+    oscA.frequency.value = Sound.snapToLoop(baseFreq, len);
+    oscB.frequency.value = Sound.snapToLoop(baseFreq * detuneRatio, len);
 
     // Vibrato LFO — slow pitch bend that gives the drone its theremin-y
     // hand-wobble quality. Routed to both oscillator frequencies.
     const vibratoLfo = ctx.createOscillator();
     vibratoLfo.type = "sine";
-    vibratoLfo.frequency.value = Sound.ALIEN_DRONE_VIBRATO_RATE[size];
+    vibratoLfo.frequency.value = Sound.snapToLoop(Sound.ALIEN_DRONE_VIBRATO_RATE[size], len);
     const vibratoDepth = ctx.createGain();
     vibratoDepth.gain.value = baseFreq * 0.012;
     vibratoLfo.connect(vibratoDepth);
@@ -2049,7 +2086,7 @@ export class Sound {
     // softly" rather than a flat sustain. Maps to (0..1) on the pulse gain.
     const pulseLfo = ctx.createOscillator();
     pulseLfo.type = "sine";
-    pulseLfo.frequency.value = 0.7;
+    pulseLfo.frequency.value = Sound.snapToLoop(0.7, len);
     const pulseGain = ctx.createGain();
     // Pulse depth ≈ 0.5 → audible swell without going silent at trough.
     const pulseDepth = ctx.createGain();
@@ -2064,19 +2101,27 @@ export class Sound {
     filter.Q.value = 3;
     filter.frequency.value = Sound.ALIEN_DRONE_FILTER_FREQ[size];
 
+    // Headroom trim: the live graph fed straight into this.master, which
+    // routes through the master compressor/limiter — that safety net doesn't
+    // exist on the baked-buffer path, so the filter's Q=3 resonant boost near
+    // cutoff could clip the rendered buffer (measured on "medium"). A fixed
+    // trim here keeps every size's peak comfortably under 0dBFS.
+    const trim = ctx.createGain();
+    trim.gain.value = 0.85;
     oscA.connect(filter);
     oscB.connect(filter);
     filter.connect(pulseGain);
-    pulseGain.connect(dest);
+    pulseGain.connect(trim);
+    trim.connect(dest);
 
     oscA.start(0);
     oscB.start(0);
     pulseLfo.start(0);
     vibratoLfo.start(0);
-    oscA.stop(len);
-    oscB.stop(len);
-    pulseLfo.stop(len);
-    vibratoLfo.stop(len);
+    oscA.stop(renderLen);
+    oscB.stop(renderLen);
+    pulseLfo.stop(renderLen);
+    vibratoLfo.stop(renderLen);
   }
 
   // Warm all 3 committed alien-drone loops (big/medium/small).
@@ -2107,9 +2152,7 @@ export class Sound {
     const spatial = pos ? this.makeSpatial(pos, this.master) : null;
     const sink: AudioNode = spatial ? spatial.panner : this.master;
 
-    const src = this.ctx.createBufferSource();
-    src.buffer = buf;
-    src.loop = true;
+    const { src, startOffset } = this.makeBakedLoopSource(buf, Sound.ALIEN_DRONE_LOOP_LEN);
 
     const peak = Sound.ALIEN_DRONE_PEAK[size];
     const mainGain = this.ctx.createGain();
@@ -2118,7 +2161,7 @@ export class Sound {
 
     src.connect(mainGain);
     mainGain.connect(sink);
-    src.start(t);
+    src.start(t, startOffset);
 
     this.alienDrones.set(key, { src, mainGain, spatial: spatial ?? undefined });
   }
@@ -2149,12 +2192,12 @@ export class Sound {
   // the C-rooted bass bed. Shared by both baked endpoint states.
   private static readonly WARBLE_DRONE_BASE_FREQ = 196;
   // Seamless-loop length (s) per endpoint state, index 0=phased-in,
-  // 1=phased-out. Each length is a whole number of cycles of that state's
-  // vibrato LFO rate (4Hz phased-in, 11Hz phased-out) so the loop tiles
-  // without a click: 2.0s = 8 cycles at 4Hz, and also 22 cycles at 11Hz —
-  // both endpoints happen to share the same loop length here, but they don't
-  // have to (each is baked and looped independently).
-  private static readonly WARBLE_DRONE_LOOP_LEN: [number, number] = [2.0, 2.0];
+  // 1=phased-out. Both vibrato rates (4Hz phased-in, 11Hz phased-out)
+  // complete whole cycles in 4.0s; the carriers and their detuned partners
+  // are snapped to whole cycles per loop by snapToLoop inside
+  // buildWarbleDroneGraph, so each endpoint tiles without a click. Both
+  // endpoints share the length so the live crossfade pair stays phase-locked.
+  private static readonly WARBLE_DRONE_LOOP_LEN: [number, number] = [4.0, 4.0];
   private static readonly WARBLE_DRONE_VIBRATO_RATE: [number, number] = [4, 4 + 7];
 
   // Renders one endpoint of the warble drone's morph into `ctx`: phaseState
@@ -2165,6 +2208,7 @@ export class Sound {
   // it renders identically every time.
   private buildWarbleDroneGraph(ctx: BaseAudioContext, dest: AudioNode, phaseState: 0 | 1) {
     const len = Sound.WARBLE_DRONE_LOOP_LEN[phaseState];
+    const renderLen = len + 2 * Sound.LOOP_BAKE_PAD;
     const g = phaseState; // 0 or 1 — the two morph endpoints
     const baseFreq = Sound.WARBLE_DRONE_BASE_FREQ;
     const freq = baseFreq * (1 - 0.12 * g); // dip ~a tone as it ghosts out
@@ -2173,12 +2217,12 @@ export class Sound {
     const oscB = ctx.createOscillator();
     oscA.type = "sine";
     oscB.type = "sine";
-    oscA.frequency.value = freq;
-    oscB.frequency.value = freq * 1.004;
+    oscA.frequency.value = Sound.snapToLoop(freq, len);
+    oscB.frequency.value = Sound.snapToLoop(freq * 1.004, len);
 
     const vibratoLfo = ctx.createOscillator();
     vibratoLfo.type = "sine";
-    vibratoLfo.frequency.value = Sound.WARBLE_DRONE_VIBRATO_RATE[phaseState];
+    vibratoLfo.frequency.value = Sound.snapToLoop(Sound.WARBLE_DRONE_VIBRATO_RATE[phaseState], len);
     const vibratoDepth = ctx.createGain();
     vibratoDepth.gain.value = baseFreq * (0.004 + 0.05 * g);
     vibratoLfo.connect(vibratoDepth);
@@ -2197,9 +2241,9 @@ export class Sound {
     oscA.start(0);
     oscB.start(0);
     vibratoLfo.start(0);
-    oscA.stop(len);
-    oscB.stop(len);
-    vibratoLfo.stop(len);
+    oscA.stop(renderLen);
+    oscB.stop(renderLen);
+    vibratoLfo.stop(renderLen);
   }
 
   // Warm both committed warble-drone endpoint loops (phased-in, phased-out).
@@ -2238,15 +2282,13 @@ export class Sound {
     const sources: AudioBufferSourceNode[] = [];
     const phaseGains: GainNode[] = [];
     for (let i = 0; i < 2; i++) {
-      const src = this.ctx.createBufferSource();
-      src.buffer = bufs[i];
-      src.loop = true;
+      const { src, startOffset } = this.makeBakedLoopSource(bufs[i], Sound.WARBLE_DRONE_LOOP_LEN[i as 0 | 1]);
       const gain = this.ctx.createGain();
       // Only the phased-in loop audible at the start; phased-out crossfades in.
       gain.gain.setValueAtTime(i === 0 ? 1 : 0.0001, t);
       src.connect(gain);
       gain.connect(mainGain);
-      src.start(t);
+      src.start(t, startOffset);
       sources.push(src);
       phaseGains.push(gain);
     }
@@ -2333,12 +2375,12 @@ export class Sound {
     { baseFreq: 65.41, vibratoRate: 4.9, vibratoDepthRatio: 0.0028 },   // 8: firstDotHaloHum (C2)
   ];
 
-  // Loop length (s) per hum instance, chosen so its vibrato LFO completes a whole number of
-  // cycles — required for a seamless loop seam. Each is the nearest whole-cycle length to 2.0s
-  // for that instance's vibratoRate (rates differ slightly per instance, so lengths do too).
-  private static readonly FIRST_DOT_HUM_LOOP_LEN: readonly number[] = Sound.FIRST_DOT_HUM_PITCH.map(
-    ({ vibratoRate }) => Math.round(2.0 * vibratoRate) / vibratoRate,
-  );
+  // Loop length (s), shared by all hum instances. Every rate in the graph (both detuned sines
+  // and the vibrato LFO) is snapped to a whole number of cycles per loop by snapToLoop inside
+  // buildFirstDotHumGraph, so the seam is exact. Long enough that the slow detune-beat cycle
+  // (the chorus "breathing", ~1s at C4 up to ~4s for the C2 halo hum) completes whole cycles
+  // INSIDE the loop — the drift-hold stack keeps evolving instead of repeating a clipped swell.
+  private static readonly FIRST_DOT_HUM_LOOP_LEN = 8.0;
 
   // Renders one seamless first-dot-hum drone-tone loop for hum instance `humIndex` into `ctx`:
   // two detuned sines (chorus beating) + a slow vibrato LFO pitch-bending both. This is only the
@@ -2347,30 +2389,42 @@ export class Sound {
   // renders identically every time — see bakeSound's "firstDotHum" case.
   private buildFirstDotHumGraph(ctx: BaseAudioContext, dest: AudioNode, humIndex: number) {
     const { baseFreq, vibratoRate, vibratoDepthRatio } = Sound.FIRST_DOT_HUM_PITCH[humIndex];
-    const len = Sound.FIRST_DOT_HUM_LOOP_LEN[humIndex];
+    const len = Sound.FIRST_DOT_HUM_LOOP_LEN;
+    const renderLen = len + 2 * Sound.LOOP_BAKE_PAD;
     const detuneRatio = 1.0035;
     const oscA = ctx.createOscillator();
     const oscB = ctx.createOscillator();
     oscA.type = "sine";
     oscB.type = "sine";
-    oscA.frequency.value = baseFreq;
-    oscB.frequency.value = baseFreq * detuneRatio;
+    oscA.frequency.value = Sound.snapToLoop(baseFreq, len);
+    oscB.frequency.value = Sound.snapToLoop(baseFreq * detuneRatio, len);
     const vibratoLfo = ctx.createOscillator();
     vibratoLfo.type = "sine";
-    vibratoLfo.frequency.value = vibratoRate;
+    vibratoLfo.frequency.value = Sound.snapToLoop(vibratoRate, len);
     const vibratoDepth = ctx.createGain();
     vibratoDepth.gain.value = baseFreq * vibratoDepthRatio;
     vibratoLfo.connect(vibratoDepth);
     vibratoDepth.connect(oscA.frequency);
     vibratoDepth.connect(oscB.frequency);
-    oscA.connect(dest);
-    oscB.connect(dest);
+    // The original live graph summed oscA+oscB straight into the (also-live)
+    // bandpass filter with no gain staging — headroom came for free because
+    // nothing downstream ever captured the raw sum as a fixed-amplitude
+    // buffer. Baking that same unattenuated sum clips: two full-scale sines
+    // can peak near ±2.0, and even a 0.5 trim (unity at worst-case in-phase
+    // alignment) measured only a few dB of headroom in practice — the live
+    // pulseGain/mainGain chain downstream still shapes final loudness exactly
+    // as before, so trimming further only removes clipping, not character.
+    const trim = ctx.createGain();
+    trim.gain.value = 0.4;
+    oscA.connect(trim);
+    oscB.connect(trim);
+    trim.connect(dest);
     oscA.start(0);
     oscB.start(0);
     vibratoLfo.start(0);
-    oscA.stop(len);
-    oscB.stop(len);
-    vibratoLfo.stop(len);
+    oscA.stop(renderLen);
+    oscB.stop(renderLen);
+    vibratoLfo.stop(renderLen);
   }
 
   // Warm all 9 committed first-dot-hum drone-tone loops.
@@ -2392,9 +2446,7 @@ export class Sound {
       return null;
     }
     const t = this.ctx.currentTime;
-    const src = this.ctx.createBufferSource();
-    src.buffer = buf;
-    src.loop = true;
+    const { src, startOffset } = this.makeBakedLoopSource(buf, Sound.FIRST_DOT_HUM_LOOP_LEN);
     const filter = this.ctx.createBiquadFilter();
     filter.type = "bandpass";
     filter.frequency.value = filterStartHz;
@@ -2407,7 +2459,7 @@ export class Sound {
     filter.connect(pulseGain);
     pulseGain.connect(mainGain);
     mainGain.connect(this.master);
-    src.start(t);
+    src.start(t, startOffset);
     return {
       src, filter, pulseGain, mainGain,
       lastScheduledBeatAudioTime: -Infinity, releasing: false, releaseCleanupTimer: null,
@@ -3289,12 +3341,14 @@ export class Sound {
   private static readonly BASS_DRONE_KINDS: Array<"bassA" | "bassB" | "bassC" | "bassD"> = ["bassA", "bassB", "bassC", "bassD"];
   private static readonly BASS_DRONE_SIZES: Array<"medium" | "small"> = ["medium", "small"];
 
-  // Seamless-loop length (s) per kind. Each must be a whole number of cycles
-  // of every LFO baked into that kind's loop, or the buffer clicks at the
-  // seam when it repeats. Original pulse-LFO rates (0.07-0.17Hz) are retuned
-  // by <3% to the nearest rate that divides evenly into a clean loop length;
-  // inaudible for a slow amplitude swell. bassB additionally carries a
-  // 0.6Hz vibrato LFO, which is already a whole number of cycles (9) in 15s.
+  // Seamless-loop length (s) per kind. Every rate baked into a loop — the
+  // pulse/vibrato LFOs below AND the audio-rate oscillators (snapped by
+  // snapToLoop in buildBassteroidDroneGraph) — completes a whole number of
+  // cycles per loop, or the buffer clicks at the seam when it repeats.
+  // Original pulse-LFO rates (0.07-0.17Hz) are retuned by <3% to the nearest
+  // rate that divides evenly into a clean loop length; inaudible for a slow
+  // amplitude swell. bassB additionally carries a 0.6Hz vibrato LFO, which
+  // is already a whole number of cycles (9) in 15s.
   //   bassA: 11.0s @ 1/11 Hz  (~0.0909Hz, was 0.09Hz)  — 1 pulse cycle
   //   bassB: 15.0s @ 2/15 Hz (~0.1333Hz, was 0.13Hz) — 2 pulse cycles, 9 vibrato cycles
   //   bassC: 14.0s @ 1/14 Hz  (~0.0714Hz, was 0.07Hz)  — 1 pulse cycle
@@ -3321,6 +3375,7 @@ export class Sound {
   // state, so it renders identically every time.
   private buildBassteroidDroneGraph(ctx: BaseAudioContext, dest: AudioNode, kind: "bassA" | "bassB" | "bassC" | "bassD", size: "medium" | "small") {
     const len = Sound.BASS_DRONE_LOOP_LEN[kind];
+    const renderLen = len + 2 * Sound.LOOP_BAKE_PAD;
     const baseFreq = size === "medium" ? Sound.BASS_DRONE_MEDIUM_FREQ[kind] : Sound.BASS_DRONE_SMALL_FREQ[kind];
 
     // Lowpass kept conservative so even the brighter D voice never bites.
@@ -3346,28 +3401,36 @@ export class Sound {
     pulseLfo.connect(pulseDepth);
     pulseDepth.connect(pulseGain.gain);
 
+    // Headroom trim: the live graph fed straight into this.master, which
+    // routes through the master compressor/limiter — that safety net doesn't
+    // exist on the baked-buffer path, so bassC's root+fifth (plus the filter's
+    // Q=1.2 resonant boost near cutoff) could clip the rendered buffer. A
+    // fixed trim here keeps every kind's peak comfortably under 0dBFS.
+    const trim = ctx.createGain();
+    trim.gain.value = 0.7;
     filter.connect(pulseGain);
-    pulseGain.connect(dest);
+    pulseGain.connect(trim);
+    trim.connect(dest);
 
     if (kind === "bassA") {
       // Warm filtered sine pad — single sine, soft.
       const osc = ctx.createOscillator();
       osc.type = "sine";
-      osc.frequency.value = baseFreq;
+      osc.frequency.value = Sound.snapToLoop(baseFreq, len);
       osc.connect(filter);
       osc.start(0);
-      osc.stop(len);
+      osc.stop(renderLen);
     } else if (kind === "bassB") {
       // Detuned sine pair with slow vibrato → breathy choir character.
       const oscA = ctx.createOscillator();
       const oscB = ctx.createOscillator();
       oscA.type = "sine";
       oscB.type = "sine";
-      oscA.frequency.value = baseFreq;
-      oscB.frequency.value = baseFreq * 1.008;
+      oscA.frequency.value = Sound.snapToLoop(baseFreq, len);
+      oscB.frequency.value = Sound.snapToLoop(baseFreq * 1.008, len);
       const vib = ctx.createOscillator();
       vib.type = "sine";
-      vib.frequency.value = 0.6;
+      vib.frequency.value = Sound.snapToLoop(0.6, len);
       const vibDepth = ctx.createGain();
       vibDepth.gain.value = baseFreq * 0.004;
       vib.connect(vibDepth);
@@ -3378,9 +3441,9 @@ export class Sound {
       oscA.start(0);
       oscB.start(0);
       vib.start(0);
-      oscA.stop(len);
-      oscB.stop(len);
-      vib.stop(len);
+      oscA.stop(renderLen);
+      oscB.stop(renderLen);
+      vib.stop(renderLen);
     } else if (kind === "bassC") {
       // Open chorale — root + perfect fifth above. Both sines so the
       // interval reads as harmonic colour rather than a separate voice.
@@ -3388,8 +3451,8 @@ export class Sound {
       const fifth = ctx.createOscillator();
       root.type = "sine";
       fifth.type = "sine";
-      root.frequency.value = baseFreq;
-      fifth.frequency.value = baseFreq * 1.5;
+      root.frequency.value = Sound.snapToLoop(baseFreq, len);
+      fifth.frequency.value = Sound.snapToLoop(baseFreq * 1.5, len);
       const fifthGain = ctx.createGain();
       fifthGain.gain.value = 0.45; // fifth quieter than root so it just tints
       root.connect(filter);
@@ -3397,21 +3460,23 @@ export class Sound {
       fifthGain.connect(filter);
       root.start(0);
       fifth.start(0);
-      root.stop(len);
-      fifth.stop(len);
+      root.stop(renderLen);
+      fifth.stop(renderLen);
     } else {
       // bassD — sine + narrow bandpassed noise for a wind-through-metal hush.
       const osc = ctx.createOscillator();
       osc.type = "sine";
-      osc.frequency.value = baseFreq;
+      osc.frequency.value = Sound.snapToLoop(baseFreq, len);
       osc.connect(filter);
       osc.start(0);
-      osc.stop(len);
+      osc.stop(renderLen);
 
       // Local noise buffer built directly against the offline ctx — can't
       // use this.makeNoiseBuffer here, it's tied to the live ctx + a shared
       // cache (see buildChargeBedGraph's noiseFor for the same pattern).
-      const n = Math.max(1, Math.floor(ctx.sampleRate * len));
+      // Exactly one loop long and looped, so the noise layer repeats with
+      // the loop period and the seam splices identical noise.
+      const n = Math.max(1, Math.round(ctx.sampleRate * len));
       const noiseBuf = ctx.createBuffer(1, n, ctx.sampleRate);
       const data = noiseBuf.getChannelData(0);
       for (let i = 0; i < n; i++) data[i] = Math.random() * 2 - 1;
@@ -3429,11 +3494,11 @@ export class Sound {
       nBp.connect(nGain);
       nGain.connect(filter);
       noise.start(0);
-      noise.stop(len);
+      noise.stop(renderLen);
     }
 
     pulseLfo.start(0);
-    pulseLfo.stop(len);
+    pulseLfo.stop(renderLen);
   }
 
   // Warm all 8 committed bassteroid-drone loops (4 kinds × 2 sizes).
@@ -3465,9 +3530,7 @@ export class Sound {
     // than smalls so the lower octave still anchors the mix when present.
     const peakBase = size === "medium" ? 0.035 : 0.022;
 
-    const src = this.ctx.createBufferSource();
-    src.buffer = buf;
-    src.loop = true;
+    const { src, startOffset } = this.makeBakedLoopSource(buf, Sound.BASS_DRONE_LOOP_LEN[kind]);
 
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
@@ -3476,7 +3539,7 @@ export class Sound {
 
     src.connect(mainGain);
     mainGain.connect(sink);
-    src.start(t);
+    src.start(t, startOffset);
 
     this.bassDrones.set(key, { src, mainGain, spatial: spatial ?? undefined });
   }
@@ -6413,24 +6476,27 @@ export class Sound {
     }
   }
 
-  // Length (s) of the rendered thrust loop. 2.0s = exactly 10 cycles of the
-  // 5Hz tremolo LFO, so the buffer tiles with no discontinuity at the seam.
-  private static THRUST_LOOP_LEN = 2.0;
+  // Length (s) of the rendered thrust loop. Every rate in the graph — the
+  // 5Hz tremolo LFO and all three oscillators (snapped by snapToLoop) —
+  // completes a whole number of cycles per loop, so the buffer tiles with
+  // no discontinuity at the seam.
+  private static THRUST_LOOP_LEN = 4.0;
 
   // Builds the forward-thrust drone graph into `ctx`, summed into `dest`, all
   // scheduled relative to offline time 0. Nothing here reads live state, so
   // it renders identically every time — see bakeSound's "thrust" case.
   private buildThrustGraph(ctx: BaseAudioContext, dest: AudioNode) {
     const len = Sound.THRUST_LOOP_LEN;
+    const renderLen = len + 2 * Sound.LOOP_BAKE_PAD;
     const tri1 = ctx.createOscillator();
     tri1.type = "triangle";
-    tri1.frequency.value = 110.0;
+    tri1.frequency.value = Sound.snapToLoop(110.0, len);
     const tri2 = ctx.createOscillator();
     tri2.type = "triangle";
-    tri2.frequency.value = 110.7;
+    tri2.frequency.value = Sound.snapToLoop(110.7, len);
     const sub = ctx.createOscillator();
     sub.type = "sine";
-    sub.frequency.value = 55.0;
+    sub.frequency.value = Sound.snapToLoop(55.0, len);
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
@@ -6442,26 +6508,33 @@ export class Sound {
 
     const lfo = ctx.createOscillator();
     lfo.type = "sine";
-    lfo.frequency.value = 5;
+    lfo.frequency.value = Sound.snapToLoop(5, len);
     const lfoDepth = ctx.createGain();
     lfoDepth.gain.value = 0.08;
     lfo.connect(lfoDepth);
     lfoDepth.connect(tremoloGain.gain);
 
+    // Headroom trim: the live graph fed straight into this.master, which
+    // routes through the master compressor/limiter — that safety net doesn't
+    // exist on the baked-buffer path, so summing 3 full-scale oscillators
+    // could clip the rendered buffer. A fixed trim keeps the peak under 0dBFS.
+    const trim = ctx.createGain();
+    trim.gain.value = 0.85;
     tri1.connect(filter);
     tri2.connect(filter);
     sub.connect(filter);
     filter.connect(tremoloGain);
-    tremoloGain.connect(dest);
+    tremoloGain.connect(trim);
+    trim.connect(dest);
 
     tri1.start(0);
     tri2.start(0);
     sub.start(0);
     lfo.start(0);
-    tri1.stop(len);
-    tri2.stop(len);
-    sub.stop(len);
-    lfo.stop(len);
+    tri1.stop(renderLen);
+    tri2.stop(renderLen);
+    sub.stop(renderLen);
+    lfo.stop(renderLen);
   }
 
   // Warm the committed thrust loop (single buffer, pitchRatio unused). Goes
@@ -6482,9 +6555,7 @@ export class Sound {
     }
     const t = this.ctx.currentTime;
 
-    const src = this.ctx.createBufferSource();
-    src.buffer = buf;
-    src.loop = true;
+    const { src, startOffset } = this.makeBakedLoopSource(buf, Sound.THRUST_LOOP_LEN);
 
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
@@ -6492,7 +6563,7 @@ export class Sound {
 
     src.connect(mainGain);
     mainGain.connect(this.master);
-    src.start(t);
+    src.start(t, startOffset);
 
     this.thrustNode = { src, mainGain };
   }
@@ -6527,6 +6598,10 @@ export class Sound {
   // loop is seamless. Nothing reads live state, so it renders identically.
   private buildChargeBedGraph(ctx: BaseAudioContext, dest: AudioNode, tier: number) {
     const len = Sound.CHARGE_LOOP_LEN;
+    // Scheduled envelopes (chord pulses, arp plucks) must keep repeating
+    // with period `len` through the whole padded render so the interior
+    // loop window tiles — see LOOP_BAKE_PAD.
+    const renderLen = len + 2 * Sound.LOOP_BAKE_PAD;
     const topBoost = tier >= 4 ? 1.35 : 1;
 
     // Pulse rhythm: number of even beats across the loop. Quickens with charge
@@ -6556,7 +6631,7 @@ export class Sound {
       // Floor keeps the pad present between hits; the swell on each beat gives
       // the groove. Sharper (deeper-dipping) pulse as charge climbs.
       const floor = peak * (0.55 - tier * 0.06);
-      for (let b = 0; b < pulses; b++) {
+      for (let b = 0; b * beat < renderLen; b++) {
         const t0 = b * beat;
         gain.gain.setValueAtTime(floor, t0);
         gain.gain.linearRampToValueAtTime(peak, t0 + beat * 0.18);
@@ -6565,7 +6640,7 @@ export class Sound {
       osc.connect(gain);
       gain.connect(dest);
       osc.start(0);
-      osc.stop(len + 0.05);
+      osc.stop(renderLen);
     }
 
     // Plucked arpeggio — a bright triangle voice stepping up the C-major triad
@@ -6583,9 +6658,11 @@ export class Sound {
         const gain = ctx.createGain();
         gain.gain.setValueAtTime(0.0001, 0);
         const peak = 0.05 + tier * 0.012;
-        for (let s = 0; s < steps; s++) {
+        // (s % steps) first so the note pattern restarts each loop copy —
+        // indexing arpNotes by a raw running s would drift once s > steps.
+        for (let s = 0; s * stepDur < renderLen; s++) {
           const t0 = s * stepDur;
-          freqParam.setValueAtTime(arpNotes[s % arpNotes.length], t0);
+          freqParam.setValueAtTime(arpNotes[(s % steps) % arpNotes.length], t0);
           gain.gain.setValueAtTime(0.0001, t0);
           gain.gain.linearRampToValueAtTime(peak, t0 + stepDur * 0.12);
           gain.gain.exponentialRampToValueAtTime(0.0001, t0 + stepDur * 0.88);
@@ -6597,7 +6674,7 @@ export class Sound {
         lp.connect(gain);
         gain.connect(dest);
         osc.start(0);
-        osc.stop(len + 0.05);
+        osc.stop(renderLen);
       }
     }
 
@@ -6609,11 +6686,12 @@ export class Sound {
       return buf;
     };
 
-    // Crackling electric layer — bandpassed looping noise. Louder/brighter with
-    // charge. (Noise is stationary so it loops seamlessly at any length.)
+    // Crackling electric layer — bandpassed looping noise. Louder/brighter
+    // with charge. The noise buffer is exactly one loop long, so the layer
+    // repeats with the loop period and the seam splices identical noise.
     {
       const noise = ctx.createBufferSource();
-      noise.buffer = noiseFor(len + 0.1);
+      noise.buffer = noiseFor(len);
       noise.loop = true;
       const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
@@ -6625,7 +6703,7 @@ export class Sound {
       bp.connect(gain);
       gain.connect(dest);
       noise.start(0);
-      noise.stop(len + 0.05);
+      noise.stop(renderLen);
     }
 
     // Rolling-thunder rumble — lowpassed noise whose cutoff is churned by a slow
@@ -6633,7 +6711,7 @@ export class Sound {
     // thunder. The roll quickens and deepens, and the band opens, with charge.
     {
       const noise = ctx.createBufferSource();
-      noise.buffer = noiseFor(len + 0.1);
+      noise.buffer = noiseFor(len);
       noise.loop = true;
       const lp = ctx.createBiquadFilter();
       lp.type = "lowpass";
@@ -6652,9 +6730,9 @@ export class Sound {
       lp.connect(gain);
       gain.connect(dest);
       noise.start(0);
-      noise.stop(len + 0.05);
+      noise.stop(renderLen);
       lfo.start(0);
-      lfo.stop(len + 0.05);
+      lfo.stop(renderLen);
     }
 
     // Deep sub sine — the body of the building storm. Silent at tier 0, swells
@@ -6668,7 +6746,7 @@ export class Sound {
       osc.connect(gain);
       gain.connect(dest);
       osc.start(0);
-      osc.stop(len + 0.05);
+      osc.stop(renderLen);
     }
   }
 
@@ -6709,15 +6787,15 @@ export class Sound {
     const sources: AudioBufferSourceNode[] = [];
     const tierGains: GainNode[] = [];
     for (let tier = 0; tier <= 4; tier++) {
-      const src = this.ctx.createBufferSource();
-      src.buffer = tierBufs[tier];
-      src.loop = true;
+      // All five tiers share the loop window, so the beds stay phase-locked
+      // for the crossfades no matter how long the hold lasts.
+      const { src, startOffset } = this.makeBakedLoopSource(tierBufs[tier], Sound.CHARGE_LOOP_LEN);
       const gain = this.ctx.createGain();
       // Only tier 0 audible at the start of a hold; others crossfade in.
       gain.gain.setValueAtTime(tier === 0 ? 1 : 0.0001, t);
       src.connect(gain);
       gain.connect(mainGain);
-      src.start(t);
+      src.start(t, startOffset);
       sources.push(src);
       tierGains.push(gain);
     }
@@ -6771,7 +6849,8 @@ export class Sound {
   }
 
   // Length (s) of the rendered reverse-thrust loop. 5.0s = exactly 21 cycles
-  // of the 4.2Hz tremolo LFO, so the buffer tiles with no seam discontinuity.
+  // of the 4.2Hz tremolo LFO; the oscillators are snapped to whole cycles
+  // per loop too (snapToLoop), so the buffer tiles with no seam discontinuity.
   private static REVERSE_THRUST_LOOP_LEN = 5.0;
 
   // Deeper sibling of buildThrustGraph — same architecture, lower oscillator
@@ -6780,15 +6859,16 @@ export class Sound {
   // reads live state, so it renders identically every time.
   private buildReverseThrustGraph(ctx: BaseAudioContext, dest: AudioNode) {
     const len = Sound.REVERSE_THRUST_LOOP_LEN;
+    const renderLen = len + 2 * Sound.LOOP_BAKE_PAD;
     const tri1 = ctx.createOscillator();
     tri1.type = "triangle";
-    tri1.frequency.value = 72.0;
+    tri1.frequency.value = Sound.snapToLoop(72.0, len);
     const tri2 = ctx.createOscillator();
     tri2.type = "triangle";
-    tri2.frequency.value = 72.5;
+    tri2.frequency.value = Sound.snapToLoop(72.5, len);
     const sub = ctx.createOscillator();
     sub.type = "sine";
-    sub.frequency.value = 36.0;
+    sub.frequency.value = Sound.snapToLoop(36.0, len);
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
@@ -6800,26 +6880,33 @@ export class Sound {
 
     const lfo = ctx.createOscillator();
     lfo.type = "sine";
-    lfo.frequency.value = 4.2;
+    lfo.frequency.value = Sound.snapToLoop(4.2, len);
     const lfoDepth = ctx.createGain();
     lfoDepth.gain.value = 0.08;
     lfo.connect(lfoDepth);
     lfoDepth.connect(tremoloGain.gain);
 
+    // Headroom trim: the live graph fed straight into this.master, which
+    // routes through the master compressor/limiter — that safety net doesn't
+    // exist on the baked-buffer path, so summing 3 full-scale oscillators
+    // could clip the rendered buffer. A fixed trim keeps the peak under 0dBFS.
+    const trim = ctx.createGain();
+    trim.gain.value = 0.85;
     tri1.connect(filter);
     tri2.connect(filter);
     sub.connect(filter);
     filter.connect(tremoloGain);
-    tremoloGain.connect(dest);
+    tremoloGain.connect(trim);
+    trim.connect(dest);
 
     tri1.start(0);
     tri2.start(0);
     sub.start(0);
     lfo.start(0);
-    tri1.stop(len);
-    tri2.stop(len);
-    sub.stop(len);
-    lfo.stop(len);
+    tri1.stop(renderLen);
+    tri2.stop(renderLen);
+    sub.stop(renderLen);
+    lfo.stop(renderLen);
   }
 
   // Warm the committed reverse-thrust loop (single buffer, pitchRatio unused).
@@ -6837,9 +6924,7 @@ export class Sound {
     }
     const t = this.ctx.currentTime;
 
-    const src = this.ctx.createBufferSource();
-    src.buffer = buf;
-    src.loop = true;
+    const { src, startOffset } = this.makeBakedLoopSource(buf, Sound.REVERSE_THRUST_LOOP_LEN);
 
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
@@ -6847,7 +6932,7 @@ export class Sound {
 
     src.connect(mainGain);
     mainGain.connect(this.master);
-    src.start(t);
+    src.start(t, startOffset);
 
     this.reverseThrustNode = { src, mainGain };
   }
@@ -6863,9 +6948,11 @@ export class Sound {
     this.reverseThrustNode = null;
   }
 
-  // Length (s) of the rendered side-thrust loop. 2.0s = exactly 13 cycles of
-  // the 6.5Hz tremolo LFO, so the buffer tiles with no seam discontinuity.
-  private static SIDE_THRUST_LOOP_LEN = 2.0;
+  // Length (s) of the rendered side-thrust loop. Every rate in the graph —
+  // the 6.5Hz tremolo LFO and all three oscillators (snapped by snapToLoop)
+  // — completes a whole number of cycles per loop, so the buffer tiles with
+  // no seam discontinuity.
+  private static SIDE_THRUST_LOOP_LEN = 4.0;
 
   // Side engines — third engine voice. Architecture mirrors thrust/retro, but
   // pitch sits between the two (90Hz/45Hz here vs 110/55 forward and 72/36 retro)
@@ -6874,15 +6961,16 @@ export class Sound {
   // live state, so it renders identically every time.
   private buildSideThrustGraph(ctx: BaseAudioContext, dest: AudioNode) {
     const len = Sound.SIDE_THRUST_LOOP_LEN;
+    const renderLen = len + 2 * Sound.LOOP_BAKE_PAD;
     const tri1 = ctx.createOscillator();
     tri1.type = "triangle";
-    tri1.frequency.value = 90.0;
+    tri1.frequency.value = Sound.snapToLoop(90.0, len);
     const tri2 = ctx.createOscillator();
     tri2.type = "triangle";
-    tri2.frequency.value = 90.7;
+    tri2.frequency.value = Sound.snapToLoop(90.7, len);
     const sub = ctx.createOscillator();
     sub.type = "sine";
-    sub.frequency.value = 45.0;
+    sub.frequency.value = Sound.snapToLoop(45.0, len);
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
@@ -6894,26 +6982,33 @@ export class Sound {
 
     const lfo = ctx.createOscillator();
     lfo.type = "sine";
-    lfo.frequency.value = 6.5;
+    lfo.frequency.value = Sound.snapToLoop(6.5, len);
     const lfoDepth = ctx.createGain();
     lfoDepth.gain.value = 0.1;
     lfo.connect(lfoDepth);
     lfoDepth.connect(tremoloGain.gain);
 
+    // Headroom trim: the live graph fed straight into this.master, which
+    // routes through the master compressor/limiter — that safety net doesn't
+    // exist on the baked-buffer path, so summing 3 full-scale oscillators
+    // could clip the rendered buffer. A fixed trim keeps the peak under 0dBFS.
+    const trim = ctx.createGain();
+    trim.gain.value = 0.85;
     tri1.connect(filter);
     tri2.connect(filter);
     sub.connect(filter);
     filter.connect(tremoloGain);
-    tremoloGain.connect(dest);
+    tremoloGain.connect(trim);
+    trim.connect(dest);
 
     tri1.start(0);
     tri2.start(0);
     sub.start(0);
     lfo.start(0);
-    tri1.stop(len);
-    tri2.stop(len);
-    sub.stop(len);
-    lfo.stop(len);
+    tri1.stop(renderLen);
+    tri2.stop(renderLen);
+    sub.stop(renderLen);
+    lfo.stop(renderLen);
   }
 
   // Warm the committed side-thrust loop (single buffer, pitchRatio unused).
@@ -6931,9 +7026,7 @@ export class Sound {
     }
     const t = this.ctx.currentTime;
 
-    const src = this.ctx.createBufferSource();
-    src.buffer = buf;
-    src.loop = true;
+    const { src, startOffset } = this.makeBakedLoopSource(buf, Sound.SIDE_THRUST_LOOP_LEN);
 
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
@@ -6941,7 +7034,7 @@ export class Sound {
 
     src.connect(mainGain);
     mainGain.connect(this.master);
-    src.start(t);
+    src.start(t, startOffset);
 
     this.sideThrustNode = { src, mainGain };
   }

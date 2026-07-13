@@ -246,6 +246,11 @@ export const showWaveSummary = (
   driftBonuses: number,
   warmup = false,
 ) => {
+  // Replay seeks and the open-time histogram sweep fast-step through many wave
+  //   boundaries in one synchronous burst (game.replayFastForwarding) — skip the
+  //   panel/timer work then, or it schedules timers against a wall-clock "now"
+  //   that has nothing to do with where playback actually resumes.
+  if (game.replayFastForwarding) return;
   cancelActiveTimers();
   cancelBeatCues(game, CUE_TAG);
   const bonus = (maxRhythm + finalRhythm + driftBonuses + bestStreak) * 100;
