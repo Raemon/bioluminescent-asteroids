@@ -64,13 +64,14 @@ type WarbleDroneNode = {
 // lastScheduledBeatAudioTime tracks the most recent beat-onset audio-clock time we've already
 // scheduled an envelope for, so each beat onset only gets one pulse even though the caller fires
 // updateFirstDotHum every frame.
-// releaseCleanupTimer holds a setTimeout id that tears down the oscillators after the two-stage
+// releaseCleanupTimer holds a setTimeout id that tears down the buffer source after the two-stage
 // release tail finishes — kept on the node so re-hovering mid-release can cancel it and resume.
+// The two detuned sines + vibrato LFO (the raw drone tone) are baked into `src`, a looping
+// AudioBufferSourceNode — see buildFirstDotHumGraph. filter/pulseGain/mainGain stay live: the
+// filter's frequency and pulseGain are automated per-beat by scheduleHumBeatPulse (the beat grid
+// isn't known at bake time), and mainGain is ramped per-frame to the caller's intensity/attack.
 type FirstDotHumNode = {
-  oscA: OscillatorNode;
-  oscB: OscillatorNode;
-  vibratoLfo: OscillatorNode;
-  vibratoDepth: GainNode;
+  src: AudioBufferSourceNode;
   filter: BiquadFilterNode;
   pulseGain: GainNode;
   mainGain: GainNode;
@@ -354,7 +355,13 @@ export type SoundName =
   // Alien theremin drone. One committed seamless loop per size (0=big,
   // 1=medium, 2=small), keyed by pitchRatio = size index. Built by
   // buildAlienDroneGraph, not the Tone path.
-  | "alienDrone";
+  | "alienDrone"
+  // First-dot hum drone TONE only (two detuned sines + vibrato LFO). One
+  // committed seamless loop per hum instance (0..8, see FIRST_DOT_HUM_PITCH),
+  // keyed by pitchRatio = hum index. Built by buildFirstDotHumGraph, not the
+  // Tone path. The bandpass filter / pulseGain (beat accent) / mainGain
+  // (hover swell) stay live downstream of the loop — see createHumVoice.
+  | "firstDotHum";
   // Note: "thrust" / "reverseThrust" / "sideThrust" are declared above (with
   // the rest of the play() switch names) but are ALSO baked one-shots now —
   // each is one committed seamless loop, pitchRatio unused (always 1). Built
@@ -604,6 +611,7 @@ export class Sound {
     this.prerenderSideThrust();
     this.prerenderBassteroidDrones();
     this.prerenderAlienDrones();
+    this.prerenderFirstDotHums();
     this.loadGuitarSample();
     // Kick off the baked-mp3 fetch + decode for every voice that has a baked
     // recipe. The title screen awaits bakedCacheReady() before letting the
@@ -788,6 +796,8 @@ export class Sound {
       ["bassteroidDrone", [0, 1, 2, 3, 4, 5, 6, 7]],
       // Alien theremin drone: one committed loop per size.
       ["alienDrone", [0, 1, 2]],
+      // First-dot hum drone tone: one committed loop per hum instance.
+      ["firstDotHum", Sound.FIRST_DOT_HUM_PITCH.map((_, i) => i)],
       // Wave-summary drain chime: one variant per harmonic over A3.
       ["drainChime", [1, 2, 3, 4, 6, 8]],
     ];
@@ -1189,6 +1199,17 @@ export class Sound {
       const len = Math.ceil(sr * Sound.ALIEN_DRONE_LOOP_LEN);
       const offline = new OACearly(1, len, sr);
       this.buildAlienDroneGraph(offline, offline.destination, size);
+      return offline.startRendering();
+    }
+    // firstDotHum is a pure-WebAudio seamless loop (no Tone, no reverb bus):
+    // one committed mp3 per hum instance (the drone TONE only — filter,
+    // pulseGain and mainGain stay live), keyed by pitchRatio = hum index
+    // (0..8, see FIRST_DOT_HUM_PITCH).
+    if (name === "firstDotHum") {
+      const index = Math.max(0, Math.min(Sound.FIRST_DOT_HUM_PITCH.length - 1, Math.round(pitchRatio)));
+      const len = Math.ceil(sr * Sound.FIRST_DOT_HUM_LOOP_LEN[index]);
+      const offline = new OACearly(1, len, sr);
+      this.buildFirstDotHumGraph(offline, offline.destination, index);
       return offline.startRendering();
     }
 
@@ -1744,9 +1765,7 @@ export class Sound {
     for (const node of hums) {
       if (!node) continue;
       if (node.releaseCleanupTimer !== null) clearTimeout(node.releaseCleanupTimer);
-      try { node.oscA.stop(stopAt); } catch {}
-      try { node.oscB.stop(stopAt); } catch {}
-      try { node.vibratoLfo.stop(stopAt); } catch {}
+      try { node.src.stop(stopAt); } catch {}
     }
     this.firstDotHum = null;
     this.firstDotOctaveHum = null;
@@ -2221,29 +2240,83 @@ export class Sound {
   private static readonly FIRST_DOT_HUM_FILTER_TROUGH_HZ = 700;
   private static readonly FIRST_DOT_HUM_FILTER_PEAK_HZ = 950;
 
-  // shared voice builder for the first-dot hums: two detuned sines (chorus beating) through
-  // a bandpass "mm" formant, a slow vibrato, a pulseGain for the on-beat accent and a mainGain for
-  // the hover swell. The node starts effectively silent; the caller ramps mainGain to taste.
-  private createHumVoice(
-    baseFreq: number, vibratoRate: number, vibratoDepthRatio: number, filterStartHz: number,
-  ): FirstDotHumNode | null {
-    if (!this.ctx || !this.master) return null;
-    const t = this.ctx.currentTime;
+  // Fixed (baseFreq, vibratoRate, vibratoDepthRatio) per hum instance, indexed 0..8 in field
+  // declaration order — see the FirstDotHumNode doc comment. Read verbatim off each hum's original
+  // createHumVoice call site; do not derive these from anything else.
+  private static readonly FIRST_DOT_HUM_PITCH: ReadonlyArray<{ baseFreq: number; vibratoRate: number; vibratoDepthRatio: number }> = [
+    { baseFreq: 261.63, vibratoRate: 4.2, vibratoDepthRatio: 0.004 },   // 0: firstDotHum (C4)
+    { baseFreq: 523.25, vibratoRate: 4.6, vibratoDepthRatio: 0.003 },   // 1: firstDotOctaveHum (C5)
+    { baseFreq: 392.00, vibratoRate: 4.4, vibratoDepthRatio: 0.0035 },  // 2: firstDotLockHum (G4)
+    { baseFreq: 329.63, vibratoRate: 4.5, vibratoDepthRatio: 0.0035 },  // 3: firstDotHarmonyHum (E4)
+    { baseFreq: 130.81, vibratoRate: 4.1, vibratoDepthRatio: 0.0035 },  // 4: firstDotSubHum (C3)
+    { baseFreq: 783.99, vibratoRate: 4.8, vibratoDepthRatio: 0.003 },   // 5: firstDotShimmerHum (G5)
+    { baseFreq: 587.33, vibratoRate: 4.6, vibratoDepthRatio: 0.003 },   // 6: firstDotNinthHum (D5)
+    { baseFreq: 659.25, vibratoRate: 4.5, vibratoDepthRatio: 0.0033 },  // 7: firstDotSixthHum (E5)
+    { baseFreq: 65.41, vibratoRate: 4.9, vibratoDepthRatio: 0.0028 },   // 8: firstDotHaloHum (C2)
+  ];
+
+  // Loop length (s) per hum instance, chosen so its vibrato LFO completes a whole number of
+  // cycles — required for a seamless loop seam. Each is the nearest whole-cycle length to 2.0s
+  // for that instance's vibratoRate (rates differ slightly per instance, so lengths do too).
+  private static readonly FIRST_DOT_HUM_LOOP_LEN: readonly number[] = Sound.FIRST_DOT_HUM_PITCH.map(
+    ({ vibratoRate }) => Math.round(2.0 * vibratoRate) / vibratoRate,
+  );
+
+  // Renders one seamless first-dot-hum drone-tone loop for hum instance `humIndex` into `ctx`:
+  // two detuned sines (chorus beating) + a slow vibrato LFO pitch-bending both. This is only the
+  // raw tone — the bandpass formant, beat pulse and hover-swell gain all stay live (built fresh in
+  // createHumVoice around the looping buffer this produces). Nothing here reads live state, so it
+  // renders identically every time — see bakeSound's "firstDotHum" case.
+  private buildFirstDotHumGraph(ctx: BaseAudioContext, dest: AudioNode, humIndex: number) {
+    const { baseFreq, vibratoRate, vibratoDepthRatio } = Sound.FIRST_DOT_HUM_PITCH[humIndex];
+    const len = Sound.FIRST_DOT_HUM_LOOP_LEN[humIndex];
     const detuneRatio = 1.0035;
-    const oscA = this.ctx.createOscillator();
-    const oscB = this.ctx.createOscillator();
+    const oscA = ctx.createOscillator();
+    const oscB = ctx.createOscillator();
     oscA.type = "sine";
     oscB.type = "sine";
     oscA.frequency.value = baseFreq;
     oscB.frequency.value = baseFreq * detuneRatio;
-    const vibratoLfo = this.ctx.createOscillator();
+    const vibratoLfo = ctx.createOscillator();
     vibratoLfo.type = "sine";
     vibratoLfo.frequency.value = vibratoRate;
-    const vibratoDepth = this.ctx.createGain();
+    const vibratoDepth = ctx.createGain();
     vibratoDepth.gain.value = baseFreq * vibratoDepthRatio;
     vibratoLfo.connect(vibratoDepth);
     vibratoDepth.connect(oscA.frequency);
     vibratoDepth.connect(oscB.frequency);
+    oscA.connect(dest);
+    oscB.connect(dest);
+    oscA.start(0);
+    oscB.start(0);
+    vibratoLfo.start(0);
+    oscA.stop(len);
+    oscB.stop(len);
+    vibratoLfo.stop(len);
+  }
+
+  // Warm all 9 committed first-dot-hum drone-tone loops.
+  private prerenderFirstDotHums() {
+    for (let i = 0; i < Sound.FIRST_DOT_HUM_PITCH.length; i++) void this.queueBake("firstDotHum", i);
+  }
+
+  // shared voice builder for the first-dot hums: looks up the baked drone-tone loop for
+  // `humIndex` (bailing + kicking a (re)bake if it isn't ready yet), then builds the live chain
+  // around it exactly as before — a bandpass "mm" formant, a pulseGain for the on-beat accent and
+  // a mainGain for the hover swell. The node starts effectively silent; the caller ramps mainGain
+  // to taste.
+  private createHumVoice(humIndex: number, filterStartHz: number): FirstDotHumNode | null {
+    if (!this.ctx || !this.master) return null;
+    const buf = this.bakedBuffers.get(this.bakedKey("firstDotHum", humIndex));
+    if (!buf) {
+      // Bake hasn't landed yet (or failed) — kick it for next time and bail.
+      this.prerenderFirstDotHums();
+      return null;
+    }
+    const t = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
     const filter = this.ctx.createBiquadFilter();
     filter.type = "bandpass";
     filter.frequency.value = filterStartHz;
@@ -2252,16 +2325,13 @@ export class Sound {
     pulseGain.gain.setValueAtTime(Sound.FIRST_DOT_HUM_PULSE_TROUGH, t);
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
-    oscA.connect(filter);
-    oscB.connect(filter);
+    src.connect(filter);
     filter.connect(pulseGain);
     pulseGain.connect(mainGain);
     mainGain.connect(this.master);
-    oscA.start(t);
-    oscB.start(t);
-    vibratoLfo.start(t);
+    src.start(t);
     return {
-      oscA, oscB, vibratoLfo, vibratoDepth, filter, pulseGain, mainGain,
+      src, filter, pulseGain, mainGain,
       lastScheduledBeatAudioTime: -Infinity, releasing: false, releaseCleanupTimer: null,
     };
   }
@@ -2287,8 +2357,8 @@ export class Sound {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     if (!this.firstDotHum) {
-      // C4 = 261.63 Hz, slow vibrato, bandpass near 700 Hz for the closed-mouth "mm" formant.
-      this.firstDotHum = this.createHumVoice(261.63, 4.2, 0.004, Sound.FIRST_DOT_HUM_FILTER_TROUGH_HZ);
+      // index 0: C4 = 261.63 Hz, slow vibrato, bandpass near 700 Hz for the closed-mouth "mm" formant.
+      this.firstDotHum = this.createHumVoice(0, Sound.FIRST_DOT_HUM_FILTER_TROUGH_HZ);
       if (!this.firstDotHum) return;
     }
     const node = this.firstDotHum;
@@ -2360,9 +2430,7 @@ export class Sound {
     node.releaseCleanupTimer = setTimeout(() => {
       if (!isCurrent()) return;
       const stopAt = this.ctx ? this.ctx.currentTime + 0.02 : 0;
-      try { node.oscA.stop(stopAt); } catch {}
-      try { node.oscB.stop(stopAt); } catch {}
-      try { node.vibratoLfo.stop(stopAt); } catch {}
+      try { node.src.stop(stopAt); } catch {}
       clear();
     }, Math.ceil((Sound.FIRST_DOT_HUM_RELEASE_DROP_SEC + Sound.FIRST_DOT_HUM_RELEASE_TAIL_SEC) * 1000) + 30);
   }
@@ -2386,7 +2454,8 @@ export class Sound {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     if (!this.firstDotOctaveHum) {
-      this.firstDotOctaveHum = this.createHumVoice(523.25, 4.6, 0.003, Sound.FIRST_DOT_OCTAVE_HUM_FILTER_TROUGH_HZ);
+      // index 1: C5 = 523.25 Hz.
+      this.firstDotOctaveHum = this.createHumVoice(1, Sound.FIRST_DOT_OCTAVE_HUM_FILTER_TROUGH_HZ);
       if (!this.firstDotOctaveHum) return;
     }
     const node = this.firstDotOctaveHum;
@@ -2417,8 +2486,8 @@ export class Sound {
     if (!this.ctx || !this.master) return;
     if (this.firstDotLockHum) return;
     const t = this.ctx.currentTime;
-    // G4 = 392.00 Hz — a perfect fifth above the C4 root hum.
-    this.firstDotLockHum = this.createHumVoice(392.00, 4.4, 0.0035, Sound.FIRST_DOT_LOCK_HUM_FILTER_TROUGH_HZ);
+    // index 2: G4 = 392.00 Hz — a perfect fifth above the C4 root hum.
+    this.firstDotLockHum = this.createHumVoice(2, Sound.FIRST_DOT_LOCK_HUM_FILTER_TROUGH_HZ);
     if (!this.firstDotLockHum) return;
     // linear ramp from silence to peak across LOCK_ATTACK_SEC — soft enough that the lock
     // reads as a swell joining the chord rather than a percussive accent on its own clock.
@@ -2450,9 +2519,7 @@ export class Sound {
     node.releaseCleanupTimer = setTimeout(() => {
       if (this.firstDotLockHum !== node) return;
       const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
-      try { node.oscA.stop(stopAt); } catch {}
-      try { node.oscB.stop(stopAt); } catch {}
-      try { node.vibratoLfo.stop(stopAt); } catch {}
+      try { node.src.stop(stopAt); } catch {}
       this.firstDotLockHum = null;
     }, Math.ceil(Sound.FIRST_DOT_LOCK_HUM_FAST_RELEASE_SEC * 1000) + 20);
   }
@@ -2477,8 +2544,8 @@ export class Sound {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     if (!this.firstDotHarmonyHum) {
-      // E4 = 329.63 Hz — the major third above the C4 root, completing the triad.
-      this.firstDotHarmonyHum = this.createHumVoice(329.63, 4.5, 0.0035, Sound.FIRST_DOT_HARMONY_HUM_FILTER_TROUGH_HZ);
+      // index 3: E4 = 329.63 Hz — the major third above the C4 root, completing the triad.
+      this.firstDotHarmonyHum = this.createHumVoice(3, Sound.FIRST_DOT_HARMONY_HUM_FILTER_TROUGH_HZ);
       if (!this.firstDotHarmonyHum) return;
       this.firstDotHarmonyHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_HARMONY_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_HARMONY_HUM_ATTACK_SEC);
     }
@@ -2506,9 +2573,7 @@ export class Sound {
     node.releaseCleanupTimer = setTimeout(() => {
       if (this.firstDotHarmonyHum !== node) return;
       const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
-      try { node.oscA.stop(stopAt); } catch {}
-      try { node.oscB.stop(stopAt); } catch {}
-      try { node.vibratoLfo.stop(stopAt); } catch {}
+      try { node.src.stop(stopAt); } catch {}
       this.firstDotHarmonyHum = null;
     }, Math.ceil(Sound.FIRST_DOT_HARMONY_HUM_FAST_RELEASE_SEC * 1000) + 20);
   }
@@ -2528,7 +2593,8 @@ export class Sound {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     if (!this.firstDotSubHum) {
-      this.firstDotSubHum = this.createHumVoice(130.81, 4.1, 0.0035, Sound.FIRST_DOT_SUB_HUM_FILTER_TROUGH_HZ);
+      // index 4: C3 = 130.81 Hz.
+      this.firstDotSubHum = this.createHumVoice(4, Sound.FIRST_DOT_SUB_HUM_FILTER_TROUGH_HZ);
       if (!this.firstDotSubHum) return;
       this.firstDotSubHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_SUB_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_SUB_HUM_ATTACK_SEC);
     }
@@ -2554,9 +2620,7 @@ export class Sound {
     node.releaseCleanupTimer = setTimeout(() => {
       if (this.firstDotSubHum !== node) return;
       const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
-      try { node.oscA.stop(stopAt); } catch {}
-      try { node.oscB.stop(stopAt); } catch {}
-      try { node.vibratoLfo.stop(stopAt); } catch {}
+      try { node.src.stop(stopAt); } catch {}
       this.firstDotSubHum = null;
     }, Math.ceil(Sound.FIRST_DOT_SUB_HUM_FAST_RELEASE_SEC * 1000) + 20);
   }
@@ -2575,7 +2639,8 @@ export class Sound {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     if (!this.firstDotShimmerHum) {
-      this.firstDotShimmerHum = this.createHumVoice(783.99, 4.8, 0.003, Sound.FIRST_DOT_SHIMMER_HUM_FILTER_TROUGH_HZ);
+      // index 5: G5 = 783.99 Hz.
+      this.firstDotShimmerHum = this.createHumVoice(5, Sound.FIRST_DOT_SHIMMER_HUM_FILTER_TROUGH_HZ);
       if (!this.firstDotShimmerHum) return;
       this.firstDotShimmerHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_SHIMMER_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_SHIMMER_HUM_ATTACK_SEC);
     }
@@ -2601,9 +2666,7 @@ export class Sound {
     node.releaseCleanupTimer = setTimeout(() => {
       if (this.firstDotShimmerHum !== node) return;
       const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
-      try { node.oscA.stop(stopAt); } catch {}
-      try { node.oscB.stop(stopAt); } catch {}
-      try { node.vibratoLfo.stop(stopAt); } catch {}
+      try { node.src.stop(stopAt); } catch {}
       this.firstDotShimmerHum = null;
     }, Math.ceil(Sound.FIRST_DOT_SHIMMER_HUM_FAST_RELEASE_SEC * 1000) + 20);
   }
@@ -2622,7 +2685,8 @@ export class Sound {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     if (!this.firstDotNinthHum) {
-      this.firstDotNinthHum = this.createHumVoice(587.33, 4.6, 0.003, Sound.FIRST_DOT_NINTH_HUM_FILTER_TROUGH_HZ);
+      // index 6: D5 = 587.33 Hz.
+      this.firstDotNinthHum = this.createHumVoice(6, Sound.FIRST_DOT_NINTH_HUM_FILTER_TROUGH_HZ);
       if (!this.firstDotNinthHum) return;
       this.firstDotNinthHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_NINTH_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_NINTH_HUM_ATTACK_SEC);
     }
@@ -2648,9 +2712,7 @@ export class Sound {
     node.releaseCleanupTimer = setTimeout(() => {
       if (this.firstDotNinthHum !== node) return;
       const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
-      try { node.oscA.stop(stopAt); } catch {}
-      try { node.oscB.stop(stopAt); } catch {}
-      try { node.vibratoLfo.stop(stopAt); } catch {}
+      try { node.src.stop(stopAt); } catch {}
       this.firstDotNinthHum = null;
     }, Math.ceil(Sound.FIRST_DOT_NINTH_HUM_FAST_RELEASE_SEC * 1000) + 20);
   }
@@ -2668,7 +2730,8 @@ export class Sound {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     if (!this.firstDotSixthHum) {
-      this.firstDotSixthHum = this.createHumVoice(659.25, 4.5, 0.0033, Sound.FIRST_DOT_SIXTH_HUM_FILTER_TROUGH_HZ);
+      // index 7: E5 = 659.25 Hz.
+      this.firstDotSixthHum = this.createHumVoice(7, Sound.FIRST_DOT_SIXTH_HUM_FILTER_TROUGH_HZ);
       if (!this.firstDotSixthHum) return;
       this.firstDotSixthHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_SIXTH_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_SIXTH_HUM_ATTACK_SEC);
     }
@@ -2694,9 +2757,7 @@ export class Sound {
     node.releaseCleanupTimer = setTimeout(() => {
       if (this.firstDotSixthHum !== node) return;
       const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
-      try { node.oscA.stop(stopAt); } catch {}
-      try { node.oscB.stop(stopAt); } catch {}
-      try { node.vibratoLfo.stop(stopAt); } catch {}
+      try { node.src.stop(stopAt); } catch {}
       this.firstDotSixthHum = null;
     }, Math.ceil(Sound.FIRST_DOT_SIXTH_HUM_FAST_RELEASE_SEC * 1000) + 20);
   }
@@ -2715,7 +2776,8 @@ export class Sound {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
     if (!this.firstDotHaloHum) {
-      this.firstDotHaloHum = this.createHumVoice(65.41, 4.9, 0.0028, Sound.FIRST_DOT_HALO_HUM_FILTER_TROUGH_HZ);
+      // index 8: C2 = 65.41 Hz.
+      this.firstDotHaloHum = this.createHumVoice(8, Sound.FIRST_DOT_HALO_HUM_FILTER_TROUGH_HZ);
       if (!this.firstDotHaloHum) return;
       this.firstDotHaloHum.mainGain.gain.linearRampToValueAtTime(Sound.FIRST_DOT_HALO_HUM_PEAK_GAIN, t + Sound.FIRST_DOT_HALO_HUM_ATTACK_SEC);
     }
@@ -2741,9 +2803,7 @@ export class Sound {
     node.releaseCleanupTimer = setTimeout(() => {
       if (this.firstDotHaloHum !== node) return;
       const stopAt = this.ctx ? this.ctx.currentTime + 0.01 : 0;
-      try { node.oscA.stop(stopAt); } catch {}
-      try { node.oscB.stop(stopAt); } catch {}
-      try { node.vibratoLfo.stop(stopAt); } catch {}
+      try { node.src.stop(stopAt); } catch {}
       this.firstDotHaloHum = null;
     }, Math.ceil(Sound.FIRST_DOT_HALO_HUM_FAST_RELEASE_SEC * 1000) + 20);
   }
