@@ -26,15 +26,12 @@ async function loadTone(): Promise<ToneModule> {
 // which routes into voiceBusDry/Wet.
 // Per-alien drone voice. Two detuned sines through a slow-sweeping lowpass,
 // modulated by an LFO on amplitude for the theremin pulse. Held open for the
-// lifetime of an alien; torn down on death or mute.
+// lifetime of an alien; torn down on death or mute. The tonal content
+// (oscillators, vibrato/pulse LFOs, filter) is a baked seamless loop per
+// size (buildAlienDroneGraph); only the fade envelope and spatial pan stay
+// live around the looping buffer source.
 type AlienDroneNode = {
-  oscA: OscillatorNode;
-  oscB: OscillatorNode;
-  pulseLfo: OscillatorNode;
-  vibratoLfo: OscillatorNode;
-  vibratoDepth: GainNode;
-  filter: BiquadFilterNode;
-  pulseGain: GainNode;
+  src: AudioBufferSourceNode;
   mainGain: GainNode;
   spatial?: SpatialNodes;
 };
@@ -353,7 +350,11 @@ export type SoundName =
   // Bassteroid ambient drone. One committed seamless loop per (kind, size)
   // pair (4 kinds x 2 sizes = 8), keyed by pitchRatio = kindIndex*2+sizeIndex.
   // Built by buildBassteroidDroneGraph, not the Tone path.
-  | "bassteroidDrone";
+  | "bassteroidDrone"
+  // Alien theremin drone. One committed seamless loop per size (0=big,
+  // 1=medium, 2=small), keyed by pitchRatio = size index. Built by
+  // buildAlienDroneGraph, not the Tone path.
+  | "alienDrone";
   // Note: "thrust" / "reverseThrust" / "sideThrust" are declared above (with
   // the rest of the play() switch names) but are ALSO baked one-shots now —
   // each is one committed seamless loop, pitchRatio unused (always 1). Built
@@ -602,6 +603,7 @@ export class Sound {
     this.prerenderReverseThrust();
     this.prerenderSideThrust();
     this.prerenderBassteroidDrones();
+    this.prerenderAlienDrones();
     this.loadGuitarSample();
     // Kick off the baked-mp3 fetch + decode for every voice that has a baked
     // recipe. The title screen awaits bakedCacheReady() before letting the
@@ -784,6 +786,8 @@ export class Sound {
       ["sideThrust", [1]],
       // Bassteroid ambient drone: one committed loop per (kind, size) pair.
       ["bassteroidDrone", [0, 1, 2, 3, 4, 5, 6, 7]],
+      // Alien theremin drone: one committed loop per size.
+      ["alienDrone", [0, 1, 2]],
       // Wave-summary drain chime: one variant per harmonic over A3.
       ["drainChime", [1, 2, 3, 4, 6, 8]],
     ];
@@ -1174,6 +1178,17 @@ export class Sound {
       const len = Math.ceil(sr * Sound.BASS_DRONE_LOOP_LEN[kind]);
       const offline = new OACearly(1, len, sr);
       this.buildBassteroidDroneGraph(offline, offline.destination, kind, size);
+      return offline.startRendering();
+    }
+    // alienDrone is a pure-WebAudio seamless loop (no Tone, no reverb bus):
+    // one committed mp3 per size, keyed by pitchRatio = size index
+    // (0=big, 1=medium, 2=small).
+    if (name === "alienDrone") {
+      const index = Math.max(0, Math.min(Sound.ALIEN_DRONE_SIZES.length - 1, Math.round(pitchRatio)));
+      const size = Sound.ALIEN_DRONE_SIZES[index];
+      const len = Math.ceil(sr * Sound.ALIEN_DRONE_LOOP_LEN);
+      const offline = new OACearly(1, len, sr);
+      this.buildAlienDroneGraph(offline, offline.destination, size);
       return offline.startRendering();
     }
 
@@ -1925,6 +1940,112 @@ export class Sound {
     this.bakedSum.gain.linearRampToValueAtTime(bakedTarget, t + duration);
   }
 
+  // Carrier frequencies — A minor pentatonic-ish so multiple drones layer
+  // without dissonance: big=A2 (110), medium=E3 (165), small=A3 (220).
+  private static readonly ALIEN_DRONE_SIZES: Array<"big" | "medium" | "small"> = ["big", "medium", "small"];
+  private static readonly ALIEN_DRONE_BASE_FREQ: Record<"big" | "medium" | "small", number> = {
+    big: 110, medium: 165, small: 220,
+  };
+  // Lowpass cutoff per size — keeps the sines from sounding sterile and
+  // gives the bigger sizes a darker tone.
+  private static readonly ALIEN_DRONE_FILTER_FREQ: Record<"big" | "medium" | "small", number> = {
+    big: 380, medium: 560, small: 820,
+  };
+  // Per-size base loudness. Big saucers are quieter on a per-voice basis
+  // because the sub frequency takes up more sonic real estate; small
+  // saucers can be a touch louder without crowding.
+  private static readonly ALIEN_DRONE_PEAK: Record<"big" | "medium" | "small", number> = {
+    big: 0.11, medium: 0.09, small: 0.08,
+  };
+  // Seamless-loop length (s), shared by all three sizes: 50/7 ≈ 7.1429s is
+  // exactly 5 cycles of the 0.7Hz pulse LFO (no retuning needed there). The
+  // per-size vibrato LFO (1.8/2.4/3.2Hz) is retuned by <1.2% to the nearest
+  // rate that also lands on a whole number of cycles in that span —
+  // inaudible for a slow pitch wobble:
+  //   big:    1.82Hz (was 1.8Hz)  — 13 vibrato cycles, 5 pulse cycles
+  //   medium: 2.38Hz (was 2.4Hz) — 17 vibrato cycles, 5 pulse cycles
+  //   small:  3.22Hz (was 3.2Hz) — 23 vibrato cycles, 5 pulse cycles
+  private static readonly ALIEN_DRONE_LOOP_LEN = 50 / 7;
+  private static readonly ALIEN_DRONE_VIBRATO_RATE: Record<"big" | "medium" | "small", number> = {
+    big: 1.82, medium: 2.38, small: 3.22,
+  };
+
+  // Encode size into the single pitchRatio slot bakedKey offers.
+  private static alienDroneIndex(size: "big" | "medium" | "small"): number {
+    return Sound.ALIEN_DRONE_SIZES.indexOf(size);
+  }
+
+  // Renders one seamless alien-drone loop for `size` into `ctx`. Exact
+  // original synthesis graph (two detuned sines through a vibrato LFO into
+  // a lowpass into a pulsing amplitude LFO), minus the live per-frame state
+  // (there was none — spatial pan is the only thing that was ever live, and
+  // that lives outside this graph). Nothing here reads live state, so it
+  // renders identically every time.
+  private buildAlienDroneGraph(ctx: BaseAudioContext, dest: AudioNode, size: "big" | "medium" | "small") {
+    const len = Sound.ALIEN_DRONE_LOOP_LEN;
+    const baseFreq = Sound.ALIEN_DRONE_BASE_FREQ[size];
+    // Detune just enough for the slow-beating "wobbly sine" theremin feel.
+    const detuneRatio = 1.006;
+
+    const oscA = ctx.createOscillator();
+    const oscB = ctx.createOscillator();
+    oscA.type = "sine";
+    oscB.type = "sine";
+    oscA.frequency.value = baseFreq;
+    oscB.frequency.value = baseFreq * detuneRatio;
+
+    // Vibrato LFO — slow pitch bend that gives the drone its theremin-y
+    // hand-wobble quality. Routed to both oscillator frequencies.
+    const vibratoLfo = ctx.createOscillator();
+    vibratoLfo.type = "sine";
+    vibratoLfo.frequency.value = Sound.ALIEN_DRONE_VIBRATO_RATE[size];
+    const vibratoDepth = ctx.createGain();
+    vibratoDepth.gain.value = baseFreq * 0.012;
+    vibratoLfo.connect(vibratoDepth);
+    vibratoDepth.connect(oscA.frequency);
+    vibratoDepth.connect(oscB.frequency);
+
+    // Pulse LFO — slow amplitude swell so the drone reads as "pulsing
+    // softly" rather than a flat sustain. Maps to (0..1) on the pulse gain.
+    const pulseLfo = ctx.createOscillator();
+    pulseLfo.type = "sine";
+    pulseLfo.frequency.value = 0.7;
+    const pulseGain = ctx.createGain();
+    // Pulse depth ≈ 0.5 → audible swell without going silent at trough.
+    const pulseDepth = ctx.createGain();
+    pulseDepth.gain.value = 0.5;
+    pulseLfo.connect(pulseDepth);
+    pulseDepth.connect(pulseGain.gain);
+    pulseGain.gain.value = 0.5; // bias so depth swings 0..1
+
+    // Lowpass with mid-Q for a softer voice-like character.
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = 3;
+    filter.frequency.value = Sound.ALIEN_DRONE_FILTER_FREQ[size];
+
+    oscA.connect(filter);
+    oscB.connect(filter);
+    filter.connect(pulseGain);
+    pulseGain.connect(dest);
+
+    oscA.start(0);
+    oscB.start(0);
+    pulseLfo.start(0);
+    vibratoLfo.start(0);
+    oscA.stop(len);
+    oscB.stop(len);
+    pulseLfo.stop(len);
+    vibratoLfo.stop(len);
+  }
+
+  // Warm all 3 committed alien-drone loops (big/medium/small).
+  private prerenderAlienDrones() {
+    for (let i = 0; i < Sound.ALIEN_DRONE_SIZES.length; i++) {
+      void this.queueBake("alienDrone", i);
+    }
+  }
+
   // Start a continuous theremin-ish drone for an alien. The `key` is the
   // Alien instance (or any unique object) used to look up the drone when
   // it's time to stop it. Carrier frequency depends on size — bigger
@@ -1935,77 +2056,31 @@ export class Sound {
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     if (this.alienDrones.has(key)) return;
+    const index = Sound.alienDroneIndex(size);
+    const buf = this.bakedBuffers.get(this.bakedKey("alienDrone", index));
+    if (!buf) {
+      // Bake hasn't landed yet (or failed) — kick it for next time and bail.
+      this.prerenderAlienDrones();
+      return;
+    }
     const t = this.ctx.currentTime;
     const spatial = pos ? this.makeSpatial(pos, this.master) : null;
     const sink: AudioNode = spatial ? spatial.panner : this.master;
 
-    // Carrier frequencies — A minor pentatonic-ish so multiple drones layer
-    // without dissonance: big=A2 (110), medium=E3 (165), small=A3 (220).
-    const baseFreq = size === "big" ? 110 : size === "medium" ? 165 : 220;
-    // Detune just enough for the slow-beating "wobbly sine" theremin feel.
-    const detuneRatio = 1.006;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
 
-    const oscA = this.ctx.createOscillator();
-    const oscB = this.ctx.createOscillator();
-    oscA.type = "sine";
-    oscB.type = "sine";
-    oscA.frequency.value = baseFreq;
-    oscB.frequency.value = baseFreq * detuneRatio;
-
-    // Vibrato LFO — slow pitch bend that gives the drone its theremin-y
-    // hand-wobble quality. Routed to both oscillator frequencies.
-    const vibratoLfo = this.ctx.createOscillator();
-    vibratoLfo.type = "sine";
-    vibratoLfo.frequency.value = size === "big" ? 1.8 : size === "medium" ? 2.4 : 3.2;
-    const vibratoDepth = this.ctx.createGain();
-    vibratoDepth.gain.value = baseFreq * 0.012;
-    vibratoLfo.connect(vibratoDepth);
-    vibratoDepth.connect(oscA.frequency);
-    vibratoDepth.connect(oscB.frequency);
-
-    // Pulse LFO — slow amplitude swell so the drone reads as "pulsing
-    // softly" rather than a flat sustain. Maps to (0..1) on the pulse gain.
-    const pulseLfo = this.ctx.createOscillator();
-    pulseLfo.type = "sine";
-    pulseLfo.frequency.value = 0.7;
-    const pulseGain = this.ctx.createGain();
-    // Pulse depth ≈ 0.5 → audible swell without going silent at trough.
-    const pulseDepth = this.ctx.createGain();
-    pulseDepth.gain.value = 0.5;
-    pulseLfo.connect(pulseDepth);
-    pulseDepth.connect(pulseGain.gain);
-    pulseGain.gain.value = 0.5; // bias so depth swings 0..1
-
-    // Lowpass with mid-Q for a softer voice-like character — keeps the
-    // sines from sounding sterile and gives the bigger sizes a darker tone.
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.Q.value = 3;
-    filter.frequency.value = size === "big" ? 380 : size === "medium" ? 560 : 820;
-
-    // Per-size base loudness. Big saucers are quieter on a per-voice basis
-    // because the sub frequency takes up more sonic real estate; small
-    // saucers can be a touch louder without crowding.
-    const peak = size === "big" ? 0.11 : size === "medium" ? 0.09 : 0.08;
+    const peak = Sound.ALIEN_DRONE_PEAK[size];
     const mainGain = this.ctx.createGain();
     mainGain.gain.setValueAtTime(0.0001, t);
     mainGain.gain.exponentialRampToValueAtTime(peak, t + 0.6);
 
-    oscA.connect(filter);
-    oscB.connect(filter);
-    filter.connect(pulseGain);
-    pulseGain.connect(mainGain);
+    src.connect(mainGain);
     mainGain.connect(sink);
+    src.start(t);
 
-    oscA.start(t);
-    oscB.start(t);
-    pulseLfo.start(t);
-    vibratoLfo.start(t);
-
-    this.alienDrones.set(key, {
-      oscA, oscB, pulseLfo, vibratoLfo, vibratoDepth, filter, pulseGain, mainGain,
-      spatial: spatial ?? undefined,
-    });
+    this.alienDrones.set(key, { src, mainGain, spatial: spatial ?? undefined });
   }
 
   updateAlienDrone(key: object, pos: Pos) {
@@ -2022,10 +2097,7 @@ export class Sound {
     node.mainGain.gain.cancelScheduledValues(t);
     node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
     node.mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
-    node.oscA.stop(t + 0.22);
-    node.oscB.stop(t + 0.22);
-    node.pulseLfo.stop(t + 0.22);
-    node.vibratoLfo.stop(t + 0.22);
+    node.src.stop(t + 0.22);
     this.alienDrones.delete(key);
   }
 
