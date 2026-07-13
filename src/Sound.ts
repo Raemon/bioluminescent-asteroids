@@ -85,11 +85,12 @@ type FirstDotHumNode = {
 // Per-bassteroid ambient drone. Opened when a large bassteroid breaks open
 // into mediums (and again when mediums break into smalls), held for the
 // lifetime of that piece. Each (kind, size) pairs to one of 8 voices in a
-// C-major bed — see startBassteroidDrone for the assignment.
+// C-major bed — see startBassteroidDrone for the assignment. The tonal
+// content (oscillators, noise, pulse/vibrato LFOs) is a baked seamless loop
+// (buildBassteroidDroneGraph); only the fade envelope and spatial pan stay
+// live around the looping buffer source.
 type BassDroneNode = {
-  oscs: OscillatorNode[];
-  lfos: OscillatorNode[];
-  noise?: AudioBufferSourceNode;
+  src: AudioBufferSourceNode;
   mainGain: GainNode;
   spatial?: SpatialNodes;
 };
@@ -348,7 +349,11 @@ export type SoundName =
   // Streak-shimmer music-box tine. One committed one-shot per pool pitch
   // index (0..STREAK_SHIMMER_POOL.length-1), keyed by pitchRatio = index.
   // Built by buildStreakShimmerNoteGraph, not the Tone path.
-  | "streakShimmer";
+  | "streakShimmer"
+  // Bassteroid ambient drone. One committed seamless loop per (kind, size)
+  // pair (4 kinds x 2 sizes = 8), keyed by pitchRatio = kindIndex*2+sizeIndex.
+  // Built by buildBassteroidDroneGraph, not the Tone path.
+  | "bassteroidDrone";
   // Note: "thrust" / "reverseThrust" / "sideThrust" are declared above (with
   // the rest of the play() switch names) but are ALSO baked one-shots now —
   // each is one committed seamless loop, pitchRatio unused (always 1). Built
@@ -596,6 +601,7 @@ export class Sound {
     this.prerenderThrust();
     this.prerenderReverseThrust();
     this.prerenderSideThrust();
+    this.prerenderBassteroidDrones();
     this.loadGuitarSample();
     // Kick off the baked-mp3 fetch + decode for every voice that has a baked
     // recipe. The title screen awaits bakedCacheReady() before letting the
@@ -776,6 +782,8 @@ export class Sound {
       ["thrust", [1]],
       ["reverseThrust", [1]],
       ["sideThrust", [1]],
+      // Bassteroid ambient drone: one committed loop per (kind, size) pair.
+      ["bassteroidDrone", [0, 1, 2, 3, 4, 5, 6, 7]],
       // Wave-summary drain chime: one variant per harmonic over A3.
       ["drainChime", [1, 2, 3, 4, 6, 8]],
     ];
@@ -1152,6 +1160,20 @@ export class Sound {
       const len = Math.ceil(sr * (Sound.CHARGE_LOOP_LEN + 0.05));
       const offline = new OACearly(2, len, sr);
       this.buildChargeBedGraph(offline, offline.destination, tier);
+      return offline.startRendering();
+    }
+    // bassteroidDrone is a pure-WebAudio seamless loop (no Tone, no reverb
+    // bus): one committed mp3 per (kind, size) pair, keyed by
+    // pitchRatio = kindIndex*2 + sizeIndex (0..7).
+    if (name === "bassteroidDrone") {
+      const index = Math.max(0, Math.min(7, Math.round(pitchRatio)));
+      const kindIndex = Math.floor(index / 2);
+      const sizeIndex = index % 2;
+      const kind = Sound.BASS_DRONE_KINDS[kindIndex];
+      const size = Sound.BASS_DRONE_SIZES[sizeIndex];
+      const len = Math.ceil(sr * Sound.BASS_DRONE_LOOP_LEN[kind]);
+      const offline = new OACearly(1, len, sr);
+      this.buildBassteroidDroneGraph(offline, offline.destination, kind, size);
       return offline.startRendering();
     }
 
@@ -3042,34 +3064,60 @@ export class Sound {
   //   bassB = detuned sine pair with vibrato (breathy choir)
   //   bassC = sine + sine-fifth (open chorale)
   //   bassD = sine + bandpassed noise (wind-through-metal)
-  startBassteroidDrone(key: object, kind: "bassA" | "bassB" | "bassC" | "bassD", size: "medium" | "small", pos?: Pos) {
-    if (!this.enabled) return;
-    this.ensureContext();
-    if (!this.ctx || !this.master) return;
-    if (this.bassDrones.has(key)) return;
-    const t = this.ctx.currentTime;
-    const spatial = pos ? this.makeSpatial(pos, this.master) : null;
-    const sink: AudioNode = spatial ? spatial.panner : this.master;
+  //
+  // The tonal content (oscillators, LFOs, noise) is entirely static per
+  // (kind, size) — nothing here is ever live-modulated — so it's rendered
+  // once into a seamless baked loop by buildBassteroidDroneGraph and played
+  // back as a buffer source. Only the fade-in/out envelope on mainGain and
+  // the spatial pan stay live.
+  private static readonly BASS_DRONE_MEDIUM_FREQ: Record<"bassA" | "bassB" | "bassC" | "bassD", number> = {
+    bassA: 130.81, bassB: 196.00, bassC: 164.81, bassD: 220.00,
+  };
+  private static readonly BASS_DRONE_SMALL_FREQ: Record<"bassA" | "bassB" | "bassC" | "bassD", number> = {
+    bassA: 392.00, bassB: 587.33, bassC: 493.88, bassD: 659.25,
+  };
+  private static readonly BASS_DRONE_KINDS: Array<"bassA" | "bassB" | "bassC" | "bassD"> = ["bassA", "bassB", "bassC", "bassD"];
+  private static readonly BASS_DRONE_SIZES: Array<"medium" | "small"> = ["medium", "small"];
 
-    const mediumFreq: Record<"bassA" | "bassB" | "bassC" | "bassD", number> = {
-      bassA: 130.81, bassB: 196.00, bassC: 164.81, bassD: 220.00,
-    };
-    const smallFreq: Record<"bassA" | "bassB" | "bassC" | "bassD", number> = {
-      bassA: 392.00, bassB: 587.33, bassC: 493.88, bassD: 659.25,
-    };
-    const baseFreq = size === "medium" ? mediumFreq[kind] : smallFreq[kind];
+  // Seamless-loop length (s) per kind. Each must be a whole number of cycles
+  // of every LFO baked into that kind's loop, or the buffer clicks at the
+  // seam when it repeats. Original pulse-LFO rates (0.07-0.17Hz) are retuned
+  // by <3% to the nearest rate that divides evenly into a clean loop length;
+  // inaudible for a slow amplitude swell. bassB additionally carries a
+  // 0.6Hz vibrato LFO, which is already a whole number of cycles (9) in 15s.
+  //   bassA: 11.0s @ 1/11 Hz  (~0.0909Hz, was 0.09Hz)  — 1 pulse cycle
+  //   bassB: 15.0s @ 2/15 Hz (~0.1333Hz, was 0.13Hz) — 2 pulse cycles, 9 vibrato cycles
+  //   bassC: 14.0s @ 1/14 Hz  (~0.0714Hz, was 0.07Hz)  — 1 pulse cycle
+  //   bassD: 6.0s  @ 1/6 Hz   (~0.1667Hz, was 0.17Hz)  — 1 pulse cycle
+  private static readonly BASS_DRONE_LOOP_LEN: Record<"bassA" | "bassB" | "bassC" | "bassD", number> = {
+    bassA: 11.0, bassB: 15.0, bassC: 14.0, bassD: 6.0,
+  };
+  private static readonly BASS_DRONE_PULSE_RATE: Record<"bassA" | "bassB" | "bassC" | "bassD", number> = {
+    bassA: 1 / 11, bassB: 2 / 15, bassC: 1 / 14, bassD: 1 / 6,
+  };
 
-    // Per-size base loudness. Several drones will commonly stack (a single
-    // medium that splits gives 2 smalls, two mediums give 4 smalls, etc.),
-    // so each voice is intentionally quiet. Mediums get a touch more body
-    // than smalls so the lower octave still anchors the mix when present.
-    const peakBase = size === "medium" ? 0.035 : 0.022;
+  // Encode (kind, size) into the single pitchRatio slot bakedKey offers:
+  // kindIndex (0..3 for bassA..bassD) * 2 + sizeIndex (0=medium, 1=small).
+  private static bassDroneIndex(kind: "bassA" | "bassB" | "bassC" | "bassD", size: "medium" | "small"): number {
+    const kindIndex = Sound.BASS_DRONE_KINDS.indexOf(kind);
+    const sizeIndex = size === "medium" ? 0 : 1;
+    return kindIndex * 2 + sizeIndex;
+  }
+
+  // Renders one seamless bassteroid-drone loop for (kind, size) into `ctx`.
+  // Exact original synthesis graph, minus the live per-frame state (there
+  // was none to begin with — spatial pan is the only thing that was ever
+  // live, and that lives outside this graph). Nothing here reads live
+  // state, so it renders identically every time.
+  private buildBassteroidDroneGraph(ctx: BaseAudioContext, dest: AudioNode, kind: "bassA" | "bassB" | "bassC" | "bassD", size: "medium" | "small") {
+    const len = Sound.BASS_DRONE_LOOP_LEN[kind];
+    const baseFreq = size === "medium" ? Sound.BASS_DRONE_MEDIUM_FREQ[kind] : Sound.BASS_DRONE_SMALL_FREQ[kind];
 
     // Lowpass kept conservative so even the brighter D voice never bites.
     // The cutoff sits one octave above the fundamental for mediums and a
     // little tighter (×1.6) for smalls to keep the high voices from getting
     // shrill when several are present.
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.Q.value = 1.2;
     filter.frequency.value = size === "medium" ? baseFreq * 2.2 : baseFreq * 1.6;
@@ -3078,111 +3126,149 @@ export class Sound {
     // pieces of different kinds don't beat in lockstep. Rates are all in the
     // 0.07–0.18 Hz range (5–14 second period) so the bed reads as gently
     // breathing rather than pulsing.
-    const pulseRate: Record<"bassA" | "bassB" | "bassC" | "bassD", number> = {
-      bassA: 0.09, bassB: 0.13, bassC: 0.07, bassD: 0.17,
-    };
-    const pulseLfo = this.ctx.createOscillator();
+    const pulseLfo = ctx.createOscillator();
     pulseLfo.type = "sine";
-    pulseLfo.frequency.value = pulseRate[kind];
-    const pulseDepth = this.ctx.createGain();
+    pulseLfo.frequency.value = Sound.BASS_DRONE_PULSE_RATE[kind];
+    const pulseDepth = ctx.createGain();
     pulseDepth.gain.value = 0.35;
-    const pulseGain = this.ctx.createGain();
+    const pulseGain = ctx.createGain();
     pulseGain.gain.value = 0.65;
     pulseLfo.connect(pulseDepth);
     pulseDepth.connect(pulseGain.gain);
 
-    const mainGain = this.ctx.createGain();
-    mainGain.gain.setValueAtTime(0.0001, t);
-    // ~1.4s fade-in so the drone arrives as the piece settles, not as a pop.
-    mainGain.gain.exponentialRampToValueAtTime(peakBase, t + 1.4);
-
     filter.connect(pulseGain);
-    pulseGain.connect(mainGain);
-    mainGain.connect(sink);
-
-    const oscs: OscillatorNode[] = [];
-    const lfos: OscillatorNode[] = [pulseLfo];
-    let noise: AudioBufferSourceNode | undefined;
+    pulseGain.connect(dest);
 
     if (kind === "bassA") {
       // Warm filtered sine pad — single sine, soft.
-      const osc = this.ctx.createOscillator();
+      const osc = ctx.createOscillator();
       osc.type = "sine";
       osc.frequency.value = baseFreq;
       osc.connect(filter);
-      osc.start(t);
-      oscs.push(osc);
+      osc.start(0);
+      osc.stop(len);
     } else if (kind === "bassB") {
       // Detuned sine pair with slow vibrato → breathy choir character.
-      const oscA = this.ctx.createOscillator();
-      const oscB = this.ctx.createOscillator();
+      const oscA = ctx.createOscillator();
+      const oscB = ctx.createOscillator();
       oscA.type = "sine";
       oscB.type = "sine";
       oscA.frequency.value = baseFreq;
       oscB.frequency.value = baseFreq * 1.008;
-      const vib = this.ctx.createOscillator();
+      const vib = ctx.createOscillator();
       vib.type = "sine";
       vib.frequency.value = 0.6;
-      const vibDepth = this.ctx.createGain();
+      const vibDepth = ctx.createGain();
       vibDepth.gain.value = baseFreq * 0.004;
       vib.connect(vibDepth);
       vibDepth.connect(oscA.frequency);
       vibDepth.connect(oscB.frequency);
       oscA.connect(filter);
       oscB.connect(filter);
-      oscA.start(t);
-      oscB.start(t);
-      vib.start(t);
-      oscs.push(oscA, oscB);
-      lfos.push(vib);
+      oscA.start(0);
+      oscB.start(0);
+      vib.start(0);
+      oscA.stop(len);
+      oscB.stop(len);
+      vib.stop(len);
     } else if (kind === "bassC") {
       // Open chorale — root + perfect fifth above. Both sines so the
       // interval reads as harmonic colour rather than a separate voice.
-      const root = this.ctx.createOscillator();
-      const fifth = this.ctx.createOscillator();
+      const root = ctx.createOscillator();
+      const fifth = ctx.createOscillator();
       root.type = "sine";
       fifth.type = "sine";
       root.frequency.value = baseFreq;
       fifth.frequency.value = baseFreq * 1.5;
-      const fifthGain = this.ctx.createGain();
+      const fifthGain = ctx.createGain();
       fifthGain.gain.value = 0.45; // fifth quieter than root so it just tints
       root.connect(filter);
       fifth.connect(fifthGain);
       fifthGain.connect(filter);
-      root.start(t);
-      fifth.start(t);
-      oscs.push(root, fifth);
+      root.start(0);
+      fifth.start(0);
+      root.stop(len);
+      fifth.stop(len);
     } else {
       // bassD — sine + narrow bandpassed noise for a wind-through-metal hush.
-      const osc = this.ctx.createOscillator();
+      const osc = ctx.createOscillator();
       osc.type = "sine";
       osc.frequency.value = baseFreq;
       osc.connect(filter);
-      osc.start(t);
-      oscs.push(osc);
+      osc.start(0);
+      osc.stop(len);
 
-      const noiseBuf = this.makeNoiseBuffer(6);
-      if (noiseBuf) {
-        const n = this.ctx.createBufferSource();
-        n.buffer = noiseBuf;
-        n.loop = true;
-        const nBp = this.ctx.createBiquadFilter();
-        nBp.type = "bandpass";
-        nBp.Q.value = 8;
-        nBp.frequency.value = baseFreq * 2;
-        const nGain = this.ctx.createGain();
-        nGain.gain.value = 0.18; // breath, not hiss
-        n.connect(nBp);
-        nBp.connect(nGain);
-        nGain.connect(filter);
-        n.start(t);
-        noise = n;
-      }
+      // Local noise buffer built directly against the offline ctx — can't
+      // use this.makeNoiseBuffer here, it's tied to the live ctx + a shared
+      // cache (see buildChargeBedGraph's noiseFor for the same pattern).
+      const n = Math.max(1, Math.floor(ctx.sampleRate * len));
+      const noiseBuf = ctx.createBuffer(1, n, ctx.sampleRate);
+      const data = noiseBuf.getChannelData(0);
+      for (let i = 0; i < n; i++) data[i] = Math.random() * 2 - 1;
+
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+      noise.loop = true;
+      const nBp = ctx.createBiquadFilter();
+      nBp.type = "bandpass";
+      nBp.Q.value = 8;
+      nBp.frequency.value = baseFreq * 2;
+      const nGain = ctx.createGain();
+      nGain.gain.value = 0.18; // breath, not hiss
+      noise.connect(nBp);
+      nBp.connect(nGain);
+      nGain.connect(filter);
+      noise.start(0);
+      noise.stop(len);
     }
 
-    pulseLfo.start(t);
+    pulseLfo.start(0);
+    pulseLfo.stop(len);
+  }
 
-    this.bassDrones.set(key, { oscs, lfos, noise, mainGain, spatial: spatial ?? undefined });
+  // Warm all 8 committed bassteroid-drone loops (4 kinds × 2 sizes).
+  private prerenderBassteroidDrones() {
+    for (let i = 0; i < Sound.BASS_DRONE_KINDS.length * Sound.BASS_DRONE_SIZES.length; i++) {
+      void this.queueBake("bassteroidDrone", i);
+    }
+  }
+
+  startBassteroidDrone(key: object, kind: "bassA" | "bassB" | "bassC" | "bassD", size: "medium" | "small", pos?: Pos) {
+    if (!this.enabled) return;
+    this.ensureContext();
+    if (!this.ctx || !this.master) return;
+    if (this.bassDrones.has(key)) return;
+    const index = Sound.bassDroneIndex(kind, size);
+    const buf = this.bakedBuffers.get(this.bakedKey("bassteroidDrone", index));
+    if (!buf) {
+      // Bake hasn't landed yet (or failed) — kick it for next time and bail.
+      this.prerenderBassteroidDrones();
+      return;
+    }
+    const t = this.ctx.currentTime;
+    const spatial = pos ? this.makeSpatial(pos, this.master) : null;
+    const sink: AudioNode = spatial ? spatial.panner : this.master;
+
+    // Per-size base loudness. Several drones will commonly stack (a single
+    // medium that splits gives 2 smalls, two mediums give 4 smalls, etc.),
+    // so each voice is intentionally quiet. Mediums get a touch more body
+    // than smalls so the lower octave still anchors the mix when present.
+    const peakBase = size === "medium" ? 0.035 : 0.022;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+
+    const mainGain = this.ctx.createGain();
+    mainGain.gain.setValueAtTime(0.0001, t);
+    // ~1.4s fade-in so the drone arrives as the piece settles, not as a pop.
+    mainGain.gain.exponentialRampToValueAtTime(peakBase, t + 1.4);
+
+    src.connect(mainGain);
+    mainGain.connect(sink);
+    src.start(t);
+
+    this.bassDrones.set(key, { src, mainGain, spatial: spatial ?? undefined });
   }
 
   updateBassteroidDrone(key: object, pos: Pos) {
@@ -3200,9 +3286,7 @@ export class Sound {
     node.mainGain.gain.setValueAtTime(node.mainGain.gain.value, t);
     node.mainGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
     const stopAt = t + 0.4;
-    for (const o of node.oscs) o.stop(stopAt);
-    for (const l of node.lfos) l.stop(stopAt);
-    if (node.noise) node.noise.stop(stopAt);
+    node.src.stop(stopAt);
     this.bassDrones.delete(key);
   }
 
