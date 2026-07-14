@@ -1,5 +1,51 @@
 [
   {
+    "id": "2026-07-14-5a70f21",
+    "date": "2026-07-14",
+    "title": "Citadel asteroids, wave-skip portals, boss laser overhaul",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Citadel asteroids appear in later waves — massive armoured fortresses with a ship-shaped escape hole; fly inside while the shell is phased out and shoot the inner wall to destroy them.",
+          "Defeating aliens can now open wave-skip portals; fly into one to jump ahead several waves and re-emerge with a return portal.",
+          "New warm-up waves ease newer players into the game with single-target encounters before the full field spawns.",
+          "Streaks now have their own shimmer sounds and music layer."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Boss laser timing overhauled: the eye now has a longer aim windup followed by a visible pre-fire surge before it fires, giving more time to read and dodge the shot.",
+          "Boss hemisphere armour is now directional — the freshly-cut flat face takes full damage while the rounded outer shell still deflects weak shots.",
+          "Bonus life threshold now doubles after each award."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Audio engine overhauled to pre-bake all synthesized drones and sound effects, reducing CPU load and eliminating potential audio glitches during gameplay."
+        ]
+      }
+    ],
+    "commits": [
+      "5a70f21",
+      "1ed2569",
+      "61b2a09",
+      "19c0784",
+      "a1db454",
+      "192e507",
+      "e33cb00",
+      "7a45dcf",
+      "702de04",
+      "f2c4e32",
+      "d9651fb",
+      "5e4d3e1",
+      "934a6d3",
+      "01399bd"
+    ]
+  },
+  {
     "id": "2026-07-07-faf1782",
     "date": "2026-07-07",
     "title": "Crystal asteroid tuning",
