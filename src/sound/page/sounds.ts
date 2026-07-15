@@ -65,6 +65,7 @@ export const OBJECTS: GameObject[] = [
     label: "ship",
     about: "the player",
     actions: [
+      { verb: "earns a bonus life (angelic bong)", sound: "bonusLife", trigger: beat(8) },
       { verb: "dies", sound: "death", trigger: beat(8), animation: "ship-death" },
     ],
   },
@@ -367,7 +368,7 @@ export const sublabelFor = (action: Action): string => {
 
 const MENTIONED_SOUNDS = [
   // ship
-  "death", "thrust", "reverseThrust", "sideThrust", "shieldPop",
+  "death", "thrust", "reverseThrust", "sideThrust", "shieldPop", "bonusLife",
   // bullets
   "fire", "fireBeat", "comboTick",
   // asteroids

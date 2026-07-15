@@ -16,9 +16,19 @@ import { renderLasers, renderLaserChargeDots, renderLaserAmbientFlash } from "./
 import { renderLaserReticule } from "../ship/reticule/laserReticule";
 import { renderBossBeams } from "./bossBeam";
 import { renderSlowMoTimerBar } from "./slowMoTimerBar";
+import { renderBonusLifeFlash } from "./bonusLife";
 import { updateSpectrumVisualizer, paintSpectrumVisualizer } from "./spectrumVisualizer";
 import { cosmeticRng } from "./rng";
 import { traceCitadelHolePath } from "../Asteroid";
+
+// Overdrive ramp above the tier-3 white threshold. The combo halo saturates to
+// white at rhythm 12; this 0→1 factor keeps climbing from there to 24 so the
+// bassteroid halos and the bass lightning can crank brighter/whiter past the
+// point the tier system tops out.
+const SUPER_RHYTHM_FLOOR = 12;
+const SUPER_RHYTHM_CEIL = 24;
+const superRhythm = (game: Game): number =>
+  Math.max(0, Math.min(1, (game.beatCombo - SUPER_RHYTHM_FLOOR) / (SUPER_RHYTHM_CEIL - SUPER_RHYTHM_FLOOR)));
 
 // shake is purely cosmetic; isolate its math so render() reads top-down.
 // Uses the cosmetic RNG stream — render runs every animation frame live but NOT
@@ -114,7 +124,14 @@ const paintEntityLayers = (game: Game, focusedTarget: ReticuleTarget | null) => 
   for (const s of game.shards) s.render(ctx);
   // bassteroids wear the ship's 4+/12+ combo halo — share the ship's eased
   // intensity + the live beat pulse so every halo on the field rides one rhythm.
-  const comboHalo = { intensity: game.ship.comboHaloIntensity, beatPulse: currentBeatPulse(game) };
+  // `super` (0→1 above rhythm 12) drives the extra-bright overdrive: the tier-3
+  // white saturates at 12, so past it the halos brighten and the bass lightning
+  // crackles a hotter white on top of the same colour.
+  const comboHalo = {
+    intensity: game.ship.comboHaloIntensity,
+    beatPulse: currentBeatPulse(game),
+    super: superRhythm(game),
+  };
   for (const a of game.asteroids) if (!a.entering) a.render(ctx, game.time, comboHalo);
   for (const c of game.canisters) c.render(ctx, game.time);
   for (const g of game.gems) if (!g.entering) g.render(ctx, game.time);
@@ -159,7 +176,7 @@ const paintEntityLayers = (game: Game, focusedTarget: ReticuleTarget | null) => 
   // entrance image in paintEntrances instead, else a body-less glow cloud
   // appears at the folded pos.
   if (focusedTarget && !focusedTarget.entering) paintFocusGlow(ctx, focusedTarget);
-  renderBassLightnings(ctx, game.bassLightnings, game.time * 0.001);
+  renderBassLightnings(ctx, game.bassLightnings, game.time * 0.001, superRhythm(game));
   renderDriftBursts(ctx, game.driftBursts, game.time * 0.001);
   game.particles.render(ctx);
   // Popups (combo / pickup / score) anchor at the world spot they describe (a hit
@@ -197,7 +214,11 @@ const paintEntrances = (game: Game, camX: number, camY: number, focusedTarget: R
   for (const c of game.comets) if (c.entering) atEntrance(c, () => c.glowTrail.render(ctx, tSec));
   ctx.restore();
   for (const c of game.comets) if (c.entering) atEntrance(c, () => c.render(ctx));
-  const comboHalo = { intensity: game.ship.comboHaloIntensity, beatPulse: currentBeatPulse(game) };
+  const comboHalo = {
+    intensity: game.ship.comboHaloIntensity,
+    beatPulse: currentBeatPulse(game),
+    super: superRhythm(game),
+  };
   for (const a of game.asteroids) if (a.entering) atEntrance(a, () => a.render(ctx, game.time, comboHalo));
   for (const g of game.gems) if (g.entering) atEntrance(g, () => g.render(ctx, game.time));
   for (const al of game.aliens) if (al.entering) atEntrance(al, () => al.render(ctx, game.time));
@@ -432,6 +453,7 @@ const paintScrollScene = (game: Game, shakeX: number, shakeY: number) => {
   // pulsar layer above (it rings the wrapped pulsar).
   renderSlowMoTimerBar(game);
   renderLaserAmbientFlash(ctx, game);
+  renderBonusLifeFlash(ctx, game);
   ctx.restore();
 };
 

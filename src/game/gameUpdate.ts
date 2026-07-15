@@ -52,6 +52,7 @@ import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderbo
 import { showGameOverIntro } from "./gameOverIntro";
 import { isDown, wasPressed, TUTORIAL_CONTROL_ACTIONS } from "./controlBindings";
 import { tickLaserShot, FIRE_FLASH_DECAY } from "./laserShot";
+import { BONUS_LIFE_FLASH_DECAY } from "./bonusLife";
 import { tickTorusCharge, tickSuperLaserFire } from "./torusCharge";
 import { tickEntrances, shiftEntranceFrames, audiblePos } from "./entrance";
 import { fireBossSweepBeam, tickBossBeams } from "./bossBeam";
@@ -1119,6 +1120,9 @@ const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   compactInPlace(game.lasers, (l) => l.alive);
   if (game.laserFireFlash > 0) {
     game.laserFireFlash = Math.max(0, game.laserFireFlash - musicDt / FIRE_FLASH_DECAY);
+  }
+  if (game.bonusLifeFlash > 0) {
+    game.bonusLifeFlash = Math.max(0, game.bonusLifeFlash - musicDt / BONUS_LIFE_FLASH_DECAY);
   }
   for (const ab of game.alienBullets) ab.update(musicDt, game.w, game.h);
   compactInPlace(game.alienBullets, (ab) => ab.life > 0);

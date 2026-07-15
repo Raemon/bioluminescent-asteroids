@@ -140,6 +140,9 @@ export class Ship {
   comboHaloIntensity = 0;
   // set to 1 by Game on a meaningful combo loss; decays in update to drive the red halo flash.
   comboLossFlash = 0;
+  // set to 1 in checkBonusLife when a free life is earned; decays in update to
+  //   flash the whole hull bright white for a beat.
+  bonusLifeFlash = 0;
   // per-target trajectory state — drives entry-flash phase, fade-out lingering, and pulse phase.
   private trajectoryTracks: TrajectoryTrackMap = new Map();
   // persists across frames so the 8th-note hover ring can fill in over a continuous hover.

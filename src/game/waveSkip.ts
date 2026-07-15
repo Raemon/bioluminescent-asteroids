@@ -60,6 +60,10 @@ export type WaveSkipState = {
   // One announce per skipped-past wave (internal numbering), ascending. The
   // landing wave's own announce fires with its spawn, as on any wave.
   titles: Array<{ atBeat: number; wave: number }>;
+  // The landing wave's title (fired by advanceWave's deferred spawn) is DOM-only;
+  // ring its cascade chime here so the wave you actually arrive at sounds like
+  // the skipped ones did. Nulled once played.
+  landingChimeBeat: number | null;
   emergePortalBeat: number;
   emergeShipBeat: number;
   emergePortalSpawned: boolean;
@@ -170,6 +174,7 @@ const beginWaveSkip = (game: Game, portal: SkipPortal) => {
     diveTo: { x: ship.pos.x + tdx, y: ship.pos.y + tdy },
     cropPortal: portal.wormhole,
     titles,
+    landingChimeBeat: schedule.spawnBeat,
     emergePortalBeat: schedule.spawnBeat + skipCfg().emergeDelayBeats * BEAT_GRID,
     emergeShipBeat: schedule.spawnBeat + (skipCfg().emergeDelayBeats + skipCfg().emergeRideBeats) * BEAT_GRID,
     emergePortalSpawned: false,
@@ -204,6 +209,12 @@ export const tickWaveSkip = (game: Game, musicDt: number) => {
   while (warp.titles.length > 0 && game.beatTime >= warp.titles[0].atBeat) {
     showWaveAnnounce(game, warp.titles.shift()!.wave);
     game.sound.play("chime");
+  }
+  // The landing wave's DOM title is fired by advanceWave's deferred spawn; ring
+  // its chime the moment that beat arrives so it matches the cascade above.
+  if (warp.landingChimeBeat !== null && game.beatTime >= warp.landingChimeBeat) {
+    game.sound.play("chime");
+    warp.landingChimeBeat = null;
   }
   if (warp.phase === "dive") {
     warp.t = Math.min(1, warp.t + musicDt / WARP_OUT_DURATION);

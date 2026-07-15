@@ -17,18 +17,26 @@ const shipHullVertices = (ship: Ship): Vec[] => [
   fromAngle(ship.heading - Math.PI * 0.78, ship.radius * 1.0),
 ];
 
-// shares the combo halo's snap-and-fade so every ship light rides one rhythm
-const paintShipHull = (ctx: CanvasRenderingContext2D, verts: Vec[], invuln: number, beatPulse: number) => {
+// shares the combo halo's snap-and-fade so every ship light rides one rhythm.
+// bonusFlash (0..1) blooms the whole hull toward bright white on a free life:
+// the outline desaturates up to full white and the fill floods opaque.
+const paintShipHull = (
+  ctx: CanvasRenderingContext2D, verts: Vec[], invuln: number, beatPulse: number, bonusFlash: number,
+) => {
   const beatBrightness = 0.7 + 0.3 * beatPulse;
-  ctx.strokeStyle = `hsla(195, 100%, 75%, ${0.95 * beatBrightness * invuln})`;
-  ctx.lineWidth = 1.5;
-  ctx.shadowColor = "hsla(195, 100%, 70%, 1)";
+  // Pull the cyan hue's saturation down toward 0 (white) and force full opacity
+  // as the flash rides, so the ship reads as a searing white silhouette.
+  const sat = 100 - bonusFlash * 100;
+  const strokeA = Math.min(1, 0.95 * beatBrightness * invuln + bonusFlash);
+  ctx.strokeStyle = `hsla(195, ${sat}%, ${75 + bonusFlash * 25}%, ${strokeA})`;
+  ctx.lineWidth = 1.5 + bonusFlash * 1.5;
   ctx.beginPath();
   ctx.moveTo(verts[0].x, verts[0].y);
   for (const vert of verts.slice(1)) ctx.lineTo(vert.x, vert.y);
   ctx.closePath();
   ctx.stroke();
-  ctx.fillStyle = `hsla(195, 100%, 60%, ${0.12 * invuln})`;
+  const fillA = 0.12 * invuln + bonusFlash * 0.85;
+  ctx.fillStyle = `hsla(195, ${sat}%, ${60 + bonusFlash * 40}%, ${fillA})`;
   ctx.fill();
 };
 
@@ -196,6 +204,7 @@ export const renderShipBody = (ctx: CanvasRenderingContext2D, ship: Ship, t: num
   // transform in Ship.render shrinks it down the portal throat.
   if (!ship.alive && ship.skipWarpT === null) return;
   const invuln = invulnFlicker(ship, t);
+  const bonusFlash = ship.bonusLifeFlash;
   const verts = shipHullVertices(ship);
   ctx.save();
   ctx.translate(ship.pos.x, ship.pos.y);
@@ -203,7 +212,7 @@ export const renderShipBody = (ctx: CanvasRenderingContext2D, ship: Ship, t: num
   ctx.globalCompositeOperation = "lighter";
   renderComboHalo(ctx, ship, beatPulse);
   paintSuperLaserCharge(ctx, ship, t);
-  paintShipHull(ctx, verts, invuln, beatPulse);
+  paintShipHull(ctx, verts, invuln, beatPulse, bonusFlash);
   paintThrustFlame(ctx, ship);
   paintRetroFlares(ctx, ship);
   paintSideJets(ctx, ship);

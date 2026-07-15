@@ -78,7 +78,7 @@ const LASER_BEAM_LIFE = 0.1;
 // effectiveBulletLife * LASER_BASE_RANGE_MULT, then the pierce/longshot/
 // superBoosted multipliers shipWeapons uses stack on top. The base mult is
 // further scaled by a per-dot range factor so an uncharged shot is short.
-const LASER_BASE_RANGE_MULT = 2;
+const LASER_BASE_RANGE_MULT = 1.8;
 // Range factor by dot count: a 0-dot shot reaches half the old length, a
 // full charge overshoots it.
 const LASER_RANGE_BY_DOTS = [0.5, 0.7, 0.85, 1.0, 1.2];
@@ -513,7 +513,10 @@ const laserTargetGroups = (game: Game): LaserTargetGroup[] => [
       const g = target as Gem;
       const onBeat = beamHitOnBeat(game, fakeBullet);
       applyHitToCombo(game, onBeat, fakeBullet.pos);
-      if (onBeat && beam.damage >= 4) crackGemForCanister(game, g);
+      // Beams carry no drift tier (driftTierAtHit is 0), so an on-beat crack
+      // scores rhythm-multiplied but never stages a drift bonus — same as a
+      // plain on-beat bullet.
+      if (onBeat && beam.damage >= 4) crackGemForCanister(game, g, fakeBullet.driftTierAtHit());
       else expireGem(game, g); // wasted-gem feedback, same as an off-beat bullet
       return [];
     },

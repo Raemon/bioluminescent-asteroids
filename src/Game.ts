@@ -76,6 +76,9 @@ export class Game implements HudElements {
   //   fire flash survives the resetLaserCharge that runs right after firing.
   laserChargeGlow = 0;
   laserFireFlash = 0;
+  // Medium white full-screen wash when a bonus life is earned. Set to 1 in
+  //   checkBonusLife, decayed in updatePlaying, painted in renderBonusLifeFlash.
+  bonusLifeFlash = 0;
   // Sustained sweeping beams fired by the boss eye — see game/bossBeam.ts.
   bossBeams: BossBeam[] = [];
   popups: Popup[] = [];

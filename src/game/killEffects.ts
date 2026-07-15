@@ -157,7 +157,9 @@ const advanceFirstWaveHintOnCombo = (game: Game) => {
 
 // multiplier + sparkle + popup are the on-beat reward — one helper guarantees consistency.
 //   Returns the points actually added so the parade can flash the same "+N" per kill.
-const awardScoreForKill = (
+//   Shared by every scored kill (asteroid/alien/gem) so rhythm-multiply, the combo
+//   popup, and the drift-tier bonus staging live in exactly one place.
+export const awardScoreForKill = (
   game: Game, hitPos: Vec, baseScore: number, isOnBeatHit: boolean, driftTier: number = 0,
 ): number => {
   let scoreEarned = baseScore;

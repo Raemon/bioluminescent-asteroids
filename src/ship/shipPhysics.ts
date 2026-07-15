@@ -312,6 +312,7 @@ const easeComboHaloIntensity = (ship: Ship, dt: number) => {
   const rate = rising ? 14 : 2.5;
   ship.comboHaloIntensity += (haloTarget - ship.comboHaloIntensity) * Math.min(1, rate * dt);
   if (ship.comboLossFlash > 0) ship.comboLossFlash = Math.max(0, ship.comboLossFlash - dt / 0.7);
+  if (ship.bonusLifeFlash > 0) ship.bonusLifeFlash = Math.max(0, ship.bonusLifeFlash - dt / 0.4);
 };
 
 // velocity cap + screen wrap keep the ship in bounds; drag is 0 so Newtonian drift dominates.

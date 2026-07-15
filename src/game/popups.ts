@@ -308,7 +308,7 @@ export const popupBonusLife = (pos: Vec): Popup => ({
   life: BONUS_LIFE_POPUP_LIFE,
   maxLife: BONUS_LIFE_POPUP_LIFE,
   text: "Bonus Life",
-  font: "700 18px 'Space Grotesk', system-ui, sans-serif",
+  font: "700 36px 'Space Grotesk', system-ui, sans-serif",
   fill: "#ffffff",
   shadowColor: "rgba(255, 255, 255, 0.9)",
   decayX: 0.96, decayY: 0.96,

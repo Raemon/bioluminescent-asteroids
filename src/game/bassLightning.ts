@@ -207,9 +207,12 @@ const drawSpectrumBars = (
   ctx.stroke();
 };
 
-// Caller does NOT need to set composite mode — handled here.
+// Caller does NOT need to set composite mode — handled here. `sup` is the
+// overdrive factor (0→1 as rhythm climbs above 12): past the point the combo
+// halo saturates to white, the bolt's core crackles a hotter, whiter discharge
+// around its own hue while the coloured glow stays as the surrounding aura.
 export const renderBassLightnings = (
-  ctx: CanvasRenderingContext2D, bolts: BassLightning[], tSec: number,
+  ctx: CanvasRenderingContext2D, bolts: BassLightning[], tSec: number, sup = 0,
 ) => {
   if (bolts.length === 0) return;
   ctx.save();
@@ -219,11 +222,14 @@ export const renderBassLightnings = (
   for (const l of bolts) {
     const k = l.life / l.maxLife;
     // sharp attack, squared release — flash, not a sustained beam. The slow
-    // shimmer keeps the tail alive without reading as a second pulse.
-    const env = k * k * (0.85 + 0.15 * Math.sin(tSec * 23 + l.seed));
+    // shimmer keeps the tail alive without reading as a second pulse. Past 12
+    // rhythm the shimmer bites deeper + faster so the bolt visibly crackles.
+    const crackle = 0.15 + 0.35 * sup;
+    const rate = 23 + 26 * sup;
+    const env = k * k * (1 - crackle + crackle * Math.sin(tSec * rate + l.seed));
     if (env < 0.02) continue;
     const pts = buildBoltPoints(l, tSec);
-    const lightness = 70;
+    const lightness = 70 + 12 * sup;
     // Boss-shard bolts get a fatter glow halo + brighter core so the larger
     // discharge reads at a glance; a Bassteroid splinter's stays a thin zap.
     const wMul = l.big ? 1.9 : 1;
@@ -231,6 +237,13 @@ export const renderBassLightnings = (
     strokePolyline(ctx, pts, 6.5 * wMul, `hsla(${l.hue}, 100%, ${lightness}%, ${glowA * env})`);
     strokePolyline(ctx, pts, 2.6 * wMul, `hsla(${l.hue}, 100%, ${lightness + 8}%, ${0.3 * env})`);
     strokePolyline(ctx, pts, 1.2 * (l.big ? 1.5 : 1), `hsla(${l.hue}, 100%, 92%, ${0.75 * env})`);
+    // Overdrive core: a fatter, near-white filament riding the same jag, tinted
+    // only faintly with the bolt's hue so it reads as white lightning "around
+    // the core colour" rather than a colour-shifted bolt.
+    if (sup > 0.001) {
+      strokePolyline(ctx, pts, 3.6 * wMul, `hsla(${l.hue}, 60%, 96%, ${0.28 * sup * env})`);
+      strokePolyline(ctx, pts, 1.6 * (l.big ? 1.5 : 1), `hsla(${l.hue}, 30%, 100%, ${0.85 * sup * env})`);
+    }
     drawSpectrumBars(ctx, l, pts, tSec, env, lightness);
   }
   ctx.restore();

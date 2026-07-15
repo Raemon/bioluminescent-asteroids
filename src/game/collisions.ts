@@ -16,15 +16,13 @@ import {
 import { FuelOrb, spawnFuelOrbAt } from "../FuelOrb";
 import { FUEL_MODE_ENABLED, FUEL_ORB_RESTORE } from "./fuel";
 import { isInBeatWindow, beatOffsetFor, logBeatEvent, spawnBeatDebugPopup, rebaseBeatEval } from "./rhythmGate";
-import { BEAT_GRID, DRIFT_RHYTHM_BONUS } from "./rhythmConstants";
 import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGemPickup, emitFuelOrbPickup, emitBounceSparks, emitAlienBulletPop } from "./particleBursts";
-import { spawnDriftBurst } from "./driftBurst";
-import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage, popupDriftCombo } from "./popups";
-import { checkBonusLife } from "./bonusLife";
+import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage } from "./popups";
 import {
   applyHitToCombo,
+  awardScoreForKill,
   onAsteroidKilledByBullet,
   onAsteroidKilledByRam,
   onAsteroidCrackedByBullet,
@@ -451,11 +449,8 @@ export const handleGems = (game: Game) => {
       const onBeat = isHitOnBeat(game, b);
       const dmg = b.damage();
       applyHitToCombo(game, onBeat, b.pos);
-      if (onBeat && dmg >= 4) {
-        crackGemForCanister(game, g);
-        const driftTier = b.driftTierAtHit();
-        if (driftTier > 0) queueDriftBonusForGem(game, g, driftTier);
-      } else wasteGem(game, g);
+      if (onBeat && dmg >= 4) crackGemForCanister(game, g, b.driftTierAtHit());
+      else wasteGem(game, g);
       continue;
     }
     if (game.ship.alive && game.ship.invuln <= 0 && g.collidesWith(game.ship.pos, game.ship.radius * 0.9)) {
@@ -482,10 +477,12 @@ const shatterGemOnShip = (game: Game, g: Gem) => {
   }
 };
 
-// Rhythm-cracked: 40% of the time the gem yields its embedded canister, the
-// rest of the time it pays out GEM_REVEAL_SCORE with a comet-style
-// score popup so the reveal still feels like a payoff.
-export const crackGemForCanister = (game: Game, g: Gem) => {
+// Rhythm-cracked (always on-beat — the caller only reaches here on-beat): 40% of
+// the time the gem yields its embedded canister, the rest of the time it pays out
+// score. The score branch goes through the shared awardScoreForKill, so the gem's
+// reveal score is rhythm-multiplied and its drift-tier bonus is staged exactly the
+// same way an asteroid kill's is — one code path, no gem-specific bonus queue.
+export const crackGemForCanister = (game: Game, g: Gem, driftTier: number) => {
   game.sound.play("tink", 1, g.pos);
   game.shake = Math.min(game.shake + 0.25, 1.2);
   emitGemPickup(game.particles, g);
@@ -494,8 +491,8 @@ export const crackGemForCanister = (game: Game, g: Gem) => {
     game.canisters.push(canister);
     game.sound.play("canisterAppear", 1, g.pos);
   } else {
-    game.score += GEM_REVEAL_SCORE;
-    game.popups.push(popupScore(g.pos, GEM_REVEAL_SCORE));
+    const earned = awardScoreForKill(game, g.pos, GEM_REVEAL_SCORE, true, driftTier);
+    game.popups.push(popupScore(g.pos, earned));
     // Fuel Mode: a no-upgrade crack still drops something useful — a fuel orb to
     // chase down. Off → unchanged (score only).
     if (FUEL_MODE_ENABLED) {
@@ -504,27 +501,6 @@ export const crackGemForCanister = (game: Game, g: Gem) => {
     }
   }
   syncHud(game);
-  checkBonusLife(game);
-};
-
-// Drift-locked on-beat crack: same pending-bonus pattern as asteroid drift shots — the on-beat
-// crack already bumped combo +1, and this queues one more a beat later (capped at +1 regardless
-// of tier; cancelled if the streak breaks). Stages the same two combo numbers + tier-coloured
-// damage subtitle, and plays the drift-shot fanfare immediately so the reward reads at the hit.
-const queueDriftBonusForGem = (game: Game, g: Gem, tier: number) => {
-  const dmgMult = tier + 1;
-  const newBest = dmgMult > game.bestDriftDamageMultShown;
-  if (newBest) game.bestDriftDamageMultShown = dmgMult;
-  game.popups.push(popupDriftCombo(g.pos, game.beatCombo, false));
-  game.pendingDriftBonuses.push({
-    fireAt: game.perceivedBeatTime + BEAT_GRID,
-    pos: { x: g.pos.x, y: g.pos.y },
-    amount: DRIFT_RHYTHM_BONUS,
-    tier,
-    showDamageMult: newBest,
-  });
-  game.sound.playDriftShotHit(tier);
-  spawnDriftBurst(game, g.pos.x, g.pos.y, tier);
 };
 
 // Off-beat / weak shot: same "wasted upgrade" feedback as shooting a canister

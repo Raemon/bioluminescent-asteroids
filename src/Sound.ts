@@ -312,6 +312,7 @@ export type SoundName =
   | "summaryDownbeatDucked"
   | "drainChime"
   | "powerup"
+  | "bonusLife"
   | "shieldPop"
   | "pulsarHum"
   | "bgBeat"
@@ -784,6 +785,7 @@ export class Sound {
       ["fireBeat", [1]],
       ["chime", [1]],
       ["powerup", [1]],
+      ["bonusLife", [1]],
       ["waveClear", [1]],
       ["bassKick", standardPitches],
       ["bassBoom", standardPitches],
@@ -1288,6 +1290,9 @@ export class Sound {
       // carry trailing silence, which VBR mp3 compresses to almost nothing.
       drainChime: 7.0,
       powerup: 1.6,
+      // bonusLife: comet-impact crack + sub thump into a major-chord bloom
+      // with a long shimmering release + reverb tail.
+      bonusLife: 8.0,
       waveClear: 2.4,
       // cometNote: longest decay (downbeat "1n" + 3.4s release) is ~4.4s + reverb tail.
       cometNote: 5.0,
@@ -1485,6 +1490,72 @@ export class Sound {
         const synth = wire(new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sine" }, envelope: { attack: 0.005, decay: 0.2, sustain: 0.1, release: 0.45 }, volume: -10 }), 0.5, 0.7);
         const notes = ["C5", "E5", "G5", "C6"];
         for (let i = 0; i < notes.length; i++) synth.triggerAttackRelease(notes[i], "16n", i * 0.06, 0.7);
+        break;
+      }
+      case "bonusLife": {
+        // Earning a free life should land like a COMET IMPACT reversed into
+        // grace — the same physical heft as the comet-hit (a hard crack, a
+        // chest-thumping sub, a long blooming tail) but voiced in a bright
+        // MAJOR key so it reads as triumphant/angelic rather than destructive.
+        // Where the comet-kill collapses downward into wreckage, this one
+        // OPENS UPWARD: the tail is a major triad that blooms brighter and a
+        // high fifth that rises into light. Built through the Tone reverb bus
+        // (unlike the live comet graph) so it bakes deterministically.
+
+        // ── Impact crack: a broadband noise burst with a fast down-sweep, the
+        // "something huge just happened" transient. Brighter and shorter than
+        // the comet's so it reads as a struck chime-strike, not an explosion.
+        const crack = new Tone.Noise("white").start(0);
+        const crackFilter = new Tone.Filter({ type: "lowpass", Q: 0.8, frequency: 9000 });
+        crackFilter.frequency.exponentialRampToValueAtTime(2200, 0.14);
+        const crackGain = new Tone.Gain(0.0001);
+        crackGain.gain.setValueAtTime(0.5, 0);
+        crackGain.gain.exponentialRampToValueAtTime(0.0001, 0.3);
+        crack.connect(crackFilter); crackFilter.connect(crackGain);
+        crackGain.connect(toneMaster); crackGain.connect(reverbSend);
+        crack.stop(0.35);
+
+        // ── Sub thump: a short sine drop that gives the strike physical weight
+        // in the chest — the comet-kill's sub, but landing on a musical C2 root
+        // instead of sweeping down into a rumble, so the low end sits in-key.
+        const sub = new Tone.Oscillator({ type: "sine", frequency: 130.8 }).start(0); // C3
+        sub.frequency.exponentialRampToValueAtTime(65.4, 0.5); // → C2, a settling octave drop
+        const subEnv = new Tone.Gain(0.0001);
+        subEnv.gain.setValueAtTime(0.0001, 0);
+        subEnv.gain.exponentialRampToValueAtTime(0.5, 0.012);
+        subEnv.gain.exponentialRampToValueAtTime(0.0001, 1.1);
+        sub.connect(subEnv); subEnv.connect(toneMaster);
+        sub.stop(1.2);
+
+        // ── The major bell cluster: a struck cathedral bell voiced as a full
+        // C-MAJOR triad across three octaves (C4 E4 G4 C5 E5) — the third is
+        // what makes it unambiguously major and radiant. Same FM-bell palette
+        // as the comet-hit cometNote but with a long shimmering release and a
+        // heavy reverb wet so the tail blooms into the room like a chime struck
+        // in a great hall.
+        const bell = wire(new Tone.PolySynth(Tone.FMSynth, {
+          harmonicity: 2.0,
+          modulationIndex: 3.5,
+          oscillator: { type: "sine" },
+          modulation: { type: "sine" },
+          envelope: { attack: 0.006, decay: 1.6, sustain: 0.2, release: 4.2 },
+          modulationEnvelope: { attack: 0.005, decay: 0.8, sustain: 0.05, release: 1.6 },
+          volume: -10,
+        }), 0.35, 1.0);
+        bell.triggerAttackRelease(["C4", "E4", "G4", "C5", "E5"], "1n", 0, 0.8);
+        // A glinting high major-third (E6) rises in a hair later so the strike
+        // "opens up" into shimmer rather than landing as one flat block — the
+        // upward answer to the comet-kill's downward collapse.
+        bell.triggerAttackRelease("G5", "2n", 0.04, 0.42);
+        bell.triggerAttackRelease("E6", "2n", 0.09, 0.32);
+        // Airy top partial (C7) — the halo of light over the bell, very soft
+        // and reverb-drenched so it reads as a glow, not a pitched note.
+        const shimmer = wire(new Tone.Synth({
+          oscillator: { type: "sine" },
+          envelope: { attack: 0.02, decay: 1.0, sustain: 0.06, release: 2.6 },
+          volume: -22,
+        }), 0.2, 1.0);
+        shimmer.triggerAttackRelease("C7", "2n", 0.02, 0.5);
         break;
       }
       case "waveClear": {
@@ -5584,6 +5655,7 @@ export class Sound {
       case "summaryDownbeatDucked": this.playSummaryDownbeat(Math.round(pitchRatio), true); break;
       case "drainChime": this.playDrainChime(Math.round(pitchRatio)); break;
       case "powerup": this.playPowerup(); break;
+      case "bonusLife": this.playBonusLife(); break;
       case "shieldPop": this.playShieldPop(); break;
       case "pulsarHum": this.playPulsarHum(); break;
       case "bgBeat": this.playBgBeat(effectivePitch); break;
@@ -8403,6 +8475,14 @@ export class Sound {
   // good" jingle that plays when the ship flies over a canister.
   private playPowerup() {
     this.playBaked("powerup", 1);
+  }
+
+  // Earning a free life — a comet-impact crack + sub thump blooming into a
+  // struck C-major bell (see bakeSound's bonusLife recipe). The comet-kill's
+  // physical heft, but opened upward into a bright major triad so it lands as
+  // triumph rather than destruction.
+  private playBonusLife() {
+    this.playBaked("bonusLife", 1);
   }
 
   // Canister-appear: gentle ascending wind-chime sparkle. Three soft sine

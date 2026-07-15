@@ -51,6 +51,8 @@ export const DevLog = () => {
   const [entries, setEntries] = useState<DevLogEntry[]>([]);
   const [mode, setMode] = useState<Mode>("collapsed");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Shown only on the title screen — the same screens that show the leaderboard.
+  const [onTitle, setOnTitle] = useState(false);
 
   const newest = entries[0];
   const isOpen = mode === "open";
@@ -90,13 +92,14 @@ export const DevLog = () => {
     return () => document.removeEventListener("keydown", onKey, true);
   }, [isOpen]);
 
-  // Starting a run closes the panel so pause/title return to it collapsed.
+  // Track the title screen so the panel appears only there, and collapse it on
+  //   leaving so returning to title shows it closed (or as a fresh teaser).
   useEffect(() => {
     const onState = (e: Event) => {
       const { state } = (e as CustomEvent<{ state: string }>).detail;
-      if (state === "playing" || state === "replaying") {
-        setMode((m) => (m === "open" ? "collapsed" : m));
-      }
+      const title = state === "title";
+      setOnTitle(title);
+      if (!title) setMode((m) => (m === "open" ? "collapsed" : m));
     };
     window.addEventListener("game:state", onState as EventListener);
     return () => window.removeEventListener("game:state", onState as EventListener);
@@ -118,6 +121,8 @@ export const DevLog = () => {
       return next;
     });
   };
+
+  if (!onTitle) return null;
 
   return (
     <div

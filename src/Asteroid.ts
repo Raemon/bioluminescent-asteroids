@@ -10,6 +10,10 @@ import { drawGlow } from "./glow";
 
 const HUE_PALETTE = [185, 200, 220, 250, 280, 310, 330];
 
+// Combo-halo state shared from the ship each frame. `super` is the overdrive
+// ramp (0→1 above rhythm 12) that brightens the halo past the tier-3 ceiling.
+export type ComboHalo = { intensity: number; beatPulse: number; super: number };
+
 // Cap on how far the boss laser aim can rotate per windup beat, so a circling
 // player can outrun the sweep instead of being snapped onto.
 const MAX_AIM_TURN_PER_BEAT = 0.32;
@@ -4844,7 +4848,7 @@ export class Asteroid {
     return fragmentList;
   }
 
-  render(ctx: CanvasRenderingContext2D, t: number, comboHalo?: { intensity: number; beatPulse: number }) {
+  render(ctx: CanvasRenderingContext2D, t: number, comboHalo?: ComboHalo) {
     if (this.isBoss()) {
       // Dormant boss draws the swelling planetoid silhouette + the slow
       // architecture reveal; live boss draws the fully-built body with the
@@ -5396,7 +5400,7 @@ export class Asteroid {
   // (one per HP lost) + a big bright beat flare on the beat. The beat flare
   // gates the visual rhythm — when all four kinds are active it reads as a
   // syncopated lighthouse sweep across the screen.
-  renderBass(ctx: CanvasRenderingContext2D, t: number, comboHalo?: { intensity: number; beatPulse: number }) {
+  renderBass(ctx: CanvasRenderingContext2D, t: number, comboHalo?: ComboHalo) {
     const baseHue = this.hue;
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
@@ -5458,6 +5462,11 @@ export class Asteroid {
         const hue = 195 + (45 - 195) * tier2;
         const sat = 100 * (1 - tier3);
         const flash = this.beatFlash;
+        // Overdrive above rhythm 12: the tier system tops out at white here, so
+        // `sup` (0→1 as rhythm climbs 12→24) is the only headroom left. It fattens
+        // the aura and drives an extra white bloom pass so the halos read as
+        // "much brighter" the deeper into the streak the player is.
+        const sup = comboHalo.super;
 
         // Shimmer: a low-amplitude twinkle on the resting line so the halo is
         // never perfectly static. Two incommensurate sines (one slow drift,
@@ -5481,7 +5490,8 @@ export class Asteroid {
         // shimmer are what carry it. beatFlash still whites it out on the hit.
         const light = Math.min(100, 70 + (100 - 70) * tier3 + 22 * flash + 12 * warm);
         const alpha =
-          (0.22 + 0.12 * comboHalo.beatPulse + 0.08 * shimmer + 0.5 * flash + 0.2 * warm) * tier2;
+          (0.22 + 0.12 * comboHalo.beatPulse + 0.08 * shimmer + 0.5 * flash + 0.2 * warm) * tier2 *
+          (1 + 0.9 * sup);
 
         // Expanding soundwave echo: on the beat the perimeter sheds a small
         // family of staggered copies that ride outward and dissolve. Driven by
@@ -5539,11 +5549,21 @@ export class Asteroid {
         const w = Math.max(1, this.radius * 0.04);
         this.traceHaloOutline(ctx);
         ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${Math.min(100, light - 10)}%, ${(0.3 + 0.2 * flash + 0.15 * warm) * alpha})`;
-        ctx.lineWidth = w * (2.4 + 4.5 * flash + 1.2 * warm);
+        ctx.lineWidth = w * (2.4 + 4.5 * flash + 1.2 * warm) * (1 + 1.1 * sup);
         ctx.stroke();
         ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, ${alpha})`;
-        ctx.lineWidth = w * (1 + 0.6 * flash + 0.3 * warm);
+        ctx.lineWidth = w * (1 + 0.6 * flash + 0.3 * warm) * (1 + 0.5 * sup);
         ctx.stroke();
+
+        // Overdrive white bloom: past rhythm 12 a fat, near-white halo pass rides
+        // on top of the coloured rim, so the whole outline blazes hotter the
+        // deeper the streak. Widens with the beat + warm-up like the rim itself.
+        if (sup > 0.001) {
+          this.traceHaloOutline(ctx);
+          ctx.strokeStyle = `hsla(${hue}, ${sat * 0.5}%, 100%, ${(0.14 + 0.16 * flash + 0.08 * warm) * sup})`;
+          ctx.lineWidth = w * (3.5 + 6 * flash + 1.5 * warm) * sup;
+          ctx.stroke();
+        }
       }
     }
 
