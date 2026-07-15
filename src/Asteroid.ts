@@ -5,6 +5,7 @@ import { SoundwaveRadiator } from "./SoundwaveRadiator";
 import { rng, cosmeticRng } from "./game/rng";
 import { ENTITY_CONFIG, ENTITY_STATS, entityStat } from "./game/entityConfig";
 import { SHIP_BODY_RADIUS, SHIP_HALO_OFFSET, SHIP_NOSE_MUL, SHIP_WING_ANGLE } from "./ship/shipHitbox";
+import { PRONG_ANGLE_STEP, BULLET_VEL_INHERIT } from "./ship/shipWeapons";
 import { drawGlow } from "./glow";
 
 const HUE_PALETTE = [185, 200, 220, 250, 280, 310, 330];
@@ -124,7 +125,14 @@ export type AsteroidSize = "huge" | "large" | "medium" | "small";
 // deflects all but the heaviest shots. The intended kill: drift into the hole
 // while it's phased out and shoot the unarmoured inner wall from inside (see
 // citadelInnerHit). Breaking it releases the warbles it was built from.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "citadel" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "asteroidWithGem" | "burstGemMedium" | "burstGemBig" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock" | "torus" | "torusArc" | "torusChunk";
+//
+// "metalChunk" is a dense tungsten ingot — a medium-sized, extremely heavy cube
+// behind damageReduction 8 (only a drift-tier-2+ shot or the super laser bites
+// through). Its 8 HP shatters it into 4 slow "metalShard" cubes, each 1 HP but
+// still behind the same DR 8 armour, so the fragments are as tough to punch
+// through as the parent — a lingering field of stubborn scrap.
+// Rare across display-levels 5-9, then a common obstacle afterwards.
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "citadel" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "asteroidWithGem" | "burstGemMedium" | "burstGemBig" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock" | "torus" | "torusArc" | "torusChunk" | "metalChunk" | "metalShard";
 
 // The two phased kinds share the warble opacity/solid state machine, the
 // blurred-ghost render path and the phase drone; they differ in cycle length
@@ -185,6 +193,10 @@ export const isTorusFragment = (kind: AsteroidKind): boolean =>
 // clamp); they differ only in radius and shard count. Most call sites test the
 // family rather than the exact tier.
 export const isBurstGem = (kind: AsteroidKind): boolean => kind === "burstGemMedium" || kind === "burstGemBig";
+
+// The two hull-metal tiers share the plate material, DR 8 armour, and the
+// opaque steel render; they differ only in size and whether they split further.
+export const isMetalHull = (kind: AsteroidKind): boolean => kind === "metalChunk" || kind === "metalShard";
 
 // The cathedral ("bell") asteroid rolls one of these archetypes at spawn. Each
 // reads as a different fragment of a civilization's basilica carved out of the
@@ -1375,6 +1387,13 @@ export class Asteroid {
       // the 8 samples.
       freqs = [3, 5];
       ampScale = 0.5;
+    } else if (isMetalHull(kind)) {
+      // A dense tungsten block: computeOutline's cubeProfile carries the
+      // rounded-cube silhouette; these low harmonics only add a faint chipped
+      // wobble so no two blocks are identical. Kept low-amp so the square
+      // corners survive. Avoid freqs dividing the 16 samples (2, 4, 8 do).
+      freqs = [1, 3, 5];
+      ampScale = 0.35;
     } else {
       // Default — classic asteroid lumpiness.
       freqs = [2, 3, 5, 7];
@@ -1426,7 +1445,8 @@ export class Asteroid {
     // Cathedral pieces are dead derelict stone — the architecture painters lay
     // down their own opaque body + rim, so skip the biolum halo / interior glow
     // / filament veins / nuclei cores that would otherwise make them "alive".
-    const isArchitectural = this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
+    // Metal hull is likewise inert plate: it paints its own opaque steel body.
+    const isArchitectural = this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind) || isMetalHull(this.kind);
     // The citadel lays down its own laminated armour body instead — the soft
     // membrane/filament pass would read organic under the plate bands.
     const isCitadel = this.kind === "citadel";
@@ -1509,6 +1529,7 @@ export class Asteroid {
     if (this.kind === "glassShard") this.paintGlassShardBody(ctx);
     if (this.kind === "columnDrum") this.paintColumnDrumBody(ctx);
     if (this.kind === "rubbleBlock") this.paintRubbleBlockBody(ctx);
+    if (isMetalHull(this.kind)) this.paintMetalChunkBody(ctx);
     // Cut last so the hole punches through every layer painted above.
     if (this.kind === "citadel") this.paintCitadelHole(ctx);
 
@@ -2646,6 +2667,137 @@ export class Asteroid {
     ctx.restore();
   }
 
+  // Metal chunk / shard — a heavy tungsten block, not a plated hull panel. Deep
+  // cold near-black steel with a faint blue cast, given cube-like volume by a
+  // few big planar facets fanned off the real polygon corners: each facet takes
+  // one FLAT lightness set by how much its outward normal faces the upper-left
+  // light, so the face reads as cut planes meeting at hard edges rather than a
+  // painted panel. A hard specular on the lit shoulder + a pinpoint corner glint
+  // sell the dense-metal sheen; a two-stroke rim seats it against the starfield.
+  // No rivets, seams, or gouges — this is a solid ingot, not riveted plate. Both
+  // tiers share this; the shard is just a smaller block. Pre-baked, clipped to
+  // the silhouette. Deterministic seed off the harmonics so each block is stably
+  // distinct across the bake.
+  private paintMetalChunkBody(ctx: CanvasRenderingContext2D) {
+    const H = this.hue, R = this.radius;
+    ctx.save();
+    this.traceOutline(ctx);
+    ctx.clip();
+    ctx.globalCompositeOperation = "source-over";
+
+    // Body: deep tungsten — near-black in shadow, dark cold steel through the
+    // mid, only a restrained cool highlight up-left. Hue drifts a touch cooler
+    // and darker into the far side. Much lower lightness than a hull plate so
+    // it reads dense and heavy rather than sheet metal.
+    const body = ctx.createRadialGradient(-R * 0.32, -R * 0.42, R * 0.05, 0, 0, R * 1.35);
+    body.addColorStop(0, `hsla(${H - 4}, 14%, 40%, 1)`);
+    body.addColorStop(0.5, `hsla(${H}, 18%, 19%, 1)`);
+    body.addColorStop(1, `hsla(${H + 8}, 24%, 6%, 1)`);
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 1.5, 0, TAU);
+    ctx.fill();
+
+    // Planar facets: fan triangles from the block's center out to each polygon
+    // edge, and flat-shade each one by its outward-normal alignment to the
+    // upper-left light. lit faces catch a cold pewter, away faces sink toward
+    // black — the abrupt lightness step between neighbours is the cube read.
+    const lightX = -0.7, lightY = -0.72; // upper-left
+    const n = this.outlineSamples;
+    const vert = (i: number): { x: number; y: number } => {
+      const a = (i / n) * TAU;
+      const r = this.outline[(i % n + n) % n];
+      return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+    };
+    for (let i = 0; i < n; i++) {
+      const p0 = vert(i), p1 = vert(i + 1);
+      // Outward normal of this edge = its midpoint direction from center.
+      const mx = (p0.x + p1.x) * 0.5, my = (p0.y + p1.y) * 0.5;
+      const ml = Math.hypot(mx, my) || 1;
+      const facing = (mx / ml) * lightX + (my / ml) * lightY; // -1..1
+      // Flat plane lightness: bright pewter facing the light, near-black away.
+      const L = 8 + Math.max(0, facing) * 34 + (facing < 0 ? facing * 8 : 0);
+      const S = 12 + Math.max(0, facing) * 6;
+      ctx.fillStyle = `hsla(${H - facing * 4}, ${S}%, ${Math.max(4, L)}%, 0.9)`;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Interior crease lines from center to the CUBE CORNERS only — the hard
+    // edges where the visible faces meet. A corner is a vertex where the
+    // silhouette turns sharply (the two adjacent edges bend by a big angle), so
+    // the mid-face samples of the rounded square are skipped and we get the ~3
+    // creases of a cube seen in three-quarter, not 16 spokes. Bright lip on the
+    // lit side, dark groove elsewhere.
+    const edgeAngle = (i: number): number => {
+      const p0 = vert(i), p1 = vert(i + 1);
+      return Math.atan2(p1.y - p0.y, p1.x - p0.x);
+    };
+    for (let i = 0; i < n; i++) {
+      // Turn angle at vertex i: how much the outline direction bends here.
+      let turn = edgeAngle(i) - edgeAngle(i - 1);
+      while (turn > Math.PI) turn -= TAU;
+      while (turn < -Math.PI) turn += TAU;
+      if (Math.abs(turn) < 0.45) continue; // mid-face sample, not a corner
+      const p = vert(i);
+      const pl = Math.hypot(p.x, p.y) || 1;
+      const facing = (p.x / pl) * lightX + (p.y / pl) * lightY;
+      ctx.strokeStyle = facing > 0.2
+        ? `hsla(${H - 6}, 16%, 62%, 0.4)`
+        : `hsla(${H}, 24%, 5%, 0.55)`;
+      ctx.lineWidth = facing > 0.2 ? 1.0 : 1.5;
+      ctx.beginPath();
+      ctx.moveTo(p.x * 0.1, p.y * 0.1);
+      ctx.lineTo(p.x * 0.92, p.y * 0.92);
+      ctx.stroke();
+    }
+
+    // Specular catch: one hard, tight bright blob on the lit upper-left shoulder
+    // — a dense metal ingot throws a small crisp highlight, not a soft sheen.
+    const spec = ctx.createRadialGradient(-R * 0.4, -R * 0.46, 0, -R * 0.4, -R * 0.46, R * 0.42);
+    spec.addColorStop(0, `hsla(${H - 8}, 18%, 82%, 0.55)`);
+    spec.addColorStop(0.4, `hsla(${H - 4}, 16%, 60%, 0.18)`);
+    spec.addColorStop(1, `hsla(${H}, 16%, 50%, 0)`);
+    ctx.fillStyle = spec;
+    ctx.beginPath();
+    ctx.arc(-R * 0.4, -R * 0.46, R * 0.42, 0, TAU);
+    ctx.fill();
+
+    // Pinpoint glint on the corner nearest the light — the single sharpest sheen
+    // cue that says polished heavy metal.
+    let best = vert(0), bestF = -2;
+    for (let i = 0; i < n; i++) {
+      const p = vert(i);
+      const pl = Math.hypot(p.x, p.y) || 1;
+      const f = (p.x / pl) * lightX + (p.y / pl) * lightY;
+      if (f > bestF) { bestF = f; best = p; }
+    }
+    ctx.fillStyle = `hsla(${H - 10}, 20%, 92%, 0.7)`;
+    ctx.beginPath();
+    ctx.arc(best.x * 0.9, best.y * 0.9, Math.max(1.1, R * 0.05), 0, TAU);
+    ctx.fill();
+
+    // Two-stacked-stroke steel rim: a thick dark outer stroke for occlusion
+    // contact against the starfield + a thin bright inset catch on the edge.
+    ctx.globalCompositeOperation = "source-over";
+    ctx.lineJoin = "miter";
+    ctx.miterLimit = 4;
+    ctx.strokeStyle = `hsla(${H}, 28%, 4%, 0.96)`;
+    ctx.lineWidth = 3.2;
+    this.traceOutline(ctx);
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${H - 8}, 20%, 74%, 0.5)`;
+    ctx.lineWidth = 1.1;
+    this.traceOutline(ctx, 0.95);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
   // The cathedral ("bell") asteroid reads as a fragment of a basilica that a
   // lost civilization carved out of an asteroid — weathered raw rock with
   // architecture recessed INTO it (beveled openings, not pasted-on walls).
@@ -3315,9 +3467,25 @@ export class Asteroid {
     return rhombus + crown;
   }
 
+  // Square radius profile for the tungsten hull blocks: r = 1/max(|cos|,|sin|)
+  // traces an exact square, so the block reads as a solid cube face rather than
+  // a lumpy rock. The per-block tilt is SNAPPED to the outline sample grid
+  // (TAU/outlineSamples) so a corner always lands on a vertex — otherwise the
+  // fixed-angle sampler misses the corner apex and the square rounds off to a
+  // near-circle. outlineSamples is a multiple of 4, so all four corners land.
+  // The harmonic wobble in computeOutline rides on top for chipped-edge chunks.
+  private cubeProfile(angle: number): number {
+    const step = TAU / this.outlineSamples;
+    const rawTilt = this.harmonics.reduce((s, h) => s + h.phase * h.freq, 0);
+    const tilt = Math.round(rawTilt / step) * step;
+    const a = angle - tilt;
+    return 1 / Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a)));
+  }
+
   computeOutline(): number[] {
-    const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isBurstGem(this.kind) || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
+    const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isBurstGem(this.kind) || CATHEDRAL_DEBRIS_KINDS.includes(this.kind) || isMetalHull(this.kind);
     const isDiamond = isBurstGem(this.kind);
+    const isCube = isMetalHull(this.kind);
     const samples: number[] = [];
     for (let i = 0; i < this.outlineSamples; i++) {
       const angle = (i / this.outlineSamples) * TAU;
@@ -3330,6 +3498,7 @@ export class Asteroid {
       // can't collapse a vertex to (or past) the origin.
       if (isClamped) r = Math.max(0.45, Math.min(1.55, r));
       if (isDiamond) r *= this.diamondProfile(angle);
+      if (isCube) r *= this.cubeProfile(angle);
       samples.push(r * this.radius);
     }
     return samples;
@@ -3342,10 +3511,11 @@ export class Asteroid {
     }
     // Mirror the clamp in computeOutline so the collision surface matches
     // the visible silhouette for the high-amp crystal / cathedral harmonics.
-    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isBurstGem(this.kind)) {
+    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isBurstGem(this.kind) || isMetalHull(this.kind)) {
       r = Math.max(0.45, Math.min(1.55, r));
     }
     if (isBurstGem(this.kind)) r *= this.diamondProfile(angle);
+    if (isMetalHull(this.kind)) r *= this.cubeProfile(angle);
     return r * this.radius;
   }
 
@@ -3956,7 +4126,7 @@ export class Asteroid {
     return a;
   }
 
-  split(opts?: { impactDir?: Vec; impactPos?: Vec; combo?: number; onBeat?: boolean; awayFrom?: Vec }): Asteroid[] {
+  split(opts?: { impactDir?: Vec; impactPos?: Vec; combo?: number; onBeat?: boolean; awayFrom?: Vec; shipHeading?: number; shipVel?: Vec; bulletSpeed?: number }): Asteroid[] {
     const impactDir = opts?.impactDir;
     // Boss whole-body: cracks open into two hemisphere halves + the iris
     // eye-core (3 mediums total, but with distinct identities). Cleavage
@@ -4291,6 +4461,84 @@ export class Asteroid {
       }
       return fragmentList;
     }
+    // Metal chunk: the slab breaks into 4 slow shards that barely drift (dense
+    // scrap that just sits there once cracked) and keep the parent's DR 8, so
+    // each one is another drift-shot the player has to line up. This IS the
+    // entity's job — teach the drift shot — so it makes the reward legible: two
+    // of the four shards are placed on the ship's ACTUAL prong-bullet rays. The
+    // first prong pair fans ±half a prong step off the heading, but each bullet
+    // also inherits BULLET_VEL_INHERIT·shipVel, so at speed the rays bend off
+    // the pure heading; we reproduce that bend here and drop a shard on each
+    // true ray at the slab's distance. A player who owns prong and fires right
+    // now, at this velocity, threads both. The other two fling off to the sides
+    // so the break still reads as a burst. metalShards are terminal.
+    if (this.kind === "metalChunk") {
+      const parentSpeed = Math.hypot(this.vel.x, this.vel.y);
+      // Slow shove on top of the ponderous parent drift, so shards linger.
+      const shardSpeed = () => parentSpeed * rand(0.7, 1.0) + rand(20, 45);
+      const newShard = (pos: Vec, vel: Vec): Asteroid => {
+        const s = new Asteroid(pos, vel, "small", this.hue, "metalShard");
+        s.rotSpeed = rand(-0.5, 0.5);
+        return s;
+      };
+      const fragmentList: Asteroid[] = [];
+      const half = PRONG_ANGLE_STEP / 2; // first prong pair sits at heading ± this
+      // Ship→slab direction + distance, torus-correct. When we don't have the
+      // ship pose (shockwave-driven split), fall back to a plain radial burst.
+      const ship = opts?.awayFrom;
+      const heading = opts?.shipHeading;
+      if (ship && heading !== undefined) {
+        const [sx, sy] = toroidalDelta(this.pos.x - ship.x, this.pos.y - ship.y, WORLD_W, WORLD_H);
+        const dist = Math.max(this.radius, Math.hypot(sx, sy));
+        const shipVel = opts?.shipVel ?? { x: 0, y: 0 };
+        const bulletSpeed = opts?.bulletSpeed ?? 0;
+        // True unit direction a prong bullet at `offset` flies, matching
+        // launchBullet: speed·dir + inherit·shipVel, renormalised.
+        const prongRayDir = (offset: number): { x: number; y: number } => {
+          const a = heading + offset;
+          const vx = Math.cos(a) * bulletSpeed + shipVel.x * BULLET_VEL_INHERIT;
+          const vy = Math.sin(a) * bulletSpeed + shipVel.y * BULLET_VEL_INHERIT;
+          const m = Math.hypot(vx, vy) || 1;
+          return { x: vx / m, y: vy / m };
+        };
+        // Two shards, one on each true prong ray, at the slab's distance — the
+        // pair sits right where the slab was, so the prong shot threads both.
+        for (const sign of [-1, 1] as const) {
+          const d = prongRayDir(sign * half);
+          const pos = { x: ship.x + d.x * dist, y: ship.y + d.y * dist };
+          wrapMut(pos, WORLD_W, WORLD_H);
+          // Drift roughly outward along the ray so alignment nudges them little.
+          const outAngle = Math.atan2(d.y, d.x) + rand(-0.1, 0.1);
+          fragmentList.push(newShard(pos, fromAngle(outAngle, shardSpeed())));
+        }
+        // Remaining two spall off perpendicular to the heading, one per side, so
+        // the four together read as the slab bursting apart.
+        for (const sign of [-1, 1] as const) {
+          const sideAngle = heading + sign * (Math.PI / 2) + rand(-0.2, 0.2);
+          const pos = {
+            x: this.pos.x + Math.cos(sideAngle) * this.radius * 0.5,
+            y: this.pos.y + Math.sin(sideAngle) * this.radius * 0.5,
+          };
+          fragmentList.push(newShard(pos, fromAngle(sideAngle, shardSpeed())));
+        }
+        return fragmentList;
+      }
+      // Fallback: even radial burst around the impact when there's no ship pose.
+      const baseAngle = impactDir
+        ? Math.atan2(impactDir.y, impactDir.x)
+        : Math.atan2(this.vel.y, this.vel.x);
+      const shardCount = ENTITY_CONFIG.metalChunk.shardCount;
+      for (let i = 0; i < shardCount; i++) {
+        const childAngle = baseAngle + (i / shardCount) * TAU + rand(-0.15, 0.15);
+        const pos = {
+          x: this.pos.x + Math.cos(childAngle) * this.radius * 0.5,
+          y: this.pos.y + Math.sin(childAngle) * this.radius * 0.5,
+        };
+        fragmentList.push(newShard(pos, fromAngle(childAngle, shardSpeed())));
+      }
+      return fragmentList;
+    }
+    if (this.kind === "metalShard") return [];
     // Solid crystal: large shatters into 2 fast-moving small crystal
     // fragments fanning around the bullet's heading. Smalls don't split
     // further — they're the terminal tier.
@@ -4630,7 +4878,8 @@ export class Asteroid {
 
     // Cathedral pieces are dead derelict stone — blit opaque like a solid plate
     // so the rock sits against the starfield instead of glowing through it.
-    const isArchitectural = this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind);
+    // Metal hull is the same: inert plate, drawn opaque, not glowing through.
+    const isArchitectural = this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind) || isMetalHull(this.kind);
     ctx.globalCompositeOperation = isArchitectural ? "source-over" : "lighter";
 
     // A warble dims its whole body toward the void as it phases out. Under the

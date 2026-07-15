@@ -6,17 +6,19 @@ import { cosmeticRng as rng } from "./rng";
 // A departure portal: comets that time out and aliens that fly past the far
 // edge leave THROUGH this instead of fading/popping off. Distinct from the
 // canister upgrade's flat radial-streak vortex (Canister.renderWarp) — that one
-// is a head-on swirl of spokes collapsing to a point. This is a round hole in
-// space — an outer bezel RIM ringing an INNER iris with a swirling event horizon
-// and a tunnel of depth-rings receding into the screen — so a body reads as
-// dropping down a shaft, and it reads the same from every approach because its
-// slight tilt is fixed to the SCREEN, not to the body's line of flight.
+// is a head-on swirl of spokes collapsing to a point. This is a torn wound in
+// space — a writhing organic maw that reaches out with grasping tendrils and
+// churns a dark vortex down to a lightless throat, so a body reads as being
+// SUCKED IN and swallowed. Its slight tilt is fixed to the SCREEN, not to the
+// body's line of flight, so it reads the same from every approach.
 //
-// Aesthetic: it shares the aliens' crimson-manta bioluminescence — the rim is
-// carved with radial rib ticks like the manta's wing seams, and the whole thing
-// glows in the same blood-red band the aliens live in — so an alien diving home
-// reads as returning to something of its own kind. (Recolour hooks stay live so
-// the wave-skip portals can wear their distinct emerald.)
+// Aesthetic: not the aliens' clean crimson bioluminescence but something
+// hungrier — a dark red / purple / black wound. The throat is near-black void
+// bleeding out through blood-red to a bruised violet membrane; a nest of
+// writhing tendrils claws inward from the rim like a sea-anemone mouth or a
+// tear in living tissue, and the whole thing pulses and wobbles as it drinks.
+// (Recolour hooks stay live so the wave-skip portals can wear their distinct
+// emerald.)
 //
 // The effect is purely cosmetic and self-contained (same lifecycle shape as
 // DriftBurst): spawn → update(dt) prunes by life → render() draws additively.
@@ -40,9 +42,9 @@ export const WORMHOLE_LIFE = OPEN + HOLD + CLOSE;
 // heading, so the portal looks identical no matter which way a body approached.
 const TILT = 0.6; // vertical squash of the ellipse (1 = head-on circle)
 
-// The inner iris (the actual hole) sits inside the outer bezel rim, which frames
+// The inner iris (the actual hole) sits inside the outer membrane, which frames
 // it. This is the inner iris's fraction of the full long axis; the gap out to 1
-// is the rim's width.
+// is the membrane's width, and the tendrils reach out past 1.
 const INNER_FRAC = 0.74;
 
 // Long axis (px) of a portal torn by a body of this radius. The floor keeps a
@@ -55,7 +57,7 @@ export const portalLongAxis = (bodyRadius: number): number => Math.max(40, bodyR
 // the tilt is screen-fixed the throat always sits straight up-screen from the
 // centre (up the minor axis), independent of the body's heading — every body
 // dives "up and back" into the same visible shaft. The entity eases its dive
-// toward this point; renderWormholes paints the throat spark at the same spot.
+// toward this point; renderWormholes paints the throat void at the same spot.
 export const warpAnchorOffset = (
   bodyRadius: number, _heading: number,
 ): { dx: number; dy: number } => {
@@ -63,16 +65,16 @@ export const warpAnchorOffset = (
   return { dx: 0, dy: -d };
 };
 
-// Depth tunnel: concentric rings shrinking toward a vanishing point, each pushed
+// Depth vortex: churning loops spiralling toward a vanishing point, each pushed
 // "back" so the eye falls into a receding throat rather than a flat disc.
-const TUNNEL_RINGS = 7;
+const VORTEX_LOOPS = 7;
 
-// Hue band for the portal's own light — the aliens' blood-red crimson so a
-// departing manta reads as returning to something of its own kind. The rim runs
-// a touch warmer (toward orange-red) than the deep-red throat, echoing the
-// alien family's own big→small hue drift.
-const RIM_HUE = 6;
-const THROAT_HUE = 354;
+// Hue band for the portal's own light — a dark red/purple/black wound. The
+// membrane runs bruised violet, the mid ring blood-red, and the throat plunges
+// to near-black void. Three anchors so the depth ramp can drift hue across the
+// whole band instead of a single flat tint.
+const MEMBRANE_HUE = 296; // outer bruised violet
+const THROAT_HUE = 350; // inner blood-red bleeding to black
 
 export type Wormhole = {
   x: number;
@@ -80,17 +82,17 @@ export type Wormhole = {
   // Long axis of the ellipse (px) at full open — scaled from the body's radius
   // so a big alien tears a bigger hole than a comet.
   radius: number;
-  // Vestigial: the portal's tilt is now screen-fixed, so nothing rotates the
-  // frame by this. Kept as a small per-portal phase so the rim ticks and swirl
-  // don't all line up between simultaneous portals. spawnWormhole seeds it from
-  // the heading purely so replays stay deterministic.
+  // Vestigial as a frame rotation (the portal's tilt is screen-fixed), but used
+  // as a per-portal phase so the tendrils and swirl of simultaneous portals
+  // don't line up. spawnWormhole seeds it from the heading so replays stay
+  // deterministic.
   angle: number;
   hueShift: number; // small per-portal hue jitter so they don't all match
   seed: number;
   life: number;
   maxLife: number;
   // Hue overrides for recoloured portals (the wave-skip kind). The defaults
-  // reproduce the classic violet departure portal.
+  // reproduce the dark-wound departure portal; wave-skip wears emerald.
   rimHue?: number;
   throatHue?: number;
 };
@@ -199,106 +201,172 @@ const mouthOpen = (elapsed: number, life: number): number => {
   return open;
 };
 
-// Centre of the tunnel ring at a given depth, in the portal's (unrotated,
-// screen-fixed) frame. Rings march from the inner-iris mouth (depth 0, centred
-// on origin) straight up-screen toward the vanishing point, so the stack bores
+// Centre of the vortex loop at a given depth, in the portal's (unrotated,
+// screen-fixed) frame. Loops march from the inner-iris mouth (depth 0, centred
+// on origin) straight up-screen toward the vanishing point, so the vortex bores
 // back-and-"up" into the screen the same way from every approach. `inner` is the
 // inner iris's long axis (= long * INNER_FRAC).
 const ringCenterY = (inner: number, depth: number): number => -inner * 0.55 * TILT * depth;
 
-// Build the ellipse path for one tunnel ring at the given depth (0 = inner mouth,
-// 1 = vanishing point), squashed on the screen y-axis. Deeper rings shrink
-// (perspective falloff), slide up toward the vanishing point, and twist — so the
-// stack reads as a corkscrew throat, not nested flat circles.
-const ringPath = (
-  ctx: CanvasRenderingContext2D, inner: number, depth: number, swirl: number,
+// A cheap deterministic value-noise: a sum of a few sines the caller can sample
+// smoothly by angle so an outline wobbles organically instead of running a clean
+// circle. `phase` decorrelates portals; `t` drifts it so the wobble crawls and
+// writhes over time rather than sitting still.
+const wobble = (a: number, phase: number, t: number): number =>
+  Math.sin(a * 3 + phase + t) * 0.55
+  + Math.sin(a * 5 - phase * 1.7 - t * 0.8) * 0.3
+  + Math.sin(a * 8 + phase * 0.5 + t * 1.6) * 0.15;
+
+// Trace one churning vortex loop at the given depth (0 = inner mouth, 1 =
+// vanishing point) into the current path. Deeper loops shrink (perspective
+// falloff), slide up toward the vanishing point, twist, AND get their radius
+// chewed by the organic wobble — so the stack reads as a roiling corkscrew
+// throat, not tidy nested circles. `flux` drives the time-varying wobble.
+const vortexLoop = (
+  ctx: CanvasRenderingContext2D,
+  inner: number, depth: number, swirl: number, phase: number, flux: number,
 ): void => {
-  // Receding scale: a perspective-ish 1/(1+kd) falloff packs the far rings
+  // Receding scale: a perspective-ish 1/(1+kd) falloff packs the far loops
   // tight near the vanishing point.
   const scale = 1 / (1 + depth * 2.4);
   const rx = inner * scale;
   const ry = inner * TILT * scale;
   const cy = ringCenterY(inner, depth);
   const twist = swirl * depth;
+  // Wobble gets meatier toward the mouth (near loops churn hard) and calms into
+  // the tight far throat so the vanishing point stays a clean dark point.
+  const chew = (0.28 + 0.16 * (1 - depth));
   ctx.beginPath();
-  const SAMP = 40;
+  const SAMP = 48;
   for (let i = 0; i <= SAMP; i++) {
     const a = (i / SAMP) * TAU + twist;
-    const px = Math.cos(a) * rx;
-    const py = cy + Math.sin(a) * ry;
+    const w = 1 + wobble(a, phase + depth * 2, flux) * chew;
+    const px = Math.cos(a) * rx * w;
+    const py = cy + Math.sin(a) * ry * w;
     if (i === 0) ctx.moveTo(px, py);
     else ctx.lineTo(px, py);
   }
 };
 
-// Trace a screen-fixed tilted ellipse of the given long axis into the current
-// path — the shared silhouette of the outer bezel and the inner iris.
-const ellipsePath = (ctx: CanvasRenderingContext2D, long: number): void => {
-  ctx.beginPath();
-  ctx.ellipse(0, 0, long, long * TILT, 0, 0, TAU);
-};
+// Number of tendrils clawing inward from the membrane — the writhing cilia that
+// make the maw read as a living mouth pulling matter in rather than a machined
+// aperture.
+const TENDRIL_COUNT = 13;
 
-// Number of radial rib ticks carved around the outer bezel — the manta-wing
-// seam vocabulary borrowed onto the rim so the hole reads as the aliens' own
-// architecture rather than a generic vortex.
-const RIM_TICKS = 22;
-
-// Paint the outer bezel rim: a raised ring framing the inner iris, carved with
-// radial rib ticks like the alien wings' structural seams, lit in the crimson
-// band. `long` is the full long axis, `inner` the iris long axis it frames.
-const renderRim = (
+// Paint the nest of grasping tendrils: tapering filaments anchored just outside
+// the iris that curl INWARD toward the throat, undulating as they go, so the
+// hole looks like it's reaching out to drag a body down. `long` is the full
+// long axis, `inner` the iris edge they spring from.
+const renderTendrils = (
   ctx: CanvasRenderingContext2D,
-  long: number, inner: number, rimHue: number, open: number, shimmer: number,
-  swirl: number,
+  long: number, inner: number, membraneHue: number, throatHue: number,
+  open: number, swirl: number, phase: number, flux: number,
 ): void => {
-  // 1) Bezel band — a soft glowing annulus between the iris edge and the outer
-  //    lip, brightest along its mid-line so it reads as a rounded raised rim.
   ctx.save();
-  ctx.scale(1, TILT);
-  const mid = (long + inner) * 0.5;
-  const band = ctx.createRadialGradient(0, 0, inner * 0.92, 0, 0, long);
-  band.addColorStop(0, `hsla(${rimHue - 6}, 90%, 30%, 0)`);
-  band.addColorStop((mid - inner * 0.92) / (long - inner * 0.92), `hsla(${rimHue}, 95%, 55%, ${0.5 * open * shimmer})`);
-  band.addColorStop(1, `hsla(${rimHue + 6}, 85%, 34%, 0)`);
-  ctx.fillStyle = band;
-  ctx.beginPath();
-  ctx.arc(0, 0, long, 0, TAU);
-  ctx.arc(0, 0, inner * 0.92, 0, TAU, true);
-  ctx.fill("evenodd");
-  ctx.restore();
-
-  // 2) Radial rib ticks — short spokes bridging the iris edge to the outer lip,
-  //    evenly spaced around the bezel like the manta's wing seams. The swirl
-  //    phase drifts them so the rim slowly turns.
+  ctx.scale(1, TILT); // draw in the squashed frame so tendrils hug the ellipse
   ctx.lineCap = "round";
-  for (let i = 0; i < RIM_TICKS; i++) {
-    const a = (i / RIM_TICKS) * TAU + swirl * 0.15;
-    const ca = Math.cos(a);
-    const sa = Math.sin(a);
-    const x0 = ca * inner;
-    const y0 = sa * inner * TILT;
-    const x1 = ca * long;
-    const y1 = sa * long * TILT;
-    // Ticks catch the light unevenly — a slow per-tick shimmer keeps the rim
-    // crackling with the same bioluminescent flicker the alien ribs have.
-    const flick = 0.55 + 0.45 * Math.sin(swirl * 2.2 + i * 1.7);
-    ctx.strokeStyle = `hsla(${rimHue + 8}, 100%, 62%, ${0.5 * open * flick})`;
-    ctx.lineWidth = 1.6;
+  for (let i = 0; i < TENDRIL_COUNT; i++) {
+    // Each tendril owns a base angle and its own drift so they writhe out of
+    // phase — a slow crawl plus a per-tendril wiggle keeps the nest restless.
+    const base = (i / TENDRIL_COUNT) * TAU + swirl * 0.4;
+    const wig = Math.sin(flux * 1.3 + i * 2.399) * 0.5;
+    // Reach: how far past the membrane the tip claws, breathing with the flux
+    // and jittered per tendril so the silhouette is ragged, never a clean ring.
+    const reachLen = long * (0.5 + 0.35 * (0.5 + 0.5 * Math.sin(flux + i * 1.7)));
+    const rootR = inner * 1.02;
+    const tipR = inner + reachLen;
+    // Sample the tendril as a curved spine: it springs outward from the iris,
+    // bows sideways (the curl), and the tip hooks back toward the throat.
+    const SEG = 9;
     ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
+    for (let s = 0; s <= SEG; s++) {
+      const u = s / SEG; // 0 root … 1 tip
+      const r = rootR + (tipR - rootR) * u;
+      // Curl: angular sweep grows along the length and hooks harder at the tip,
+      // so the filament curves like a finger closing inward.
+      const curl = (wig + 0.9 * u * u) * (1 - u * 0.25);
+      const a = base + curl + wobble(u * 6, phase + i, flux) * 0.12 * u;
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r;
+      if (s === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    // Two stacked strokes give the filament body: a dark thick underlayer for
+    // the fleshy mass, a thin hot core so it glows like a lit vein. Both taper
+    // via the flicker so tips fade out into the dark.
+    const flick = 0.5 + 0.5 * Math.sin(flux * 2.1 + i * 1.9);
+    ctx.lineWidth = 3.4;
+    ctx.strokeStyle = `hsla(${throatHue - 8}, 85%, 20%, ${0.42 * open})`;
+    ctx.stroke();
+    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = `hsla(${membraneHue + 10}, 95%, 60%, ${0.5 * open * flick})`;
     ctx.stroke();
   }
+  ctx.restore();
+};
 
-  // 3) Outer lip — a bright thin ring bounding the whole hole, with a soft wide
-  //    glow underneath, so the bezel has a clean crackling edge.
-  ellipsePath(ctx, long);
-  ctx.lineWidth = 6;
-  ctx.strokeStyle = `hsla(${rimHue}, 95%, 68%, ${0.28 * open * shimmer})`;
-  ctx.stroke();
-  ctx.lineWidth = 1.8;
-  ctx.strokeStyle = `hsla(${rimHue + 6}, 100%, 88%, ${0.7 * open * shimmer})`;
-  ctx.stroke();
+// Paint the outer membrane: a soft bruised-violet fleshy annulus framing the
+// iris, its inner and outer edges chewed by the wobble so it reads as living
+// tissue torn open rather than a machined bezel. `long` is the full long axis,
+// `inner` the iris long axis it frames.
+const renderMembrane = (
+  ctx: CanvasRenderingContext2D,
+  long: number, inner: number, membraneHue: number, throatHue: number,
+  open: number, phase: number, flux: number,
+): void => {
+  ctx.save();
+  ctx.scale(1, TILT);
+
+  // 1) Membrane band — a filled organic annulus between two wobbled outlines:
+  //    the ragged outer flesh edge and the iris edge it wraps. A radial gradient
+  //    across it goes bruised-violet at the rim, darkening to near-black where it
+  //    meets the void so the flesh reads as thickening into shadow.
+  const band = ctx.createRadialGradient(0, 0, inner, 0, 0, long);
+  band.addColorStop(0, `hsla(${throatHue - 6}, 80%, 10%, 0)`);
+  band.addColorStop(0.4, `hsla(${throatHue}, 80%, 16%, ${0.5 * open})`);
+  band.addColorStop(0.75, `hsla(${membraneHue}, 70%, 26%, ${0.6 * open})`);
+  band.addColorStop(1, `hsla(${membraneHue + 12}, 60%, 14%, 0)`);
+  ctx.fillStyle = band;
+  ctx.beginPath();
+  const SAMP = 64;
+  // Outer flesh edge — wobbled, ragged.
+  for (let i = 0; i <= SAMP; i++) {
+    const a = (i / SAMP) * TAU;
+    const r = long * (1 + wobble(a, phase, flux) * 0.12);
+    const px = Math.cos(a) * r;
+    const py = Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  // Iris edge as an inner sub-path (reverse wind) so evenodd punches the hole.
+  for (let i = 0; i <= SAMP; i++) {
+    const a = (i / SAMP) * TAU;
+    const r = inner * (1 + wobble(a, phase + 3, flux) * 0.06);
+    const px = Math.cos(a) * r;
+    const py = Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.fill("evenodd");
+  ctx.restore();
+};
+
+// Trace the wobbled iris edge (the leading lip of the actual hole) into the
+// current path — used for the hot event-horizon stroke. Drawn in the squashed
+// frame by the caller.
+const irisPath = (
+  ctx: CanvasRenderingContext2D, inner: number, phase: number, flux: number,
+): void => {
+  ctx.beginPath();
+  const SAMP = 64;
+  for (let i = 0; i <= SAMP; i++) {
+    const a = (i / SAMP) * TAU;
+    const r = inner * (1 + wobble(a, phase + 3, flux) * 0.06);
+    const px = Math.cos(a) * r;
+    const py = Math.sin(a) * r * TILT;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
 };
 
 export const renderWormholes = (
@@ -306,7 +374,6 @@ export const renderWormholes = (
 ): void => {
   if (list.length === 0) return;
   ctx.save();
-  ctx.globalCompositeOperation = "lighter";
   ctx.lineJoin = "round";
   for (const wh of list) {
     const elapsed = wh.maxLife - wh.life;
@@ -314,73 +381,91 @@ export const renderWormholes = (
     if (open < 0.02) continue;
     const long = wh.radius * open;
     const inner = long * INNER_FRAC;
-    const rimHue = (wh.rimHue ?? RIM_HUE) + wh.hueShift;
+    const membraneHue = (wh.rimHue ?? MEMBRANE_HUE) + wh.hueShift;
     const throatHue = (wh.throatHue ?? THROAT_HUE) + wh.hueShift;
-    // Slow rotation of the whole swirl, plus a fast shimmer on the rim.
-    const swirl = tSec * 1.8 + wh.seed;
-    const shimmer = 0.78 + 0.22 * Math.sin(tSec * 18 + wh.seed);
+    // Slow rotation of the whole swirl, a per-portal phase, and a churning flux
+    // that drives every organic wobble so the maw writhes and pulses.
+    const swirl = tSec * 1.4 + wh.seed;
+    const phase = wh.angle * 1.7 + wh.seed;
+    const flux = tSec * 2.3 + wh.seed;
+    const shimmer = 0.78 + 0.22 * Math.sin(tSec * 16 + wh.seed);
 
     ctx.save();
     ctx.translate(wh.x, wh.y);
     // No frame rotation: the tilt is screen-fixed so the hole reads identically
     // regardless of the direction the departing body came from.
 
-    // 1) Throat glow — a soft elliptical wash filling the inner iris so the hole
-    //    reads as lit-from-within depth rather than an empty outline. Squash y
-    //    to draw the ellipse with a plain radial gradient.
+    // --- BACK-TO-FRONT, mostly additive so the light stacks and blooms ---
+
+    // 1) Membrane (source-over): the solid bruised-violet flesh ring. Drawn
+    //    first and OPAQUE so it occludes the starfield — a real torn wound, not
+    //    a translucent wash. Everything after it is additive light on top.
+    ctx.globalCompositeOperation = "source-over";
+    renderMembrane(ctx, long, inner, membraneHue, throatHue, open, phase, flux);
+
+    // 2) Throat void (source-over): the actual hole. A radial gradient from a
+    //    dead-black centre out through blood-red to the iris — the lightless
+    //    pit the body falls into. Opaque black core kills the stars behind it.
     ctx.save();
     ctx.scale(1, TILT);
-    const throat = ctx.createRadialGradient(0, 0, 0, 0, 0, inner);
-    throat.addColorStop(0, `hsla(${throatHue}, 90%, 62%, ${0.5 * open})`);
-    throat.addColorStop(0.55, `hsla(${rimHue}, 88%, 44%, ${0.3 * open})`);
-    throat.addColorStop(1, `hsla(${rimHue}, 85%, 24%, 0)`);
-    ctx.fillStyle = throat;
+    const void_ = ctx.createRadialGradient(0, 0, 0, 0, 0, inner);
+    void_.addColorStop(0, `hsla(${throatHue}, 90%, 2%, ${0.96 * open})`);
+    void_.addColorStop(0.45, `hsla(${throatHue}, 90%, 6%, ${0.9 * open})`);
+    void_.addColorStop(0.8, `hsla(${throatHue}, 88%, 22%, ${0.7 * open})`);
+    void_.addColorStop(1, `hsla(${membraneHue}, 80%, 24%, ${0.3 * open})`);
+    ctx.fillStyle = void_;
     ctx.beginPath();
     ctx.arc(0, 0, inner, 0, TAU);
     ctx.fill();
     ctx.restore();
 
-    // 2) Depth tunnel — receding twisted rings boring into the screen. Far
-    //    rings are dimmer and deeper-red (atmospheric depth); the swirl twist
-    //    makes the stack corkscrew so the eye falls in.
-    for (let r = 0; r < TUNNEL_RINGS; r++) {
-      const depth = r / (TUNNEL_RINGS - 1);
-      const fade = (1 - depth * 0.78) * open;
+    // Everything below is additive light layered over the dark pit.
+    ctx.globalCompositeOperation = "lighter";
+
+    // 3) Churning vortex (additive): roiling loops spiralling down to the
+    //    vanishing point. Near loops churn wide and glow blood-red; far loops
+    //    shrink, dim, and bleed toward violet-black as they recede into depth.
+    for (let r = 0; r < VORTEX_LOOPS; r++) {
+      const depth = r / (VORTEX_LOOPS - 1);
+      const fade = (1 - depth * 0.82) * open;
       if (fade < 0.03) continue;
-      ringPath(ctx, inner, depth, swirl);
-      ctx.lineWidth = 1.1 + (1 - depth) * 1.6;
-      const l = 74 - depth * 32; // brighter at the mouth, dim down the throat
-      ctx.strokeStyle = `hsla(${throatHue - depth * 18}, 92%, ${l}%, ${0.55 * fade})`;
+      vortexLoop(ctx, inner, depth, swirl, phase, flux);
+      ctx.lineWidth = 1.0 + (1 - depth) * 1.8;
+      const hue = throatHue - depth * 40; // red mouth → violet-black throat
+      const l = 42 - depth * 26; // dark and bruised, never bright/clean
+      ctx.strokeStyle = `hsla(${hue}, 95%, ${l}%, ${0.5 * fade})`;
       ctx.stroke();
     }
 
-    // 3) Event-horizon lip — the bright leading edge of the inner iris. A wide
-    //    soft glow stroke with a hot thin core on top, both swept by the shimmer
-    //    so the iris edge crackles with energy.
-    ringPath(ctx, inner, 0, swirl);
-    ctx.lineWidth = 6;
-    ctx.strokeStyle = `hsla(${throatHue}, 95%, 70%, ${0.3 * open * shimmer})`;
+    // 4) Event-horizon lip (additive): the hot leading edge of the wobbled iris
+    //    — a wide soft glow with a thin hotter core, both swept by the shimmer
+    //    so the wound's lip crackles with a bruised-magenta energy.
+    irisPath(ctx, inner, phase, flux);
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = `hsla(${membraneHue + 4}, 90%, 34%, ${0.4 * open * shimmer})`;
     ctx.stroke();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = `hsla(${throatHue + 6}, 100%, 90%, ${0.85 * open * shimmer})`;
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = `hsla(${membraneHue + 16}, 100%, 66%, ${0.7 * open * shimmer})`;
     ctx.stroke();
 
-    // 4) Vanishing-point spark — a tiny hot point deep in the throat the body
-    //    falls toward (the same point beginWarpOut aims the body at). Brightest
-    //    mid-life, gone by collapse.
+    // 5) Vanishing-point pull (additive): a faint dark-red ember deep in the
+    //    throat the body falls toward (the point beginWarpOut aims the body at).
+    //    Kept dim so the throat stays a pit, not a lantern — just enough of a
+    //    glow to mark the drain the vortex spirals into.
     const vy = ringCenterY(inner, 1);
-    const spark = open * shimmer;
-    const sg = ctx.createRadialGradient(0, vy, 0, 0, vy, inner * 0.3);
-    sg.addColorStop(0, `hsla(${throatHue}, 100%, 96%, ${0.9 * spark})`);
-    sg.addColorStop(1, `hsla(${throatHue}, 100%, 80%, 0)`);
-    ctx.fillStyle = sg;
+    const pull = open * shimmer;
+    const pg = ctx.createRadialGradient(0, vy, 0, 0, vy, inner * 0.34);
+    pg.addColorStop(0, `hsla(${throatHue}, 100%, 40%, ${0.55 * pull})`);
+    pg.addColorStop(1, `hsla(${throatHue}, 100%, 20%, 0)`);
+    ctx.fillStyle = pg;
     ctx.beginPath();
-    ctx.arc(0, vy, inner * 0.3, 0, TAU);
+    ctx.arc(0, vy, inner * 0.34, 0, TAU);
     ctx.fill();
 
-    // 5) Outer bezel rim — the raised, rib-carved frame around the iris. Drawn
-    //    last so its lip sits proud in front of the throat glow.
-    renderRim(ctx, long, inner, rimHue, open, shimmer, swirl);
+    // 6) Grasping tendrils (additive): the writhing cilia clawing inward from
+    //    the membrane. Drawn LAST so they curl proud in front of the throat,
+    //    reaching over the lip to drag a body down.
+    renderTendrils(ctx, long, inner, membraneHue, throatHue, open, swirl, phase, flux);
 
     ctx.restore();
   }

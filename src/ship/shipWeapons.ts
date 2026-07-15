@@ -6,7 +6,9 @@ import { BEAT_GRID } from "../game/rhythmConstants";
 
 // each prong upgrade adds one more bullet, every prong 45° from its neighbour, wrapping
 // into a full ring at 8 shots (8 × 45° = 360°) and continuing to overlap beyond that.
-const PRONG_ANGLE_STEP = Math.PI / 4;
+// Exported so metalChunk can lay two shards on the first-tier prong pair's rays
+// (±half a step off the heading) — see Asteroid.split.
+export const PRONG_ANGLE_STEP = Math.PI / 4;
 
 // prongCount n yields n+1 shots fanned symmetrically about the heading (centred on the front).
 // count 0 → [0]; 1 → ±22.5°; 2 → -45,0,+45; 3 → ±22.5,±67.5; 7 → full ring every 45°.
@@ -29,10 +31,13 @@ const PIERCE_RANGE_MULT = 2;
 const LONGSHOT_RANGE_MULT = 1.5;
 
 // bullet inherits a fraction of ship velocity so muzzle output reads as physical, not portaled.
+// Exported so metalChunk can reproduce the true (velocity-bent) prong ray when it
+// lays shards on the prong pair — see Asteroid.split.
+export const BULLET_VEL_INHERIT = 0.4;
 const launchBullet = (ship: Ship, headingOffset: number, pierce: boolean, longshot: boolean): Bullet => {
   const dir = fromAngle(ship.heading + headingOffset, 1);
   const muzzle = add(ship.pos, mul(dir, ship.radius + 4));
-  const vel = add(mul(dir, ship.bulletSpeed), mul(ship.vel, 0.4));
+  const vel = add(mul(dir, ship.bulletSpeed), mul(ship.vel, BULLET_VEL_INHERIT));
   let life = ship.bulletLife;
   if (pierce) life *= PIERCE_RANGE_MULT;
   if (longshot) life *= LONGSHOT_RANGE_MULT;

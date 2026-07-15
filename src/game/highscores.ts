@@ -17,6 +17,7 @@ const BUCKET_LABELS: Record<KillBucket, string> = {
   asteroidWithGem: "gem",
   burstGem: "gold gem",
   solidCrystal: "crystal",
+  metalChunk: "metal",
   alien_big: "alien-L",
   alien_medium: "alien-M",
   alien_small: "alien-S",

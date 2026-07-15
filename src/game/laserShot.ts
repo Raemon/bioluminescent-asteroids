@@ -44,7 +44,7 @@ export const laserDamage = (dots: number): number =>
 // Refire period in quarter-note beats: after a shot, the beats in between are
 // locked out and a fresh charge press can only land once this many beats have
 // passed since the fire beat.
-export const LASER_REFIRE_BEATS = 4;
+export const LASER_REFIRE_BEATS = 2;
 
 // Fraction of the refire lockout still pending — 1 right after a shot, easing
 // to 0 as the next allowed fire beat approaches. Drives the reticule's
@@ -53,6 +53,14 @@ export const laserCooldownFrac = (game: Game): number => {
   const remaining = game.ship.laserCooldownEndBeat - game.perceivedBeatTime / BEAT_GRID;
   return Math.max(0, Math.min(1, remaining / LASER_REFIRE_BEATS));
 };
+
+// True once the refire lockout has fully released and a fresh charge press
+// would land — i.e. the laser is charged and ready to fire again.
+export const laserReady = (game: Game): boolean =>
+  Math.round(game.perceivedBeatTime / BEAT_GRID) >= game.ship.laserCooldownEndBeat;
+
+// Seconds for the one-shot ready burst to fade after the lockout releases.
+const READY_FLASH_DECAY = 0.55;
 
 // The rhythm-gated cap on reachable charge dots. Higher combo unlocks deeper
 // charge tiers, so a long beam is something rhythm earns.
@@ -178,7 +186,7 @@ export class LaserBeam {
 // Beam origin: the ship's muzzle, a touch ahead of the hull, along the beam's
 // (possibly prong-offset) heading. Module-private: single-direction beam
 // geometry never leaves this file — aim points only exit via laserAimFan.
-const muzzleOf = (ship: Ship, headingOffset = 0): Vec => {
+export const muzzleOf = (ship: Ship, headingOffset = 0): Vec => {
   const dir = fromAngle(ship.heading + headingOffset, 1);
   return add(ship.pos, mul(dir, ship.radius + 4));
 };
@@ -275,9 +283,19 @@ export const tickLaserShot = (game: Game, dt: number) => {
     game.sound.stopLaserCharge();
     game.laserChargeGlow = approachGlow(game.laserChargeGlow, 0, dt);
     resetLaserCharge(ship);
+    // Keep the ready edge armed so a respawn doesn't pop a stray ready burst.
+    ship.laserWasReady = true;
+    ship.laserReadyFlash = 0;
     return;
   }
   if (!ship.lasershotActive) return;
+  // Fire a one-shot ready burst on the locked→ready edge, then decay it. The
+  // reticule reads laserReadyFlash to pop an "armed" ring the instant the
+  // refire lockout releases, so the player sees the exact moment it can refire.
+  const ready = laserReady(game);
+  if (ready && !ship.laserWasReady) ship.laserReadyFlash = 1;
+  ship.laserWasReady = ready;
+  ship.laserReadyFlash = Math.max(0, ship.laserReadyFlash - dt / READY_FLASH_DECAY);
   const firePressed = isDown(game.input, "fire");
 
   if (firePressed) {

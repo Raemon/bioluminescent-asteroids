@@ -1,5 +1,5 @@
 import type { Game } from "../../Game";
-import { reachableBeamLengths, laserDotCount, maxLaserDots, laserAimFan, laserCooldownFrac } from "../../game/laserShot";
+import { reachableBeamLengths, laserDotCount, maxLaserDots, laserAimFan, laserCooldownFrac, laserReady, muzzleOf } from "../../game/laserShot";
 import { BEAT_GRID } from "../../game/rhythmConstants";
 import { drawGlow } from "../../glow";
 
@@ -36,6 +36,14 @@ const PULSE_PERIOD_SEC = 2.0;
 // The refire lockout dims the whole sight by this much right after a shot,
 // recovering to full brightness as the lock releases — the re-arm is visible.
 const COOLDOWN_DIM = 0.75;
+
+// Armed ring: a bright pip-ring at the muzzle marking "charged and ready". A
+// faint steady ring sits there whenever the laser can refire; laserReadyFlash
+// pops an expanding burst on the exact locked→ready edge on top of it.
+const ARMED_RING_HSL = { h: 45, s: 100, l: 88 }; // white-gold, the full-charge hue
+const ARMED_RING_R = 9;
+const ARMED_STEADY_ALPHA = 0.32;
+const ARMED_BURST_R = 26;
 
 const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
 
@@ -82,6 +90,37 @@ const paintGate = (
   ctx.restore();
 };
 
+// Paint the "charged and ready" indicator at a beam's muzzle: a steady faint
+// ring while the laser can refire (alpha scaled by `ready`, so it fades in as
+// the lockout releases), plus an expanding one-shot burst driven by `flash`
+// (1→0) that pops on the exact locked→ready edge.
+const paintArmedRing = (
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, breathe: number, ready01: number, flash: number,
+) => {
+  const hsl = `${ARMED_RING_HSL.h}, ${ARMED_RING_HSL.s}%, ${ARMED_RING_HSL.l}%`;
+  // Steady armed ring — a soft loaded-and-waiting pulse, dim until fully ready.
+  const steady = ARMED_STEADY_ALPHA * ready01 * breathe;
+  if (steady > 0.001) {
+    ctx.strokeStyle = `hsla(${hsl}, ${steady})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, ARMED_RING_R, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // Ready burst — a bright ring expanding out and fading as the flash decays.
+  if (flash > 0.001) {
+    const r = ARMED_RING_R + (ARMED_BURST_R - ARMED_RING_R) * (1 - flash);
+    drawGlow(ctx, x, y, r * 0.6, ARMED_RING_HSL.h, flash * 0.5);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = `hsla(${hsl}, ${flash})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+};
+
 export const renderLaserReticule = (
   ctx: CanvasRenderingContext2D, game: Game, beatTime: number,
 ) => {
@@ -99,11 +138,18 @@ export const renderLaserReticule = (
     : 0;
   const pulse = PULSE_MIN + (PULSE_MAX - PULSE_MIN) * (0.5 + 0.5 * Math.cos((beatTime / PULSE_PERIOD_SEC) * Math.PI * 2));
   const ready = 1 - COOLDOWN_DIM * laserCooldownFrac(game);
+  // Muzzle "armed" indicator: steady ring only when loaded and waiting (ready +
+  // not mid-charge — a charge already shows its own gate ladder); the burst pops
+  // on the ready edge regardless. Both are cosmetic reads of the same lockout.
+  const armedSteady = !charging && laserReady(game) ? 1 : 0;
+  const readyFlash = ship.laserReadyFlash;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   const maxTier = lengths.length - 1;
   // One gate ladder per aim-fan beam, so prong shows a sight on every beam.
   for (const aim of laserAimFan(ship)) {
+    const muzzle = muzzleOf(ship, aim.headingOffset);
+    paintArmedRing(ctx, muzzle.x, muzzle.y, pulse, armedSteady, readyFlash);
     for (let tier = 0; tier < lengths.length; tier++) {
       const end = aim.endpointAt(lengths[tier]);
       const hsl = gateHsl(maxTier > 0 ? tier / maxTier : 0);

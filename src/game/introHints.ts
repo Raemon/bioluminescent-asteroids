@@ -35,9 +35,9 @@ const SLOT_2_POOL: readonly string[] = [
 
 const SLOT_3_POOL: readonly string[] = [
   "Dance with the void.",
-  "Drink your coffee. It'll be a long night.",
+  "Drink your coffee. This'll be a long job.",
   "Don't forget the dream.",
-  "One last job.",
+  "Don't lose contact with command.",
   "Tell your son you'll be home soon.",
   "Remember your promise to your wife.",
   "The stars are singing.",

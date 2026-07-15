@@ -1,7 +1,7 @@
 import type { Game } from "../Game";
 import { Asteroid, AsteroidKind, AsteroidSize, BASS_KINDS, BASS_MEASURE_LENGTH, isBurstGem, isTorusFragment, SIZE_SPAWN_SPEED, spawnAsteroidAtEdge, spawnBossAt } from "../Asteroid";
 import { spawnGemSwarm } from "../Gem";
-import { spawnComet as spawnCometAtEdge, spawnMeteorShower, COMET_WARP_LIFETIME } from "../Comet";
+import { spawnComet as spawnCometAtEdge, spawnMeteorShower, COMET_LIFETIME } from "../Comet";
 import { AlienSize, spawnAlienAtEdge } from "../Alien";
 import { spawnCanister } from "../Canister";
 import { rand, randInt, v, TAU, nearestImageOf, wrapMut } from "../vec";
@@ -48,6 +48,10 @@ const spawnSpeedRange = (a: Asteroid): [number, number] => {
   }
   if (a.kind === "torus") {
     const m = CFG.torus.spawnSpeedMul;
+    return [lo * m, hi * m];
+  }
+  if (a.kind === "metalChunk") {
+    const m = CFG.metalChunk.spawnSpeedMul;
     return [lo * m, hi * m];
   }
   if (a.kind === "citadel") {
@@ -263,6 +267,10 @@ export const spawnAsteroidAway = (
     a.vel.x *= CFG.torus.spawnSpeedMul;
     a.vel.y *= CFG.torus.spawnSpeedMul;
   }
+  if (a.kind === "metalChunk") {
+    a.vel.x *= CFG.metalChunk.spawnSpeedMul;
+    a.vel.y *= CFG.metalChunk.spawnSpeedMul;
+  }
   if (a.kind === "citadel") {
     a.vel.x *= CFG.citadel.spawnSpeedMul;
     a.vel.y *= CFG.citadel.spawnSpeedMul;
@@ -338,8 +346,8 @@ export const spawnComet = (game: Game) => {
   }
   applyRhythmSpeed(game, c.vel);
   // Fixed 30s in play regardless of speed or map position — the comet crosses,
-  // keeps drifting through the wrapped world, then warps out on the clock.
-  c.lifetime = COMET_WARP_LIFETIME;
+  // keeps drifting through the wrapped world, then bursts apart on the clock.
+  c.lifetime = COMET_LIFETIME;
   stageEntrance(game, c);
   game.comets.push(c);
   game.sound.startCometShimmer(c, audiblePos(c));
@@ -752,6 +760,14 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
       : 0;
     const rollBurstGem = burstGemChance > 0 && rng() < burstGemChance;
     if (rollBurstGem) { slotKinds.push(rollBurstGemTier()); continue; }
+    // Metal chunk: rare across its introduction span (display 5-9), then a
+    // common obstacle from frequentWave on. Rolled before solid/gem so a chunk
+    // slot keeps its identity rather than being downgraded.
+    const metalChunkChance =
+      game.wave >= CFG.metalChunk.frequentWave ? CFG.metalChunk.frequentChance
+      : game.wave >= CFG.metalChunk.firstWave && game.wave <= CFG.metalChunk.lastEarlyWave ? CFG.metalChunk.perSpawnChance
+      : 0;
+    if (metalChunkChance > 0 && rng() < metalChunkChance) { slotKinds.push("metalChunk"); continue; }
     const isSolid = game.wave > CFG.solidCrystal.firstWave && rng() < CFG.solidCrystal.perSpawnChance;
     if (isSolid) { slotKinds.push("solidCrystal"); continue; }
     const isGem = game.wave > CFG.asteroidWithGem.firstWave && rng() < CFG.asteroidWithGem.perSpawnChance;
@@ -795,8 +811,8 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
   let normalLargeCount = 0;
   for (const kind of slotKinds) {
     if (kind === "normal") { normalLargeCount++; continue; }
-    // Solid crystal is a medium-sized gem; the other specials spawn large.
-    specialSpawns.push({ kind, size: kind === "solidCrystal" ? "medium" : "large" });
+    // Solid crystal + metal chunk are medium-sized; the other specials spawn large.
+    specialSpawns.push({ kind, size: kind === "solidCrystal" || kind === "metalChunk" ? "medium" : "large" });
   }
   // Huge rocks only start appearing at display wave 3 (internal wave 4).
   const allowHuge = displayWave(game.wave) >= 3;

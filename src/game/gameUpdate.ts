@@ -46,7 +46,7 @@ import { resetStreak, streakWindowClosed } from "./streakBurst";
 import { updateWormholes, spawnWormhole } from "./wormhole";
 import { tickWaveSkip, collapseSkipPortals } from "./waveSkip";
 import { tickPendingRhythmBonuses, flushPendingRhythmBonuses } from "./rhythmBonus";
-import { emitExplosion } from "./particleBursts";
+import { emitExplosion, emitCometExplosion } from "./particleBursts";
 import { musicDtForFrame } from "./slowMo";
 import { hideScoreEntry, isScoreEntryBlockingEnter, showScoreEntry, tickLeaderboardKeyRepeat } from "./scoreEntry";
 import { showGameOverIntro } from "./gameOverIntro";
@@ -1097,7 +1097,7 @@ const tickBulletReticuleCrossings = (game: Game) => {
 //   Ship stays on wall-clock dt (updated earlier) so player reactions feel responsive.
 const tickWorldEntities = (game: Game, _dt: number, musicDt: number) => {
   for (const c of game.comets) c.update(musicDt, game.w, game.h);
-  spawnPendingWormholes(game, game.comets);
+  spawnPendingCometExplosions(game);
   pruneDeadComets(game);
   for (const a of game.asteroids) a.update(musicDt, game.w, game.h);
   // Torus fragments don't integrate their own position in update() — drive the
@@ -1189,6 +1189,22 @@ const spawnPendingWormholes = (game: Game, bodies: WarpingBody[]) => {
     spawnWormhole(
       game.wormholes, { x: e.warpStartX, y: e.warpStartY }, e.radius, e.warpHeading,
     );
+  }
+};
+
+// A comet/meteor that times out flags needsExplosion the frame it ends (the body
+// owns the clock; the Game owns particles + sound). Burst it apart in place with
+// the same celestial spray a player-killed one throws. A lone comet also gets the
+// softer "sad" death tone since nobody shot it — it just burned out; a meteor
+// shower stays silent here so its staggered flock doesn't ripple out a chorus of
+// sad tones (the shower had its own entrance sound). The flag is consumed once;
+// pruneDeadComets then drops the now-!alive body.
+const spawnPendingCometExplosions = (game: Game) => {
+  for (const c of game.comets) {
+    if (!c.needsExplosion) continue;
+    c.needsExplosion = false;
+    emitCometExplosion(game.particles, c);
+    if (!c.isMeteor) game.sound.play("cometDestroyedSad", 1, c.pos);
   }
 };
 

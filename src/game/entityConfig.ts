@@ -300,6 +300,26 @@ export const ENTITY_CONFIG = {
     },
   },
 
+  // Metal chunk — a dense derelict slab of hull plate. Medium-sized but
+  // extremely heavy (drifts in far slower than its band) and behind DR 8, so it
+  // shrugs off everything short of a drift-tier-2+ shot or the super laser. The
+  // killing hit shatters it into 4 slow metalShard pieces (combat stats in
+  // ENTITY_STATS). Rare across display-levels 5-9, then a common obstacle after
+  // the boss arc opens up.
+  metalChunk: {
+    firstWave: 6,
+    lastEarlyWave: 11,
+    // Rare per-rock roll across the introduction span (display 5-9).
+    perSpawnChance: 0.06,
+    // From this internal wave (display 11) the slab turns up much more often.
+    frequentWave: 12,
+    frequentChance: 0.2,
+    // Heavy mass: drifts in slower than its size band so the tough target reads.
+    spawnSpeedMul: 0.4,
+    // Fragments flung on the killing hit.
+    shardCount: 4,
+  },
+
   // Glass prison — appears from display-level 11 onward (internal wave 12+,
   // immediately after the boss fight). Fragile indigo crystal shell with
   // wraiths locked inside; the single killing hit shatters the shell and
@@ -524,6 +544,27 @@ export const ENTITY_STATS: Partial<Record<AsteroidKind, EntityStats>> = {
     hue: 46,
     damageReduction: 4,
     outlineSamples: 8,
+  },
+
+  // Dense tungsten block. Both tiers ride the same DR 8 (only a drift-tier-2+
+  // shot or the super laser bites through); a cold steel hue. The parent is a
+  // medium ingot; each shard it shatters into keeps the armour but drops to 1
+  // HP. High sample count so computeOutline's superellipse traces a clean
+  // rounded-cube silhouette rather than a lumpy polygon.
+  metalChunk: {
+    hp: 8,
+    score: 500,
+    radius: 30,
+    hue: 210,
+    damageReduction: 8,
+    outlineSamples: 16,
+  },
+  metalShard: {
+    hp: 1,
+    score: 250,
+    hue: 210,
+    damageReduction: 8,
+    outlineSamples: 16,
   },
 
   glassPrison: {

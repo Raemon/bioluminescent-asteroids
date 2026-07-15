@@ -118,6 +118,12 @@ export class Ship {
   // Quarter-note beat index when the refire lockout from the last shot ends;
   //   charge presses before it are rejected. See LASER_REFIRE_BEATS.
   laserCooldownEndBeat = 0;
+  // Whether the laser cleared its refire lockout as of last tick — used to fire
+  //   laserReadyFlash exactly once on the locked→ready edge. See tickLaserShot.
+  laserWasReady = true;
+  // 0→1 pop that fires the instant the refire lockout releases and decays to 0,
+  //   driving the reticule's "armed" ready burst. Cosmetic only.
+  laserReadyFlash = 0;
 
   // Super-laser charge — gained by flying the ship through the flickering energy
   //   thread strung between a broken torus ring's orbiting fragments. While

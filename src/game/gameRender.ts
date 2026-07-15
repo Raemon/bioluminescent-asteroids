@@ -148,9 +148,9 @@ const paintEntityLayers = (game: Game, focusedTarget: ReticuleTarget | null) => 
         paintBeatFlash(ctx, a.pos, a.radius, beatFlash);
       }
     }
-    // warping-out comets/aliens skip the beat-flash — a full-size flash disc
-    // would detach from the shrinking body diving down the portal throat.
-    for (const c of game.comets) if (c.warpT === null && !c.entering) paintBeatFlash(ctx, c.pos, c.radius, beatFlash);
+    // warping-out aliens skip the beat-flash — a full-size flash disc would
+    // detach from the shrinking body diving down the portal throat.
+    for (const c of game.comets) if (!c.entering) paintBeatFlash(ctx, c.pos, c.radius, beatFlash);
     for (const al of game.aliens) if (al.warpT === null && !al.entering) paintBeatFlash(ctx, al.pos, al.radius, beatFlash);
     for (const c of game.canisters) paintBeatFlash(ctx, c.pos, c.radius, beatFlash);
     for (const g of game.gems) if (!g.entering) paintBeatFlash(ctx, g.pos, g.radius, beatFlash);
@@ -229,8 +229,9 @@ export const targetsForReticule = (game: Game) => [
   // bullets through, so the reticule shouldn't promise a hit on them.
   // (Entering spawns ARE included: they're live toroidal targets.)
   ...game.asteroids.filter((a) => !(a.isBoss() && a.bossPhase === "dormant") && !a.isPhasedOut()),
-  // Warping-out comets/aliens are intangible and leaving — don't lock them.
-  ...game.comets.filter((c) => c.warpT === null),
+  // Warping-out aliens are intangible and leaving — don't lock them. Comets are
+  // tangible their whole life (they burst apart in place, no warp), so all count.
+  ...game.comets,
   ...game.aliens.filter((a) => a.warpT === null),
   ...game.canisters,
   // Moving gems (the fan a burst gold asteroid throws off) are real rhythm

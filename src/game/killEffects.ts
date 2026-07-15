@@ -1,5 +1,5 @@
 import type { Game } from "../Game";
-import { Asteroid, isBurstGem, isPhasedKind } from "../Asteroid";
+import { Asteroid, isBurstGem, isMetalHull, isPhasedKind } from "../Asteroid";
 import { Alien } from "../Alien";
 import { AlienBullet } from "../AlienBullet";
 import { Comet } from "../Comet";
@@ -65,6 +65,7 @@ const asteroidBucket = (a: Asteroid): KillBucket => {
   if (a.kind === "asteroidWithGem") return "asteroidWithGem";
   if (isBurstGem(a.kind)) return "burstGem";
   if (a.kind === "solidCrystal" || a.kind === "solidCrystalSmall") return "solidCrystal";
+  if (isMetalHull(a.kind)) return "metalChunk";
   if (a.kind === "glassPrison") return "glassPrison";
   if (a.kind === "wraith") return "wraith";
   return `asteroid_${a.size}`;
@@ -299,6 +300,13 @@ const finishAsteroidKillCore = (
     combo: game.beatCombo,
     onBeat: isOnBeatHit,
     awayFrom: game.ship.pos,
+    // metalChunk lays two shards on the ship's actual prong-bullet rays (see
+    // split). Those rays bend with ship velocity (bullets inherit 0.4·vel), so
+    // it needs the live heading, velocity, and bullet speed to place the pair
+    // where a prong shot fired right now would truly thread both.
+    shipHeading: game.ship.heading,
+    shipVel: game.ship.vel,
+    bulletSpeed: game.ship.bulletSpeed,
   });
   // sibling fragments share one beat-claim set so the two pieces target
   //   *different* beats — otherwise the player can only combo one of them

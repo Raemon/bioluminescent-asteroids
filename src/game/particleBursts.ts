@@ -137,11 +137,15 @@ export const emitCrackParticles = (particles: ParticleSystem, a: Asteroid, onBea
   }
 };
 
-// sparks + slow dust cloud reads "celestial" — distinguishes comet kill from rock kill.
+// sparks + slow dust cloud reads "celestial" — distinguishes comet kill from rock
+// kill. Burst counts + spread scale with the body (a scale-0.45 meteor throws a
+// proportionally smaller gout than a full comet), so a whole shower detonating at
+// once doesn't dump a full-comet spray per member.
 export const emitCometExplosion = (particles: ParticleSystem, c: Comet) => {
+  const s = c.scale;
   emitBurst(particles, {
-    pos: c.pos, count: 90,
-    speedRange: [160, 520],
+    pos: c.pos, count: Math.round(90 * s),
+    speedRange: [160 * s, 520 * s],
     lifeRange: [0.6, 1.6], maxLife: 1.6,
     sizeRange: [1.4, 2.8],
     hue: c.hue, hueSpread: [-15, 25],
@@ -149,8 +153,8 @@ export const emitCometExplosion = (particles: ParticleSystem, c: Comet) => {
     angleMode: "random", angleJitter: 0,
   });
   emitBurst(particles, {
-    pos: c.pos, count: 40,
-    speedRange: [40, 180],
+    pos: c.pos, count: Math.round(40 * s),
+    speedRange: [40 * s, 180 * s],
     lifeRange: [1.5, 3.0], maxLife: 3.0,
     sizeRange: [2.0, 3.4],
     hue: c.hue, hueSpread: [-40, 40],

@@ -26,13 +26,15 @@ const queueRhythmBonus = (game: Game, pos: Vec, order: number) => {
 const STREAK_ORBIT_BEATS = 4;
 
 const STREAK_BASE_POINTS = 25;
+const STREAK_BASE_POINTS_LASER = 5;
 
 // Every counted streak shot pays escalating points on the spot, flashed as a
 //   small "Streak +N" tag the way the Bassteroid resonance bonuses are. Flat
 //   score — no rhythm multiply.
 const awardStreakShot = (game: Game, hitPos: Vec) => {
   if (game.streakShots > game.bestStreakThisWave) game.bestStreakThisWave = game.streakShots;
-  const points = STREAK_BASE_POINTS * 2 ** (game.streakShots - 1);
+  const base = game.ship.lasershotActive ? STREAK_BASE_POINTS_LASER : STREAK_BASE_POINTS;
+  const points = base * 2 ** (game.streakShots - 1);
   game.score += points;
   flashScoreGain(game, points);
   checkBonusLife(game);

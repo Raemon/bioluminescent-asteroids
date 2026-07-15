@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 27;
+export const REPLAY_FORMAT_VERSION = 30;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -94,6 +94,18 @@ export const REPLAY_FORMAT_VERSION = 27;
 //   deflects what the bare cut face lets through, resolved at the impact
 //   point), so a v26 recording's post-break boss fight re-sims with different
 //   deflections, damage, and knockback.
+// v28 halves the lasershot refire lockout (LASER_REFIRE_BEATS 4 → 2), so a v27
+//   recording whose charge presses landed in the now-unlocked beats re-sims
+//   with those shots firing instead of being rejected.
+// v29 makes a timed-out comet burst apart in place instead of diving through a
+//   departure portal: it leaves game.comets the instant it hits its lifetime
+//   (was ~0.68s later, after the warp-out) and stays a tangible target through
+//   that final window (was intangible mid-warp), so a v28 recording that shot
+//   or grazed a comet near end-of-life re-sims with a different hit outcome and
+//   comet-count timing.
+// v30 adds the metalChunk special rock (a per-slot spawn roll from internal
+//   wave 6 on, before the solid/gem rolls), so a v29 recording of any wave ≥ 6
+//   consumes a different rng draw sequence and re-sims into a different field.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat
