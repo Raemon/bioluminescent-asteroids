@@ -4138,12 +4138,12 @@ export class Sound {
   // The bonus-life graph, built into `ctx` ending at `dest`, time origin 0.
   // Shared by the offline bake (see bakeSound's bonusLife case). This is
   // buildCometDestroyedGraph transposed into GRACE: same crack → sub → long
-  // 15-second tail → low drone architecture (so it inherits the comet-hit's
-  // huge, resonating, echoing-through-the-void character), but
+  // tail → low drone architecture (so it inherits the comet-hit's huge,
+  // resonating, echoing-through-the-void character), but
   //   • the crack is much softer and shorter — a gentle strike, not an explosion;
-  //   • the wreckage noise-band is replaced by a swelling C-MAJOR chord of
-  //     detuned "choir" voices that bloom UP and ring for the full tail — the
-  //     angelic/resonant part;
+  //   • the wreckage noise-band is replaced by a C-MAJOR chord of detuned
+  //     "choir" voices that enter one by one from the root upward — an
+  //     audible bloom UP — and ring for the full tail;
   //   • the sub and low drone land on a MAJOR root (C) instead of the comet's
   //     ambiguous G1, so the whole thing sits consonant and radiant.
   private buildBonusLifeGraph(ctx: BaseAudioContext, dest: AudioNode) {
@@ -4167,7 +4167,7 @@ export class Sound {
     chiffFilter.frequency.setValueAtTime(3200, 0);
     chiffFilter.frequency.exponentialRampToValueAtTime(900, 0.16);
     const chiffGain = ctx.createGain();
-    chiffGain.gain.setValueAtTime(0.16, 0);
+    chiffGain.gain.setValueAtTime(0.14, 0);
     chiffGain.gain.exponentialRampToValueAtTime(0.0001, 0.3);
     chiff.connect(chiffFilter);
     chiffFilter.connect(chiffGain);
@@ -4175,81 +4175,149 @@ export class Sound {
     chiff.start(0);
     chiff.stop(0.34);
 
-    // ── Sub swell: a sine that RISES an octave onto a C root (C2 → C3) and
-    // holds, giving the strike warm physical weight that resolves upward
-    // instead of the comet-kill's downward collapse into rumble.
+    // ── Glass ping: a soft celesta-like strike at the flash instant — the
+    // choir blooms in slowly, so this gives the milestone a clear, pitched
+    // anchor right at t=0. Voiced on the halo's note an octave-pair up, so
+    // the ping pre-echoes the light that later arrives sustained.
+    const PING = [
+      { hz: 1046.5, peak: 0.2, decay: 0.8 }, // C6
+      { hz: 2093.0, peak: 0.06, decay: 0.35 }, // C7
+    ];
+    for (const p of PING) {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = p.hz;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, 0);
+      g.gain.exponentialRampToValueAtTime(p.peak, 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, p.decay);
+      osc.connect(g);
+      g.connect(dest);
+      osc.start(0);
+      osc.stop(p.decay + 0.05);
+    }
+
+    // ── Sub swell: a sine that RISES an octave onto the C root (C1 → C2).
+    // The attack is a swell rather than a thump so the low end blooms with
+    // the choir instead of front-loading the whole sound at the strike.
     const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.setValueAtTime(32.7, 0); // C1
-    sub.frequency.exponentialRampToValueAtTime(65.4, 0.6); // → C2
+    sub.frequency.exponentialRampToValueAtTime(65.41, 0.5); // → C2
     const subGain = ctx.createGain();
     subGain.gain.setValueAtTime(0.0001, 0);
-    subGain.gain.exponentialRampToValueAtTime(0.5, 0.04);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, 2.2);
+    subGain.gain.exponentialRampToValueAtTime(0.42, 0.22);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, 2.6);
     sub.connect(subGain);
     subGain.connect(dest);
     sub.start(0);
-    sub.stop(2.3);
+    sub.stop(2.7);
 
-    // ── Choir: the resonating angelic body. A C-MAJOR chord (C4 E4 G4 C5 E5 G5)
-    // of triangle voices, each doubled by a pair detuned ±7 cents so it reads
-    // as many singers rather than one synth. A slow ~0.35Hz LFO on a shared
-    // lowpass opens the timbre brighter over the first few seconds (the "aah"
-    // blooming), then the whole chord fades across the full 15s tail so it
-    // rings and echoes out through the void.
-    const CHORD_HZ = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99]; // C4 E4 G4 C5 E5 G5
-    // Upper voices are quieter so the chord is rooted, not top-heavy.
-    const voicePeak = [0.16, 0.13, 0.12, 0.10, 0.08, 0.07];
+    // ── Choir: the resonating angelic body. An open C-major voicing (C4 G4
+    // C5 E5 G5 — no low third, so it reads luminous rather than thick) of
+    // triangle voices entering one by one from the root upward, each with its
+    // own soft attack: the chord audibly blooms UP like a strummed harp.
+    // Each voice is a trio — a center oscillator plus a pair split by a fixed
+    // beat RATE (not fixed cents, which made the top voices flutter): every
+    // voice shimmers at the same slow ensemble speed, and the center tone
+    // keeps the shimmer from ever dipping to a null. A shared lowpass opens
+    // brighter through the bloom (the "aah" forming), then slowly closes as
+    // the tail rings out — and the tail's ring is shallow for most of its
+    // length so the echo genuinely lasts, dropping to silence only at the end.
+    const CHORD_HZ = [261.63, 392.00, 523.25, 659.25, 783.99]; // C4 G4 C5 E5 G5
+    // Lower voices are louder so the chord is rooted, not top-heavy.
+    const voicePeak = [0.17, 0.14, 0.12, 0.10, 0.09];
     const choirLp = ctx.createBiquadFilter();
     choirLp.type = "lowpass";
     choirLp.Q.value = 0.6;
-    // Timbre blooms open (900 → 2600Hz over 4s) then slowly closes as it fades.
-    choirLp.frequency.setValueAtTime(900, 0);
-    choirLp.frequency.exponentialRampToValueAtTime(2600, 4.0);
-    choirLp.frequency.exponentialRampToValueAtTime(700, TAIL);
+    choirLp.frequency.setValueAtTime(700, 0);
+    choirLp.frequency.exponentialRampToValueAtTime(3000, 3.5);
+    choirLp.frequency.exponentialRampToValueAtTime(850, TAIL);
     const choirGain = ctx.createGain();
-    // A slow swell in (~0.5s, not a percussive hit) then a long exponential
-    // ring-out to silence exactly at TAIL — the echoing cathedral tail.
     choirGain.gain.setValueAtTime(0.0001, 0);
-    choirGain.gain.exponentialRampToValueAtTime(0.5, 0.5);
-    choirGain.gain.setValueAtTime(0.5, 1.2);
-    choirGain.gain.exponentialRampToValueAtTime(0.16, 5.0);
+    choirGain.gain.exponentialRampToValueAtTime(0.55, 0.9);
+    choirGain.gain.setValueAtTime(0.55, 1.6);
+    choirGain.gain.exponentialRampToValueAtTime(0.18, 6.0);
+    choirGain.gain.exponentialRampToValueAtTime(0.0045, 13.5);
     choirGain.gain.exponentialRampToValueAtTime(0.0001, TAIL);
     choirLp.connect(choirGain);
     choirGain.connect(dest);
     for (let i = 0; i < CHORD_HZ.length; i++) {
+      const at = i * 0.12;
+      const beatHz = 1.5 + i * 0.15;
       const vGain = ctx.createGain();
-      vGain.gain.value = voicePeak[i];
+      vGain.gain.setValueAtTime(0.0001, at);
+      vGain.gain.exponentialRampToValueAtTime(voicePeak[i], at + 0.4);
       vGain.connect(choirLp);
-      for (const det of [-7, 7]) {
+      for (const offset of [-beatHz / 2, 0, beatHz / 2]) {
         const osc = ctx.createOscillator();
         osc.type = "triangle";
-        osc.frequency.value = CHORD_HZ[i];
-        osc.detune.value = det;
+        osc.frequency.value = CHORD_HZ[i] + offset;
         osc.connect(vGain);
-        osc.start(0);
+        osc.start(at);
         osc.stop(TAIL + 0.2);
       }
     }
 
-    // ── Low drone under the choir: a sawtooth pair on a C root (C1, wide
-    // detune for slow beating) humming the whole tail — the comet-kill's
-    // ghost-drone, but tuned to the major root so it grounds the chord instead
-    // of darkening it.
+    // ── Halo: a pair of pure sines two octaves up (C6 + G6) that swell in
+    // slowly AFTER the chord has formed and hover above it — the radiant
+    // "light arriving" layer the triangle chord can't reach on its own.
+    const HALO_HZ = [1046.5, 1567.98]; // C6 G6
+    const haloPeak = [0.05, 0.024];
+    for (let i = 0; i < HALO_HZ.length; i++) {
+      const hGain = ctx.createGain();
+      hGain.gain.setValueAtTime(0.0001, 0.6);
+      hGain.gain.exponentialRampToValueAtTime(haloPeak[i], 2.4);
+      hGain.gain.exponentialRampToValueAtTime(0.0001, 12.0);
+      hGain.connect(dest);
+      for (const offset of [-0.6, 0.6]) {
+        const osc = ctx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.value = HALO_HZ[i] + offset;
+        osc.connect(hGain);
+        osc.start(0.6);
+        osc.stop(12.1);
+      }
+    }
+
+    // ── Air: a quiet band of breath-noise above the chord — the "voices in a
+    // big space" sheen. Swells with the halo and clears well before the tail
+    // ends so the ring-out is pure tone.
+    const air = ctx.createBufferSource();
+    air.buffer = noiseFor(9.0);
+    const airBp = ctx.createBiquadFilter();
+    airBp.type = "bandpass";
+    airBp.frequency.value = 2600;
+    airBp.Q.value = 1.1;
+    const airGain = ctx.createGain();
+    airGain.gain.setValueAtTime(0.0001, 0);
+    airGain.gain.exponentialRampToValueAtTime(0.05, 1.8);
+    airGain.gain.exponentialRampToValueAtTime(0.0001, 9.0);
+    air.connect(airBp);
+    airBp.connect(airGain);
+    airGain.connect(dest);
+    air.start(0);
+    air.stop(9.1);
+
+    // ── Low drone under the choir: a sawtooth pair on the C root an octave
+    // above the comet-kill's floor (C2 — the sub's landing note), slow-beating
+    // and humming the whole tail. High enough to sound on small speakers and
+    // stay out of the rumble zone, low enough to ground the chord.
     const droneRoot = ctx.createOscillator();
     const droneOct = ctx.createOscillator();
     droneRoot.type = "sawtooth";
     droneOct.type = "sawtooth";
-    droneRoot.frequency.value = 32.7; // C1 — a true major-root floor
-    droneOct.frequency.value = 32.7 * 1.012;
+    droneRoot.frequency.value = 65.41; // C2
+    droneOct.frequency.value = 65.41 * 1.006;
     const droneLp = ctx.createBiquadFilter();
     droneLp.type = "lowpass";
     droneLp.Q.value = 0.8;
-    droneLp.frequency.setValueAtTime(500, 0);
-    droneLp.frequency.exponentialRampToValueAtTime(110, TAIL);
+    droneLp.frequency.setValueAtTime(420, 0);
+    droneLp.frequency.exponentialRampToValueAtTime(100, TAIL);
     const droneGain = ctx.createGain();
     droneGain.gain.setValueAtTime(0.0001, 0);
-    droneGain.gain.exponentialRampToValueAtTime(0.18, 0.5);
+    droneGain.gain.exponentialRampToValueAtTime(0.13, 0.6);
+    droneGain.gain.exponentialRampToValueAtTime(0.008, 13.5);
     droneGain.gain.exponentialRampToValueAtTime(0.0001, TAIL);
     droneRoot.connect(droneLp);
     droneOct.connect(droneLp);
