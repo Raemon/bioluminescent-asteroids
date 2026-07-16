@@ -11,8 +11,8 @@ export const BONUS_LIFE_FLASH_DECAY = 0.6;
 // Awards a free life at FIRST_BONUS_LIFE_SCORE points; each threshold after
 //   that costs double the last. Loops in case a single score gain crosses
 //   more than one threshold (e.g. a fat on-beat multiplier).
-//   The milestone lands as a rite: an angelic open-fifth bong, the whole hull
-//   flashing bright white, and a medium white wash across the screen.
+//   The milestone lands as a rite: a swelling major-key comet choir, the whole
+//   hull flashing bright white, and a medium white wash across the screen.
 export const checkBonusLife = (game: Game) => {
   while (game.score >= game.nextBonusLifeScore) {
     game.lives += 1;

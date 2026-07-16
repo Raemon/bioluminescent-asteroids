@@ -1208,7 +1208,9 @@ const spawnPendingCometExplosions = (game: Game) => {
     if (!c.needsExplosion) continue;
     c.needsExplosion = false;
     emitCometExplosion(game.particles, c);
-    if (!c.isMeteor) game.sound.play("cometDestroyedSad", 1, c.pos);
+    // No pos — see killEffects: the baked comet-death buffer must play centered
+    // at full volume, matching the old live graph's dead-center routing.
+    if (!c.isMeteor) game.sound.play("cometDestroyedSad", 1);
   }
 };
 

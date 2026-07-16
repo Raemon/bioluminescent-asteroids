@@ -441,7 +441,10 @@ export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: bool
   }
   game.shake = Math.min(game.shake + 0.6, 1.6);
   const deathSound = isOnBeatHit ? "cometDestroyed" : "cometDestroyedSad";
-  game.sound.play(deathSound, 1, c.pos);
+  // No pos: these are big centered "event" sounds — the live graph always
+  // played them dead-center at full volume, so the baked buffer must too (a
+  // pos would pan + distance-attenuate them via playBaked's spatial splice).
+  game.sound.play(deathSound, 1);
   game.sound.stopCometShimmer(c);
   emitCometExplosion(game.particles, c);
   const snap = snapshotCometKill(c, deathSound, scoreEarned);

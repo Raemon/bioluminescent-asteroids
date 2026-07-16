@@ -65,7 +65,7 @@ export const OBJECTS: GameObject[] = [
     label: "ship",
     about: "the player",
     actions: [
-      { verb: "earns a bonus life (angelic bong)", sound: "bonusLife", trigger: beat(8) },
+      { verb: "earns a bonus life (major-key comet choir)", sound: "bonusLife", trigger: beat(8) },
       { verb: "dies", sound: "death", trigger: beat(8), animation: "ship-death" },
     ],
   },

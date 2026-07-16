@@ -792,6 +792,10 @@ export class Sound {
       ["bassPluck", standardPitches],
       ["bassSnap", standardPitches],
       ["cometNote", cometIdxs],
+      // Comet-hit death sounds + the major-key bonus-life bong: long-tailed
+      // pure-WebAudio one-shots, one committed mp3 each (pitchRatio unused).
+      ["cometDestroyed", [1]],
+      ["cometDestroyedSad", [1]],
       // Hold-to-charge laser bed: one committed loop per tier (pitchRatio=tier).
       ["chargeBed", [0, 1, 2, 3, 4]],
       // Laser-shot thunderclap: one committed one-shot per tier (pitchRatio=tier).
@@ -1082,6 +1086,15 @@ export class Sound {
   // at the head of the render and gapless-trim differences across decoders.
   private static readonly LOOP_BAKE_PAD = 0.25;
 
+  // Render length (seconds) for the pure-WebAudio comet/bonus-life bakes. Each
+  // must cover its graph's full stop time (crack + sub + tail/drone) plus the
+  // stop-pad and a hair of settle so the exponential fades reach true silence.
+  private static readonly COMET_BAKE_LEN: Record<string, number> = {
+    cometDestroyed: 15.4,
+    cometDestroyedSad: 6.4,
+    bonusLife: 15.4,
+  };
+
   // Snap a periodic rate to a whole number of cycles per loopLen. EVERY
   // oscillator and LFO baked into a loop must land exactly back on its
   // starting phase at the seam or the buffer clicks when it repeats — the
@@ -1274,6 +1287,22 @@ export class Sound {
       this.buildWarbleDroneGraph(offline, offline.destination, phaseState);
       return offline.startRendering();
     }
+    // cometDestroyed / cometDestroyedSad / bonusLife are pure-WebAudio one-shots
+    // (no Tone, no reverb bus) that were formerly played LIVE straight into
+    // this.master. The live master applied a compressor + brick-wall limiter on
+    // playback; baked buffers skip that (they play through bakedSum straight to
+    // destination), so we bake the same master chain into the render here to
+    // keep the baked clip bit-for-bit what the live path produced. Their graphs
+    // run long (6–15s tails) — see COMET_BAKE_LEN.
+    if (name === "cometDestroyed" || name === "cometDestroyedSad" || name === "bonusLife") {
+      const len = Math.ceil(sr * Sound.COMET_BAKE_LEN[name]);
+      const offline = new OACearly(1, len, sr);
+      const masterIn = this.buildBakedMasterChain(offline);
+      if (name === "cometDestroyed") this.buildCometDestroyedGraph(offline, masterIn);
+      else if (name === "cometDestroyedSad") this.buildCometDestroyedSadGraph(offline, masterIn);
+      else this.buildBonusLifeGraph(offline, masterIn);
+      return offline.startRendering();
+    }
 
     const Tone = await loadTone();
     // Total duration to render. Longer than the dry note so the reverb tail
@@ -1290,9 +1319,6 @@ export class Sound {
       // carry trailing silence, which VBR mp3 compresses to almost nothing.
       drainChime: 7.0,
       powerup: 1.6,
-      // bonusLife: comet-impact crack + sub thump into a major-chord bloom
-      // with a long shimmering release + reverb tail.
-      bonusLife: 8.0,
       waveClear: 2.4,
       // cometNote: longest decay (downbeat "1n" + 3.4s release) is ~4.4s + reverb tail.
       cometNote: 5.0,
@@ -1490,72 +1516,6 @@ export class Sound {
         const synth = wire(new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sine" }, envelope: { attack: 0.005, decay: 0.2, sustain: 0.1, release: 0.45 }, volume: -10 }), 0.5, 0.7);
         const notes = ["C5", "E5", "G5", "C6"];
         for (let i = 0; i < notes.length; i++) synth.triggerAttackRelease(notes[i], "16n", i * 0.06, 0.7);
-        break;
-      }
-      case "bonusLife": {
-        // Earning a free life should land like a COMET IMPACT reversed into
-        // grace — the same physical heft as the comet-hit (a hard crack, a
-        // chest-thumping sub, a long blooming tail) but voiced in a bright
-        // MAJOR key so it reads as triumphant/angelic rather than destructive.
-        // Where the comet-kill collapses downward into wreckage, this one
-        // OPENS UPWARD: the tail is a major triad that blooms brighter and a
-        // high fifth that rises into light. Built through the Tone reverb bus
-        // (unlike the live comet graph) so it bakes deterministically.
-
-        // ── Impact crack: a broadband noise burst with a fast down-sweep, the
-        // "something huge just happened" transient. Brighter and shorter than
-        // the comet's so it reads as a struck chime-strike, not an explosion.
-        const crack = new Tone.Noise("white").start(0);
-        const crackFilter = new Tone.Filter({ type: "lowpass", Q: 0.8, frequency: 9000 });
-        crackFilter.frequency.exponentialRampToValueAtTime(2200, 0.14);
-        const crackGain = new Tone.Gain(0.0001);
-        crackGain.gain.setValueAtTime(0.5, 0);
-        crackGain.gain.exponentialRampToValueAtTime(0.0001, 0.3);
-        crack.connect(crackFilter); crackFilter.connect(crackGain);
-        crackGain.connect(toneMaster); crackGain.connect(reverbSend);
-        crack.stop(0.35);
-
-        // ── Sub thump: a short sine drop that gives the strike physical weight
-        // in the chest — the comet-kill's sub, but landing on a musical C2 root
-        // instead of sweeping down into a rumble, so the low end sits in-key.
-        const sub = new Tone.Oscillator({ type: "sine", frequency: 130.8 }).start(0); // C3
-        sub.frequency.exponentialRampToValueAtTime(65.4, 0.5); // → C2, a settling octave drop
-        const subEnv = new Tone.Gain(0.0001);
-        subEnv.gain.setValueAtTime(0.0001, 0);
-        subEnv.gain.exponentialRampToValueAtTime(0.5, 0.012);
-        subEnv.gain.exponentialRampToValueAtTime(0.0001, 1.1);
-        sub.connect(subEnv); subEnv.connect(toneMaster);
-        sub.stop(1.2);
-
-        // ── The major bell cluster: a struck cathedral bell voiced as a full
-        // C-MAJOR triad across three octaves (C4 E4 G4 C5 E5) — the third is
-        // what makes it unambiguously major and radiant. Same FM-bell palette
-        // as the comet-hit cometNote but with a long shimmering release and a
-        // heavy reverb wet so the tail blooms into the room like a chime struck
-        // in a great hall.
-        const bell = wire(new Tone.PolySynth(Tone.FMSynth, {
-          harmonicity: 2.0,
-          modulationIndex: 3.5,
-          oscillator: { type: "sine" },
-          modulation: { type: "sine" },
-          envelope: { attack: 0.006, decay: 1.6, sustain: 0.2, release: 4.2 },
-          modulationEnvelope: { attack: 0.005, decay: 0.8, sustain: 0.05, release: 1.6 },
-          volume: -10,
-        }), 0.35, 1.0);
-        bell.triggerAttackRelease(["C4", "E4", "G4", "C5", "E5"], "1n", 0, 0.8);
-        // A glinting high major-third (E6) rises in a hair later so the strike
-        // "opens up" into shimmer rather than landing as one flat block — the
-        // upward answer to the comet-kill's downward collapse.
-        bell.triggerAttackRelease("G5", "2n", 0.04, 0.42);
-        bell.triggerAttackRelease("E6", "2n", 0.09, 0.32);
-        // Airy top partial (C7) — the halo of light over the bell, very soft
-        // and reverb-drenched so it reads as a glow, not a pitched note.
-        const shimmer = wire(new Tone.Synth({
-          oscillator: { type: "sine" },
-          envelope: { attack: 0.02, decay: 1.0, sustain: 0.06, release: 2.6 },
-          volume: -22,
-        }), 0.2, 1.0);
-        shimmer.triggerAttackRelease("C7", "2n", 0.02, 0.5);
         break;
       }
       case "waveClear": {
@@ -3920,232 +3880,385 @@ export class Sound {
     this.cometShimmers.delete(key);
   }
 
-  // Big explosive-into-quiet death sound for a player-destroyed comet.
-  // Begins with a sharp white-noise crack + low sub-thump (the actual
-  // explosion impact) and resolves into a long noise + sub drone that
-  // fades out over 15 seconds — the wreckage echoing through the void.
-  // Played on top of (and louder than) the comet's own drone, which
-  // continues its normal ~2s fade-out via stopCometShimmer.
+  // Big explosive-into-quiet death sound for an on-beat player-destroyed comet.
+  // Plays on top of (and louder than) the comet's own drone, which continues
+  // its normal ~2s fade-out via stopCometShimmer. Pre-baked — see
+  // buildCometDestroyedGraph for the actual synthesis.
   playCometDestroyed() {
-    if (!this.enabled) return;
-    this.ensureContext();
-    if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.playBaked("cometDestroyed", 1);
+  }
+
+  // Build a compressor → brick-wall limiter into an offline render context,
+  // matching the LIVE master chain (see buildMixGraph). Returns the chain's
+  // input node — a raw one-shot graph connects to it instead of straight to
+  // destination so the baked buffer contains the same dynamics the live path
+  // used to apply on playback (baked buffers bypass the runtime master chain).
+  private buildBakedMasterChain(ctx: BaseAudioContext): AudioNode {
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -18;
+    compressor.ratio.value = 3;
+    compressor.attack.value = 0.01;
+    compressor.release.value = 0.18;
+    compressor.knee.value = 12;
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -1;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.01;
+    limiter.knee.value = 0;
+    compressor.connect(limiter);
+    limiter.connect(ctx.destination);
+    return compressor;
+  }
+
+  // The comet-hit graph, built into `ctx` ending at `dest`, with time origin 0.
+  // Shared by the offline bake (see bakeSound's cometDestroyed case) — the live
+  // playCometDestroyed just plays the resulting baked buffer. Self-contained
+  // (generates its own noise) so it renders identically in an OfflineAudioContext.
+  // Begins with a sharp white-noise crack + low sub-thump (the explosion impact)
+  // and resolves into a long noise + sub drone that fades out over 15 seconds —
+  // the wreckage echoing through the void.
+  private buildCometDestroyedGraph(ctx: BaseAudioContext, dest: AudioNode) {
     const TAIL = 15.0;
+    const noiseFor = (dur: number): AudioBuffer => {
+      const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      return buf;
+    };
 
     // ── Initial crack: short broadband noise burst with a fast HP→LP
     // sweep so it reads as "explosion now, then debris".
-    const crackBuf = this.makeNoiseBuffer(0.4);
-    if (crackBuf) {
-      const crack = this.ctx.createBufferSource();
-      crack.buffer = crackBuf;
-      const crackFilter = this.ctx.createBiquadFilter();
-      crackFilter.type = "lowpass";
-      crackFilter.Q.value = 0.9;
-      crackFilter.frequency.setValueAtTime(8000, t);
-      crackFilter.frequency.exponentialRampToValueAtTime(1400, t + 0.18);
-      const crackGain = this.ctx.createGain();
-      crackGain.gain.setValueAtTime(0.85, t);
-      crackGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-      crack.connect(crackFilter);
-      crackFilter.connect(crackGain);
-      crackGain.connect(this.master);
-      crack.start(t);
-      crack.stop(t + 0.4);
-    }
+    const crack = ctx.createBufferSource();
+    crack.buffer = noiseFor(0.4);
+    const crackFilter = ctx.createBiquadFilter();
+    crackFilter.type = "lowpass";
+    crackFilter.Q.value = 0.9;
+    crackFilter.frequency.setValueAtTime(8000, 0);
+    crackFilter.frequency.exponentialRampToValueAtTime(1400, 0.18);
+    const crackGain = ctx.createGain();
+    crackGain.gain.setValueAtTime(0.85, 0);
+    crackGain.gain.exponentialRampToValueAtTime(0.0001, 0.35);
+    crack.connect(crackFilter);
+    crackFilter.connect(crackGain);
+    crackGain.connect(dest);
+    crack.start(0);
+    crack.stop(0.4);
 
     // ── Sub-bass thump: pitched sine sweep from ~120Hz down to ~30Hz.
     // The chest-thump under the crack — gives the explosion physical weight.
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
-    sub.frequency.setValueAtTime(140, t);
-    sub.frequency.exponentialRampToValueAtTime(30, t + 0.9);
-    const subGain = this.ctx.createGain();
-    subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(0.55, t + 0.01);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+    sub.frequency.setValueAtTime(140, 0);
+    sub.frequency.exponentialRampToValueAtTime(30, 0.9);
+    const subGain = ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, 0);
+    subGain.gain.exponentialRampToValueAtTime(0.55, 0.01);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, 1.4);
     sub.connect(subGain);
-    subGain.connect(this.master);
-    sub.start(t);
-    sub.stop(t + 1.5);
+    subGain.connect(dest);
+    sub.start(0);
+    sub.stop(1.5);
 
     // ── Long tail: looped pink noise through a slow-closing bandpass.
     // After the initial crack settles, the noise band drops from ~1200Hz
     // down to ~80Hz over the 15-second tail, so the "wreckage" gets
     // duller (more felt than heard) as it fades.
-    const tailBuf = this.makeNoiseBuffer(4);
-    if (tailBuf) {
-      const tail = this.ctx.createBufferSource();
-      tail.buffer = tailBuf;
-      tail.loop = true;
-
-      const tailFilter = this.ctx.createBiquadFilter();
-      tailFilter.type = "bandpass";
-      tailFilter.Q.value = 1.6;
-      tailFilter.frequency.setValueAtTime(2400, t);
-      tailFilter.frequency.exponentialRampToValueAtTime(1200, t + 0.6);
-      tailFilter.frequency.exponentialRampToValueAtTime(80, t + TAIL);
-
-      const tailGain = this.ctx.createGain();
-      // Big at the impact, then a long exponential fade to silence at
-      // exactly TAIL seconds. The shape uses two segments so the first
-      // ~2s of tail are still meaty before the long quiet fade takes over.
-      tailGain.gain.setValueAtTime(0.0001, t);
-      tailGain.gain.exponentialRampToValueAtTime(0.45, t + 0.05);
-      tailGain.gain.exponentialRampToValueAtTime(0.18, t + 2.0);
-      tailGain.gain.exponentialRampToValueAtTime(0.0001, t + TAIL);
-
-      tail.connect(tailFilter);
-      tailFilter.connect(tailGain);
-      tailGain.connect(this.master);
-      tail.start(t);
-      tail.stop(t + TAIL + 0.2);
-    }
+    const tail = ctx.createBufferSource();
+    tail.buffer = noiseFor(4);
+    tail.loop = true;
+    const tailFilter = ctx.createBiquadFilter();
+    tailFilter.type = "bandpass";
+    tailFilter.Q.value = 1.6;
+    tailFilter.frequency.setValueAtTime(2400, 0);
+    tailFilter.frequency.exponentialRampToValueAtTime(1200, 0.6);
+    tailFilter.frequency.exponentialRampToValueAtTime(80, TAIL);
+    const tailGain = ctx.createGain();
+    // Big at the impact, then a long exponential fade to silence at
+    // exactly TAIL seconds. The shape uses two segments so the first
+    // ~2s of tail are still meaty before the long quiet fade takes over.
+    tailGain.gain.setValueAtTime(0.0001, 0);
+    tailGain.gain.exponentialRampToValueAtTime(0.45, 0.05);
+    tailGain.gain.exponentialRampToValueAtTime(0.18, 2.0);
+    tailGain.gain.exponentialRampToValueAtTime(0.0001, TAIL);
+    tail.connect(tailFilter);
+    tailFilter.connect(tailGain);
+    tailGain.connect(dest);
+    tail.start(0);
+    tail.stop(TAIL + 0.2);
 
     // ── Sub-drone under the tail: low sawtooth that hums for the full
     // 15s. Gives the fade a tangible low-end presence so the player can
     // still feel the comet's ghost long after the visual is gone.
-    const droneRoot = this.ctx.createOscillator();
-    const droneOct = this.ctx.createOscillator();
+    const droneRoot = ctx.createOscillator();
+    const droneOct = ctx.createOscillator();
     droneRoot.type = "sawtooth";
     droneOct.type = "sawtooth";
     droneRoot.frequency.value = 49.0; // G1 — sits below the bassteroid bed
     droneOct.frequency.value = 49.0 * 1.013; // wide detune for slow beating
-    const droneLp = this.ctx.createBiquadFilter();
+    const droneLp = ctx.createBiquadFilter();
     droneLp.type = "lowpass";
     droneLp.Q.value = 0.8;
-    droneLp.frequency.setValueAtTime(600, t);
-    droneLp.frequency.exponentialRampToValueAtTime(120, t + TAIL);
-    const droneGain = this.ctx.createGain();
-    droneGain.gain.setValueAtTime(0.0001, t);
-    droneGain.gain.exponentialRampToValueAtTime(0.22, t + 0.4);
-    droneGain.gain.exponentialRampToValueAtTime(0.0001, t + TAIL);
+    droneLp.frequency.setValueAtTime(600, 0);
+    droneLp.frequency.exponentialRampToValueAtTime(120, TAIL);
+    const droneGain = ctx.createGain();
+    droneGain.gain.setValueAtTime(0.0001, 0);
+    droneGain.gain.exponentialRampToValueAtTime(0.22, 0.4);
+    droneGain.gain.exponentialRampToValueAtTime(0.0001, TAIL);
     droneRoot.connect(droneLp);
     droneOct.connect(droneLp);
     droneLp.connect(droneGain);
-    droneGain.connect(this.master);
-    droneRoot.start(t);
-    droneOct.start(t);
-    droneRoot.stop(t + TAIL + 0.2);
-    droneOct.stop(t + TAIL + 0.2);
+    droneGain.connect(dest);
+    droneRoot.start(0);
+    droneOct.start(0);
+    droneRoot.stop(TAIL + 0.2);
+    droneOct.stop(TAIL + 0.2);
   }
 
-  // Sadder sibling of playCometDestroyed for off-rhythm comet kills. Same
-  // overall shape (crack → sub thump → noise tail → low drone) but smaller,
-  // duller, and with a descending pitched sigh layered on top. The drone
-  // sits a minor-6th lower (Eb1 vs G1) for a darker root, the tail collapses
-  // in ~6s instead of 15s, and the sub thump ends on a falling minor-third
-  // sine sigh — the literal "aww" of wasting the comet's moment.
+  // Sadder sibling of playCometDestroyed for off-rhythm comet kills. Pre-baked
+  // — see buildCometDestroyedSadGraph for the synthesis.
   playCometDestroyedSad() {
-    if (!this.enabled) return;
-    this.ensureContext();
-    if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.playBaked("cometDestroyedSad", 1);
+  }
+
+  // The off-beat comet-hit graph, built into `ctx` ending at `dest`, time
+  // origin 0. Shared by the offline bake (see bakeSound's cometDestroyedSad
+  // case). Same overall shape as buildCometDestroyedGraph (crack → sub thump →
+  // noise tail → low drone) but smaller, duller, and with a descending pitched
+  // sigh layered on top. The drone sits a minor-6th lower (Eb1 vs G1) for a
+  // darker root, the tail collapses in ~6s instead of 15s, and the sub thump
+  // ends on a falling minor-third sine sigh — the "aww" of wasting the moment.
+  private buildCometDestroyedSadGraph(ctx: BaseAudioContext, dest: AudioNode) {
     const TAIL = 6.0;
+    const noiseFor = (dur: number): AudioBuffer => {
+      const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      return buf;
+    };
 
     // Softer crack — duller, quicker decay so it reads as a fizzle.
-    const crackBuf = this.makeNoiseBuffer(0.3);
-    if (crackBuf) {
-      const crack = this.ctx.createBufferSource();
-      crack.buffer = crackBuf;
-      const crackFilter = this.ctx.createBiquadFilter();
-      crackFilter.type = "lowpass";
-      crackFilter.Q.value = 0.9;
-      crackFilter.frequency.setValueAtTime(4500, t);
-      crackFilter.frequency.exponentialRampToValueAtTime(900, t + 0.18);
-      const crackGain = this.ctx.createGain();
-      crackGain.gain.setValueAtTime(0.55, t);
-      crackGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
-      crack.connect(crackFilter);
-      crackFilter.connect(crackGain);
-      crackGain.connect(this.master);
-      crack.start(t);
-      crack.stop(t + 0.32);
-    }
+    const crack = ctx.createBufferSource();
+    crack.buffer = noiseFor(0.3);
+    const crackFilter = ctx.createBiquadFilter();
+    crackFilter.type = "lowpass";
+    crackFilter.Q.value = 0.9;
+    crackFilter.frequency.setValueAtTime(4500, 0);
+    crackFilter.frequency.exponentialRampToValueAtTime(900, 0.18);
+    const crackGain = ctx.createGain();
+    crackGain.gain.setValueAtTime(0.55, 0);
+    crackGain.gain.exponentialRampToValueAtTime(0.0001, 0.28);
+    crack.connect(crackFilter);
+    crackFilter.connect(crackGain);
+    crackGain.connect(dest);
+    crack.start(0);
+    crack.stop(0.32);
 
     // Sub thump — softer than the celebratory variant and lower start pitch.
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
-    sub.frequency.setValueAtTime(110, t);
-    sub.frequency.exponentialRampToValueAtTime(28, t + 1.0);
-    const subGain = this.ctx.createGain();
-    subGain.gain.setValueAtTime(0.0001, t);
-    subGain.gain.exponentialRampToValueAtTime(0.38, t + 0.015);
-    subGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.3);
+    sub.frequency.setValueAtTime(110, 0);
+    sub.frequency.exponentialRampToValueAtTime(28, 1.0);
+    const subGain = ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, 0);
+    subGain.gain.exponentialRampToValueAtTime(0.38, 0.015);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, 1.3);
     sub.connect(subGain);
-    subGain.connect(this.master);
-    sub.start(t);
-    sub.stop(t + 1.4);
+    subGain.connect(dest);
+    sub.start(0);
+    sub.stop(1.4);
 
     // Descending sigh — soft sine falling a minor third (G4 → E4 → C4-ish),
     // the audible "aww" that tells the player they missed the rhythm window.
-    const sigh = this.ctx.createOscillator();
+    const sigh = ctx.createOscillator();
     sigh.type = "sine";
-    sigh.frequency.setValueAtTime(392, t + 0.05); // G4
-    sigh.frequency.exponentialRampToValueAtTime(311, t + 0.55); // Eb4
-    sigh.frequency.exponentialRampToValueAtTime(220, t + 1.5); // A3 — settles below
-    const sighGain = this.ctx.createGain();
-    sighGain.gain.setValueAtTime(0.0001, t + 0.05);
-    sighGain.gain.exponentialRampToValueAtTime(0.12, t + 0.15);
-    sighGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
+    sigh.frequency.setValueAtTime(392, 0.05); // G4
+    sigh.frequency.exponentialRampToValueAtTime(311, 0.55); // Eb4
+    sigh.frequency.exponentialRampToValueAtTime(220, 1.5); // A3 — settles below
+    const sighGain = ctx.createGain();
+    sighGain.gain.setValueAtTime(0.0001, 0.05);
+    sighGain.gain.exponentialRampToValueAtTime(0.12, 0.15);
+    sighGain.gain.exponentialRampToValueAtTime(0.0001, 1.8);
     sigh.connect(sighGain);
-    sighGain.connect(this.master);
-    sigh.start(t + 0.05);
-    sigh.stop(t + 1.85);
+    sighGain.connect(dest);
+    sigh.start(0.05);
+    sigh.stop(1.85);
 
     // Short noise tail — bandpass collapses quickly so the wreckage clears
     // in ~6s instead of lingering for 15. The comet didn't get to sing.
-    const tailBuf = this.makeNoiseBuffer(3);
-    if (tailBuf) {
-      const tail = this.ctx.createBufferSource();
-      tail.buffer = tailBuf;
-      tail.loop = true;
-
-      const tailFilter = this.ctx.createBiquadFilter();
-      tailFilter.type = "bandpass";
-      tailFilter.Q.value = 1.8;
-      tailFilter.frequency.setValueAtTime(1400, t);
-      tailFilter.frequency.exponentialRampToValueAtTime(500, t + 0.6);
-      tailFilter.frequency.exponentialRampToValueAtTime(60, t + TAIL);
-
-      const tailGain = this.ctx.createGain();
-      tailGain.gain.setValueAtTime(0.0001, t);
-      tailGain.gain.exponentialRampToValueAtTime(0.22, t + 0.05);
-      tailGain.gain.exponentialRampToValueAtTime(0.08, t + 1.2);
-      tailGain.gain.exponentialRampToValueAtTime(0.0001, t + TAIL);
-
-      tail.connect(tailFilter);
-      tailFilter.connect(tailGain);
-      tailGain.connect(this.master);
-      tail.start(t);
-      tail.stop(t + TAIL + 0.2);
-    }
+    const tail = ctx.createBufferSource();
+    tail.buffer = noiseFor(3);
+    tail.loop = true;
+    const tailFilter = ctx.createBiquadFilter();
+    tailFilter.type = "bandpass";
+    tailFilter.Q.value = 1.8;
+    tailFilter.frequency.setValueAtTime(1400, 0);
+    tailFilter.frequency.exponentialRampToValueAtTime(500, 0.6);
+    tailFilter.frequency.exponentialRampToValueAtTime(60, TAIL);
+    const tailGain = ctx.createGain();
+    tailGain.gain.setValueAtTime(0.0001, 0);
+    tailGain.gain.exponentialRampToValueAtTime(0.22, 0.05);
+    tailGain.gain.exponentialRampToValueAtTime(0.08, 1.2);
+    tailGain.gain.exponentialRampToValueAtTime(0.0001, TAIL);
+    tail.connect(tailFilter);
+    tailFilter.connect(tailGain);
+    tailGain.connect(dest);
+    tail.start(0);
+    tail.stop(TAIL + 0.2);
 
     // Low drone — tuned to Eb1 (~38.9Hz), a minor-6th below the celebratory
     // G1, so the harmonic root reads as "minor key" instead of open root.
-    const droneRoot = this.ctx.createOscillator();
-    const droneOct = this.ctx.createOscillator();
+    const droneRoot = ctx.createOscillator();
+    const droneOct = ctx.createOscillator();
     droneRoot.type = "sawtooth";
     droneOct.type = "sawtooth";
     droneRoot.frequency.value = 38.9; // Eb1
     droneOct.frequency.value = 38.9 * 1.011;
-    const droneLp = this.ctx.createBiquadFilter();
+    const droneLp = ctx.createBiquadFilter();
     droneLp.type = "lowpass";
     droneLp.Q.value = 0.8;
-    droneLp.frequency.setValueAtTime(500, t);
-    droneLp.frequency.exponentialRampToValueAtTime(100, t + TAIL);
-    const droneGain = this.ctx.createGain();
-    droneGain.gain.setValueAtTime(0.0001, t);
-    droneGain.gain.exponentialRampToValueAtTime(0.16, t + 0.4);
-    droneGain.gain.exponentialRampToValueAtTime(0.0001, t + TAIL);
+    droneLp.frequency.setValueAtTime(500, 0);
+    droneLp.frequency.exponentialRampToValueAtTime(100, TAIL);
+    const droneGain = ctx.createGain();
+    droneGain.gain.setValueAtTime(0.0001, 0);
+    droneGain.gain.exponentialRampToValueAtTime(0.16, 0.4);
+    droneGain.gain.exponentialRampToValueAtTime(0.0001, TAIL);
     droneRoot.connect(droneLp);
     droneOct.connect(droneLp);
     droneLp.connect(droneGain);
-    droneGain.connect(this.master);
-    droneRoot.start(t);
-    droneOct.start(t);
-    droneRoot.stop(t + TAIL + 0.2);
-    droneOct.stop(t + TAIL + 0.2);
+    droneGain.connect(dest);
+    droneRoot.start(0);
+    droneOct.start(0);
+    droneRoot.stop(TAIL + 0.2);
+    droneOct.stop(TAIL + 0.2);
+  }
+
+  // The bonus-life graph, built into `ctx` ending at `dest`, time origin 0.
+  // Shared by the offline bake (see bakeSound's bonusLife case). This is
+  // buildCometDestroyedGraph transposed into GRACE: same crack → sub → long
+  // 15-second tail → low drone architecture (so it inherits the comet-hit's
+  // huge, resonating, echoing-through-the-void character), but
+  //   • the crack is much softer and shorter — a gentle strike, not an explosion;
+  //   • the wreckage noise-band is replaced by a swelling C-MAJOR chord of
+  //     detuned "choir" voices that bloom UP and ring for the full tail — the
+  //     angelic/resonant part;
+  //   • the sub and low drone land on a MAJOR root (C) instead of the comet's
+  //     ambiguous G1, so the whole thing sits consonant and radiant.
+  private buildBonusLifeGraph(ctx: BaseAudioContext, dest: AudioNode) {
+    const TAIL = 15.0;
+    const noiseFor = (dur: number): AudioBuffer => {
+      const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      return buf;
+    };
+
+    // ── Soft strike: a gentle filtered-noise chiff instead of the comet's hard
+    // crack. Much quieter, darker, and quicker to clear — it gives the swell an
+    // onset to lock to without reading as an explosion. ("less crack.")
+    const chiff = ctx.createBufferSource();
+    chiff.buffer = noiseFor(0.3);
+    const chiffFilter = ctx.createBiquadFilter();
+    chiffFilter.type = "lowpass";
+    chiffFilter.Q.value = 0.7;
+    chiffFilter.frequency.setValueAtTime(3200, 0);
+    chiffFilter.frequency.exponentialRampToValueAtTime(900, 0.16);
+    const chiffGain = ctx.createGain();
+    chiffGain.gain.setValueAtTime(0.16, 0);
+    chiffGain.gain.exponentialRampToValueAtTime(0.0001, 0.3);
+    chiff.connect(chiffFilter);
+    chiffFilter.connect(chiffGain);
+    chiffGain.connect(dest);
+    chiff.start(0);
+    chiff.stop(0.34);
+
+    // ── Sub swell: a sine that RISES an octave onto a C root (C2 → C3) and
+    // holds, giving the strike warm physical weight that resolves upward
+    // instead of the comet-kill's downward collapse into rumble.
+    const sub = ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(32.7, 0); // C1
+    sub.frequency.exponentialRampToValueAtTime(65.4, 0.6); // → C2
+    const subGain = ctx.createGain();
+    subGain.gain.setValueAtTime(0.0001, 0);
+    subGain.gain.exponentialRampToValueAtTime(0.5, 0.04);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, 2.2);
+    sub.connect(subGain);
+    subGain.connect(dest);
+    sub.start(0);
+    sub.stop(2.3);
+
+    // ── Choir: the resonating angelic body. A C-MAJOR chord (C4 E4 G4 C5 E5 G5)
+    // of triangle voices, each doubled by a pair detuned ±7 cents so it reads
+    // as many singers rather than one synth. A slow ~0.35Hz LFO on a shared
+    // lowpass opens the timbre brighter over the first few seconds (the "aah"
+    // blooming), then the whole chord fades across the full 15s tail so it
+    // rings and echoes out through the void.
+    const CHORD_HZ = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99]; // C4 E4 G4 C5 E5 G5
+    // Upper voices are quieter so the chord is rooted, not top-heavy.
+    const voicePeak = [0.16, 0.13, 0.12, 0.10, 0.08, 0.07];
+    const choirLp = ctx.createBiquadFilter();
+    choirLp.type = "lowpass";
+    choirLp.Q.value = 0.6;
+    // Timbre blooms open (900 → 2600Hz over 4s) then slowly closes as it fades.
+    choirLp.frequency.setValueAtTime(900, 0);
+    choirLp.frequency.exponentialRampToValueAtTime(2600, 4.0);
+    choirLp.frequency.exponentialRampToValueAtTime(700, TAIL);
+    const choirGain = ctx.createGain();
+    // A slow swell in (~0.5s, not a percussive hit) then a long exponential
+    // ring-out to silence exactly at TAIL — the echoing cathedral tail.
+    choirGain.gain.setValueAtTime(0.0001, 0);
+    choirGain.gain.exponentialRampToValueAtTime(0.5, 0.5);
+    choirGain.gain.setValueAtTime(0.5, 1.2);
+    choirGain.gain.exponentialRampToValueAtTime(0.16, 5.0);
+    choirGain.gain.exponentialRampToValueAtTime(0.0001, TAIL);
+    choirLp.connect(choirGain);
+    choirGain.connect(dest);
+    for (let i = 0; i < CHORD_HZ.length; i++) {
+      const vGain = ctx.createGain();
+      vGain.gain.value = voicePeak[i];
+      vGain.connect(choirLp);
+      for (const det of [-7, 7]) {
+        const osc = ctx.createOscillator();
+        osc.type = "triangle";
+        osc.frequency.value = CHORD_HZ[i];
+        osc.detune.value = det;
+        osc.connect(vGain);
+        osc.start(0);
+        osc.stop(TAIL + 0.2);
+      }
+    }
+
+    // ── Low drone under the choir: a sawtooth pair on a C root (C1, wide
+    // detune for slow beating) humming the whole tail — the comet-kill's
+    // ghost-drone, but tuned to the major root so it grounds the chord instead
+    // of darkening it.
+    const droneRoot = ctx.createOscillator();
+    const droneOct = ctx.createOscillator();
+    droneRoot.type = "sawtooth";
+    droneOct.type = "sawtooth";
+    droneRoot.frequency.value = 32.7; // C1 — a true major-root floor
+    droneOct.frequency.value = 32.7 * 1.012;
+    const droneLp = ctx.createBiquadFilter();
+    droneLp.type = "lowpass";
+    droneLp.Q.value = 0.8;
+    droneLp.frequency.setValueAtTime(500, 0);
+    droneLp.frequency.exponentialRampToValueAtTime(110, TAIL);
+    const droneGain = ctx.createGain();
+    droneGain.gain.setValueAtTime(0.0001, 0);
+    droneGain.gain.exponentialRampToValueAtTime(0.18, 0.5);
+    droneGain.gain.exponentialRampToValueAtTime(0.0001, TAIL);
+    droneRoot.connect(droneLp);
+    droneOct.connect(droneLp);
+    droneLp.connect(droneGain);
+    droneGain.connect(dest);
+    droneRoot.start(0);
+    droneOct.start(0);
+    droneRoot.stop(TAIL + 0.2);
+    droneOct.stop(TAIL + 0.2);
   }
 
   // One-shot entrance for a meteor shower — bigger and more aggressive than the
@@ -8477,10 +8590,9 @@ export class Sound {
     this.playBaked("powerup", 1);
   }
 
-  // Earning a free life — a comet-impact crack + sub thump blooming into a
-  // struck C-major bell (see bakeSound's bonusLife recipe). The comet-kill's
-  // physical heft, but opened upward into a bright major triad so it lands as
-  // triumph rather than destruction.
+  // Earning a free life — the comet-hit's long resonating tail transposed into
+  // grace: a soft strike + rising sub into a swelling C-major choir that rings
+  // and echoes out over 15 seconds (see buildBonusLifeGraph). Pre-baked.
   private playBonusLife() {
     this.playBaked("bonusLife", 1);
   }

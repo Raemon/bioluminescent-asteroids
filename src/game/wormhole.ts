@@ -12,13 +12,16 @@ import { cosmeticRng as rng } from "./rng";
 // SUCKED IN and swallowed. Its slight tilt is fixed to the SCREEN, not to the
 // body's line of flight, so it reads the same from every approach.
 //
-// Aesthetic: not the aliens' clean crimson bioluminescence but something
-// hungrier — a dark red / purple / black wound. The throat is near-black void
-// bleeding out through blood-red to a bruised violet membrane; a nest of
-// writhing tendrils claws inward from the rim like a sea-anemone mouth or a
-// tear in living tissue, and the whole thing pulses and wobbles as it drinks.
-// (Recolour hooks stay live so the wave-skip portals can wear their distinct
-// emerald.)
+// Aesthetic: a BLACK wound lit only by RED. The membrane and throat are
+// near-black flesh — the portal reads first as a hole of pure darkness cut into
+// space. Every warm note is a highlight riding an edge: a molten event-horizon
+// lip, red-hot threads spiralling down the vortex, embers glowing in the
+// grasping tendrils, and a single coal deep in the throat the body falls
+// toward. The red runs from a hot white-cored crimson on the sharpest edges out
+// to a deep oxblood in the folds, so the light reads as fire caught on black
+// tissue rather than a flat tint. The whole thing pulses and wobbles as it
+// drinks. (Recolour hooks stay live so the wave-skip portals can wear their
+// distinct emerald.)
 //
 // The effect is purely cosmetic and self-contained (same lifecycle shape as
 // DriftBurst): spawn → update(dt) prunes by life → render() draws additively.
@@ -69,12 +72,14 @@ export const warpAnchorOffset = (
 // "back" so the eye falls into a receding throat rather than a flat disc.
 const VORTEX_LOOPS = 7;
 
-// Hue band for the portal's own light — a dark red/purple/black wound. The
-// membrane runs bruised violet, the mid ring blood-red, and the throat plunges
-// to near-black void. Three anchors so the depth ramp can drift hue across the
-// whole band instead of a single flat tint.
-const MEMBRANE_HUE = 296; // outer bruised violet
-const THROAT_HUE = 350; // inner blood-red bleeding to black
+// Hue band for the portal's own light — a black wound lit by red. Both anchors
+// live in the red band; the body of the portal is near-black and the hue only
+// shows where light catches an edge. The rim highlight runs a touch toward
+// orange (hotter, fire-caught-on-flesh) and the throat a touch toward oxblood
+// (deeper, cooler) so the warm edges and the deep folds read as different
+// temperatures of the same coal rather than one flat crimson.
+const MEMBRANE_HUE = 8; // rim highlight — hot orange-red
+const THROAT_HUE = 352; // throat/vortex — deep oxblood red
 
 export type Wormhole = {
   x: number;
@@ -248,6 +253,49 @@ const vortexLoop = (
   }
 };
 
+// Cinders drifting up out of the throat — tiny hot motes that rise from the
+// deep vanishing point toward the lip and fade, like sparks lifting off a fire.
+// Pure decoration over the black pit; their motion is derived analytically from
+// the render clock so nothing new is drawn from the RNG (replay-safe).
+const EMBER_COUNT = 9;
+
+// Paint the rising cinders. Each ember owns a fixed lane (angle + a phase offset
+// so they don't pulse in unison) and cycles from deep in the throat (depth ~1)
+// up to the mouth (depth 0), brightening then guttering out. `inner` is the iris
+// long axis; `flux` drives the rise so they crawl with the rest of the maw.
+const renderEmbers = (
+  ctx: CanvasRenderingContext2D,
+  inner: number, membraneHue: number, throatHue: number,
+  open: number, phase: number, flux: number,
+): void => {
+  ctx.save();
+  ctx.scale(1, TILT);
+  for (let i = 0; i < EMBER_COUNT; i++) {
+    // rise 0→1 over the ember's cycle; the fractional part loops it endlessly.
+    const rise = (flux * 0.11 + i * 0.137) % 1;
+    const depth = 1 - rise; // starts deep (1), climbs to the mouth (0)
+    // Lane: a stable angle per ember, drifting slightly as it climbs so the
+    // motes spiral up the vortex rather than rising in straight columns.
+    const a = phase + i * 2.399 + rise * 1.1;
+    const rr = inner * (0.12 + 0.7 * rise); // spiral outward as it climbs
+    const cy = ringCenterY(inner, depth);
+    const px = Math.cos(a) * rr;
+    const py = cy + Math.sin(a) * rr;
+    // Brightness arcs up then fades — brightest mid-climb, guttering at the top.
+    const glow = Math.sin(rise * Math.PI);
+    const rad = (0.7 + 1.3 * rise) * (inner / 60 + 0.6);
+    const g = ctx.createRadialGradient(px, py, 0, px, py, rad);
+    g.addColorStop(0, `hsla(${membraneHue + 10}, 100%, 82%, ${0.7 * glow * open})`);
+    g.addColorStop(0.4, `hsla(${throatHue + 6}, 100%, 52%, ${0.4 * glow * open})`);
+    g.addColorStop(1, `hsla(${throatHue}, 100%, 30%, 0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(px, py, rad, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+};
+
 // Number of tendrils clawing inward from the membrane — the writhing cilia that
 // make the maw read as a living mouth pulling matter in rather than a machined
 // aperture.
@@ -291,24 +339,26 @@ const renderTendrils = (
       if (s === 0) ctx.moveTo(px, py);
       else ctx.lineTo(px, py);
     }
-    // Two stacked strokes give the filament body: a dark thick underlayer for
-    // the fleshy mass, a thin hot core so it glows like a lit vein. Both taper
-    // via the flicker so tips fade out into the dark.
+    // Two stacked strokes give the filament body: a near-black oxblood
+    // underlayer for the fleshy mass, and a thin hot crimson core that glows
+    // like a live ember buried in the tissue. The core flickers hard so the
+    // nest looks like it's smouldering, tips fading out into the dark.
     const flick = 0.5 + 0.5 * Math.sin(flux * 2.1 + i * 1.9);
     ctx.lineWidth = 3.4;
-    ctx.strokeStyle = `hsla(${throatHue - 8}, 85%, 20%, ${0.42 * open})`;
+    ctx.strokeStyle = `hsla(${throatHue}, 90%, 8%, ${0.5 * open})`; // black-red flesh
     ctx.stroke();
-    ctx.lineWidth = 1.3;
-    ctx.strokeStyle = `hsla(${membraneHue + 10}, 95%, 60%, ${0.5 * open * flick})`;
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = `hsla(${membraneHue + 4}, 100%, 58%, ${0.55 * open * flick})`; // ember core
     ctx.stroke();
   }
   ctx.restore();
 };
 
-// Paint the outer membrane: a soft bruised-violet fleshy annulus framing the
-// iris, its inner and outer edges chewed by the wobble so it reads as living
-// tissue torn open rather than a machined bezel. `long` is the full long axis,
-// `inner` the iris long axis it frames.
+// Paint the outer membrane: a near-black fleshy annulus framing the iris, its
+// inner and outer edges chewed by the wobble so it reads as living tissue torn
+// open rather than a machined bezel, with only its outer edge catching a thin
+// band of oxblood rim-light. `long` is the full long axis, `inner` the iris
+// long axis it frames.
 const renderMembrane = (
   ctx: CanvasRenderingContext2D,
   long: number, inner: number, membraneHue: number, throatHue: number,
@@ -318,14 +368,17 @@ const renderMembrane = (
   ctx.scale(1, TILT);
 
   // 1) Membrane band — a filled organic annulus between two wobbled outlines:
-  //    the ragged outer flesh edge and the iris edge it wraps. A radial gradient
-  //    across it goes bruised-violet at the rim, darkening to near-black where it
-  //    meets the void so the flesh reads as thickening into shadow.
+  //    the ragged outer flesh edge and the iris edge it wraps. The flesh is
+  //    near-black: it stays dark almost the whole way across (occluding the
+  //    stars behind it) and only the outer edge catches a thin band of oxblood
+  //    rim-light, dying back to nothing at the ragged outer lip. So the ring
+  //    reads as black tissue with fire licking its far edge, not a lit annulus.
   const band = ctx.createRadialGradient(0, 0, inner, 0, 0, long);
-  band.addColorStop(0, `hsla(${throatHue - 6}, 80%, 10%, 0)`);
-  band.addColorStop(0.4, `hsla(${throatHue}, 80%, 16%, ${0.5 * open})`);
-  band.addColorStop(0.75, `hsla(${membraneHue}, 70%, 26%, ${0.6 * open})`);
-  band.addColorStop(1, `hsla(${membraneHue + 12}, 60%, 14%, 0)`);
+  band.addColorStop(0, `hsla(${throatHue}, 90%, 3%, ${0.92 * open})`); // black at the iris
+  band.addColorStop(0.5, `hsla(${throatHue}, 88%, 5%, ${0.88 * open})`); // still near-black flesh
+  band.addColorStop(0.82, `hsla(${throatHue + 4}, 92%, 15%, ${0.7 * open})`); // oxblood rim-light band
+  band.addColorStop(0.93, `hsla(${membraneHue}, 96%, 24%, ${0.42 * open})`); // hottest at the outer lip
+  band.addColorStop(1, `hsla(${membraneHue}, 80%, 8%, 0)`); // fades out into space
   ctx.fillStyle = band;
   ctx.beginPath();
   const SAMP = 64;
@@ -397,22 +450,43 @@ export const renderWormholes = (
 
     // --- BACK-TO-FRONT, mostly additive so the light stacks and blooms ---
 
-    // 1) Membrane (source-over): the solid bruised-violet flesh ring. Drawn
-    //    first and OPAQUE so it occludes the starfield — a real torn wound, not
-    //    a translucent wash. Everything after it is additive light on top.
+    // 0) Outer bloom (additive): a soft red glow radiating well past the flesh
+    //    into the surrounding space, so the black hole sits in a pool of its own
+    //    dim red light instead of a hard cutout on the starfield. Squashed to the
+    //    portal's tilt and breathing with the shimmer. Drawn first so the opaque
+    //    membrane lands on top of its inner half and the bloom only shows as a
+    //    halo bleeding outward.
+    ctx.save();
+    ctx.scale(1, TILT);
+    const bloomR = long * 1.9;
+    const bloom = ctx.createRadialGradient(0, 0, inner * 0.5, 0, 0, bloomR);
+    bloom.addColorStop(0, `hsla(${throatHue}, 95%, 18%, ${0.22 * open * shimmer})`);
+    bloom.addColorStop(0.5, `hsla(${throatHue - 4}, 95%, 12%, ${0.12 * open})`);
+    bloom.addColorStop(1, `hsla(${throatHue - 4}, 95%, 8%, 0)`);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = bloom;
+    ctx.beginPath();
+    ctx.arc(0, 0, bloomR, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // 1) Membrane (source-over): the solid near-black flesh ring. Drawn OPAQUE
+    //    so it occludes the starfield — a real torn wound, not a translucent
+    //    wash — with only its outer edge catching the oxblood rim-light.
+    //    Everything after it is additive light on top.
     ctx.globalCompositeOperation = "source-over";
     renderMembrane(ctx, long, inner, membraneHue, throatHue, open, phase, flux);
 
     // 2) Throat void (source-over): the actual hole. A radial gradient from a
-    //    dead-black centre out through blood-red to the iris — the lightless
-    //    pit the body falls into. Opaque black core kills the stars behind it.
+    //    dead-black centre out through oxblood to the iris — the lightless pit
+    //    the body falls into. Opaque black core kills the stars behind it.
     ctx.save();
     ctx.scale(1, TILT);
     const void_ = ctx.createRadialGradient(0, 0, 0, 0, 0, inner);
-    void_.addColorStop(0, `hsla(${throatHue}, 90%, 2%, ${0.96 * open})`);
-    void_.addColorStop(0.45, `hsla(${throatHue}, 90%, 6%, ${0.9 * open})`);
-    void_.addColorStop(0.8, `hsla(${throatHue}, 88%, 22%, ${0.7 * open})`);
-    void_.addColorStop(1, `hsla(${membraneHue}, 80%, 24%, ${0.3 * open})`);
+    void_.addColorStop(0, `hsla(${throatHue}, 95%, 1%, ${0.98 * open})`); // dead-black pit
+    void_.addColorStop(0.55, `hsla(${throatHue}, 92%, 3%, ${0.94 * open})`); // holds black deep in
+    void_.addColorStop(0.85, `hsla(${throatHue}, 92%, 12%, ${0.72 * open})`); // oxblood only near the lip
+    void_.addColorStop(1, `hsla(${membraneHue}, 95%, 20%, ${0.34 * open})`); // hot red meeting the iris
     ctx.fillStyle = void_;
     ctx.beginPath();
     ctx.arc(0, 0, inner, 0, TAU);
@@ -423,46 +497,70 @@ export const renderWormholes = (
     ctx.globalCompositeOperation = "lighter";
 
     // 3) Churning vortex (additive): roiling loops spiralling down to the
-    //    vanishing point. Near loops churn wide and glow blood-red; far loops
-    //    shrink, dim, and bleed toward violet-black as they recede into depth.
+    //    vanishing point — red-hot threads of tissue-fire. Near loops churn
+    //    wide and burn bright crimson with a hot inner core; far loops shrink,
+    //    dim, and cool to a deep oxblood as they recede into the black throat.
+    //    They stay in the red band the whole way down — never bruising to
+    //    violet — so the drain reads as glowing coals, not cold rock.
     for (let r = 0; r < VORTEX_LOOPS; r++) {
       const depth = r / (VORTEX_LOOPS - 1);
       const fade = (1 - depth * 0.82) * open;
       if (fade < 0.03) continue;
+      // Hue stays red, sliding just a few degrees toward oxblood with depth so
+      // the far loops read cooler without ever leaving the crimson band.
+      const hue = throatHue + 8 - depth * 10;
+      // Wide soft under-stroke: the diffuse glow of the hot thread.
       vortexLoop(ctx, inner, depth, swirl, phase, flux);
-      ctx.lineWidth = 1.0 + (1 - depth) * 1.8;
-      const hue = throatHue - depth * 40; // red mouth → violet-black throat
-      const l = 42 - depth * 26; // dark and bruised, never bright/clean
-      ctx.strokeStyle = `hsla(${hue}, 95%, ${l}%, ${0.5 * fade})`;
+      ctx.lineWidth = 2.6 + (1 - depth) * 3.4;
+      ctx.strokeStyle = `hsla(${hue}, 92%, ${20 - depth * 12}%, ${0.36 * fade})`;
+      ctx.stroke();
+      // Thin hot core riding the same path: white-hot crimson on the near loops,
+      // fading toward the deep throat. This is the "molten wire" catch.
+      const coreL = 62 - depth * 40;
+      ctx.lineWidth = 0.8 + (1 - depth) * 1.2;
+      ctx.strokeStyle = `hsla(${hue + 4}, 100%, ${coreL}%, ${0.6 * fade})`;
       ctx.stroke();
     }
 
-    // 4) Event-horizon lip (additive): the hot leading edge of the wobbled iris
-    //    — a wide soft glow with a thin hotter core, both swept by the shimmer
-    //    so the wound's lip crackles with a bruised-magenta energy.
+    // 4) Event-horizon lip (additive): the molten leading edge of the wobbled
+    //    iris — the marquee red highlight. Three stacked strokes give it real
+    //    heat: a wide soft crimson bloom, a mid oxblood body, and a thin
+    //    near-white core so the lip reads as genuinely molten metal-of-flesh
+    //    rather than a painted red line. All swept by the shimmer so it crackles.
     irisPath(ctx, inner, phase, flux);
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = `hsla(${membraneHue + 4}, 90%, 34%, ${0.4 * open * shimmer})`;
+    ctx.lineWidth = 9;
+    ctx.strokeStyle = `hsla(${membraneHue}, 95%, 26%, ${0.34 * open * shimmer})`; // outer bloom
     ctx.stroke();
-    ctx.lineWidth = 1.6;
-    ctx.strokeStyle = `hsla(${membraneHue + 16}, 100%, 66%, ${0.7 * open * shimmer})`;
+    ctx.lineWidth = 3.2;
+    ctx.strokeStyle = `hsla(${membraneHue + 2}, 100%, 44%, ${0.55 * open * shimmer})`; // crimson body
+    ctx.stroke();
+    ctx.lineWidth = 1.1;
+    ctx.strokeStyle = `hsla(${membraneHue + 14}, 100%, 82%, ${0.7 * open * shimmer})`; // white-hot core
     ctx.stroke();
 
-    // 5) Vanishing-point pull (additive): a faint dark-red ember deep in the
+    // 5) Vanishing-point pull (additive): a single burning coal deep in the
     //    throat the body falls toward (the point beginWarpOut aims the body at).
-    //    Kept dim so the throat stays a pit, not a lantern — just enough of a
-    //    glow to mark the drain the vortex spirals into.
+    //    A white-hot pinpoint core inside a tight crimson ember — kept small and
+    //    dim so the throat stays a black pit with one glowing drain at its floor,
+    //    not a lantern. This is the hottest red on screen, marking where matter
+    //    disappears.
     const vy = ringCenterY(inner, 1);
     const pull = open * shimmer;
-    const pg = ctx.createRadialGradient(0, vy, 0, 0, vy, inner * 0.34);
-    pg.addColorStop(0, `hsla(${throatHue}, 100%, 40%, ${0.55 * pull})`);
-    pg.addColorStop(1, `hsla(${throatHue}, 100%, 20%, 0)`);
+    const pg = ctx.createRadialGradient(0, vy, 0, 0, vy, inner * 0.36);
+    pg.addColorStop(0, `hsla(${membraneHue + 12}, 100%, 78%, ${0.5 * pull})`); // white-hot pinpoint
+    pg.addColorStop(0.28, `hsla(${throatHue + 6}, 100%, 46%, ${0.5 * pull})`); // crimson ember
+    pg.addColorStop(1, `hsla(${throatHue}, 100%, 18%, 0)`);
     ctx.fillStyle = pg;
     ctx.beginPath();
-    ctx.arc(0, vy, inner * 0.34, 0, TAU);
+    ctx.arc(0, vy, inner * 0.36, 0, TAU);
     ctx.fill();
 
-    // 6) Grasping tendrils (additive): the writhing cilia clawing inward from
+    // 6) Rising cinders (additive): hot motes lifting out of the throat toward
+    //    the lip and guttering out — sparks off a fire, drawn over the dark pit
+    //    to give the black something to sparkle against.
+    renderEmbers(ctx, inner, membraneHue, throatHue, open, phase, flux);
+
+    // 7) Grasping tendrils (additive): the writhing cilia clawing inward from
     //    the membrane. Drawn LAST so they curl proud in front of the throat,
     //    reaching over the lip to drag a body down.
     renderTendrils(ctx, long, inner, membraneHue, throatHue, open, swirl, phase, flux);
