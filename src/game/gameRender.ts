@@ -20,6 +20,7 @@ import { renderBonusLifeFlash } from "./bonusLife";
 import { updateSpectrumVisualizer, paintSpectrumVisualizer } from "./spectrumVisualizer";
 import { cosmeticRng } from "./rng";
 import { traceCitadelHolePath } from "../Asteroid";
+import { paintInkClouds, isPointInAnyInkPatch } from "./inkCloud";
 
 // Overdrive ramp above the tier-3 white threshold. The combo halo saturates to
 // white at rhythm 12; this 0→1 factor keeps climbing from there to 24 so the
@@ -179,6 +180,10 @@ const paintEntityLayers = (game: Game, focusedTarget: ReticuleTarget | null) => 
   renderBassLightnings(ctx, game.bassLightnings, game.time * 0.001, superRhythm(game));
   renderDriftBursts(ctx, game.driftBursts, game.time * 0.001);
   game.particles.render(ctx);
+  // Ink clouds sit above every entity/particle so the blackout genuinely
+  // occludes the field, but below popups (small text/icon accents that
+  // should stay legible even mid-blackout).
+  paintInkClouds(ctx, game);
   // Popups (combo / pickup / score) anchor at the world spot they describe (a hit
   // location, the ship), so they scroll + wrap with the world, not the glass.
   renderPopups(ctx, game.popups);
@@ -316,6 +321,21 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   // During a skip warp the ship dives into (and later climbs out of) a portal —
   // pass that portal so its far lip crops the hull as it sinks down the throat.
   const cropPortal = game.waveSkip?.cropPortal ?? null;
+  // Ink blackout dims the ship rather than swallowing it outright — a soft
+  // dark disc UNDER the hull so it still reads as "there, but hard to see",
+  // never fully invisible. Ship renders on top of this every frame regardless.
+  if (isPointInAnyInkPatch(game, game.ship.pos)) {
+    const dimR = game.ship.radius * 2.2;
+    const dimGrad = ctx.createRadialGradient(game.ship.pos.x, game.ship.pos.y, 0, game.ship.pos.x, game.ship.pos.y, dimR);
+    dimGrad.addColorStop(0, "rgba(2, 3, 6, 0.55)");
+    dimGrad.addColorStop(1, "rgba(2, 3, 6, 0)");
+    ctx.save();
+    ctx.fillStyle = dimGrad;
+    ctx.beginPath();
+    ctx.arc(game.ship.pos.x, game.ship.pos.y, dimR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
   game.ship.render(ctx, game.time, currentBeatPulse(game), cropPortal, game.w, game.h);
   if (!warping) {
     renderLaserReticule(ctx, game, game.beatTime);

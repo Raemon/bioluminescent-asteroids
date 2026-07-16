@@ -105,10 +105,10 @@ export type AsteroidSize = "huge" | "large" | "medium" | "small";
 // modular ring panels they wore); the eye further splits into
 // `bossIrisShard` slivers + a single inert `bossEmber` pupil.
 //
-// "glassPrison" is the post-boss horror: an angular indigo glass shell with
-// 16 HP that drifts in starting display-level 11. A tortured silhouette is
-// frozen inside, eyes glowing faintly. The killing hit shatters the shell —
-// the captive wraith escapes screaming.
+// "glassPrison" is the post-boss horror: a cut black diamond, faceted and
+// near-lightless, with faint red eyes glowing from somewhere inside. Drifts
+// in starting display-level 11; one hit shatters it — the wraiths inside
+// escape screaming, and the shell's own shards fan out as debris.
 //
 // "wraith" is what crawls out. It has no baked sprite (drawn live every
 // frame from drifting noise layers and writhing tendrils), pursues the ship
@@ -197,6 +197,10 @@ export const isTorusFragment = (kind: AsteroidKind): boolean =>
 // clamp); they differ only in radius and shard count. Most call sites test the
 // family rather than the exact tier.
 export const isBurstGem = (kind: AsteroidKind): boolean => kind === "burstGemMedium" || kind === "burstGemBig";
+
+// Anything cut as a true rhombus silhouette (diamondProfile) rather than the
+// harmonic-noise outline — burst gems and the black-diamond prison shell.
+export const isDiamondCut = (kind: AsteroidKind): boolean => isBurstGem(kind) || kind === "glassPrison";
 
 // The two hull-metal tiers share the plate material, DR 8 armour, and the
 // opaque steel render; they differ only in size and whether they split further.
@@ -1132,6 +1136,12 @@ export class Asteroid {
   // Emission cooldown for the dark-smoke trail the wraith bleeds behind it.
   wraithSmokeT = 0;
 
+  // True only for solidCrystalSmall shards ejected from a shattered glass
+  // prison — paints as a black diamond splinter instead of the standalone
+  // treat pickup's ice-blue crystal. Same kind, same HP/physics/sound; this
+  // flag only swaps paintSolidCrystalBody's material.
+  isPrisonShard = false;
+
   constructor(pos: Vec, vel: Vec, size: AsteroidSize, hue?: number, kind: AsteroidKind = "normal", inheritBass?: BassShip) {
     this.pos = pos;
     this.vel = vel;
@@ -1365,12 +1375,12 @@ export class Asteroid {
       freqs = [3, 5, 8];
       ampScale = 0.4;
     } else if (kind === "glassPrison") {
-      // Strong 1-harmonic = tall asymmetric sarcophagus (one end wider than
-      // the other). 3 and 5 jut individual facet vertices outward. The clamp
-      // in computeOutline (set for glassPrison alongside crystals) prevents
-      // a degenerate collapse if phases happen to align.
-      freqs = [1, 3, 5];
-      ampScale = 1.6;
+      // Black diamond shell: the diamondProfile in computeOutline carries the
+      // sharp rhombus silhouette; these harmonics only add a faint per-gem
+      // facet wobble so no two prisons are identical. Kept low-amp (same
+      // treatment as the burst gems) so the crisp diamond points survive.
+      freqs = [3, 5];
+      ampScale = 0.5;
     } else if (kind === "solidCrystal" || kind === "solidCrystalSmall") {
       // Pure crystal: a low harmonic count + low outlineSamples (set in the
       // constructor) make the silhouette a hard-edged polygon. Avoid any
@@ -1983,12 +1993,12 @@ export class Asteroid {
     ctx.restore();
   }
 
-  // The glass prison is faceted indigo crystal containing a captive wraith.
-  // Pre-baked: the outer shell (etched runes, faceted shading, rim) + the
-  // dark interior with the frozen silhouette of the thing inside. Per-frame
-  // we overlay an eye-glow pulse in render() so the captive reads as "still
-  // alive". Drawing order: shell paint → clip → interior void → silhouette
-  // → runes overstroke.
+  // The glass prison is a cut black diamond — the diamondProfile outline
+  // (computeOutline) gives it the sharp rhombus silhouette; this paints the
+  // gem material. Pre-baked: void interior + faceted glints + rim. Per-frame
+  // render() overlays a red eye-glow pulse so it still reads as "something
+  // alive is in there, watching". Drawing order: clip → void → facet glints
+  // → specular highlight → facet seams → rim.
   private paintGlassPrisonBody(ctx: CanvasRenderingContext2D) {
     const H = this.hue;
     const R = this.radius;
@@ -2008,24 +2018,26 @@ export class Asteroid {
     ctx.closePath();
     ctx.clip();
 
-    // Interior void — much darker than a solid crystal. The captive lives
-    // in here; the player should feel they're peering into a black sarcophagus.
+    // Gem-black void — an offset upper-left hotspot so a lit facet and a
+    // near-total-black shadow side fall out of one gradient, same as every
+    // other lit body in this file. Never gets bright: this is black diamond,
+    // not lit crystal, so the "lit" stop still sits in single-digit lightness.
+    const lightX = -R * 0.4;
+    const lightY = -R * 0.48;
     ctx.globalCompositeOperation = "source-over";
-    const voidGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
-    voidGrad.addColorStop(0, `hsla(${H - 8}, 60%, 6%, 1)`);
-    voidGrad.addColorStop(0.6, `hsla(${H}, 55%, 10%, 0.95)`);
-    voidGrad.addColorStop(1, `hsla(${H + 8}, 45%, 16%, 0.85)`);
+    const voidGrad = ctx.createRadialGradient(lightX, lightY, R * 0.1, 0, 0, R * 1.25);
+    voidGrad.addColorStop(0, `hsla(${H + 6}, 45%, 9%, 1)`);
+    voidGrad.addColorStop(0.55, `hsla(${H}, 35%, 4%, 1)`);
+    voidGrad.addColorStop(1, `hsla(${H - 6}, 30%, 1.5%, 1)`);
     ctx.fillStyle = voidGrad;
     ctx.beginPath();
     ctx.arc(0, 0, R, 0, TAU);
     ctx.fill();
 
-    // Frosted facet wash — same fan-triangulation trick the solid crystal
-    // uses, but additive and far lower-alpha so the void shows through. The
-    // faintly-lit facets sell the "this is cut glass" read without making
-    // the shell read as solid.
-    const lightX = -R * 0.5;
-    const lightY = -R * 0.55;
+    // Faceted glints — same fan-triangulation as solid crystal, but additive
+    // and very low-alpha: black diamond doesn't glow, it glints. Only the
+    // facets nearest the light pick up a cold violet sheen; most of the
+    // shell stays near-invisible against the void.
     const maxLightDist = R * 1.9;
     ctx.globalCompositeOperation = "lighter";
     for (let i = 0; i < verts.length; i++) {
@@ -2034,10 +2046,10 @@ export class Asteroid {
       const cx = (a.x + b.x) / 3;
       const cy = (a.y + b.y) / 3;
       const d = Math.hypot(cx - lightX, cy - lightY);
-      const lit = Math.pow(Math.max(0, 1 - d / maxLightDist), 1.4);
-      const lightness = 22 + lit * 36;
-      const alpha = 0.18 + lit * 0.22;
-      ctx.fillStyle = `hsla(${H + 8}, 75%, ${lightness}%, ${alpha})`;
+      const lit = Math.pow(Math.max(0, 1 - d / maxLightDist), 2.2);
+      const lightness = 4 + lit * 22;
+      const alpha = 0.08 + lit * 0.20;
+      ctx.fillStyle = `hsla(${H + 12}, 65%, ${lightness}%, ${alpha})`;
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.lineTo(a.x, a.y);
@@ -2046,81 +2058,23 @@ export class Asteroid {
       ctx.fill();
     }
 
-    // The captive silhouette — a hunched figure rendered in near-black with a
-    // single bright violet rim. Hand-tuned vertex list (in local space, scaled
-    // by R) so each prison reads as the SAME thing inside, not a procedural
-    // blob. The figure faces the viewer, arms hugging itself.
+    // Crisp specular highlight on the lit shoulder — the single cheapest
+    // "this is a polished gem, not a matte rock" cue.
+    const specX = lightX * 0.7;
+    const specY = lightY * 0.7;
+    const specGrad = ctx.createRadialGradient(specX, specY, 0, specX, specY, R * 0.32);
+    specGrad.addColorStop(0, `hsla(${H + 20}, 70%, 92%, 0.65)`);
+    specGrad.addColorStop(0.4, `hsla(${H + 16}, 70%, 70%, 0.22)`);
+    specGrad.addColorStop(1, `hsla(${H + 16}, 70%, 70%, 0)`);
+    ctx.fillStyle = specGrad;
+    ctx.beginPath();
+    ctx.arc(specX, specY, R * 0.32, 0, TAU);
+    ctx.fill();
+
+    // Hairline facet seams from centre to each vertex — cold and very faint,
+    // just enough to read "cut gem" without lighting up the shell.
     ctx.globalCompositeOperation = "source-over";
-    ctx.save();
-    ctx.fillStyle = `hsla(${H - 12}, 80%, 4%, 0.95)`;
-    ctx.beginPath();
-    const head = R * 0.16;
-    ctx.arc(0, -R * 0.28, head, 0, TAU);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(-R * 0.20, -R * 0.05);
-    ctx.lineTo( R * 0.20, -R * 0.05);
-    ctx.lineTo( R * 0.28,  R * 0.30);
-    ctx.lineTo( R * 0.10,  R * 0.55);
-    ctx.lineTo(-R * 0.10,  R * 0.55);
-    ctx.lineTo(-R * 0.28,  R * 0.30);
-    ctx.closePath();
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(-R * 0.18, -R * 0.02);
-    ctx.lineTo(-R * 0.32,  R * 0.18);
-    ctx.lineTo(-R * 0.14,  R * 0.32);
-    ctx.lineTo(-R * 0.08,  R * 0.10);
-    ctx.closePath();
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo( R * 0.18, -R * 0.02);
-    ctx.lineTo( R * 0.32,  R * 0.18);
-    ctx.lineTo( R * 0.14,  R * 0.32);
-    ctx.lineTo( R * 0.08,  R * 0.10);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-
-    // Frost veil — a milky band just inside the silhouette so the figure
-    // reads as "encased in ice" rather than "painted on a window".
-    const frostGrad = ctx.createRadialGradient(0, 0, R * 0.15, 0, 0, R * 1.0);
-    frostGrad.addColorStop(0, `hsla(${H + 4}, 30%, 90%, 0)`);
-    frostGrad.addColorStop(0.65, `hsla(${H + 2}, 40%, 78%, 0.08)`);
-    frostGrad.addColorStop(1, `hsla(${H}, 50%, 88%, 0.32)`);
-    ctx.fillStyle = frostGrad;
-    ctx.globalCompositeOperation = "lighter";
-    ctx.beginPath();
-    ctx.arc(0, 0, R, 0, TAU);
-    ctx.fill();
-
-    // Etched containment runes — thin bright glyph segments scattered along
-    // the inside of the rim. Suggests "this thing was bound here on purpose".
-    // Pre-rolled positions look identical every paint (we want every prison
-    // to feel like a deliberate ritual artefact, not procedurally noisy).
-    ctx.strokeStyle = `hsla(${H + 22}, 80%, 82%, 0.55)`;
-    ctx.lineWidth = 0.8;
-    const runeCount = 12;
-    for (let i = 0; i < runeCount; i++) {
-      const a = (i / runeCount) * TAU + 0.12;
-      const rr = R * 0.84;
-      const cx = Math.cos(a) * rr;
-      const cy = Math.sin(a) * rr;
-      const tang = a + Math.PI / 2;
-      const len = R * 0.07;
-      ctx.beginPath();
-      ctx.moveTo(cx - Math.cos(tang) * len, cy - Math.sin(tang) * len);
-      ctx.lineTo(cx + Math.cos(tang) * len, cy + Math.sin(tang) * len);
-      ctx.stroke();
-      // tiny perpendicular tick = stylised glyph rather than a hash mark.
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx + Math.cos(a) * len * 0.6, cy + Math.sin(a) * len * 0.6);
-      ctx.stroke();
-    }
-
-    // Hairline facet seams from centre to each vertex.
-    ctx.strokeStyle = `hsla(${H + 14}, 90%, 80%, 0.16)`;
+    ctx.strokeStyle = `hsla(${H + 10}, 60%, 60%, 0.12)`;
     ctx.lineWidth = 0.5;
     ctx.beginPath();
     for (const vtx of verts) {
@@ -2129,9 +2083,10 @@ export class Asteroid {
     }
     ctx.stroke();
 
-    // Thick shell rim — two stacked strokes: an outer dark layer for depth,
-    // a bright inner band for the "cut glass edge" tell. Heavier and cooler
-    // than the solid crystal so the prison reads as a tougher object.
+    // Thick shell rim — two stacked strokes: an outer near-black layer for
+    // depth/occlusion, a thin cold-bright inner band for the cut-edge catch.
+    // Darker and cooler than the solid crystal so the prison reads as dense
+    // black gem, not backlit glass.
     const rimPath = () => {
       ctx.beginPath();
       for (let i = 0; i < verts.length; i++) {
@@ -2143,16 +2098,16 @@ export class Asteroid {
     ctx.globalCompositeOperation = "source-over";
     ctx.lineJoin = "miter";
     ctx.miterLimit = 4;
-    ctx.strokeStyle = `hsla(${H - 16}, 75%, 14%, 0.95)`;
+    ctx.strokeStyle = `hsla(${H - 10}, 40%, 2%, 0.95)`;
     ctx.lineWidth = 5.0;
     rimPath();
     ctx.stroke();
-    ctx.strokeStyle = `hsla(${H + 18}, 70%, 88%, 0.85)`;
-    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = `hsla(${H + 14}, 55%, 62%, 0.75)`;
+    ctx.lineWidth = 1.8;
     rimPath();
     ctx.stroke();
-    ctx.strokeStyle = `hsla(${H + 30}, 60%, 96%, 0.55)`;
-    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = `hsla(${H + 24}, 50%, 88%, 0.4)`;
+    ctx.lineWidth = 0.7;
     ctx.save();
     ctx.scale(0.94, 0.94);
     rimPath();
@@ -2927,6 +2882,9 @@ export class Asteroid {
   // distance from a virtual light source, so the gem reads as one coherent
   // refractive object rather than a polygon with disjoint sparkle stapled on.
   private paintSolidCrystalBody(ctx: CanvasRenderingContext2D) {
+    // Glass-prison shard: same kind/outline/physics as a treat solidCrystalSmall,
+    // but reads as a splinter of the black diamond it broke off from.
+    if (this.isPrisonShard) { this.paintBlackDiamondShardBody(ctx); return; }
     const H = this.hue;
     const R = this.radius;
     // Outer polygon vertices in local space — the same hard polygon the
@@ -3072,6 +3030,96 @@ export class Asteroid {
     ctx.restore();
 
     this.paintFrostedEmbeddedGems(ctx);
+
+    ctx.restore();
+  }
+
+  // A splinter of the black diamond prison — same silhouette/facet skeleton
+  // as paintGlassPrisonBody's void + glint treatment, just scaled down to the
+  // small shard outline with no rune/eye detail (too small to read at this
+  // size; the parent's material alone sells "broken-off piece of that thing").
+  private paintBlackDiamondShardBody(ctx: CanvasRenderingContext2D) {
+    const H = this.hue;
+    const R = this.radius;
+    const verts: Vec[] = [];
+    for (let i = 0; i < this.outlineSamples; i++) {
+      const angle = (i / this.outlineSamples) * TAU;
+      const r = this.outline[i];
+      verts.push(v(Math.cos(angle) * r, Math.sin(angle) * r));
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i < verts.length; i++) {
+      if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
+      else ctx.lineTo(verts[i].x, verts[i].y);
+    }
+    ctx.closePath();
+    ctx.clip();
+
+    const lightX = -R * 0.4;
+    const lightY = -R * 0.48;
+    ctx.globalCompositeOperation = "source-over";
+    const voidGrad = ctx.createRadialGradient(lightX, lightY, R * 0.1, 0, 0, R * 1.25);
+    voidGrad.addColorStop(0, `hsla(${H + 6}, 45%, 10%, 1)`);
+    voidGrad.addColorStop(0.55, `hsla(${H}, 35%, 5%, 1)`);
+    voidGrad.addColorStop(1, `hsla(${H - 6}, 30%, 2%, 1)`);
+    ctx.fillStyle = voidGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, TAU);
+    ctx.fill();
+
+    const maxLightDist = R * 1.9;
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < verts.length; i++) {
+      const a = verts[i];
+      const b = verts[(i + 1) % verts.length];
+      const cx = (a.x + b.x) / 3;
+      const cy = (a.y + b.y) / 3;
+      const d = Math.hypot(cx - lightX, cy - lightY);
+      const lit = Math.pow(Math.max(0, 1 - d / maxLightDist), 2.2);
+      const lightness = 5 + lit * 24;
+      const alpha = 0.10 + lit * 0.22;
+      ctx.fillStyle = `hsla(${H + 12}, 65%, ${lightness}%, ${alpha})`;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // One small specular spark on the lit shoulder — the shard's "it's a cut
+    // gem, not a soot fleck" tell, cheap enough to keep even at this size.
+    const specX = lightX * 0.7;
+    const specY = lightY * 0.7;
+    const specGrad = ctx.createRadialGradient(specX, specY, 0, specX, specY, R * 0.4);
+    specGrad.addColorStop(0, `hsla(${H + 20}, 70%, 90%, 0.6)`);
+    specGrad.addColorStop(1, `hsla(${H + 16}, 70%, 70%, 0)`);
+    ctx.fillStyle = specGrad;
+    ctx.beginPath();
+    ctx.arc(specX, specY, R * 0.4, 0, TAU);
+    ctx.fill();
+
+    ctx.globalCompositeOperation = "source-over";
+    const rimPath = () => {
+      ctx.beginPath();
+      for (let i = 0; i < verts.length; i++) {
+        if (i === 0) ctx.moveTo(verts[i].x, verts[i].y);
+        else ctx.lineTo(verts[i].x, verts[i].y);
+      }
+      ctx.closePath();
+    };
+    ctx.lineJoin = "miter";
+    ctx.miterLimit = 4;
+    ctx.strokeStyle = `hsla(${H - 10}, 40%, 3%, 0.9)`;
+    ctx.lineWidth = 1.6;
+    rimPath();
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${H + 14}, 55%, 62%, 0.7)`;
+    ctx.lineWidth = 0.9;
+    rimPath();
+    ctx.stroke();
 
     ctx.restore();
   }
@@ -3488,7 +3536,7 @@ export class Asteroid {
 
   computeOutline(): number[] {
     const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isBurstGem(this.kind) || CATHEDRAL_DEBRIS_KINDS.includes(this.kind) || isMetalHull(this.kind);
-    const isDiamond = isBurstGem(this.kind);
+    const isDiamond = isDiamondCut(this.kind) || this.isPrisonShard;
     const isCube = isMetalHull(this.kind);
     const samples: number[] = [];
     for (let i = 0; i < this.outlineSamples; i++) {
@@ -3518,7 +3566,7 @@ export class Asteroid {
     if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isBurstGem(this.kind) || isMetalHull(this.kind)) {
       r = Math.max(0.45, Math.min(1.55, r));
     }
-    if (isBurstGem(this.kind)) r *= this.diamondProfile(angle);
+    if (isDiamondCut(this.kind) || this.isPrisonShard) r *= this.diamondProfile(angle);
     if (isMetalHull(this.kind)) r *= this.cubeProfile(angle);
     return r * this.radius;
   }
@@ -4414,9 +4462,11 @@ export class Asteroid {
         const wraith = new Asteroid(wraithPos, v(0, 0), "medium", undefined, "wraith");
         fragmentList.push(wraith);
       }
-      // Three small crystal shards as the prison's broken pieces. Reuse the
-      // solidCrystalSmall kind so they look like cut glass and ring on hit;
-      // they hand the player a small extra payout for cracking the prison.
+      // Three small black-diamond shards as the prison's broken pieces. Reuse
+      // the solidCrystalSmall kind so they keep the same HP/physics/ring-on-
+      // hit sound; isPrisonShard only swaps the paint to a black diamond
+      // splinter instead of the standalone treat pickup's ice-blue crystal.
+      // They hand the player a small extra payout for cracking the prison.
       const parentSpeed = Math.hypot(this.vel.x, this.vel.y);
       const ejectDist = this.radius * 0.5;
       for (let i = 0; i < 3; i++) {
@@ -4428,6 +4478,15 @@ export class Asteroid {
         const speedMag = parentSpeed * rand(1.0, 1.4) + rand(160, 220);
         const shard = new Asteroid(childPos, fromAngle(childAngle, speedMag), "small", this.hue, "solidCrystalSmall");
         shard.rotSpeed = rand(1.2, 2.4) * (rng() < 0.5 ? -1 : 1);
+        // isPrisonShard swaps the silhouette to a clean diamond: low-amp
+        // harmonics (freq 4 — avoids aliasing against the 6 outlineSamples,
+        // unlike the treat pickup's jagged [1,2,4,5]/1.8 wobble) so the
+        // diamondProfile's sharp points survive. Outline + sprite already
+        // ran once in the constructor before this flag existed, so redo them.
+        shard.isPrisonShard = true;
+        shard.harmonics = [{ amp: rand(0.05, 0.12), freq: 4, phase: rand(0, TAU) }];
+        shard.outline = shard.computeOutline();
+        shard.sprite = shard.buildSprite();
         fragmentList.push(shard);
       }
       return fragmentList;

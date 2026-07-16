@@ -34,7 +34,7 @@ const RETICULE_RADAR_PULSE_MAX = 1;
 const RETICULE_RADAR_PULSE_MIN = 0.7;
 const RETICULE_RADAR_PULSE_PERIOD_SEC = 3.0;
 
-// doubletime (rapid powerup or combo ≥ 12) fires every half-beat, so the off-beat bullet
+// doubletime (rapid powerup) fires every half-beat, so the off-beat bullet
 // only travels half as far before the next beat.
 const HALF_BEAT_FRACTION = 0.5;
 

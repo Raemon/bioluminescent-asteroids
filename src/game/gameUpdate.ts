@@ -42,6 +42,7 @@ import { snapshotShipKill } from "./killSnapshot";
 import { updatePopups, popupDriftBonus, popupDriftCombo } from "./popups";
 import { updateBassLightnings } from "./bassLightning";
 import { updateDriftBursts } from "./driftBurst";
+import { updateInkClouds } from "./inkCloud";
 import { resetStreak, streakWindowClosed } from "./streakBurst";
 import { updateWormholes, spawnWormhole } from "./wormhole";
 import { tickWaveSkip, collapseSkipPortals } from "./waveSkip";
@@ -842,6 +843,7 @@ const updatePlaying = (game: Game, dt: number) => {
   game.popups = updatePopups(game.popups, dt, game.w, game.h);
   game.bassLightnings = updateBassLightnings(game.bassLightnings, dt);
   game.driftBursts = updateDriftBursts(game.driftBursts, dt);
+  updateInkClouds(game, dt);
   // musicDt (not dt) so the portal opens/closes in lockstep with the body's
   // dive, which also runs on musicDt — under slow-mo both stretch together.
   game.wormholes = updateWormholes(game.wormholes, musicDt);

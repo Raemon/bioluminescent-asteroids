@@ -20,6 +20,7 @@ import {
   onAlienCracked,
   onCometKilled,
   applyHitToCombo,
+  applyNonKillHitToCombo,
 } from "./killEffects";
 import { explodeCanister, expireGem, crackGemForCanister } from "./collisions";
 import type { Gem } from "../Gem";
@@ -461,7 +462,6 @@ const laserTargetGroups = (game: Game): LaserTargetGroup[] => [
       const onBeat = beamHitOnBeat(game, fakeBullet);
       const { killed } = a.applyDamage(beam.damage, false, fakeBullet.pos);
       game.shake = Math.min(game.shake + (killed ? 0.3 : 0.15), 1.2);
-      applyHitToCombo(game, onBeat, fakeBullet.pos);
       if (!killed) {
         a.applyKnockback(dir.x, dir.y, beam.damage);
         onAsteroidCrackedByBullet(game, a, fakeBullet, onBeat);
@@ -482,7 +482,6 @@ const laserTargetGroups = (game: Game): LaserTargetGroup[] => [
       for (let i = 0; i < beam.damage; i++) {
         if (al.applyDamage().killed) { killed = true; break; }
       }
-      applyHitToCombo(game, onBeat, fakeBullet.pos);
       if (killed) {
         onAlienKilled(game, al, fakeBullet, onBeat);
         return [];
@@ -497,7 +496,6 @@ const laserTargetGroups = (game: Game): LaserTargetGroup[] => [
     list: () => game.comets,
     onHit: (game, target, _beam, _dir, fakeBullet) => {
       const onBeat = beamHitOnBeat(game, fakeBullet);
-      applyHitToCombo(game, onBeat, fakeBullet.pos);
       onCometKilled(game, target as Comet, fakeBullet, onBeat);
       return [];
     },
@@ -505,19 +503,22 @@ const laserTargetGroups = (game: Game): LaserTargetGroup[] => [
   },
   {
     // Gems crack (yield canister/score) only on an on-beat hit of ≥4 damage —
-    // the same gate the bullet path applies (handleGems). An on-beat beam strike
-    // also gains rhythm via applyHitToCombo; an off-beat or under-powered strike
-    // wastes the gem, exactly like an off-beat bullet.
+    // the same gate the bullet path applies (handleGems). An off-beat or
+    // under-powered strike wastes the gem, exactly like an off-beat bullet.
     list: () => game.gems,
     onHit: (game, target, beam, _dir, fakeBullet) => {
       const g = target as Gem;
       const onBeat = beamHitOnBeat(game, fakeBullet);
-      applyHitToCombo(game, onBeat, fakeBullet.pos);
       // Beams carry no drift tier (driftTierAtHit is 0), so an on-beat crack
       // scores rhythm-multiplied but never stages a drift bonus — same as a
       // plain on-beat bullet.
-      if (onBeat && beam.damage >= 4) crackGemForCanister(game, g, fakeBullet.driftTierAtHit());
-      else expireGem(game, g); // wasted-gem feedback, same as an off-beat bullet
+      if (onBeat && beam.damage >= 4) {
+        applyHitToCombo(game, onBeat, fakeBullet.pos);
+        crackGemForCanister(game, g, fakeBullet.driftTierAtHit());
+      } else {
+        applyNonKillHitToCombo(game, onBeat, fakeBullet.pos);
+        expireGem(game, g); // wasted-gem feedback, same as an off-beat bullet
+      }
       return [];
     },
     set: (game, surviving) => { game.gems = surviving as Gem[]; },

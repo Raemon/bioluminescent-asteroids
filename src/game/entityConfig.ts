@@ -351,7 +351,7 @@ export const ENTITY_CONFIG = {
     // offset is set at spawn so several wraiths stagger across the grid.
     lungePeriodMeasures: 2,
     lungeDuration: 0.65,
-    lungeAccel: 380,
+    lungeAccel: 800,
   },
 
   // Torus — a mechanical ring that solidifies in display-level 11+ (internal
@@ -571,7 +571,7 @@ export const ENTITY_STATS: Partial<Record<AsteroidKind, EntityStats>> = {
     hp: 1,
     score: 600,
     radius: 46,
-    hue: 258,
+    hue: 270,
     outlineSamples: 8,
   },
   wraith: {

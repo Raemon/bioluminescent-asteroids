@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 30;
+export const REPLAY_FORMAT_VERSION = 32;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -106,6 +106,20 @@ export const REPLAY_FORMAT_VERSION = 30;
 // v30 adds the metalChunk special rock (a per-slot spawn roll from internal
 //   wave 6 on, before the solid/gem rolls), so a v29 recording of any wave ≥ 6
 //   consumes a different rng draw sequence and re-sims into a different field.
+// v31 gates rhythm/combo/streak gains on actual kills: a hit that
+//   only cracks its target (bass chips, armor, multi-hp aliens) or
+//   wastes a gem no longer increments the combo or stages drift
+//   bonuses, and bass chip score pays flat (no combo multiply).
+//   Off-beat hits still lose the combo; an on-beat non-kill hit
+//   refreshes the streak's gap window without adding an orb
+//   (extendStreakWindow). Combo totals and score both diverge, so
+//   v30 recordings re-sim into different runs.
+// v32 drops the eighth-note grid at combo ≥ 32: the cap now judges fires/hits on
+//   quarter-notes (only the rapid powerup still doubletimes), so off-beat presses
+//   no longer land on a slot and same-beat pairs no longer double-hit. The on-beat
+//   window also stops tightening 40ms at the cap. Rhythm judging + combo/score
+//   both diverge for any v31 run that reached 32, so those recordings re-sim into
+//   different runs.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat

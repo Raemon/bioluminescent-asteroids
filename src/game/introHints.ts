@@ -24,7 +24,7 @@ const SLOT_2_POOL: readonly string[] = [
   "Patience.",
   "Drift gently.",
   "Trust your instincts. Also your targeting system.",
-  FIRE_HIT_HINT,
+  "Fire on the beat. Hit on the beat.",
   "Build rhythm, carefully.",
   "Find the rhythm.",
   "Become stronger.",
@@ -35,7 +35,7 @@ const SLOT_2_POOL: readonly string[] = [
 
 const SLOT_3_POOL: readonly string[] = [
   "Dance with the void.",
-  "Drink your coffee. This'll be a long job.",
+  "Keep a warm mug of coffee. This'll be a long job.",
   "Don't forget the dream.",
   "Don't lose contact with command.",
   "Tell your son you'll be home soon.",
@@ -45,7 +45,7 @@ const SLOT_3_POOL: readonly string[] = [
   "Don't forget the way back.",
   "Don't lose the way forward.",
   "Don't get lost.",
-  "Keep the photo on the cockpit dashboard.",
+  "Unfold the photo on your cockpit dashboard.",
 ];
 
 const SLOT_POOLS: readonly (readonly string[])[] = [SLOT_1_POOL, SLOT_2_POOL, SLOT_3_POOL];

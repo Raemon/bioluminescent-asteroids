@@ -54,6 +54,14 @@ const startStreak = (game: Game, grid: number, beatCenter: number) => {
   game.streakLastBeatCenter = beatCenter;
 };
 
+// One rule for "does a hit on this beat extend the streak?" —
+//   shared by real streak shots (trackStreak) and window-extending
+//   non-kill hits (extendStreakWindow) so they can't drift apart.
+const streakGapQualifies = (game: Game, grid: number, beatCenter: number): boolean => {
+  const gapBeats = Math.round((beatCenter - game.streakLastBeatCenter) / grid);
+  return gapBeats >= 1 && gapBeats <= STREAK_MAX_GAP && grid === game.streakGrid;
+};
+
 // Rhythmic-consistency reward: keep landing combo-shots close together and a ring
 //   of orbs grows around the reticule. Called once per new-beat combo shot
 //   (same-beat prong pairs are filtered out by the caller). A shot extends the
@@ -67,8 +75,7 @@ const trackStreak = (game: Game, grid: number, beatCenter: number, hitPos: Vec) 
     return;
   }
 
-  const gapBeats = Math.round((beatCenter - game.streakLastBeatCenter) / grid);
-  const qualifies = gapBeats >= 1 && gapBeats <= STREAK_MAX_GAP && grid === game.streakGrid;
+  const qualifies = streakGapQualifies(game, grid, beatCenter);
 
   // First confirmation: the 2nd in-window shot establishes the streak and mints
   //   the first orb. The seed shot itself never counts — only 2nd-and-onward
@@ -95,6 +102,17 @@ const trackStreak = (game: Game, grid: number, beatCenter: number, hitPos: Vec) 
   //   already paid on landing — and this shot seeds a fresh one.
   resetStreak(game);
   startStreak(game, grid, beatCenter);
+};
+
+// An on-beat hit that lands but doesn't destroy adds no orb and
+//   pays nothing, but it proves the player is still on rhythm —
+//   refresh the gap timer so chipping a multi-hit body doesn't let
+//   the ring fade out mid-fight. Never seeds or establishes.
+export const extendStreakWindow = (game: Game) => {
+  if (game.streakGrid <= 0) return;
+  const grid = comboGrid(game);
+  const beatCenter = Math.round(game.perceivedBeatTime / grid) * grid;
+  if (streakGapQualifies(game, grid, beatCenter)) game.streakLastBeatCenter = beatCenter;
 };
 
 // called for every combo-incrementing on-beat hit (see applyHitToCombo).

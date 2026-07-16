@@ -6,18 +6,18 @@ import { popupBeatDebug, popupComboLost } from "./popups";
 import { resetStreak } from "./streakBurst";
 
 // Two grid tiers, measured as the period between on-beat slots:
-//   combo 0–31       → quarter-notes (BEAT_GRID): the default groove.
-//   combo ≥ 32, or   → eighth-notes (BEAT_GRID/2): rapid-fire pulls each land on a beat;
-//   rapid powerup     at the sparkle tier the in-between bg-beat is audible (see
-//                     bassClock.ts), so the player can hear and play the eighths too.
+//   default          → quarter-notes (BEAT_GRID): the groove the player judges against.
+//   rapid powerup    → eighth-notes (BEAT_GRID/2): rapid-fire pulls each land on a beat.
+// combo ≥ 32 stays on quarter-notes: the player never hits on off-beats, so there are no
+//   extra reticules and no same-beat double-hitting at the cap. (The doubletime "and"
+//   percussion still layers in above 32 — see bassClock.ts — it's decoration, not a slot.)
 export const comboGrid = (game: Game): number => {
-  if (game.ship.rapidActive || game.beatCombo >= 32) return BEAT_GRID / 2;
+  if (game.ship.rapidActive) return BEAT_GRID / 2;
   return BEAT_GRID;
 };
 
-// doubletime tier tightens the on-beat window by 40ms — earning it also raises the bar.
-export const beatWindow = (game: Game): number => {
-  return game.beatCombo >= 32 ? BEAT_WINDOW - 0.04 : BEAT_WINDOW;
+export const beatWindow = (_game: Game): number => {
+  return BEAT_WINDOW;
 };
 
 // pure predicate — classifies fire / hit as on-beat without side effects on combo state.
@@ -94,7 +94,7 @@ export const loseCombo = (game: Game, sourcePos?: Vec, reason: "fire" | "hit" = 
   const prev = game.beatCombo;
   const wasMeaningful = prev >= 2;
   const haloActive = game.ship.comboHaloTier >= 2;
-  // Reaching doubletime is a real achievement — a single off-beat doesn't wipe it,
+  // Reaching the 32x cap is a real achievement — a single off-beat doesn't wipe it,
   // it drops back to the 4x halo tier so the player keeps the yellow halo and music bed.
   game.beatCombo = prev >= 32 ? 4 : 0;
   // a post-loss hit must not pair with a pre-loss one for Rapid Rhythm / Twin Shot.

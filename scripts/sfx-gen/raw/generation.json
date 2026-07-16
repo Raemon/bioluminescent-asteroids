@@ -1,0 +1,47 @@
+{
+  "wraithLunge": {
+    "recipe": {
+      "prompt": "a short low haunted moan, a cold ghostly voice surging closer with a soft swelling groan in a low chest register, brief and breathy, reverberant, dark vocal tone",
+      "duration_seconds": 0.65,
+      "prompt_influence": 0.45
+    },
+    "takes": [
+      {
+        "prompt": "a short low haunted moan, a cold ghostly voice surging closer with a soft swelling groan in a low chest register, brief and breathy, reverberant, dark vocal tone",
+        "duration_seconds": 0.65,
+        "prompt_influence": 0.45,
+        "bytes": 11328,
+        "elapsed_s": 1.62,
+        "generated_at": "2026-07-16T07:03:14.256410Z",
+        "out_path": "raw/wraithLunge_take1.mp3"
+      },
+      {
+        "prompt": "a short low haunted moan, a cold ghostly voice surging closer with a soft swelling groan in a low chest register, brief and breathy, reverberant, dark vocal tone",
+        "duration_seconds": 0.65,
+        "prompt_influence": 0.45,
+        "bytes": 11328,
+        "elapsed_s": 1.6,
+        "generated_at": "2026-07-16T07:03:15.853085Z",
+        "out_path": "raw/wraithLunge_take2.mp3"
+      },
+      {
+        "prompt": "a short low haunted moan, a cold ghostly voice surging closer with a soft swelling groan in a low chest register, brief and breathy, reverberant, dark vocal tone",
+        "duration_seconds": 0.65,
+        "prompt_influence": 0.45,
+        "bytes": 11328,
+        "elapsed_s": 1.59,
+        "generated_at": "2026-07-16T07:03:17.449093Z",
+        "out_path": "raw/wraithLunge_take3.mp3"
+      },
+      {
+        "prompt": "a short low haunted moan, a cold ghostly voice surging closer with a soft swelling groan in a low chest register, brief and breathy, reverberant, dark vocal tone",
+        "duration_seconds": 0.65,
+        "prompt_influence": 0.45,
+        "bytes": 11328,
+        "elapsed_s": 2.03,
+        "generated_at": "2026-07-16T07:03:19.481642Z",
+        "out_path": "raw/wraithLunge_take4.mp3"
+      }
+    ]
+  }
+}

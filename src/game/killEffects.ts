@@ -13,10 +13,11 @@ import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintS
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
 import { popupCombo, popupScore, popupDriftCombo } from "./popups";
 import { resonanceBonus } from "./resonanceBonus";
-import { trackRhythmComboHit } from "./rhythmBonus";
+import { trackRhythmComboHit, extendStreakWindow } from "./rhythmBonus";
 import { triggerBassLightning } from "./bassLightning";
 import { spawnDriftBurst } from "./driftBurst";
 import { checkBonusLife } from "./bonusLife";
+import { spawnInkPatch } from "./inkCloud";
 import { BEAT_GRID, DRIFT_RHYTHM_BONUS } from "./rhythmConstants";
 import {
   emitExplosion,
@@ -102,6 +103,8 @@ export const hitSoundFor = (
 
 // same combo-update rule for every kill type — one helper means callers don't reimplement.
 //   hitPos anchors the "RHYTHM LOST" popup at the target the off-beat shot landed on.
+//   Only kills (and gem cracks) route here; a landed hit that
+//   didn't earn the kill goes through applyNonKillHitToCombo.
 export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) => {
   if (isOnBeatHit && game.beatCombo >= 1) {
     const crossedSparkleThreshold = game.beatCombo === 31;
@@ -241,6 +244,8 @@ const finishAsteroidKillCore = (
     // play (crystalShatterLarge). Position-aware so the cry pans from where
     // the prison broke open.
     game.sound.play("wraithScream", 1, a.pos);
+    // Inky blackout spreads from the break point — see game/inkCloud.ts.
+    spawnInkPatch(game, a.pos);
   } else if (a.kind === "wraith") {
     emitWraithDeath(game.particles, a);
     // Release cry — layered ON TOP of the per-shot wraithHit thud the caller
@@ -326,6 +331,7 @@ export const onAsteroidKilledByBullet = (
   b: Bullet,
   isOnBeatHit: boolean,
 ): Asteroid[] => {
+  applyHitToCombo(game, isOnBeatHit, b.pos);
   const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit, b.driftTierAtHit());
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   if (isOnBeatHit) triggerBassLightning(game, a.pos, a);
@@ -372,8 +378,16 @@ const playBossImpactIfLarge = (game: Game, a: Asteroid, b: Bullet) => {
   if (a.isBossFamily() && isLargeShot(b)) game.sound.play("bossHit", 1, a.pos);
 };
 
+// a landed hit that earned no kill: no rhythm gain — on-beat keeps
+//   the streak window alive, off-beat still breaks the combo.
+export const applyNonKillHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) => {
+  if (isOnBeatHit) extendStreakWindow(game);
+  else if (game.beatCombo !== 0) loseCombo(game, hitPos, "hit");
+};
+
 // bullet crack — bassHit announces the chip; sparkle layers on if it was on-beat.
-// Bassteroid chips also pay out (small) points + combo popup so multi-hit kills feel rewarding.
+// Bassteroid chips also pay small flat points so multi-hit kills
+// feel rewarding (no combo multiply — the target survived).
 export const onAsteroidCrackedByBullet = (game: Game, a: Asteroid, b: Bullet, isOnBeatHit: boolean) => {
   if (a.isBass()) game.sound.play("bassHit", 1, a.pos);
   // Non-bass chip: play the body's own hit sound at reduced volume so a
@@ -383,7 +397,13 @@ export const onAsteroidCrackedByBullet = (game: Game, a: Asteroid, b: Bullet, is
   playBossImpactIfLarge(game, a, b);
   emitCrackParticles(game.particles, a, isOnBeatHit);
   if (isOnBeatHit) game.sound.play("comboSparkle", 1, b.pos);
-  if (a.isBass()) awardScoreForKill(game, b.pos, bassChipScore(a), isOnBeatHit, b.driftTierAtHit());
+  applyNonKillHitToCombo(game, isOnBeatHit, b.pos);
+  if (a.isBass()) {
+    const points = bassChipScore(a);
+    game.score += points;
+    flashScoreGain(game, points);
+    checkBonusLife(game);
+  }
 };
 
 // ram crack uses asteroidHit (not bassHit) so the impact reads as a kick, not a chip.
@@ -394,6 +414,7 @@ export const onAsteroidCrackedByRam = (game: Game, a: Asteroid) => {
 
 // no split path here — alien deaths fall into the "single body, fixed sound" pattern.
 export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boolean) => {
+  applyHitToCombo(game, isOnBeatHit, b.pos);
   const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit, b.driftTierAtHit());
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   if (isOnBeatHit) triggerBassLightning(game, al.pos);
@@ -417,6 +438,7 @@ export const onAlienCracked = (game: Game, isOnBeatHit: boolean, pos: Vec) => {
   game.sound.play("alienHit", 1, pos);
   game.shake = Math.min(game.shake + 0.18, 1.2);
   if (isOnBeatHit) game.sound.play("comboSparkle", 1, pos);
+  applyNonKillHitToCombo(game, isOnBeatHit, pos);
 };
 
 // Off-rhythm kills pay a flat 500 — present but unsatisfying. An on-beat kill pays
@@ -424,6 +446,7 @@ export const onAlienCracked = (game: Game, isOnBeatHit: boolean, pos: Vec) => {
 // Off-rhythm hits also get a sadder explosion variant so the audio tells the
 // player they wasted the celestial visitor.
 export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: boolean) => {
+  applyHitToCombo(game, isOnBeatHit, b.pos);
   // Meteors are the cheaper flock: an on-beat hit pays 500 × combo vs the
   // comet's 1000 × combo, but there are many of them. Off-beat pays the same
   // flat amount halved.

@@ -22,6 +22,7 @@ import { FIRST_BONUS_LIFE_SCORE } from "./game/bonusLife";
 import type { BassLightning } from "./game/bassLightning";
 import type { DriftBurst } from "./game/driftBurst";
 import type { Wormhole } from "./game/wormhole";
+import type { InkPatch } from "./game/inkCloud";
 import type { SkipPortal, WaveSkipState } from "./game/waveSkip";
 import { LaserBeam } from "./game/laserShot";
 import { BossBeam } from "./game/bossBeam";
@@ -88,6 +89,10 @@ export class Game implements HudElements {
   // one-shot "sound visualizer explosion" radiating from each on-beat drift-shot
   //   hit, tier-coloured and tier-sized — see game/driftBurst.ts.
   driftBursts: DriftBurst[] = [];
+  // Inky blackout patches spawned where a black-diamond prison shattered —
+  //   spread to a viewport-covering radius over ~10s, persist while any
+  //   wraith is alive, then unroll. See game/inkCloud.ts.
+  inkPatches: InkPatch[] = [];
   // 3D departure portals: comets that time out and aliens that fly off the far
   //   edge warp out THROUGH one of these instead of fading/vanishing. The body's
   //   suck-in lives on the entity; this holds the portal visual — see
@@ -121,7 +126,9 @@ export class Game implements HudElements {
   //   close together. The first shot seeds silently; the 2nd in-window shot mints the
   //   first orb orbiting the reticule and each further shot adds one; the streak continues
   //   as long as each shot lands within STREAK_MAX_GAP grid-beats of the last. Every
-  //   counted shot pays an escalating score bonus on the spot (awardStreakShot). A wider
+  //   counted shot pays an escalating score bonus on the spot (awardStreakShot).
+  //   Only kills count and seed; an on-beat non-kill hit refreshes
+  //   the gap timer, no orb added (extendStreakWindow). A wider
   //   gap, a combo loss, or the extension window closing (streakWindowClosed — the ring
   //   fade reaches zero at the same moment) ends it and clears the ring. The orbs spin
   //   at a steady 4-beat/rev rate. Orbit phase derives from beatTime, fade + window from
@@ -130,7 +137,7 @@ export class Game implements HudElements {
   streakGrid = 0; // comboGrid value the streak runs on; a grid change breaks it
   streakShots = 0; // orbs currently orbiting (the "N") — 0 while a seed awaits its 2nd shot
   streakEstablished = false; // has a 2nd in-window shot started counting toward the metric?
-  streakLastBeatCenter = -1; // beat-center of the last streak shot; gap measurement + fade
+  streakLastBeatCenter = -1; // beat-center of last streak shot or extending hit; gap + fade
   bestStreakThisWave = 0; // longest ESTABLISHED streak this wave, for the summary metric
   score = 0;
   wave = 1;

@@ -22,6 +22,7 @@ import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGemPickup, emit
 import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage } from "./popups";
 import {
   applyHitToCombo,
+  applyNonKillHitToCombo,
   awardScoreForKill,
   onAsteroidKilledByBullet,
   onAsteroidKilledByRam,
@@ -170,7 +171,6 @@ const hitAsteroidWithBullets = (game: Game, a: Asteroid): Asteroid[] | null => {
     logBulletHit(game, "HIT asteroid", b);
     const { killed } = a.applyDamage(dmg, innerHit, b.pos);
     game.shake = Math.min(game.shake + (killed ? 0.4 : 0.2), 1.2);
-    applyHitToCombo(game, onBeat, b.pos);
     if (!killed) {
       if (!b.hasAppliedKnockback) {
         b.hasAppliedKnockback = true;
@@ -246,7 +246,6 @@ const tryKillAlienWithBullets = (game: Game, a: Alien): boolean => {
     const onBeat = isHitOnBeat(game, b);
     logBulletHit(game, "HIT alien", b);
     const { killed } = a.applyDamage();
-    applyHitToCombo(game, onBeat, b.pos);
     if (!killed) {
       a.applyKnockback(b.vel.x, b.vel.y, 1);
       onAlienCracked(game, onBeat, a.pos);
@@ -348,7 +347,6 @@ const tryKillCometWithBullets = (game: Game, c: Comet): boolean => {
   consumeBullet(b);
   const onBeat = isHitOnBeat(game, b);
   logBulletHit(game, "HIT comet", b);
-  applyHitToCombo(game, onBeat, b.pos);
   onCometKilled(game, c, b, onBeat);
   return true;
 };
@@ -448,9 +446,13 @@ export const handleGems = (game: Game) => {
       consumeBullet(b);
       const onBeat = isHitOnBeat(game, b);
       const dmg = b.damage();
-      applyHitToCombo(game, onBeat, b.pos);
-      if (onBeat && dmg >= 4) crackGemForCanister(game, g, b.driftTierAtHit());
-      else wasteGem(game, g);
+      if (onBeat && dmg >= 4) {
+        applyHitToCombo(game, onBeat, b.pos);
+        crackGemForCanister(game, g, b.driftTierAtHit());
+      } else {
+        applyNonKillHitToCombo(game, onBeat, b.pos);
+        wasteGem(game, g);
+      }
       continue;
     }
     if (game.ship.alive && game.ship.invuln <= 0 && g.collidesWith(game.ship.pos, game.ship.radius * 0.9)) {
