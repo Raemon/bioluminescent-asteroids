@@ -27,13 +27,22 @@ export const checkBonusLife = (game: Game) => {
 
 // Full-screen additive white wash for the bonus-life milestone — medium
 // brightness so it reads as a celebratory bloom, not a blinding cut. Painted in
-// screen space above the entity layers, alongside the laser ambient flash.
+// screen space above the entity layers, alongside the laser ambient flash. The
+// ship is always screen-locked dead-centre, so a radial gradient anchored there
+// reads as the flash bursting outward from the ship rather than the whole
+// screen popping at once.
 export const renderBonusLifeFlash = (ctx: CanvasRenderingContext2D, game: Game) => {
   const a = game.bonusLifeFlash * 0.45;
   if (a <= 0.001) return;
+  const cx = game.w / 2;
+  const cy = game.h / 2;
+  const radius = Math.hypot(game.w, game.h) / 2;
+  const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  gradient.addColorStop(0, `rgba(255, 255, 255, ${a.toFixed(3)})`);
+  gradient.addColorStop(1, `rgba(255, 255, 255, 0)`);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  ctx.fillStyle = `rgba(255, 255, 255, ${a.toFixed(3)})`;
+  ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, game.w, game.h);
   ctx.restore();
 };

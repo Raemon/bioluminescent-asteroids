@@ -432,6 +432,9 @@ export class Sound {
   // back if it's too hot on their setup.
   private static readonly MASTER_BASE_GAIN = 1.0;
   private static readonly BAKED_BASE_GAIN = 1.0;
+  // Window (seconds) within which repeats of the same baked sound count as
+  // one burst and get progressively ducked — see playBaked.
+  private static readonly BAKED_RETRIGGER_WINDOW = 0.03;
   // Wave-scaled intensity (0..1) for the background pulsar-approach beat.
   // 0 = silent, 1 = full ominous rumble at wave 30. Set by Game each wave;
   // read by playBgBeat when each beat fires.
@@ -638,9 +641,11 @@ export class Sound {
     if (!this.ctx) return;
     // liveSum / bakedSum are the two summing buses every channel feeds into.
     // liveSum runs through the master compressor + limiter (live voices need
-    // it; their dynamics aren't pre-baked); bakedSum goes straight to
-    // destination because pre-baked mp3s already contain the full master
-    // chain in their tail.
+    // it; their dynamics aren't pre-baked). bakedSum skips the compressor —
+    // pre-baked mp3s already carry it in their tail — but joins the live leg
+    // at the limiter: each mp3 is limited individually, so several playing
+    // at once still sum past full scale, and without the limiter the
+    // destination hard-clips the overage into audible distortion.
     this.liveSum = this.ctx.createGain();
     this.liveSum.gain.value = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
     // Native compressor + brick-wall limiter mirroring the settings Tone's
@@ -677,7 +682,7 @@ export class Sound {
 
     this.bakedSum = this.ctx.createGain();
     this.bakedSum.gain.value = Sound.BAKED_BASE_GAIN * this.volume * this.pauseFadeFactor;
-    this.bakedSum.connect(analyser);
+    this.bakedSum.connect(masterLimiter);
 
     // Build the four channel pairs (live + baked legs each). Each leg is a
     // gain node whose value is the player's per-channel volume; it sits
@@ -897,6 +902,9 @@ export class Sound {
   // are a tiny finite set (1, 0.8409, 1.122 for bassteroids; 1 for everything
   // else), so the cache stays small.
   bakedBuffers: Map<string, AudioBuffer> = new Map();
+  // Burst tracker for playBaked's same-sound pileup duck: start time of the
+  // current burst and how many copies of the key it holds so far.
+  private bakedBursts: Map<string, { start: number; count: number }> = new Map();
   // Sounds we're currently baking — guards against double-bake when the same
   // sound fires several times before the first bake completes.
   bakingInFlight: Set<string> = new Set();
@@ -920,14 +928,15 @@ export class Sound {
   // Dedicated GainNode for baked-buffer playback. Baked buffers already
   // contain the full Tone bus chain (compressor+chorus+reverb+limiter), so
   // they bypass this.master (which is itself routed through the Tone bus in
-  // tone mode) and go straight to destination via this gain — otherwise the
-  // bus chain would be applied twice.
+  // tone mode) — otherwise the bus chain would be applied twice. They still
+  // pass through the shared master limiter, which only acts when several
+  // buffers sum past full scale (see buildMixGraph).
   bakedOut: GainNode | null = null;
   // Per-channel mix gains. Each channel has two legs — a "live" leg that
   // routes into the master compressor/limiter chain (for hand-built voices),
-  // and a "baked" leg that goes straight to destination (pre-baked mp3s
-  // already carry the master FX chain in their tail). setChannelVolume()
-  // updates both legs of a channel together.
+  // and a "baked" leg that skips the compressor but shares the limiter
+  // (pre-baked mp3s already carry the master FX chain in their tail).
+  // setChannelVolume() updates both legs of a channel together.
   //
   // chSfx{Live,Baked} are aliased by this.master and this.bakedOut so the
   // existing voice methods (which connect to those fields directly) sit on
@@ -1138,30 +1147,48 @@ export class Sound {
     if (buf) {
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
+      const when = this.scheduledWhenForCall;
+      const now = this.ctx.currentTime;
+      const startAt = when !== null ? Math.max(when, now) : now;
+      // Same-sound pileup duck: near-simultaneous copies of one buffer sum
+      // almost coherently (a same-frame multi-kill stacks identical
+      // waveforms), which is what used to clip the mix. The k-th copy
+      // starting within BAKED_RETRIGGER_WINDOW of a burst's first plays at
+      // 1/sqrt(k) so the pile gains energy gently instead of linearly.
+      const burst = this.bakedBursts.get(key);
+      let copies = 1;
+      if (burst && startAt - burst.start <= Sound.BAKED_RETRIGGER_WINDOW) {
+        copies = ++burst.count;
+      } else {
+        this.bakedBursts.set(key, { start: startAt, count: 1 });
+      }
       // Positional splice: if play() recorded a pos for this dispatch, route
       // the buffer through the same pan + distance-gain pair we'd use for
       // live voices. Baked buffers don't go through this.master, so we wire
       // them straight into the channel sink.
+      let dest: AudioNode = sink;
       const pos = this.spatialPosForCall;
       if (pos) {
         const spatial = this.makeSpatial(pos, sink);
-        if (spatial) src.connect(spatial.panner);
-        else src.connect(sink);
-      } else {
-        src.connect(sink);
+        if (spatial) dest = spatial.panner;
       }
-      const when = this.scheduledWhenForCall;
+      if (copies > 1) {
+        const duck = this.ctx.createGain();
+        duck.gain.value = 1 / Math.sqrt(copies);
+        duck.connect(dest);
+        dest = duck;
+      }
+      src.connect(dest);
       if (when !== null) {
         // Already-past start times can't sound on time — clamp to "now" so the
         // beat still plays, and surface the deficit in DEV so a frame-cost
         // regression that eats the lookahead budget shows up loudly in the
         // console instead of as subtle audible pulse lag.
-        const now = this.ctx.currentTime;
         if (import.meta.env.DEV && when < now - 0.001) {
           // eslint-disable-next-line no-console
           console.warn(`[pulse-late] ${name} scheduled ${((now - when) * 1000).toFixed(1)}ms in the past`);
         }
-        src.start(Math.max(when, now));
+        src.start(startAt);
       } else {
         src.start();
       }
@@ -3892,7 +3919,8 @@ export class Sound {
   // matching the LIVE master chain (see buildMixGraph). Returns the chain's
   // input node — a raw one-shot graph connects to it instead of straight to
   // destination so the baked buffer contains the same dynamics the live path
-  // used to apply on playback (baked buffers bypass the runtime master chain).
+  // used to apply on playback (at runtime baked buffers skip this compressor
+  // and only share the master limiter).
   private buildBakedMasterChain(ctx: BaseAudioContext): AudioNode {
     const compressor = ctx.createDynamicsCompressor();
     compressor.threshold.value = -18;
