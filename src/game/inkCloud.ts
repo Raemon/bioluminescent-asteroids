@@ -33,7 +33,10 @@ const INK_CELL_SIZE = 28;
 const INK_REGROW_SECONDS = 0.2;
 const INK_TARGET_RADIUS_MIN = 1800;
 const INK_TARGET_RADIUS_MAX = 2200;
-const INK_FILL_ALPHA = 0.995;
+// The opaque zone should read as almost completely black — nothing of the
+// scene survives under it. Full occlusion (source-over never punches, so this
+// is safe: it hides the composited scene, it doesn't erase it).
+const INK_FILL_ALPHA = 1.0;
 // How much colour a fully-revealed cell loses (1 = fully greyscale). The
 // revealed area carries NO dark overlay at all — the scene shows through at
 // its normal brightness, only desaturated.
@@ -219,10 +222,11 @@ const ensureFieldBuffer = (p: InkPatch, gridW: number, gridH: number): FieldBuff
   return buf;
 };
 
-// Ink body colour and its wispy mottle lift — near-black with faint cold-blue
-// smoke structure so the opaque zone reads as roiling vapour, not a flat disc.
-const INK_R = 2, INK_G = 3, INK_B = 6;
-const MOTTLE_R = 20, MOTTLE_G = 24, MOTTLE_B = 38;
+// Ink body colour and its wispy mottle lift — near-black with only a whisper of
+// cold-blue smoke structure so the opaque zone stays almost completely black
+// (just enough streak to read as roiling vapour, not a flat disc).
+const INK_R = 1, INK_G = 1, INK_B = 3;
+const MOTTLE_R = 6, MOTTLE_G = 8, MOTTLE_B = 14;
 
 export const paintInkClouds = (ctx: CanvasRenderingContext2D, game: Game) => {
   if (game.inkPatches.length === 0) return;
