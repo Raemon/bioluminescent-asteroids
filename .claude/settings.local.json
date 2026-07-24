@@ -8,7 +8,10 @@
       "Bash(npm run *)",
       "Bash(curl -s http://localhost:5173)",
       "Bash(pkill *)",
-      "Workflow(deep-research)"
+      "Workflow(deep-research)",
+      "Bash(awk 'NR>=4181 && NR<=4700' /Users/raymondarnold/Documents/coding/pulsar/src/Asteroid.ts)",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
     ]
   }
 }

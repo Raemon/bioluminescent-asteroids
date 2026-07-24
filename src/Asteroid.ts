@@ -1265,6 +1265,19 @@ export class Asteroid {
         pulseSpeed: rand(1.2, 2.4),
       });
     }
+    if (kind === "citadel") {
+      // Walk any shell lantern out of the escape hole's footprint (plus
+      // margin) — the hole is bare space, and render() pulses a live light at
+      // every nucleus each frame. Deterministic nudges, no fresh seeded draws.
+      for (const n of this.nuclei) {
+        for (let tries = 0; tries < 16; tries++) {
+          const nx = Math.cos(n.angle) * n.dist;
+          const ny = Math.sin(n.angle) * n.dist;
+          if (!pointInTriangle(nx / 1.18, ny / 1.18, CITADEL_HOLE_VERTS)) break;
+          n.angle += 0.3;
+        }
+      }
+    }
     this.membranePhase = rand(0, TAU);
     // Roll embedded gem count for solid crystals — weighted 60/25/10/5 for
     // 0/1/2/3 gems — and pick local-space spots so they can be pre-baked into
@@ -1365,9 +1378,11 @@ export class Asteroid {
       // A plain chipped masonry block — chunky irregular polygon.
       freqs = [1, 2, 4]; ampScale = 1.3;
     } else if (kind === "warble") {
-      // Wobbly elongated lobes: strong 3-fold + odd higher mode.
-      freqs = [3, 5, 8];
-      ampScale = 1.4;
+      // A broken bastion of the citadel: the fortress's 3/5/8 family mix plus
+      // a strong 1-harmonic, so each chunk reads as sheared off one side of
+      // the parent shell rather than grown symmetric.
+      freqs = [1, 3, 5, 8];
+      ampScale = 1.1;
     } else if (kind === "citadel") {
       // Fortress mass: the warble's lobed family resemblance at a fraction of
       // the amplitude, so the huge shell reads solid and the escape hole
@@ -1550,12 +1565,13 @@ export class Asteroid {
     return canvas;
   }
 
-  // Citadel shell — laminated carapace armour, distinct from the warble's
-  // soft membrane. Concentric plate bands step inward from the silhouette,
-  // each band's interior a shade darker so the shell funnels down toward the
-  // lit doorway; radial seams split the bands into plates and the baked
-  // nucleus glows sit on the band like rivet lights. Painted before
-  // paintCitadelHole so the escape hole punches through every layer.
+  // Citadel shell — a ring-fortress cathedral. Concentric curtain walls step
+  // inward from the silhouette, each wearing battlement teeth, so the shell
+  // funnels down toward the lit doorway; radial flying-buttress ribs brace
+  // the walls, a ring of carved lancet windows burns with phase energy
+  // between the inner walls, and the baked nucleus glows sit on the shell
+  // band like lantern lights. Painted before paintCitadelHole so the escape
+  // hole punches through every layer.
   private paintCitadelShell(ctx: CanvasRenderingContext2D) {
     const H = this.hue;
     const R = this.radius;
@@ -1597,8 +1613,10 @@ export class Asteroid {
     catchGrad.addColorStop(0.55, `hsla(${H + 30}, 90%, 78%, 0.14)`);
     catchGrad.addColorStop(1, `hsla(${H + 30}, 90%, 78%, 0)`);
 
-    // Plate bands: inset echoes of the silhouette, each shifted a touch
-    // toward the shadow side so the stack reads as overlapping plates.
+    // Curtain walls: inset echoes of the silhouette, each shifted a touch
+    // toward the shadow side so the stack reads as concentric ramparts. Each
+    // wall wears battlement teeth — a dashed dark stroke bitten out of the
+    // body just outside the wall line — over the usual dark/lit edge pair.
     const laminaScales = [0.86, 0.72, 0.58];
     for (let li = 0; li < laminaScales.length; li++) {
       const off = R * 0.022 * (li + 1);
@@ -1611,32 +1629,90 @@ export class Asteroid {
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = catchGrad;
       ctx.stroke();
+      const tooth = R * 0.045;
+      ctx.setLineDash([tooth, tooth * 0.7]);
+      ctx.lineDashOffset = R * jitter01(li);
+      ctx.lineWidth = R * 0.03;
+      ctx.strokeStyle = `hsla(${H - 6}, 45%, 8%, 0.5)`;
+      this.tracePath(ctx, laminaScales[li] + 0.04, off, off);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
-    // Radial seams split the bands into plates. Angles sit between the rivet
-    // lights, jittered so the plating doesn't read as a perfect wheel; each
-    // seam wears a thin lit edge beside its dark groove.
-    const seamCount = this.nuclei.length;
-    for (let i = 0; i < seamCount; i++) {
-      const a = ((i + 0.5) / seamCount) * TAU + (jitter01(i) - 0.5) * 0.3;
+    // Radial flying-buttress ribs brace the walls, jittered off a perfect
+    // wheel: a mid-tone stone rib spanning inner wall to rim, with a dark
+    // shadow groove on one flank and a lit catch on the other.
+    const ribCount = this.nuclei.length;
+    for (let i = 0; i < ribCount; i++) {
+      const a = ((i + 0.5) / ribCount) * TAU + (jitter01(i) - 0.5) * 0.25;
       const idx = ((Math.round((a / TAU) * this.outlineSamples) % this.outlineSamples) + this.outlineSamples) % this.outlineSamples;
-      const rOut = this.outline[idx] * 0.99;
-      const rIn = rOut * 0.5;
+      const rOut = this.outline[idx] * 0.995;
+      const rIn = rOut * 0.52;
       const cosA = Math.cos(a);
       const sinA = Math.sin(a);
-      ctx.lineWidth = 2.5;
-      ctx.strokeStyle = `hsla(${H}, 40%, 5%, 0.75)`;
-      ctx.beginPath();
-      ctx.moveTo(cosA * rIn, sinA * rIn);
-      ctx.lineTo(cosA * rOut, sinA * rOut);
-      ctx.stroke();
-      ctx.lineWidth = 1;
+      const rib = (offPerp: number) => {
+        ctx.beginPath();
+        ctx.moveTo(cosA * rIn - sinA * offPerp, sinA * rIn + cosA * offPerp);
+        ctx.lineTo(cosA * rOut - sinA * offPerp, sinA * rOut + cosA * offPerp);
+        ctx.stroke();
+      };
+      ctx.lineWidth = R * 0.042;
+      ctx.strokeStyle = `hsla(${H + 4}, 30%, 28%, 0.9)`;
+      rib(0);
+      ctx.lineWidth = 1.8;
+      ctx.strokeStyle = `hsla(${H}, 40%, 5%, 0.8)`;
+      rib(R * 0.024);
+      ctx.lineWidth = 1.2;
       ctx.strokeStyle = catchGrad;
-      ctx.beginPath();
-      ctx.moveTo(cosA * rIn - sinA * 1.8, sinA * rIn + cosA * 1.8);
-      ctx.lineTo(cosA * rOut - sinA * 1.8, sinA * rOut + cosA * 1.8);
-      ctx.stroke();
+      rib(-R * 0.024);
     }
+
+    // A ring of carved lancet windows between the inner walls, one per bay,
+    // their glass still burning with phase energy — the citadel is a living
+    // cathedral, not a derelict like the bell. Bays swallowed by the portal
+    // are skipped rather than sliced by the hole punch.
+    for (let i = 0; i < this.nuclei.length; i++) {
+      const a = this.nuclei[i].angle;
+      const idx = ((Math.round((a / TAU) * this.outlineSamples) % this.outlineSamples) + this.outlineSamples) % this.outlineSamples;
+      const rW = this.outline[idx] * 0.65;
+      const wx = Math.cos(a) * rW;
+      const wy = Math.sin(a) * rW;
+      if (pointInTriangle(wx / 1.12, wy / 1.12, CITADEL_HOLE_VERTS)) continue;
+      ctx.save();
+      ctx.translate(wx, wy);
+      // Local -y points radially outward so the lancet tip faces the rim.
+      ctx.rotate(a + Math.PI / 2);
+      const hw = R * 0.03;
+      const top = -R * 0.035, bot = R * 0.06, tip = -R * 0.095;
+      const win = (inset: number) => this.lancetPath(ctx, 0, hw, top, bot, tip, inset);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = `hsla(${H}, 40%, 6%, 0.9)`;
+      win(-R * 0.012);
+      ctx.fill();
+      const glass = ctx.createLinearGradient(0, tip, 0, bot);
+      glass.addColorStop(0, `hsla(${H + 45}, 95%, 84%, 0.95)`);
+      glass.addColorStop(1, `hsla(${H + 12}, 90%, 52%, 0.85)`);
+      ctx.fillStyle = glass;
+      win(0);
+      ctx.fill();
+      ctx.strokeStyle = `hsla(${H}, 45%, 8%, 0.85)`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, tip + R * 0.01);
+      ctx.lineTo(0, bot);
+      ctx.stroke();
+      // The window casts its light onto the surrounding stone.
+      ctx.globalCompositeOperation = "lighter";
+      const cast = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.09);
+      cast.addColorStop(0, `hsla(${H + 30}, 90%, 70%, 0.35)`);
+      cast.addColorStop(1, `hsla(${H + 30}, 90%, 70%, 0)`);
+      ctx.fillStyle = cast;
+      ctx.beginPath();
+      ctx.arc(0, 0, R * 0.09, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalCompositeOperation = "source-over";
 
     // Specular catch on the lit shoulder — the one crisp "it's 3D" cue.
     ctx.globalCompositeOperation = "lighter";
@@ -1660,7 +1736,7 @@ export class Asteroid {
     ctx.strokeStyle = `hsla(${H + 20}, 90%, 74%, 0.85)`;
     ctx.stroke();
 
-    // Rivet lights on the shell band (the citadel's take on the generic
+    // Lantern lights on the shell band (the citadel's take on the generic
     // baked-nuclei pass); render() pulses live cores over these.
     ctx.globalCompositeOperation = "lighter";
     for (const n of this.nuclei) {
@@ -1691,6 +1767,26 @@ export class Asteroid {
     ctx.globalCompositeOperation = "destination-out";
     holePath();
     ctx.fill();
+    ctx.restore();
+    // Carved portal archivolts — stepped echoes of the doorway receding into
+    // the wall, the nested-arch treatment a cathedral porch wears. Clipped to
+    // the body so the outer ring can't poke past the rim near the nose.
+    ctx.save();
+    this.tracePath(ctx, 1);
+    ctx.clip();
+    ctx.globalCompositeOperation = "source-over";
+    for (const [s, dark, lit] of [[1.09, 0.7, 0.5], [1.18, 0.55, 0.3]] as const) {
+      ctx.save();
+      ctx.scale(s, s);
+      holePath();
+      ctx.restore();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = `hsla(${H}, 35%, 7%, ${dark})`;
+      ctx.stroke();
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = `hsla(${H + 25}, 80%, 72%, ${lit})`;
+      ctx.stroke();
+    }
     ctx.restore();
     ctx.globalCompositeOperation = "source-over";
     ctx.lineWidth = 4;
@@ -1948,49 +2044,165 @@ export class Asteroid {
     return canvas;
   }
 
-  // Warble interior — clipped concentric "phase contour" rings + a bright
-  // core, so even at solid peak the rock reads as an unstable membrane / a
-  // thing slipping between planes rather than a green asteroid. The live
-  // phase-ring overlay in renderWarblePhase rides on top of this baked base.
+  // Warble interior — a broken bastion of the citadel it phases with: the
+  // parent shell's armour-stone body at fragment scale, one crenellated
+  // rampart course echoing the outline, a carved lancet window still burning
+  // with phase energy, and pale sheared faces where the chunk tore off the
+  // fortress. The live phase-ring overlay in renderWarblePhase rides on top
+  // of this baked base.
   private paintWarbleBody(ctx: CanvasRenderingContext2D) {
     const H = this.hue;
     const R = this.radius;
+    // Bake-stable jitter off already-rolled per-rock values (the citadel
+    // shell's trick) — the bake must not consume fresh seeded draws.
+    const jitter01 = (i: number): number => {
+      const h = this.harmonics[i % this.harmonics.length];
+      return (Math.sin(h.phase * (2.9 + i) + this.membranePhase * (1.3 + i)) + 1) / 2;
+    };
     ctx.save();
-    // Clip to the silhouette so the rings hug the wobbly outline.
-    ctx.beginPath();
-    for (let i = 0; i < this.outlineSamples; i++) {
-      const angle = (i / this.outlineSamples) * TAU;
-      const r = this.outline[i];
-      const x = Math.cos(angle) * r;
-      const y = Math.sin(angle) * r;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
+    this.traceOutline(ctx);
     ctx.clip();
-    ctx.globalCompositeOperation = "lighter";
-    // Concentric contour rings, slightly off-centre so they read as a ripple
-    // through the body rather than a bullseye.
-    const cx = R * 0.06, cy = -R * 0.04;
-    const ringCount = 4;
-    for (let i = 1; i <= ringCount; i++) {
-      const rr = (i / (ringCount + 0.5)) * R;
-      ctx.beginPath();
-      ctx.arc(cx, cy, rr, 0, TAU);
-      ctx.lineWidth = 1.1;
-      ctx.strokeStyle = `hsla(${H + 30}, 90%, 72%, ${0.32 - i * 0.045})`;
-      ctx.stroke();
-    }
-    // Bright unstable core.
-    const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.5);
-    core.addColorStop(0, `hsla(${H + 45}, 95%, 88%, 0.6)`);
-    core.addColorStop(0.5, `hsla(${H + 20}, 90%, 65%, 0.22)`);
-    core.addColorStop(1, `hsla(${H}, 80%, 55%, 0)`);
-    ctx.fillStyle = core;
+
+    // The citadel shell's lit armour-stone gradient, so a warble reads as a
+    // literal piece of the parent fortress.
+    ctx.globalCompositeOperation = "source-over";
+    const body = ctx.createRadialGradient(-R * 0.35, -R * 0.45, R * 0.1, 0, 0, R * 1.35);
+    body.addColorStop(0, `hsla(${H + 12}, 50%, 40%, 0.95)`);
+    body.addColorStop(0.55, `hsla(${H}, 45%, 22%, 0.92)`);
+    body.addColorStop(1, `hsla(${H - 14}, 40%, 10%, 0.9)`);
+    ctx.fillStyle = body;
+    ctx.fillRect(-R * 1.2, -R * 1.2, R * 2.4, R * 2.4);
+
+    const catchGrad = ctx.createLinearGradient(-R, -R, R, R);
+    catchGrad.addColorStop(0, `hsla(${H + 30}, 85%, 78%, 0.7)`);
+    catchGrad.addColorStop(0.6, `hsla(${H + 30}, 85%, 78%, 0.12)`);
+    catchGrad.addColorStop(1, `hsla(${H + 30}, 85%, 78%, 0)`);
+
+    // One rampart course inset from the broken edge, wearing the citadel's
+    // battlement teeth (dashed dark bite) over the same dark/lit edge pair
+    // the parent's curtain walls use.
+    this.traceOutline(ctx, 0.74);
+    ctx.lineWidth = 2.6;
+    ctx.strokeStyle = `hsla(${H}, 40%, 5%, 0.8)`;
+    ctx.stroke();
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = catchGrad;
+    ctx.stroke();
+    const tooth = Math.max(3, R * 0.11);
+    ctx.setLineDash([tooth, tooth * 0.75]);
+    ctx.lineDashOffset = R * jitter01(0);
+    ctx.lineWidth = Math.max(2.5, R * 0.08);
+    ctx.strokeStyle = `hsla(${H - 6}, 45%, 8%, 0.5)`;
+    this.traceOutline(ctx, 0.87);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Short radial joints cut the outer band into dressed masonry blocks.
+    ctx.lineWidth = 1.1;
+    ctx.strokeStyle = `hsla(${H}, 35%, 7%, 0.55)`;
+    const jointCount = 9;
     ctx.beginPath();
-    ctx.arc(cx, cy, R * 0.5, 0, TAU);
+    for (let i = 0; i < jointCount; i++) {
+      const a = ((i + jitter01(i) * 0.6) / jointCount) * TAU;
+      const idx = ((Math.round((a / TAU) * this.outlineSamples) % this.outlineSamples) + this.outlineSamples) % this.outlineSamples;
+      const rOut = this.outline[idx] * 0.98;
+      ctx.moveTo(Math.cos(a) * rOut * 0.76, Math.sin(a) * rOut * 0.76);
+      ctx.lineTo(Math.cos(a) * rOut, Math.sin(a) * rOut);
+    }
+    ctx.stroke();
+
+    // Carved lancet window, its glass still burning with the phase energy the
+    // fragment carried out of the citadel. Facing comes from the stable
+    // membranePhase so a released fan doesn't wear identical upright windows.
+    ctx.save();
+    ctx.rotate(this.membranePhase);
+    const hw = R * 0.13, top = -R * 0.16, bot = R * 0.34, tip = -R * 0.42;
+    const win = (inset: number) => this.lancetPath(ctx, 0, hw, top, bot, tip, inset);
+    ctx.fillStyle = `hsla(${H}, 40%, 6%, 0.92)`;
+    win(-R * 0.045);
+    ctx.fill();
+    const glass = ctx.createLinearGradient(0, tip, 0, bot);
+    glass.addColorStop(0, `hsla(${H + 45}, 95%, 84%, 0.95)`);
+    glass.addColorStop(1, `hsla(${H + 12}, 90%, 52%, 0.8)`);
+    ctx.fillStyle = glass;
+    win(0);
+    ctx.fill();
+    // Leaded mullion + transom so it reads as cathedral glass, not a slot.
+    ctx.strokeStyle = `hsla(${H}, 45%, 8%, 0.85)`;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(0, tip + R * 0.02);
+    ctx.lineTo(0, bot);
+    ctx.moveTo(-hw, R * 0.09);
+    ctx.lineTo(hw, R * 0.09);
+    ctx.stroke();
+    // Lit stone lip on the carved surround.
+    ctx.strokeStyle = `hsla(${H + 25}, 75%, 74%, 0.5)`;
+    ctx.lineWidth = 1;
+    win(-R * 0.03);
+    ctx.stroke();
+    // The window casts its light onto the surrounding stone.
+    ctx.globalCompositeOperation = "lighter";
+    const cast = ctx.createRadialGradient(0, R * 0.05, 0, 0, R * 0.05, R * 0.62);
+    cast.addColorStop(0, `hsla(${H + 30}, 90%, 70%, 0.34)`);
+    cast.addColorStop(1, `hsla(${H + 30}, 90%, 70%, 0)`);
+    ctx.fillStyle = cast;
+    ctx.beginPath();
+    ctx.arc(0, R * 0.05, R * 0.62, 0, TAU);
     ctx.fill();
     ctx.restore();
+
+    // Lantern glows under the live nucleus pulses (the masonry body buried
+    // the generic baked-nuclei pass) — the citadel's shell lanterns at
+    // fragment scale, so render()'s pulsing cores sit on light, not on stone.
+    ctx.globalCompositeOperation = "lighter";
+    for (const n of this.nuclei) {
+      const nx = Math.cos(n.angle) * n.dist;
+      const ny = Math.sin(n.angle) * n.dist;
+      const nr = n.size * 4;
+      const lantern = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
+      lantern.addColorStop(0, `hsla(${H + 20}, 100%, 88%, 0.7)`);
+      lantern.addColorStop(0.45, `hsla(${H}, 100%, 65%, 0.3)`);
+      lantern.addColorStop(1, `hsla(${H}, 100%, 60%, 0)`);
+      ctx.fillStyle = lantern;
+      ctx.beginPath();
+      ctx.arc(nx, ny, nr, 0, TAU);
+      ctx.fill();
+    }
+
+    // Pale sheared faces — two outline stretches lit like freshly broken
+    // stone, selling "this tore off the citadel a moment ago".
+    ctx.globalCompositeOperation = "source-over";
+    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = `hsla(${H + 18}, 55%, 76%, 0.6)`;
+    for (let s = 0; s < 2; s++) {
+      const start = Math.floor(jitter01(s + 3) * this.outlineSamples);
+      const len = Math.max(3, Math.floor(this.outlineSamples / 6));
+      ctx.beginPath();
+      for (let k = 0; k <= len; k++) {
+        const i = (start + k) % this.outlineSamples;
+        const a = (i / this.outlineSamples) * TAU;
+        const r = this.outline[i] * 0.985;
+        const x = Math.cos(a) * r;
+        const y = Math.sin(a) * r;
+        if (k === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // The citadel's double rim at fragment scale: dark occlusion under a
+    // bright catch.
+    ctx.globalCompositeOperation = "source-over";
+    this.traceOutline(ctx);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = `hsla(${H}, 35%, 6%, 0.9)`;
+    ctx.stroke();
+    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = `hsla(${H + 20}, 85%, 74%, 0.85)`;
+    this.traceOutline(ctx, 0.97);
+    ctx.stroke();
   }
 
   // The glass prison is a cut black diamond — the diamondProfile outline

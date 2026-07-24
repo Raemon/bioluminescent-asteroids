@@ -114,7 +114,7 @@ export const ENTITY_CONFIG = {
     // config so the render crossfade and the tick's solid flip stay aligned.
     solidThreshold: 0.75,
     // Escape hole = the ship's visible triangle scaled up by this factor.
-    holeScale: 3.4,
+    holeScale: 4.0,
   },
 
   canister: {
@@ -455,6 +455,9 @@ export const ENTITY_STATS: Partial<Record<AsteroidKind, EntityStats>> = {
   },
   warble: {
     hue: 130,
+    // Coarse sampling (the bell's masonry treatment) so the fragment's edges
+    // read as chipped fortress stone rather than a smooth membrane.
+    outlineSamples: 26,
   },
 
   // The warble's fortress cousin. Low HP behind heavy armour: a shot from

@@ -3,7 +3,7 @@ import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const DEFAULT_PORT = 5173;
+const DEFAULT_PORT = Number(process.env.PORT) || 5173;
 const LOOPBACK_HOSTS = ["127.0.0.1", "::1"];
 
 const isHostPortInUse = (port, host) =>
