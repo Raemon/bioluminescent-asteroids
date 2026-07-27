@@ -54,7 +54,12 @@ const shatterBassRock = (game: Game, a: Asteroid, surviving: Asteroid[], claimed
 const shatterPlainRock = (game: Game, a: Asteroid, surviving: Asteroid[], claimed: BeatClaimSet) => {
   a.flashAmount = 1;
   emitExplosion(game.particles, game.shards, a, false);
-  for (const c of a.split()) {
+  // awayFrom/shipVel only: the citadel uses them to throw its shell clear of a
+  // player standing inside it (shipGrace alone doesn't cover a fragment that
+  // spawns on top of the hull and lingers there). Withholding shipHeading
+  // deliberately keeps metalChunk on its plain radial burst — a field-wide
+  // shatter isn't the aimed prong-shot lesson that placement is for.
+  for (const c of a.split({ awayFrom: game.ship.pos, shipVel: game.ship.vel })) {
     kickChildFromShockwave(game, c);
     alignSplitChildToRhythm(game, c, claimed);
     surviving.push(c);

@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 32;
+export const REPLAY_FORMAT_VERSION = 33;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -119,6 +119,13 @@ export const REPLAY_FORMAT_VERSION = 32;
 //   no longer land on a slot and same-beat pairs no longer double-hit. The on-beat
 //   window also stops tightening 40ms at the cap. Rhythm judging + combo/score
 //   both diverge for any v31 run that reached 32, so those recordings re-sim into
+//   different runs.
+// v33 rebuilds the citadel break-up around the player standing inside it: the
+//   three warbles are struck from the SHIP (not the shell centre) whenever it's
+//   inside the footprint, born past a clearance that accounts for their own
+//   radius, and given enough speed to outrun a ship travelling down their ray.
+//   Shockwave-driven citadel breaks now get the ship pose too. Fragment
+//   positions and speeds all move, so v32 recordings with a citadel re-sim into
 //   different runs.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held

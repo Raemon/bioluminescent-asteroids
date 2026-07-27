@@ -144,6 +144,21 @@ export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "c
 export const isPhasedKind = (kind: AsteroidKind): boolean =>
   kind === "warble" || kind === "citadel";
 
+// How much of the parent ring a warble kept, by size. A warble IS a piece of a
+// citadel, so it's shaped like one: a curved stretch of the fortress's outer
+// shell closed by two straight fracture faces running back to a blunt apex — a
+// pie slice, not a lump. A large one is a literal third of the ring; the pieces
+// it breaks into keep a narrower slice each, so a small warble reads as a chip
+// off a chunk rather than a shrunken copy of the whole. Narrower also means
+// flatter: at 60° the outer arc only bulges 13% of its own radius, which is
+// exactly how a fragment-of-a-fragment should read.
+const WARBLE_WEDGE_SPAN: Record<AsteroidSize, number> = {
+  huge: TAU / 3,
+  large: TAU / 3,
+  medium: TAU * 0.25,
+  small: TAU * 0.17,
+};
+
 // The citadel's escape hole: the ship's visible triangle (hull + halo, nose
 // along local +x) scaled up by holeScale. Built once — every citadel wears the
 // same hole, rotated with its body.
@@ -175,6 +190,12 @@ export const traceCitadelHolePath = (ctx: CanvasRenderingContext2D, pos?: Vec, r
   }
   ctx.closePath();
 };
+
+// Worst-case reach of the ship's collision silhouette in any direction —
+// the nose halo plus the collision pads, mirroring Ship.hitRadius without
+// needing a live Ship. Used by the citadel break-up to place its fragments
+// outside anything the hull could possibly be touching.
+const SHIP_CLEAR_RADIUS = SHIP_BODY_RADIUS * SHIP_NOSE_MUL + SHIP_HALO_OFFSET + 10;
 
 // Same-side sign test against each edge; works for either winding.
 const pointInTriangle = (px: number, py: number, tri: ReadonlyArray<Vec>): boolean => {
@@ -1265,6 +1286,24 @@ export class Asteroid {
         pulseSpeed: rand(1.2, 2.4),
       });
     }
+    if (kind === "warble") {
+      // Lanterns belong on the stretch of shell the fragment kept, not
+      // scattered through its broken middle (and never behind the apex, which
+      // is outside the wedge entirely). Re-aim each one onto the outer band,
+      // spread across the span — the rolled angle is reused as its jitter, so
+      // this consumes no fresh seeded draws.
+      const { apexX, arcR, halfSpan } = this.wedgeGeom();
+      for (let i = 0; i < this.nuclei.length; i++) {
+        const n = this.nuclei[i];
+        const spread = ((i + 0.5) / this.nuclei.length - 0.5) * 2 * halfSpan * 0.8;
+        const bandA = spread + Math.sin(n.angle * 3.3) * halfSpan * 0.08;
+        const band = arcR * (0.72 + 0.1 * ((Math.sin(n.angle * 5.1) + 1) / 2));
+        const nx = apexX + Math.cos(bandA) * band;
+        const ny = Math.sin(bandA) * band;
+        n.angle = Math.atan2(ny, nx);
+        n.dist = Math.hypot(nx, ny);
+      }
+    }
     if (kind === "citadel") {
       // Walk any shell lantern out of the escape hole's footprint (plus
       // margin) — the hole is bare space, and render() pulses a live light at
@@ -1378,11 +1417,14 @@ export class Asteroid {
       // A plain chipped masonry block — chunky irregular polygon.
       freqs = [1, 2, 4]; ampScale = 1.3;
     } else if (kind === "warble") {
-      // A broken bastion of the citadel: the fortress's 3/5/8 family mix plus
-      // a strong 1-harmonic, so each chunk reads as sheared off one side of
-      // the parent shell rather than grown symmetric.
-      freqs = [1, 3, 5, 8];
-      ampScale = 1.1;
+      // A broken bastion of the citadel: the wedgeProfile in computeOutline
+      // carries the silhouette (curved shell arc + two fracture faces), so
+      // these only chip the edges. The fortress's 3/5/8 family mix at metal
+      // -hull amplitude — enough to weather the stone, not enough to round off
+      // the corners or bow the straight breaks. Avoid freqs dividing the 34
+      // outline samples (2 and 17 do).
+      freqs = [3, 5, 8];
+      ampScale = 0.3;
     } else if (kind === "citadel") {
       // Fortress mass: the warble's lobed family resemblance at a fraction of
       // the amplitude, so the huge shell reads solid and the escape hole
@@ -1476,10 +1518,13 @@ export class Asteroid {
     // / filament veins / nuclei cores that would otherwise make them "alive".
     // Metal hull is likewise inert plate: it paints its own opaque steel body.
     const isArchitectural = this.kind === "bell" || CATHEDRAL_DEBRIS_KINDS.includes(this.kind) || isMetalHull(this.kind);
-    // The citadel lays down its own laminated armour body instead — the soft
-    // membrane/filament pass would read organic under the plate bands.
+    // The fortress kinds lay down their own laminated armour body instead — the
+    // soft membrane/filament pass would read organic under the plate bands, and
+    // its bright baked nuclei would bleed up through the stone. Both paint their
+    // own presence halo and their own lantern lights.
     const isCitadel = this.kind === "citadel";
-    if (!isArchitectural && !isCitadel) {
+    const isFortress = isCitadel || this.kind === "warble";
+    if (!isArchitectural && !isFortress) {
     const halo = ctx.createRadialGradient(0, 0, this.radius * 0.7, 0, 0, haloRadius);
     halo.addColorStop(0, `hsla(${baseHue}, ${sHi}%, 60%, 0.12)`);
     halo.addColorStop(0.5, `hsla(${baseHue + 10}, ${sHi}%, 55%, 0.048)`);
@@ -2044,15 +2089,33 @@ export class Asteroid {
     return canvas;
   }
 
-  // Warble interior — a broken bastion of the citadel it phases with: the
-  // parent shell's armour-stone body at fragment scale, one crenellated
-  // rampart course echoing the outline, a carved lancet window still burning
-  // with phase energy, and pale sheared faces where the chunk tore off the
-  // fortress. The live phase-ring overlay in renderWarblePhase rides on top
-  // of this baked base.
+  // Warble interior — a slice of the citadel it phases with, painted as one.
+  // Every course and joint is laid out in the PARENT's frame (concentric about
+  // the wedge's apex, radial out of it), so the stonework curves with the
+  // fortress the chunk came off rather than following the chunk's own outline;
+  // the clip cuts each course dead at the fracture faces, which is what shows
+  // the wall's laminated cross-section. The two straight faces then get the
+  // pale-lit-lip-over-dark-shadow treatment of freshly broken stone. Feature
+  // count steps down with size: a large fragment still carries a battlemented
+  // rampart and a lit lancet bay, a small one is just courses and breaks — a
+  // chip off a chunk. The live phase-ring overlay in renderWarblePhase rides on
+  // top of this baked base.
   private paintWarbleBody(ctx: CanvasRenderingContext2D) {
     const H = this.hue;
     const R = this.radius;
+    const { apexX, arcR, halfSpan } = this.wedgeGeom();
+    const isBig = this.size === "large" || this.size === "huge";
+
+    // Presence halo — the parent's glow at fragment scale, offset onto the mass
+    // so it doesn't bloom out of the empty corner behind the apex.
+    const haloR = R * 1.5;
+    const halo = ctx.createRadialGradient(apexX + arcR * 0.5, 0, R * 0.4, apexX + arcR * 0.5, 0, haloR);
+    halo.addColorStop(0, `hsla(${H}, 100%, 60%, 0.1)`);
+    halo.addColorStop(1, `hsla(${H}, 100%, 60%, 0)`);
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(apexX + arcR * 0.5, 0, haloR, 0, TAU);
+    ctx.fill();
     // Bake-stable jitter off already-rolled per-rock values (the citadel
     // shell's trick) — the bake must not consume fresh seeded draws.
     const jitter01 = (i: number): number => {
@@ -2067,9 +2130,9 @@ export class Asteroid {
     // literal piece of the parent fortress.
     ctx.globalCompositeOperation = "source-over";
     const body = ctx.createRadialGradient(-R * 0.35, -R * 0.45, R * 0.1, 0, 0, R * 1.35);
-    body.addColorStop(0, `hsla(${H + 12}, 50%, 40%, 0.95)`);
-    body.addColorStop(0.55, `hsla(${H}, 45%, 22%, 0.92)`);
-    body.addColorStop(1, `hsla(${H - 14}, 40%, 10%, 0.9)`);
+    body.addColorStop(0, `hsla(${H + 12}, 50%, 38%, 0.95)`);
+    body.addColorStop(0.55, `hsla(${H}, 45%, 18%, 0.93)`);
+    body.addColorStop(1, `hsla(${H - 14}, 40%, 8%, 0.92)`);
     ctx.fillStyle = body;
     ctx.fillRect(-R * 1.2, -R * 1.2, R * 2.4, R * 2.4);
 
@@ -2078,79 +2141,106 @@ export class Asteroid {
     catchGrad.addColorStop(0.6, `hsla(${H + 30}, 85%, 78%, 0.12)`);
     catchGrad.addColorStop(1, `hsla(${H + 30}, 85%, 78%, 0)`);
 
-    // One rampart course inset from the broken edge, wearing the citadel's
-    // battlement teeth (dashed dark bite) over the same dark/lit edge pair
-    // the parent's curtain walls use.
-    this.traceOutline(ctx, 0.74);
-    ctx.lineWidth = 2.6;
-    ctx.strokeStyle = `hsla(${H}, 40%, 5%, 0.8)`;
-    ctx.stroke();
-    ctx.lineWidth = 1.2;
-    ctx.strokeStyle = catchGrad;
-    ctx.stroke();
-    const tooth = Math.max(3, R * 0.11);
-    ctx.setLineDash([tooth, tooth * 0.75]);
-    ctx.lineDashOffset = R * jitter01(0);
-    ctx.lineWidth = Math.max(2.5, R * 0.08);
-    ctx.strokeStyle = `hsla(${H - 6}, 45%, 8%, 0.5)`;
-    this.traceOutline(ctx, 0.87);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // The shell band — this fragment's stretch of the citadel's outermost
+    // armour course, laid down a shade lighter than the core it was cast
+    // around. This is what carries the read at 50 px, long before any of the
+    // stonework below is legible: finished wall out at the curve, broken rock
+    // behind it. An annular sector struck from the apex, overshooting the span
+    // so the clip trims it against the fracture faces.
+    ctx.beginPath();
+    ctx.arc(apexX, 0, arcR * 1.06, -halfSpan * 1.3, halfSpan * 1.3);
+    ctx.arc(apexX, 0, arcR * 0.83, halfSpan * 1.3, -halfSpan * 1.3, true);
+    ctx.closePath();
+    ctx.fillStyle = `hsla(${H + 8}, 45%, 29%, 0.6)`;
+    ctx.fill();
 
-    // Short radial joints cut the outer band into dressed masonry blocks.
+    // Curtain-wall courses, concentric with the PARENT shell: arcs struck from
+    // the wedge's apex, overshooting the span so the clip ends them on the
+    // fracture faces rather than curling back inside the fragment.
+    const course = (frac: number, lw: number, style: string | CanvasGradient) => {
+      ctx.beginPath();
+      ctx.arc(apexX, 0, arcR * frac, -halfSpan * 1.3, halfSpan * 1.3);
+      ctx.lineWidth = lw;
+      ctx.strokeStyle = style;
+      ctx.stroke();
+    };
+    // A large chunk carries two walls of the fortress; smaller pieces came off
+    // between the walls and keep one.
+    const courseFracs = isBig ? [0.87, 0.71] : [0.8];
+    for (const frac of courseFracs) {
+      course(frac, 2.6, `hsla(${H}, 40%, 5%, 0.8)`);
+      course(frac, 1.2, catchGrad);
+    }
+    // Battlement teeth along the shell edge — a dashed dark bite, the parent's
+    // crenellation at fragment scale. Only the big pieces kept a rampart top.
+    if (isBig) {
+      const tooth = Math.max(3, R * 0.11);
+      ctx.setLineDash([tooth, tooth * 0.75]);
+      ctx.lineDashOffset = R * jitter01(0);
+      course(0.96, Math.max(2.5, R * 0.08), `hsla(${H - 6}, 45%, 8%, 0.5)`);
+      ctx.setLineDash([]);
+    }
+
+    // Radial joints out of the apex cut the band into dressed masonry blocks —
+    // the fortress's bays, sliced through by the break.
     ctx.lineWidth = 1.1;
     ctx.strokeStyle = `hsla(${H}, 35%, 7%, 0.55)`;
-    const jointCount = 9;
+    const jointCount = isBig ? 6 : this.size === "medium" ? 4 : 3;
     ctx.beginPath();
-    for (let i = 0; i < jointCount; i++) {
-      const a = ((i + jitter01(i) * 0.6) / jointCount) * TAU;
-      const idx = ((Math.round((a / TAU) * this.outlineSamples) % this.outlineSamples) + this.outlineSamples) % this.outlineSamples;
-      const rOut = this.outline[idx] * 0.98;
-      ctx.moveTo(Math.cos(a) * rOut * 0.76, Math.sin(a) * rOut * 0.76);
-      ctx.lineTo(Math.cos(a) * rOut, Math.sin(a) * rOut);
+    for (let i = 1; i < jointCount; i++) {
+      const a = -halfSpan + (i / jointCount) * 2 * halfSpan + (jitter01(i) - 0.5) * 0.07;
+      const cosA = Math.cos(a);
+      const sinA = Math.sin(a);
+      ctx.moveTo(apexX + cosA * arcR * 0.58, sinA * arcR * 0.58);
+      ctx.lineTo(apexX + cosA * arcR * 1.02, sinA * arcR * 1.02);
     }
     ctx.stroke();
 
-    // Carved lancet window, its glass still burning with the phase energy the
-    // fragment carried out of the citadel. Facing comes from the stable
-    // membranePhase so a released fan doesn't wear identical upright windows.
-    ctx.save();
-    ctx.rotate(this.membranePhase);
-    const hw = R * 0.13, top = -R * 0.16, bot = R * 0.34, tip = -R * 0.42;
-    const win = (inset: number) => this.lancetPath(ctx, 0, hw, top, bot, tip, inset);
-    ctx.fillStyle = `hsla(${H}, 40%, 6%, 0.92)`;
-    win(-R * 0.045);
-    ctx.fill();
-    const glass = ctx.createLinearGradient(0, tip, 0, bot);
-    glass.addColorStop(0, `hsla(${H + 45}, 95%, 84%, 0.95)`);
-    glass.addColorStop(1, `hsla(${H + 12}, 90%, 52%, 0.8)`);
-    ctx.fillStyle = glass;
-    win(0);
-    ctx.fill();
-    // Leaded mullion + transom so it reads as cathedral glass, not a slot.
-    ctx.strokeStyle = `hsla(${H}, 45%, 8%, 0.85)`;
-    ctx.lineWidth = 1.1;
-    ctx.beginPath();
-    ctx.moveTo(0, tip + R * 0.02);
-    ctx.lineTo(0, bot);
-    ctx.moveTo(-hw, R * 0.09);
-    ctx.lineTo(hw, R * 0.09);
-    ctx.stroke();
-    // Lit stone lip on the carved surround.
-    ctx.strokeStyle = `hsla(${H + 25}, 75%, 74%, 0.5)`;
-    ctx.lineWidth = 1;
-    win(-R * 0.03);
-    ctx.stroke();
-    // The window casts its light onto the surrounding stone.
-    ctx.globalCompositeOperation = "lighter";
-    const cast = ctx.createRadialGradient(0, R * 0.05, 0, 0, R * 0.05, R * 0.62);
-    cast.addColorStop(0, `hsla(${H + 30}, 90%, 70%, 0.34)`);
-    cast.addColorStop(1, `hsla(${H + 30}, 90%, 70%, 0)`);
-    ctx.fillStyle = cast;
-    ctx.beginPath();
-    ctx.arc(0, R * 0.05, R * 0.62, 0, TAU);
-    ctx.fill();
-    ctx.restore();
+    // One carved lancet bay, its glass still burning with the phase energy the
+    // fragment carried out of the citadel. Sat in the wall band and aimed
+    // radially outward, exactly like the ring of windows on the parent — a
+    // rotation of +90° puts local -y (the lancet's tip) on the outward axis.
+    // Only the big pieces are wide enough to have taken a whole bay with them.
+    if (isBig) {
+      ctx.save();
+      ctx.translate(apexX + arcR * 0.78, 0);
+      ctx.rotate(Math.PI / 2);
+      const hw = R * 0.085, top = -R * 0.05, bot = R * 0.13, tip = -R * 0.17;
+      const win = (inset: number) => this.lancetPath(ctx, 0, hw, top, bot, tip, inset);
+      ctx.fillStyle = `hsla(${H}, 40%, 6%, 0.92)`;
+      win(-R * 0.045);
+      ctx.fill();
+      const glass = ctx.createLinearGradient(0, tip, 0, bot);
+      glass.addColorStop(0, `hsla(${H + 45}, 95%, 84%, 0.95)`);
+      glass.addColorStop(1, `hsla(${H + 12}, 90%, 52%, 0.8)`);
+      ctx.fillStyle = glass;
+      win(0);
+      ctx.fill();
+      // Leaded mullion + transom so it reads as cathedral glass, not a slot.
+      ctx.strokeStyle = `hsla(${H}, 45%, 8%, 0.85)`;
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(0, tip + R * 0.02);
+      ctx.lineTo(0, bot);
+      ctx.moveTo(-hw, R * 0.05);
+      ctx.lineTo(hw, R * 0.05);
+      ctx.stroke();
+      // Lit stone lip on the carved surround.
+      ctx.strokeStyle = `hsla(${H + 25}, 75%, 74%, 0.5)`;
+      ctx.lineWidth = 1;
+      win(-R * 0.03);
+      ctx.stroke();
+      // The window casts its light onto the surrounding stone.
+      ctx.globalCompositeOperation = "lighter";
+      const cast = ctx.createRadialGradient(0, R * 0.02, 0, 0, R * 0.02, R * 0.34);
+      cast.addColorStop(0, `hsla(${H + 30}, 90%, 70%, 0.22)`);
+      cast.addColorStop(1, `hsla(${H + 30}, 90%, 70%, 0)`);
+      ctx.fillStyle = cast;
+      ctx.beginPath();
+      ctx.arc(0, R * 0.02, R * 0.34, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
 
     // Lantern glows under the live nucleus pulses (the masonry body buried
     // the generic baked-nuclei pass) — the citadel's shell lanterns at
@@ -2159,10 +2249,12 @@ export class Asteroid {
     for (const n of this.nuclei) {
       const nx = Math.cos(n.angle) * n.dist;
       const ny = Math.sin(n.angle) * n.dist;
-      const nr = n.size * 4;
+      // Capped against the body: a small chip's lanterns are lamps set in its
+      // wall, not a glow that swallows the whole fragment.
+      const nr = Math.min(n.size * 4, R * 0.22);
       const lantern = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
-      lantern.addColorStop(0, `hsla(${H + 20}, 100%, 88%, 0.7)`);
-      lantern.addColorStop(0.45, `hsla(${H}, 100%, 65%, 0.3)`);
+      lantern.addColorStop(0, `hsla(${H + 20}, 100%, 88%, 0.55)`);
+      lantern.addColorStop(0.45, `hsla(${H}, 100%, 65%, 0.22)`);
       lantern.addColorStop(1, `hsla(${H}, 100%, 60%, 0)`);
       ctx.fillStyle = lantern;
       ctx.beginPath();
@@ -2170,30 +2262,58 @@ export class Asteroid {
       ctx.fill();
     }
 
-    // Pale sheared faces — two outline stretches lit like freshly broken
-    // stone, selling "this tore off the citadel a moment ago".
+    // Specular catch on the lit shoulder, the parent's cue at fragment scale —
+    // the one crisp highlight that keeps the slab from reading flat.
+    const spx = -R * 0.18;
+    const spy = -R * 0.42;
+    const spec = ctx.createRadialGradient(spx, spy, 0, spx, spy, R * 0.3);
+    spec.addColorStop(0, `hsla(${H + 40}, 95%, 92%, 0.4)`);
+    spec.addColorStop(0.4, `hsla(${H + 25}, 90%, 75%, 0.13)`);
+    spec.addColorStop(1, `hsla(${H + 25}, 90%, 75%, 0)`);
+    ctx.fillStyle = spec;
+    ctx.beginPath();
+    ctx.arc(spx, spy, R * 0.3, 0, TAU);
+    ctx.fill();
+
+    // The two fracture faces: where the fragment was cut out of the ring. Each
+    // gets a band of shadow set into the stone with a pale lit lip riding on
+    // top of it — freshly broken rock against the weathered shell above. Drawn
+    // slightly inset from the ideal edge so the chipped silhouette can't leave
+    // a stroke hanging off in space.
     ctx.globalCompositeOperation = "source-over";
-    ctx.lineWidth = 2.2;
-    ctx.strokeStyle = `hsla(${H + 18}, 55%, 76%, 0.6)`;
-    for (let s = 0; s < 2; s++) {
-      const start = Math.floor(jitter01(s + 3) * this.outlineSamples);
-      const len = Math.max(3, Math.floor(this.outlineSamples / 6));
-      ctx.beginPath();
-      for (let k = 0; k <= len; k++) {
-        const i = (start + k) % this.outlineSamples;
-        const a = (i / this.outlineSamples) * TAU;
-        const r = this.outline[i] * 0.985;
-        const x = Math.cos(a) * r;
-        const y = Math.sin(a) * r;
-        if (k === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
+    for (const s of [1, -1]) {
+      const a = s * halfSpan;
+      const cosA = Math.cos(a);
+      const sinA = Math.sin(a);
+      // Inward normal of this face — both lean back toward the fragment's axis.
+      const nx = sinA * s;
+      const ny = -cosA * s;
+      const face = (inset: number, lw: number, style: string) => {
+        ctx.beginPath();
+        ctx.moveTo(apexX + nx * inset + cosA * arcR * 0.06, ny * inset + sinA * arcR * 0.06);
+        ctx.lineTo(apexX + cosA * arcR * 0.99 + nx * inset, sinA * arcR * 0.99 + ny * inset);
+        ctx.lineWidth = lw;
+        ctx.strokeStyle = style;
+        ctx.stroke();
+      };
+      face(R * 0.1, R * 0.16, `hsla(${H - 6}, 42%, 5%, 0.5)`);
+      face(R * 0.026, 2.4, `hsla(${H + 18}, 55%, 80%, 0.75)`);
     }
+    // Pooled shadow in the notch where the two faces meet — the deep inside
+    // corner of the break, furthest from both the light and the shell.
+    const notch = ctx.createRadialGradient(apexX, 0, 0, apexX, 0, arcR * 0.5);
+    notch.addColorStop(0, `hsla(${H - 10}, 45%, 5%, 0.55)`);
+    notch.addColorStop(1, `hsla(${H - 10}, 45%, 5%, 0)`);
+    ctx.fillStyle = notch;
+    ctx.beginPath();
+    ctx.arc(apexX, 0, arcR * 0.5, 0, TAU);
+    ctx.fill();
     ctx.restore();
 
-    // The citadel's double rim at fragment scale: dark occlusion under a
-    // bright catch.
+    // The citadel's double rim at fragment scale — but the bright catch runs
+    // along the shell arc ONLY. That asymmetry is the whole read: the curved
+    // edge is finished fortress surface catching the light, the two straight
+    // edges are raw breaks that never had a face to catch anything.
     ctx.globalCompositeOperation = "source-over";
     this.traceOutline(ctx);
     ctx.lineWidth = 3;
@@ -2201,7 +2321,8 @@ export class Asteroid {
     ctx.stroke();
     ctx.lineWidth = 1.3;
     ctx.strokeStyle = `hsla(${H + 20}, 85%, 74%, 0.85)`;
-    this.traceOutline(ctx, 0.97);
+    ctx.beginPath();
+    ctx.arc(apexX, 0, arcR * 0.97, -halfSpan * 0.94, halfSpan * 0.94);
     ctx.stroke();
   }
 
@@ -3746,10 +3867,56 @@ export class Asteroid {
     return 1 / Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a)));
   }
 
+  // Wedge geometry for a citadel fragment, in world px and cached (the outline
+  // sampler and every collision test ask for it). The shape is the sector of a
+  // disc of radius `arcR` centred on `apex` — which sits behind the fragment's
+  // own centre, on the -x axis — spanning ±`halfSpan` about +x. Centring on the
+  // sector's centroid rather than its apex is what makes it tumble like a chunk
+  // of masonry instead of pivoting on its point. `radius` stays the bounding
+  // radius: the sector is scaled to touch it at whichever point sits farthest
+  // from that centroid.
+  private wedgeCache: { apexX: number; arcR: number; halfSpan: number } | null = null;
+  wedgeGeom(): { apexX: number; arcR: number; halfSpan: number } {
+    if (this.wedgeCache) return this.wedgeCache;
+    const halfSpan = WARBLE_WEDGE_SPAN[this.size] / 2;
+    // Centroid of a unit sector sits this far along the axis from the apex.
+    const g = (2 * Math.sin(halfSpan)) / (3 * halfSpan);
+    // Farthest point from it: a corner where the arc meets a fracture face —
+    // or, once the slice is thin enough, the middle of the arc.
+    const corner = Math.hypot(Math.cos(halfSpan) - g, Math.sin(halfSpan));
+    const k = this.radius / Math.max(corner, 1 - g);
+    this.wedgeCache = { apexX: -g * k, arcR: k, halfSpan };
+    return this.wedgeCache;
+  }
+
+  // Support radius of that wedge at a local angle, as a multiple of `radius`.
+  // The ray out of the centre is clipped by the outer arc and by the two
+  // fracture faces; the sector is convex, so whichever bites first IS the
+  // boundary. Drives both the drawn outline and the collision surface, so the
+  // visible edge stays the hitbox even though the silhouette is no longer a lump.
+  private wedgeProfile(angle: number): number {
+    const { apexX, arcR, halfSpan } = this.wedgeGeom();
+    const ux = Math.cos(angle);
+    const uy = Math.sin(angle);
+    // Outer arc: solve |t·û − apex| = arcR for the positive root.
+    const ua = ux * apexX;
+    let t = ua + Math.sqrt(Math.max(0, ua * ua + arcR * arcR - apexX * apexX));
+    // Fracture faces: half-planes through the apex whose outward normals lean
+    // ± across the span. A face only bounds the ray if the ray leans into it.
+    const sinH = Math.sin(halfSpan);
+    const cosH = Math.cos(halfSpan);
+    for (const s of [1, -1]) {
+      const denom = -sinH * ux + s * cosH * uy;
+      if (denom > 1e-6) t = Math.min(t, (-sinH * apexX) / denom);
+    }
+    return t / this.radius;
+  }
+
   computeOutline(): number[] {
     const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isBurstGem(this.kind) || CATHEDRAL_DEBRIS_KINDS.includes(this.kind) || isMetalHull(this.kind);
     const isDiamond = isDiamondCut(this.kind) || this.isPrisonShard;
     const isCube = isMetalHull(this.kind);
+    const isWedge = this.kind === "warble";
     const samples: number[] = [];
     for (let i = 0; i < this.outlineSamples; i++) {
       const angle = (i / this.outlineSamples) * TAU;
@@ -3763,6 +3930,7 @@ export class Asteroid {
       if (isClamped) r = Math.max(0.45, Math.min(1.55, r));
       if (isDiamond) r *= this.diamondProfile(angle);
       if (isCube) r *= this.cubeProfile(angle);
+      if (isWedge) r *= this.wedgeProfile(angle);
       samples.push(r * this.radius);
     }
     return samples;
@@ -3780,6 +3948,7 @@ export class Asteroid {
     }
     if (isDiamondCut(this.kind) || this.isPrisonShard) r *= this.diamondProfile(angle);
     if (isMetalHull(this.kind)) r *= this.cubeProfile(angle);
+    if (this.kind === "warble") r *= this.wedgeProfile(angle);
     return r * this.radius;
   }
 
@@ -4713,24 +4882,70 @@ export class Asteroid {
         ? Math.atan2(impactDir.y, impactDir.x)
         : Math.atan2(this.vel.y, this.vel.x);
       const parentSpeed = Math.hypot(this.vel.x, this.vel.y);
-      const ejectDist = this.radius * 0.5;
+      // A fragment must be BORN clear of the hull, not merely aimed away from
+      // it: its own radius, the ship's silhouette, the ±18 px the rhythm
+      // aligner may nudge it back down its ray (alignSplitChildToRhythm), and
+      // a little slack. A large warble is r=50 against a 140-radius shell, so
+      // the old radius·0.5 ring put fragment bodies straight over the centre —
+      // exactly where the player is standing for the intended kill.
+      const clearance = entityStat("warble", "large", "radius") + SHIP_CLEAR_RADIUS + 18 + 16;
+      // Ship in this citadel's unwrapped frame; null for a shockwave-driven
+      // break, where there's no shooter standing in the blast to protect.
+      let ship: Vec | null = null;
+      let shipDist = Infinity;
+      if (opts?.awayFrom) {
+        const [sx, sy] = toroidalDelta(this.pos.x - opts.awayFrom.x, this.pos.y - opts.awayFrom.y, WORLD_W, WORLD_H);
+        ship = { x: this.pos.x - sx, y: this.pos.y - sy };
+        shipDist = Math.hypot(sx, sy);
+      }
+      // The intended kill is fired from inside the escape hole, so the player
+      // is usually at the dead centre of this explosion. Whenever they're
+      // inside the footprint the fan is struck from THEM rather than from the
+      // shell's centre — three rays spread evenly around the ship, each piece
+      // born past `clearance` down its own ray and flying straight out along
+      // it, so the gap only ever grows. From outside, pieces come off the
+      // shell band as before and are only shoved out if one lands on the ship.
+      const shipInside = ship !== null && shipDist <= this.radius;
+      const origin = shipInside ? (ship as Vec) : this.pos;
+      // 0.8·radius is the shell band the fragments visually tore off of.
+      const spawnDist = shipInside ? Math.max(clearance, this.radius * 0.8) : this.radius * 0.8;
       const fragmentList: Asteroid[] = [];
       for (let i = 0; i < 3; i++) {
-        // Spread evenly around the full shell, anchored on the killing shot.
-        const childAngle = baseAngle + i * (TAU / 3) + rand(-0.2, 0.2);
+        // Spread evenly around the origin, anchored on the killing shot.
+        const spawnAngle = baseAngle + i * (TAU / 3) + rand(-0.2, 0.2);
         const childPos = {
-          x: this.pos.x + Math.cos(childAngle) * ejectDist,
-          y: this.pos.y + Math.sin(childAngle) * ejectDist,
+          x: origin.x + Math.cos(spawnAngle) * spawnDist,
+          y: origin.y + Math.sin(spawnAngle) * spawnDist,
         };
-        // The intended kill is fired from inside the hole with the ship right
-        // there — every piece flies radially away from the shooter so none of
-        // the shell collapses back over the player.
-        let flyAngle = childAngle;
-        if (opts?.awayFrom) {
-          const [ax, ay] = toroidalDelta(childPos.x - opts.awayFrom.x, childPos.y - opts.awayFrom.y, WORLD_W, WORLD_H);
-          if (ax !== 0 || ay !== 0) flyAngle = Math.atan2(ay, ax);
+        let flyAngle = spawnAngle;
+        if (ship) {
+          const ox = childPos.x - ship.x;
+          const oy = childPos.y - ship.y;
+          const d = Math.hypot(ox, oy);
+          if (d > 1e-3) {
+            // Radially away from the shooter, and if this piece still landed
+            // inside their personal space, slide it out along the same ray
+            // until it can't be touching them.
+            flyAngle = Math.atan2(oy, ox);
+            if (d < clearance) {
+              childPos.x = ship.x + (ox / d) * clearance;
+              childPos.y = ship.y + (oy / d) * clearance;
+            }
+          }
         }
-        const speedMag = parentSpeed * rand(0.9, 1.3) + rand(55, 95);
+        wrapMut(childPos, WORLD_W, WORLD_H);
+        // Outrun the player: a ship already travelling down this ray catches a
+        // fragment carrying only the shell's ponderous drift. Adding the ship's
+        // own speed along the ray is exactly the condition that makes the gap
+        // monotonic — a fragment moving straight out from the ship faster than
+        // the ship closes on it can never be reached, from any angle, however
+        // the two coast afterwards. Pre-divided by the rhythm aligner's lowest
+        // speed multiplier so even a fragment it slows down keeps the property.
+        // Zero in the usual case: you drift into the hole, you don't race in.
+        const chase = opts?.shipVel
+          ? Math.max(0, opts.shipVel.x * Math.cos(flyAngle) + opts.shipVel.y * Math.sin(flyAngle))
+          : 0;
+        const speedMag = parentSpeed * rand(0.9, 1.3) + rand(70, 120) + chase / 0.65;
         const child = new Asteroid(childPos, fromAngle(flyAngle, speedMag), "large", this.hue, "warble");
         fragmentList.push(child);
       }

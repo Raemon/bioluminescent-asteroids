@@ -455,9 +455,11 @@ export const ENTITY_STATS: Partial<Record<AsteroidKind, EntityStats>> = {
   },
   warble: {
     hue: 130,
-    // Coarse sampling (the bell's masonry treatment) so the fragment's edges
-    // read as chipped fortress stone rather than a smooth membrane.
-    outlineSamples: 26,
+    // The wedge silhouette (Asteroid.wedgeProfile) needs enough samples that
+    // the shell arc stays smooth and the corners where it meets the two
+    // fracture faces don't get cut off by the fixed-angle sampler — but few
+    // enough that the edges still read as chipped fortress stone.
+    outlineSamples: 34,
   },
 
   // The warble's fortress cousin. Low HP behind heavy armour: a shot from

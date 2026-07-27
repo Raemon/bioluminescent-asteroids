@@ -149,7 +149,7 @@ export class Pulsar {
   static readonly SHOCK_FLASH_DURATION = 0.42;
   static readonly SHOCK_EXPAND_DURATION = 1.5;
 
-  // Boss-planet state. planets[0] (the prominent blue oblong planetoid)
+  // Boss-planet state. planets[0] (the prominent looming planet)
   // doubles as the first boss. Its drift is timed so the orbit naturally
   // carries it across the pulsar somewhere in the wave 7-9 range; that
   // eclipse is the visual cue for the impending boss. On the boss wave
@@ -782,7 +782,7 @@ export class Pulsar {
         colorApproach = approach;
       }
 
-      this.renderPlanet(ctx, planet, px, py, size, ppx, ppy, r, colorApproach, beat, flare, isBossPlanet);
+      this.renderPlanet(ctx, planet, px, py, size, ppx, ppy, r, colorApproach, beat, flare);
     }
 
     this.renderShockwave(ctx);
@@ -806,7 +806,6 @@ export class Pulsar {
     approach: number,
     beat: number,
     flare: number,
-    isOblongPlanetoid: boolean = false,
   ) {
     // Dark silhouette — the planet is backlit, so its body sits in shadow
     // against the starfield. Saturation still climbs with approach so the
@@ -817,11 +816,7 @@ export class Pulsar {
 
     ctx.fillStyle = `hsl(${planet.hue}, ${sat}%, ${light}%)`;
     ctx.beginPath();
-    if (isOblongPlanetoid) {
-      this.tracePlanetoidSilhouette(ctx, px, py, size);
-    } else {
-      ctx.arc(px, py, size, 0, TAU);
-    }
+    this.tracePlanetDisc(ctx, px, py, size);
     ctx.fill();
 
     // Direction from planet toward pulsar — that side gets the rim light.
@@ -890,11 +885,7 @@ export class Pulsar {
       ctx.fillStyle = arc;
       ctx.beginPath();
       ctx.arc(acx, acy, arcOuter, 0, TAU);
-      if (isOblongPlanetoid) {
-        this.tracePlanetoidSilhouette(ctx, px, py, size, true);
-      } else {
-        ctx.arc(px, py, size, 0, TAU, true);
-      }
+      this.tracePlanetDisc(ctx, px, py, size, true);
       ctx.fill("evenodd");
       ctx.restore();
     }
@@ -1062,11 +1053,7 @@ export class Pulsar {
       // than bleaching it.
       ctx.save();
       ctx.beginPath();
-      if (isOblongPlanetoid) {
-        this.tracePlanetoidSilhouette(ctx, px, py, size);
-      } else {
-        ctx.arc(px, py, size, 0, TAU);
-      }
+      this.tracePlanetDisc(ctx, px, py, size);
       ctx.clip();
       const transAlpha = Math.min(1, 0.55 * totality + 0.2 * beat * totality);
       const trans = ctx.createRadialGradient(px, py, 0, px, py, size);
@@ -1090,11 +1077,7 @@ export class Pulsar {
       ctx.fillStyle = ring;
       ctx.beginPath();
       ctx.arc(px, py, ringOuter, 0, TAU);
-      if (isOblongPlanetoid) {
-        this.tracePlanetoidSilhouette(ctx, px, py, size, true);
-      } else {
-        ctx.arc(px, py, size, 0, TAU, true);
-      }
+      this.tracePlanetDisc(ctx, px, py, size, true);
       ctx.fill("evenodd");
       ctx.restore();
     }
@@ -1193,35 +1176,15 @@ export class Pulsar {
     return this.orbitPoint(angle, planet.baseRadiusFrac, this.approach(), this.cameraView());
   }
 
-  // Subtle Ceres-like silhouette for the boss planetoid. At small sizes the
-  // sub-pixel wobble averages out to a circle; at close range the lumps and
-  // the slight x-axis elongation become visible so the body reads as a giant
-  // asteroid rather than a perfect sphere. Shape is fixed (not animated) so
-  // the same surface features face the camera each frame — the planetoid's
-  // axial spin is suggested only by the slowly-changing illumination, not by
-  // a tumbling outline. `reverse` traces the path counter-clockwise for use
-  // as an even-odd cutout inside the halo annulus.
-  private tracePlanetoidSilhouette(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, reverse: boolean = false) {
-    // 24 samples is enough for a smooth limb at the planet's render size; the
-    // bumps are deterministic per angle index so the silhouette is stable.
-    const STEPS = 24;
-    // Subtle radial wobble — peaks at ~7% of base radius. Two sinusoids at
-    // co-prime multiples so the lumps don't repeat in obvious symmetry.
-    const wobbleAt = (i: number) => {
-      const a = (i / STEPS) * TAU;
-      return 1 + 0.045 * Math.sin(a * 3 + 0.7) + 0.035 * Math.sin(a * 5 + 2.1) + 0.02 * Math.sin(a * 7 + 4.3);
-    };
-    // Slight x-axis elongation — peanut/Eros-ish only at close range.
-    const ELONGATE = 1.08;
-    for (let i = 0; i <= STEPS; i++) {
-      const idx = reverse ? STEPS - i : i;
-      const a = (idx / STEPS) * TAU;
-      const r = size * wobbleAt(idx);
-      const x = cx + Math.cos(a) * r * ELONGATE;
-      const y = cy + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
+  // Silhouette for a background planet: a smooth sphere with the faint
+  // equatorial bulge every spinning world has. Real oblateness (Earth's is
+  // ~0.3%) is far too small to survive rasterisation, so we exaggerate it to
+  // ~3% — enough that the limb reads as a rotating body rather than a drawn
+  // circle, small enough that it never reads as an egg. `reverse` traces the
+  // path counter-clockwise for use as an even-odd cutout inside the halo
+  // annulus.
+  private static readonly PLANET_FLATTENING = 0.03;
+  private tracePlanetDisc(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, reverse: boolean = false) {
+    ctx.ellipse(cx, cy, size, size * (1 - Pulsar.PLANET_FLATTENING), 0, 0, TAU, reverse);
   }
 }

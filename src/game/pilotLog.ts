@@ -1,5 +1,6 @@
 import type { Game } from "../Game";
 import { BEAT_GRID } from "./rhythmConstants";
+import { markPilotLogHeard, shouldPlayPilotLog } from "./sessionTracker";
 
 // Pilot's Log unlocks fire at specific combo milestones (x6, x12). Each
 // milestone has its own random pool of takes under /sounds/vocals/in-use/<n>x/.
@@ -36,6 +37,26 @@ const showUnlockToast = (label: string) => {
   window.setTimeout(() => { el?.classList.remove("show"); }, 5000);
 };
 
+// Vocals are rationed on the same 4h window as the intro's full-hint triplet:
+//   a line the player already heard this session stays quiet on every later run
+//   until the session lapses (see sessionTracker). Replay playback is exempt —
+//   playPilotLog draws its take from the shared cosmetic RNG stream, so
+//   skipping the call on one viewer's machine and not another's would drift
+//   every downstream cosmetic draw in the re-sim.
+const allowLogVocal = (game: Game, milestone: number): boolean =>
+  game.state === "replaying" || shouldPlayPilotLog(milestone);
+
+// Schedule the vocal on the next downbeat and hold the mutex for its duration.
+const playLogVocal = (game: Game, milestone: number) => {
+  if (!allowLogVocal(game, milestone)) return;
+  if (game.state !== "replaying") markPilotLogHeard(milestone);
+  game.sound.pilotLogPlaying = true;
+  const delay = nextDownbeatDelay(game.beatTime);
+  game.sound.playPilotLog(milestone, delay, 1.0).then((dur) => {
+    window.setTimeout(() => { game.sound.pilotLogPlaying = false; }, (delay + dur + 0.5) * 1000);
+  });
+};
+
 // Fire the combo-x6 unlock: HUD toast immediately, vocal cue on the next
 // downbeat so it locks to the pad's phrase grid. Guarded so a stutter at the
 // threshold can't re-trigger the line mid-playback.
@@ -49,11 +70,8 @@ export const tryUnlockPilotLog1 = (game: Game) => {
   if (game.beatCombo < 6) return;
   game.pilotLog1Unlocked = true;
   showUnlockToast("Chapter 1: The Outer Rim");
-  game.sound.pilotLogPlaying = true;
-  const delay = nextDownbeatDelay(game.beatTime);
-  game.sound.playPilotLog(6, delay, 1.0).then((dur) => {
-    window.setTimeout(() => { game.sound.pilotLogPlaying = false; }, (delay + dur + 0.5) * 1000);
-  });
+  // Toast still fires every run — only the vocal is rationed to once a session.
+  playLogVocal(game, 6);
 };
 
 // Combo x12: Pilot's Log Entry 3. Same downbeat-snap as Entry 1, but no HUD
@@ -66,11 +84,13 @@ export const tryUnlockPilotLog3 = (game: Game) => {
   if (game.replayFastForwarding) return;
   if (game.pilotLog3Unlocked) return;
   if (game.beatCombo < 12) return;
+  // Muted-this-session latches straight away: there's no playback to wait on,
+  // so the mutex retry below would just re-check forever.
+  if (!allowLogVocal(game, 12)) {
+    game.pilotLog3Unlocked = true;
+    return;
+  }
   if (game.sound.pilotLogPlaying) return;
   game.pilotLog3Unlocked = true;
-  game.sound.pilotLogPlaying = true;
-  const delay = nextDownbeatDelay(game.beatTime);
-  game.sound.playPilotLog(12, delay, 1.0).then((dur) => {
-    window.setTimeout(() => { game.sound.pilotLogPlaying = false; }, (delay + dur + 0.5) * 1000);
-  });
+  playLogVocal(game, 12);
 };

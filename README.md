@@ -19,6 +19,17 @@ npm run dev
 
 Then open the URL Vite prints.
 
+## Dev pages
+
+Alongside the game itself, the dev server serves a few authoring/inspection pages:
+
+| Path | What it's for |
+| --- | --- |
+| `/sprites` | Every drawable body in the game on one contact sheet, rendered live — zoom, tumble, collision-surface overlay, and a reroll to resample the seeded silhouettes. Loads no audio code at all, so it never starts a sound bake. |
+| `/sound` | Sound editor — tunes `public/sounds/config.json`. |
+| `/music` | Music editor. |
+| `/piano-roll` | Piano-roll view of the score. |
+
 ## Controls
 
 | Key | Action |
