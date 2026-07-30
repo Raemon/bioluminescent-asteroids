@@ -42,6 +42,10 @@ const spawnSpeedRange = (a: Asteroid): [number, number] => {
     const m = CFG.glassPrison.spawnSpeedMul;
     return [lo * m, hi * m];
   }
+  if (a.kind === "bigGlassPrison") {
+    const m = CFG.bigGlassPrison.spawnSpeedMul;
+    return [lo * m, hi * m];
+  }
   if (isBurstGem(a.kind)) {
     const m = CFG.burstGem.spawnSpeedMul;
     return [lo * m, hi * m];
@@ -258,6 +262,10 @@ export const spawnAsteroidAway = (
   if (a.kind === "glassPrison") {
     a.vel.x *= CFG.glassPrison.spawnSpeedMul;
     a.vel.y *= CFG.glassPrison.spawnSpeedMul;
+  }
+  if (a.kind === "bigGlassPrison") {
+    a.vel.x *= CFG.bigGlassPrison.spawnSpeedMul;
+    a.vel.y *= CFG.bigGlassPrison.spawnSpeedMul;
   }
   if (isBurstGem(a.kind)) {
     a.vel.x *= CFG.burstGem.spawnSpeedMul;
@@ -740,8 +748,12 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
     const isCitadel = game.wave >= CFG.citadel.firstWave && game.wave <= CFG.citadel.lastWave
       && rng() < CFG.citadel.perSpawnChance;
     if (isCitadel) { slotKinds.push("citadel"); continue; }
-    // Glass prison gated on its firstWave (post-boss). Rolled before the rest
-    // so a prison slot can't also pick up a gem or be downgraded to a solid crystal.
+    // Glass prisons gated on their firstWave (post-boss). Rolled before the rest
+    // so a prison slot can't also pick up a gem or be downgraded to a solid
+    // crystal. The big shell rolls first — when it fires, the slot becomes the
+    // oversized brood prison rather than the ordinary single-captive one.
+    const isBigPrison = game.wave >= CFG.bigGlassPrison.firstWave && rng() < CFG.bigGlassPrison.perSpawnChance;
+    if (isBigPrison) { slotKinds.push("bigGlassPrison"); continue; }
     const isPrison = game.wave >= CFG.glassPrison.firstWave && rng() < CFG.glassPrison.perSpawnChance;
     if (isPrison) { slotKinds.push("glassPrison"); continue; }
     // Phased warble — post-boss arc (display-level 11+). Rolled before solid/gem
@@ -785,6 +797,11 @@ const spawnWaveAsteroids = (game: Game, claimed: BeatClaimSet, isFirstLevel: boo
   // the new mechanic right away rather than rolling for it.
   if (game.wave === CFG.glassPrison.firstWave && normalCount > 0 && !slotKinds.includes("glassPrison")) {
     slotKinds[Math.floor(rng() * normalCount)] = "glassPrison";
+  }
+  // Same for the big prison's introductory wave — a brood shell is rare enough
+  // that leaving it to the roll could hide it for several levels.
+  if (game.wave === CFG.bigGlassPrison.firstWave && normalCount > 0 && !slotKinds.includes("bigGlassPrison")) {
+    slotKinds[Math.floor(rng() * normalCount)] = "bigGlassPrison";
   }
   // Introductory warble wave gets one guaranteed phased rock so the player
   // meets the pass-through-during-fade mechanic right away.

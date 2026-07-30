@@ -109,7 +109,13 @@ export const loseCombo = (game: Game, sourcePos?: Vec, reason: "fire" | "hit" = 
     game.sound.play(reason === "fire" ? "comboLostFire" : "comboLost");
     game.ship.comboLossFlash = 1;
     if (sourcePos && (!game.hasLostComboEver || haloActive)) {
-      game.popups.push(popupComboLost(sourcePos, reason));
+      // the hit was judged against perceivedBeatTime at the moment of impact (see
+      //   collisions.ts), so the signed offset here is the same one the gate rejected:
+      //   before the beat = too early, after it = too late. Only hits show it.
+      const offset = beatOffsetFor(game, game.perceivedBeatTime);
+      const halfWindow = beatWindow(game);
+      const timing = offset < -halfWindow ? "early" : offset > halfWindow ? "late" : undefined;
+      game.popups.push(popupComboLost(sourcePos, reason, timing));
     }
     // Show the "fire and hit on the beat to gain rhythm" hint once per game,
     // on the first meaningful loss outside the tutorial. The tutorial's own

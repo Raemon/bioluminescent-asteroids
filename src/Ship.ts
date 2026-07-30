@@ -124,6 +124,10 @@ export class Ship {
   // 0→1 pop that fires the instant the refire lockout releases and decays to 0,
   //   driving the reticule's "armed" ready burst. Cosmetic only.
   laserReadyFlash = 0;
+  // 0→1 hull desaturation while the laser sits in its refire lockout: the ship
+  //   drains to grey the moment a shot spends the charge and eases back to its
+  //   cyan once the laser is ready again. Cosmetic only. See tickLaserShot.
+  laserCooldownDim = 0;
 
   // Super-laser charge — gained by flying the ship through the flickering energy
   //   thread strung between a broken torus ring's orbiting fragments. While

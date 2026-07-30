@@ -1,6 +1,7 @@
 import type { Game } from "../Game";
 import type { KillBucket } from "./killBuckets";
 import { displayWave } from "./waveDirector";
+import { getIdToken, type PublicUser } from "./auth";
 
 // bucket names are emitted by killEffects.ts; this label map keeps the
 // leaderboard summary readable instead of leaking internal asteroid kinds.
@@ -45,15 +46,21 @@ export const totalKills = (tally: Readonly<Record<string, number>>): number => {
   return total;
 };
 
+export type SubmitResult = { score: HighscoreRow; user: PublicUser | null };
+
 export const submitHighscore = async (
   name: string,
   game: Game,
-): Promise<HighscoreRow> => {
+): Promise<SubmitResult> => {
   // Read the frozen game-over snapshot when present: the highlight clip re-sims
   //   the run on the live game object, so game.score/maxCombo/killTally now hold
   //   the clip's in-progress values, not the finished run's. runSummary is the
   //   run as it ended.
   const s = game.runSummary;
+  // Attach the Google ID token when signed in — the server links the row to the
+  //   pilot's account, bumps their stats, and permits submitting under a claimed
+  //   callsign. Omitted (undefined → absent) for guest submissions.
+  const idToken = getIdToken() ?? undefined;
   const res = await fetch("/api/highscores", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -64,14 +71,18 @@ export const submitHighscore = async (
       max_combo: s ? s.maxCombo : game.maxCombo,
       kill_count: totalKills(s ? s.killTally : game.killTally),
       kill_summary: s ? s.killTally : game.killTally,
+      idToken,
     }),
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`submit failed: ${res.status} ${text}`);
+    // Surface the server's message for the claimed-callsign (403) case so the
+    //   player understands why the save was refused.
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    if (res.status === 403 && body?.error) throw new Error(body.error);
+    throw new Error(`submit failed: ${res.status} ${body?.error ?? ""}`.trim());
   }
-  const body = (await res.json()) as { score: HighscoreRow };
-  return body.score;
+  const body = (await res.json()) as SubmitResult;
+  return body;
 };
 
 // no-store so a plain reload always reflects fresh server data — the API sends
@@ -109,14 +120,16 @@ export const fetchRecentScores = async (): Promise<HighscoreRow[]> => {
 //   each category (score, rhythm, wave, most-recent) and unioned. The view
 //   renders these unfiltered (no per-pilot dedupe) so the player sees their
 //   full board.
-export const fetchPlayerScores = async (name: string): Promise<HighscoreRow[]> => {
+export type PlayerProfile = { scores: HighscoreRow[]; user: PublicUser | null };
+
+export const fetchPlayerScores = async (name: string): Promise<PlayerProfile> => {
   const res = await fetch(`/api/highscores?mode=player&name=${encodeURIComponent(name)}`, {
     method: "GET",
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-  const body = (await res.json()) as { scores: HighscoreRow[] };
-  return body.scores;
+  const body = (await res.json()) as { scores: HighscoreRow[]; user?: PublicUser | null };
+  return { scores: body.scores, user: body.user ?? null };
 };
 
 // "Load more" for a profile: that pilot's next page of runs by score-desc, past

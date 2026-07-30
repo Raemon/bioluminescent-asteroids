@@ -107,12 +107,19 @@ export type AsteroidSize = "huge" | "large" | "medium" | "small";
 //
 // "glassPrison" is the post-boss horror: a cut black diamond, faceted and
 // near-lightless, with faint red eyes glowing from somewhere inside. Drifts
-// in starting display-level 11; one hit shatters it — the wraiths inside
-// escape screaming, and the shell's own shards fan out as debris.
+// in starting display-level 11; one hit shatters it — the single wraith
+// inside escapes screaming, and the shell's own shards fan out as debris.
+// "bigGlassPrison" is the rare oversized cousin (display-level 14+): the same
+// shell at roughly double the radius, 2 HP so it cracks before it breaks, and
+// a brood of 2-4 wraiths inside instead of one. Both share every paint path.
 //
-// "wraith" is what crawls out. It has no baked sprite (drawn live every
-// frame from drifting noise layers and writhing tendrils), pursues the ship
-// in a slow slither, and occasionally lunges. Eats a few bullets to finish.
+// "wraith" is what crawls out. It has no baked sprite (drawn live every frame
+// from drifting noise layers and writhing tendrils). It fights at two ranges:
+// far away it stalks — steering for a standoff point behind the ship's tail
+// and swirling around to get there, so it works to sit where you aren't
+// looking; up close it strikes — a braking windup telegraph, then a lunge on
+// a direction locked at ignition (dodgeable), then a limp recovery window
+// that is the player's opening to kill it. See tickWraith.
 // "torus" is a mechanical ring (display-level 11+). The killing hit cleaves it
 // into two "torusArc" C-shaped half-rings that keep orbiting a shared centre
 // with the donut gap intact; each half-ring later breaks into one shorter
@@ -136,7 +143,7 @@ export type AsteroidSize = "huge" | "large" | "medium" | "small";
 // still behind the same DR 8 armour, so the fragments are as tough to punch
 // through as the parent — a lingering field of stubborn scrap.
 // Rare across display-levels 5-9, then a common obstacle afterwards.
-export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "citadel" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "asteroidWithGem" | "burstGemMedium" | "burstGemBig" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock" | "torus" | "torusArc" | "torusChunk" | "metalChunk" | "metalShard";
+export type AsteroidKind = "normal" | "bassA" | "bassB" | "bassC" | "bassD" | "chime" | "bell" | "warble" | "citadel" | "boss" | "bossHemisphere" | "bossEye" | "bossPlate" | "bossIrisShard" | "bossEmber" | "asteroidWithGem" | "burstGemMedium" | "burstGemBig" | "solidCrystal" | "solidCrystalSmall" | "glassPrison" | "bigGlassPrison" | "wraith" | "cathedralKeystone" | "glassShard" | "columnDrum" | "rubbleBlock" | "torus" | "torusArc" | "torusChunk" | "metalChunk" | "metalShard";
 
 // The two phased kinds share the warble opacity/solid state machine, the
 // blurred-ghost render path and the phase drone; they differ in cycle length
@@ -219,9 +226,15 @@ export const isTorusFragment = (kind: AsteroidKind): boolean =>
 // family rather than the exact tier.
 export const isBurstGem = (kind: AsteroidKind): boolean => kind === "burstGemMedium" || kind === "burstGemBig";
 
+// The two prison tiers share the shell material, the diamond silhouette, the
+// captive-eye glow and the shatters-into-wraiths split; they differ only in
+// radius, HP, score and how many wraiths come out. Nearly every call site
+// tests the family rather than the tier.
+export const isGlassPrison = (kind: AsteroidKind): boolean => kind === "glassPrison" || kind === "bigGlassPrison";
+
 // Anything cut as a true rhombus silhouette (diamondProfile) rather than the
-// harmonic-noise outline — burst gems and the black-diamond prison shell.
-export const isDiamondCut = (kind: AsteroidKind): boolean => isBurstGem(kind) || kind === "glassPrison";
+// harmonic-noise outline — burst gems and the black-diamond prison shells.
+export const isDiamondCut = (kind: AsteroidKind): boolean => isBurstGem(kind) || isGlassPrison(kind);
 
 // The two hull-metal tiers share the plate material, DR 8 armour, and the
 // opaque steel render; they differ only in size and whether they split further.
@@ -274,6 +287,10 @@ const fastShardSpeedMul = (combo: number | undefined): number =>
 // generation; what changes with splitting is which beat-slot in the measure
 // each piece occupies (see `split()` below).
 export const BASS_MEASURE_LENGTH = 2.0;
+
+// Wraith strikes ignite on this grid (a half measure) so a close-quarters fight
+// stays inside the music instead of firing at arbitrary wall-clock moments.
+const WRAITH_STRIKE_GRID = BASS_MEASURE_LENGTH / 2;
 
 // Within-measure offset (seconds) for a freshly-spawned gen-0 asteroid of
 // each kind. Each kind sits on its own beat slot so the four interlock into
@@ -1134,28 +1151,60 @@ export class Asteroid {
   bossPlasmaFired = false;
 
   // Wraith-only state. The writhe phase drives the live-painted body's
-  // breathing distortion and tendril extrusion. Lunges fire on a beat-
-  // aligned cadence (every WRAITH_LUNGE_PERIOD seconds, offset per-wraith
-  // so they stagger). Pre-roll per-tendril phase offsets at construction
-  // so each wraith has its own gait.
+  // breathing distortion and tendril extrusion. Pre-roll per-tendril phase
+  // offsets at construction so each wraith has its own gait.
   writhePhase = 0;
   // 0 → just-emerged, 1 → fully manifested. Eases up over emergeDuration
   // so a wraith doesn't appear and instantly start damaging the player.
   wraithEmerge = 0;
-  // beatTime (in seconds) offset within the lunge period. Baked at spawn
-  // (0 or one measure) so several wraiths don't fire on the same downbeat.
-  lungePhaseOffset = 0;
-  // beatTime of the last lunge ignition; used to detect the next crossing.
-  lungeLastFiredBeat = -1;
+  // Which half of the strike cycle it's in (see tickWraith):
+  //   "stalk"  — repositioning; the only mode that steers freely.
+  //   "windup" — braking telegraph before a strike; beat-snapped.
+  //   "lunge"  — committed charge along a locked direction.
+  //   "recover"— limp, unsteered, heavily damped: the kill window.
+  wraithMode: "stalk" | "windup" | "lunge" | "recover" = "stalk";
+  // Seconds left in the current timed mode ("stalk" ignores it).
+  wraithModeT = 0;
+  // True once the ship has come inside cfg.lungeRange; cleared again only past
+  // cfg.stalkRange. Selects orbit-and-strike over flank-and-approach.
+  wraithClose = false;
+  // True while it is patrolling the standoff ring out in front of the player
+  // (see tickWraith) — that arc runs on a lower speed cap so it doesn't fling
+  // itself wide. Cleared as soon as it commits to the flank or a strike.
+  wraithCircling = false;
+  // Enforced hover (s) left before the next strike may arm. Set when a recovery
+  // ends so a wraith can't chain-lunge the moment it gets its legs back.
+  wraithStrikeCooldown = 0;
+  // Last WRAITH_STRIKE_GRID slot seen while close; strikes ignite on a crossing.
+  // Reset to -1 whenever it drops back to stalking so re-closing doesn't fire
+  // instantly off a stale slot.
+  wraithBeatSlot = -1;
+  // Which side of the ship this wraith prefers to swing around while stalking
+  // (+1/-1, rolled at spawn) so a brood fans out rather than queueing up on
+  // one arc.
+  wraithSwirlDir = 1;
+  // Unit direction locked in at lunge ignition — the strike does NOT re-home,
+  // which is what makes it dodgeable.
+  lungeDirX = 0;
+  lungeDirY = 0;
   // > 0 while mid-lunge; counts down. Drives the red-eye flare and the
-  // additional pursuit acceleration burst during the lunge window.
+  // additional acceleration burst during the lunge window.
   lungeActiveT = 0;
+  // > 0 while winding up; counts down. Drives the pre-strike eye flare and
+  // the coiling body squeeze in the renderer.
+  windupActiveT = 0;
   // Per-tendril phase offsets (length determines tendril count). Decided at
   // spawn so each wraith reads as an individual; the actual extrusion is
   // computed live from this + writhePhase.
   wraithTendrils: number[] = [];
   // Emission cooldown for the dark-smoke trail the wraith bleeds behind it.
   wraithSmokeT = 0;
+
+  // How many wraiths this prison shell is holding. Rolled at construction (not
+  // at shatter time) so the live eye-glow render can show one pair of eyes per
+  // captive — the player counts the eyes to judge what breaking it will cost.
+  // 0 on every non-prison kind.
+  prisonCaptives = 0;
 
   // True only for solidCrystalSmall shards ejected from a shattered glass
   // prison — paints as a black diamond splinter instead of the standalone
@@ -1197,8 +1246,13 @@ export class Asteroid {
       // Heavy mass → barely tumbles; the slow drift is set in waveDirector.
       this.rotSpeed = rand(-0.22, 0.22);
     }
-    if (kind === "glassPrison") {
+    if (isGlassPrison(kind)) {
       this.rotSpeed = rand(-0.18, 0.18);
+      // Roll the brood now so the eyes visible through the shell match what
+      // split() will actually let out.
+      this.prisonCaptives = kind === "bigGlassPrison"
+        ? Math.round(rand(ENTITY_CONFIG.bigGlassPrison.minWraiths, ENTITY_CONFIG.bigGlassPrison.maxWraiths))
+        : ENTITY_CONFIG.glassPrison.wraithCount;
     }
     if (kind === "torus") {
       // Slow majestic spin like a heavy mechanical body.
@@ -1217,7 +1271,7 @@ export class Asteroid {
       // Slow tumble — the writhe body deformation does the real visual work.
       this.rotSpeed = rand(-0.4, 0.4);
       this.writhePhase = rand(0, TAU);
-      this.lungePhaseOffset = rng() < 0.5 ? 0 : BASS_MEASURE_LENGTH;
+      this.wraithSwirlDir = rng() < 0.5 ? -1 : 1;
       // Five tendrils, evenly distributed around the body with per-piece
       // phase jitter so they wave asynchronously.
       const tendrilCount = 5;
@@ -1431,7 +1485,7 @@ export class Asteroid {
       // stays comfortably inside the silhouette at every angle.
       freqs = [3, 5, 8];
       ampScale = 0.4;
-    } else if (kind === "glassPrison") {
+    } else if (isGlassPrison(kind)) {
       // Black diamond shell: the diamondProfile in computeOutline carries the
       // sharp rhombus silhouette; these harmonics only add a faint per-gem
       // facet wobble so no two prisons are identical. Kept low-amp (same
@@ -1597,7 +1651,7 @@ export class Asteroid {
     if (this.kind === "asteroidWithGem") this.paintEmbeddedGem(ctx);
     if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall") this.paintSolidCrystalBody(ctx);
     if (isBurstGem(this.kind)) this.paintBurstGemBody(ctx);
-    if (this.kind === "glassPrison") this.paintGlassPrisonBody(ctx);
+    if (isGlassPrison(this.kind)) this.paintGlassPrisonBody(ctx);
     if (this.kind === "bell") this.paintCathedralFragmentBody(ctx);
     if (this.kind === "cathedralKeystone") this.paintKeystoneBody(ctx);
     if (this.kind === "glassShard") this.paintGlassShardBody(ctx);
@@ -3913,7 +3967,7 @@ export class Asteroid {
   }
 
   computeOutline(): number[] {
-    const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isBurstGem(this.kind) || CATHEDRAL_DEBRIS_KINDS.includes(this.kind) || isMetalHull(this.kind);
+    const isClamped = this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || isGlassPrison(this.kind) || this.kind === "bell" || isBurstGem(this.kind) || CATHEDRAL_DEBRIS_KINDS.includes(this.kind) || isMetalHull(this.kind);
     const isDiamond = isDiamondCut(this.kind) || this.isPrisonShard;
     const isCube = isMetalHull(this.kind);
     const isWedge = this.kind === "warble";
@@ -3943,7 +3997,7 @@ export class Asteroid {
     }
     // Mirror the clamp in computeOutline so the collision surface matches
     // the visible silhouette for the high-amp crystal / cathedral harmonics.
-    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || this.kind === "glassPrison" || this.kind === "bell" || isBurstGem(this.kind) || isMetalHull(this.kind)) {
+    if (this.kind === "solidCrystal" || this.kind === "solidCrystalSmall" || isGlassPrison(this.kind) || this.kind === "bell" || isBurstGem(this.kind) || isMetalHull(this.kind)) {
       r = Math.max(0.45, Math.min(1.55, r));
     }
     if (isDiamondCut(this.kind) || this.isPrisonShard) r *= this.diamondProfile(angle);
@@ -4228,14 +4282,29 @@ export class Asteroid {
     }
   }
 
-  // Drives a wraith's pursuit, lunge cycle, and writhe phase. Called once
-  // per tick from the game loop with dt + ship position + beatTime. Updates
-  // velocity in place (capped pursuit + lunge burst when the lunge fires).
-  // Returns true on the tick a lunge ignites so the caller can play SFX.
-  // The rotation field is overwritten with the gaze angle so the renderer
-  // can place eyes along it.
-  tickWraith(dt: number, shipX: number, shipY: number, beatTime: number): boolean {
-    if (this.kind !== "wraith") return false;
+  // Drives a wraith's stalk/strike cycle and writhe phase. Called once per tick
+  // from the game loop with dt + ship position + ship heading + beatTime, and
+  // updates velocity in place. The rotation field is overwritten with the gaze
+  // angle so the renderer can place the eyes along it.
+  //
+  // The whole entity is built around one decision the player keeps having to
+  // make: face it, or run from it.
+  //   FAR — "stalk": it steers for a standoff anchor cfg.flankDist behind the
+  //     ship's tail, with a tangential swirl term so it arcs around rather than
+  //     driving straight in. Turning to face it moves the anchor to your new
+  //     tail, so it has to give up the approach and start the arc over. Keeping
+  //     your nose on it is an actual defensive option.
+  //   CLOSE — it holds a tight orbit and strikes on the beat:
+  //     windup (brakes hard, coils, eyes flare — the readable telegraph)
+  //     → lunge (direction LOCKED at ignition, so it is dodgeable)
+  //     → recover (unsteered and heavily damped: the window to kill it).
+  // Close/far uses hysteresis (lungeRange in, stalkRange out) so a wraith
+  // hovering at the boundary doesn't stutter between the two.
+  //
+  // Returns "windup"/"lunge" on the tick that phase ignites so the caller can
+  // play the matching SFX, else null.
+  tickWraith(dt: number, shipX: number, shipY: number, shipHeading: number, beatTime: number): "windup" | "lunge" | null {
+    if (this.kind !== "wraith") return null;
     const cfg = ENTITY_CONFIG.wraith;
     // Emerge fade-in over emergeDuration. While < 1, damage gating + visuals
     // both scale down — the wraith should not feel suddenly there.
@@ -4245,47 +4314,140 @@ export class Asteroid {
     // Writhe advances steadily; tendril/body deformation reads from it.
     this.writhePhase += dt * 2.2;
 
-    // Gaze direction: always face the ship (for the eyes + lunge vector).
     const dx = shipX - this.pos.x;
     const dy = shipY - this.pos.y;
     const dist = Math.max(1, Math.hypot(dx, dy));
     const toShipX = dx / dist;
     const toShipY = dy / dist;
-    this.rotation = Math.atan2(dy, dx);
+    // Gaze: at the ship, except mid-lunge, where the eyes stay on the committed
+    // line so a dodged strike visibly overshoots.
+    this.rotation = this.wraithMode === "lunge"
+      ? Math.atan2(this.lungeDirY, this.lungeDirX)
+      : Math.atan2(dy, dx);
 
-    // Beat-aligned lunge cycle. The lunge fires every lungePeriodMeasures
-    // bass measures, snapped to the bass grid + a per-wraith offset so
-    // multiple wraiths don't all ignite on the same downbeat. Detect the
-    // ignition by watching the (shifted) beatTime cross a measure boundary.
-    let didLunge = false;
-    if (this.lungeActiveT > 0) {
-      this.lungeActiveT = Math.max(0, this.lungeActiveT - dt);
-    } else if (this.wraithEmerge >= 1) {
-      const period = cfg.lungePeriodMeasures * BASS_MEASURE_LENGTH;
-      const shifted = beatTime - this.lungePhaseOffset;
-      const currentSlot = Math.floor(shifted / period);
-      if (this.lungeLastFiredBeat < 0) {
-        this.lungeLastFiredBeat = currentSlot;
-      } else if (currentSlot > this.lungeLastFiredBeat) {
+    // Nothing steers or strikes until it has finished manifesting.
+    if (this.wraithEmerge < 1) return null;
+
+    // Close/far latch with hysteresis.
+    if (!this.wraithClose && dist <= cfg.lungeRange) this.wraithClose = true;
+    else if (this.wraithClose && dist > cfg.stalkRange) this.wraithClose = false;
+
+    // Tangential unit vector around the ship, on this wraith's preferred side.
+    const swirlX = -toShipY * this.wraithSwirlDir;
+    const swirlY = toShipX * this.wraithSwirlDir;
+
+    let event: "windup" | "lunge" | null = null;
+    // Only the far-and-not-behind-you branch below re-raises this.
+    this.wraithCircling = false;
+    if (this.wraithMode === "windup") {
+      this.windupActiveT = Math.max(0, this.windupActiveT - dt);
+      this.wraithModeT = this.windupActiveT;
+      // Coil: brake hard so the strike starts from near-stationary and the
+      // telegraph is a visible stop, not just a colour change.
+      const brake = 1 / (1 + cfg.windupDrag * dt);
+      this.vel.x *= brake;
+      this.vel.y *= brake;
+      if (this.windupActiveT <= 0) {
+        // Commit. Direction is locked HERE, from where the ship is at ignition.
+        this.wraithMode = "lunge";
         this.lungeActiveT = cfg.lungeDuration;
-        this.lungeLastFiredBeat = currentSlot;
-        didLunge = true;
+        this.wraithModeT = cfg.lungeDuration;
+        this.lungeDirX = toShipX;
+        this.lungeDirY = toShipY;
+        event = "lunge";
       }
+    } else if (this.wraithMode === "lunge") {
+      this.lungeActiveT = Math.max(0, this.lungeActiveT - dt);
+      this.wraithModeT = this.lungeActiveT;
+      // Charge along the locked ray — no re-homing.
+      const burst = cfg.lungeAccel * dt;
+      this.vel.x += this.lungeDirX * burst;
+      this.vel.y += this.lungeDirY * burst;
+      if (this.lungeActiveT <= 0) {
+        this.wraithMode = "recover";
+        this.wraithModeT = cfg.recoverDuration;
+      }
+    } else if (this.wraithMode === "recover") {
+      this.wraithModeT = Math.max(0, this.wraithModeT - dt);
+      // Spent: no steering at all, just drag. This is the player's opening.
+      const damp = 1 / (1 + cfg.recoverDrag * dt);
+      this.vel.x *= damp;
+      this.vel.y *= damp;
+      if (this.wraithModeT <= 0) {
+        this.wraithMode = "stalk";
+        // Hover before the next strike, and forget the beat slot so re-arming
+        // waits for a fresh crossing rather than firing off a stale one.
+        this.wraithStrikeCooldown = cfg.strikeCooldown;
+        this.wraithBeatSlot = -1;
+      }
+    } else if (this.wraithClose) {
+      // Close and idle: hold a tight predatory orbit at the strike radius while
+      // waiting for the beat. Radial term corrects toward the hold distance so
+      // it neither drifts off nor crowds straight in.
+      const holdDist = cfg.lungeRange * 0.6;
+      const radial = Math.max(-1, Math.min(1, (dist - holdDist) / holdDist));
+      const accel = cfg.stalkAccel * dt;
+      this.vel.x += toShipX * radial * accel + swirlX * cfg.swirlAccel * dt;
+      this.vel.y += toShipY * radial * accel + swirlY * cfg.swirlAccel * dt;
+      // Strikes ignite on the beat grid so the fight sits inside the music.
+      // Snapped to a half-measure; the per-wraith swirl side plus staggered
+      // recover timings keep a brood from firing in lockstep.
+      const slot = Math.floor(beatTime / WRAITH_STRIKE_GRID);
+      if (this.wraithStrikeCooldown > 0) {
+        this.wraithStrikeCooldown = Math.max(0, this.wraithStrikeCooldown - dt);
+        this.wraithBeatSlot = slot;
+      } else if (this.wraithBeatSlot < 0) {
+        this.wraithBeatSlot = slot;
+      } else if (slot > this.wraithBeatSlot) {
+        this.wraithBeatSlot = slot;
+        this.wraithMode = "windup";
+        this.windupActiveT = cfg.windupDuration;
+        this.wraithModeT = cfg.windupDuration;
+        event = "windup";
+      }
+    } else {
+      // Far: work around to the player's blind side, and only then close.
+      this.wraithBeatSlot = -1;
+      // Bearing = where the wraith sits relative to the ship's nose, wrapped to
+      // (-pi, pi]. 0 means dead ahead of the ship; ±pi means directly behind it.
+      let bearing = Math.atan2(this.pos.y - shipY, this.pos.x - shipX) - shipHeading;
+      while (bearing > Math.PI) bearing -= TAU;
+      while (bearing < -Math.PI) bearing += TAU;
+      // Sweep direction: whichever way round the ship shortens the trip to the
+      // tail. Dead ahead (where both ways are equal) it falls back to this
+      // wraith's own preferred side, so a brood peels off in both directions.
+      const sweep = Math.abs(bearing) < 0.35 ? this.wraithSwirlDir : Math.sign(bearing) || 1;
+      // Counter-clockwise tangent around the ship; times `sweep` it points the
+      // short way toward the tail.
+      const tanX = toShipY * sweep;
+      const tanY = -toShipX * sweep;
+      const accel = cfg.stalkAccel * dt;
+      const swirl = cfg.swirlAccel * dt;
+      const isCircling = Math.abs(bearing) < cfg.behindAngle;
+      if (isCircling) {
+        // Still inside the player's forward arc: hold the standoff ring and
+        // sweep sideways. Facing it pins it out here — it will circle all day
+        // rather than come at your guns.
+        const radial = Math.max(-1, Math.min(1, (dist - cfg.holdRadius) / cfg.holdRadius));
+        // radial > 0 means it is outside the ring, so it pulls inward along
+        // toShip; inside the ring the sign flips and it backs off.
+        this.vel.x += toShipX * radial * accel + tanX * swirl;
+        this.vel.y += toShipY * radial * accel + tanY * swirl;
+      } else {
+        // Behind you now — commit to the standoff anchor off the ship's tail,
+        // which is inside lungeRange, so arriving arms a strike. Turning to face
+        // it moves the anchor and throws it back out to the circling arc.
+        const anchorX = shipX - Math.cos(shipHeading) * cfg.flankDist;
+        const anchorY = shipY - Math.sin(shipHeading) * cfg.flankDist;
+        const ax = anchorX - this.pos.x;
+        const ay = anchorY - this.pos.y;
+        const aLen = Math.max(1, Math.hypot(ax, ay));
+        this.vel.x += (ax / aLen) * accel + tanX * swirl * 0.3;
+        this.vel.y += (ay / aLen) * accel + tanY * swirl * 0.3;
+      }
+      this.wraithCircling = isCircling;
     }
 
-    // Pursuit acceleration (always-on, capped). Don't start chasing until
-    // the wraith has finished emerging — gives the player room to read it.
-    if (this.wraithEmerge >= 1) {
-      const accel = cfg.pursuitAccel * dt;
-      this.vel.x += toShipX * accel;
-      this.vel.y += toShipY * accel;
-    }
-    // Lunge burst: heavy acceleration along the gaze ray while active.
-    if (this.lungeActiveT > 0 && this.wraithEmerge >= 1) {
-      const burst = cfg.lungeAccel * dt;
-      this.vel.x += toShipX * burst;
-      this.vel.y += toShipY * burst;
-    }
     // Writhe drag: perpendicular sinusoidal nudge that flips sign, making
     // the path slither instead of arrow straight in. Small magnitude so it
     // reads as a body motion rather than wild swerves.
@@ -4295,16 +4457,19 @@ export class Asteroid {
     this.vel.x += perpX * writheStr;
     this.vel.y += perpY * writheStr;
 
-    // Cap pursuit speed unless mid-lunge (a lunge briefly exceeds the cap
-    // by design — that's what makes it feel dangerous).
-    const maxSpeed = this.lungeActiveT > 0 ? cfg.maxPursuitSpeed * 2.8 : cfg.maxPursuitSpeed;
+    // Cap speed. A lunge briefly exceeds the stalk cap by design — that burst
+    // of speed is what makes the strike feel dangerous.
+    const maxSpeed = this.wraithMode === "lunge"
+      ? cfg.maxStalkSpeed * cfg.lungeSpeedMul
+      : this.wraithCircling ? cfg.maxStalkSpeed * cfg.circleSpeedMul
+      : cfg.maxStalkSpeed;
     const speed = Math.hypot(this.vel.x, this.vel.y);
     if (speed > maxSpeed) {
       const k = maxSpeed / speed;
       this.vel.x *= k;
       this.vel.y *= k;
     }
-    return didLunge;
+    return event;
   }
 
   // Step the 16-beat boss rhythm and return slot events for this tick.
@@ -4479,7 +4644,7 @@ export class Asteroid {
   }
 
   isWraith(): boolean { return this.kind === "wraith"; }
-  isGlassPrison(): boolean { return this.kind === "glassPrison"; }
+  isGlassPrison(): boolean { return isGlassPrison(this.kind); }
 
   isBoss(): boolean {
     return this.kind === "boss";
@@ -4818,21 +4983,23 @@ export class Asteroid {
       }
       return fragmentList;
     }
-    // Glass prison: shatters into a brood of wraiths born at the prison's
-    // centre + a few inert crystal fragments fanning out from the impact.
-    // The wraiths start stationary (their tickWraith emerge phase handles the
-    // fade-in); the shards fly outward fast so the visual reads as "the
-    // prison just broke open and several things stepped out".
-    if (this.kind === "glassPrison") {
+    // Glass prison: shatters into its captive wraith (or, for the big shell, a
+    // brood of them) born at the prison's centre + a few inert crystal
+    // fragments fanning out from the impact. The wraiths start stationary
+    // (their tickWraith emerge phase handles the fade-in); the shards fly
+    // outward fast so the visual reads as "the prison just broke open and
+    // something stepped out".
+    if (isGlassPrison(this.kind)) {
       const baseAngle = impactDir
         ? Math.atan2(impactDir.y, impactDir.x)
         : Math.atan2(this.vel.y, this.vel.x);
       const fragmentList: Asteroid[] = [];
-      const { minWraiths, maxWraiths } = ENTITY_CONFIG.glassPrison;
-      const wraithCount = Math.round(rand(minWraiths, maxWraiths));
+      // Brood size was rolled at construction (prisonCaptives) so the eyes the
+      // player counted through the shell are exactly what comes out.
+      const wraithCount = Math.max(1, this.prisonCaptives);
       // Spread the brood around the prison centre so they don't stack into one
       // sprite; each gets a small positional offset and the same stationary
-      // emerge contract as the original lone wraith.
+      // emerge contract as a lone wraith.
       for (let i = 0; i < wraithCount; i++) {
         const spreadAngle = baseAngle + (i - (wraithCount - 1) / 2) * 0.8;
         const spreadDist = wraithCount > 1 ? this.radius * 0.35 : 0;
@@ -4843,15 +5010,17 @@ export class Asteroid {
         const wraith = new Asteroid(wraithPos, v(0, 0), "medium", undefined, "wraith");
         fragmentList.push(wraith);
       }
-      // Three small black-diamond shards as the prison's broken pieces. Reuse
-      // the solidCrystalSmall kind so they keep the same HP/physics/ring-on-
-      // hit sound; isPrisonShard only swaps the paint to a black diamond
-      // splinter instead of the standalone treat pickup's ice-blue crystal.
-      // They hand the player a small extra payout for cracking the prison.
+      // Small black-diamond shards as the prison's broken pieces (more from the
+      // bigger shell). Reuse the solidCrystalSmall kind so they keep the same
+      // HP/physics/ring-on-hit sound; isPrisonShard only swaps the paint to a
+      // black diamond splinter instead of the standalone treat pickup's
+      // ice-blue crystal. They hand the player a small extra payout for
+      // cracking the prison.
       const parentSpeed = Math.hypot(this.vel.x, this.vel.y);
       const ejectDist = this.radius * 0.5;
-      for (let i = 0; i < 3; i++) {
-        const childAngle = baseAngle + (i - 1) * 0.9 + rand(-0.18, 0.18);
+      const shardCount = this.kind === "bigGlassPrison" ? 5 : 3;
+      for (let i = 0; i < shardCount; i++) {
+        const childAngle = baseAngle + (i - (shardCount - 1) / 2) * 0.9 + rand(-0.18, 0.18);
         const childPos = {
           x: this.pos.x + Math.cos(childAngle) * ejectDist,
           y: this.pos.y + Math.sin(childAngle) * ejectDist,
@@ -5391,27 +5560,35 @@ export class Asteroid {
     // phased out — there the blurry faint body carries the read on its own.
     if (isWarble && this.warbleSolid) this.renderWarblePhase(ctx, time);
 
-    // Glass prison: live eye-glow pulse over the baked silhouette. Two faint
-    // red pinpricks where the captive's eyes sit, breathing in and out so the
-    // figure inside reads as "alive, watching". Drawn additive so it brightens
-    // through the void without flattening the frosted facets.
-    if (this.kind === "glassPrison") {
-      const eyePulse = 0.55 + 0.45 * Math.sin(time * 1.6 + this.membranePhase);
-      const eyeY = -this.radius * 0.30;
-      const eyeX = this.radius * 0.055;
-      const glowR = this.radius * 0.22 * (0.7 + 0.3 * eyePulse);
+    // Glass prison: live eye-glow pulse over the baked silhouette. One pair of
+    // faint red pinpricks per captive, breathing in and out so the figures
+    // inside read as "alive, watching" — and so the player can COUNT what a
+    // shell is holding before deciding to crack it. Drawn additive so it
+    // brightens through the void without flattening the frosted facets.
+    if (isGlassPrison(this.kind)) {
       ctx.globalCompositeOperation = "lighter";
-      drawGlow(ctx, -eyeX, eyeY, glowR, 0, 0.55 * eyePulse);
-      drawGlow(ctx,  eyeX, eyeY, glowR, 0, 0.55 * eyePulse);
-      ctx.globalAlpha = 1;
-      // Tight bright pupil dots over the glow so the gaze has a centre.
-      ctx.fillStyle = `hsla(8, 100%, 80%, ${0.85 * eyePulse})`;
-      ctx.beginPath();
-      ctx.arc(-eyeX, eyeY, 1.2, 0, TAU);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc( eyeX, eyeY, 1.2, 0, TAU);
-      ctx.fill();
+      for (let c = 0; c < this.prisonCaptives; c++) {
+        // Stagger the brood across the shell interior: alternating sides,
+        // descending rows, each on its own breath phase so they never blink in
+        // unison. A lone captive sits dead centre where it always has.
+        const spread = this.prisonCaptives > 1 ? (c - (this.prisonCaptives - 1) / 2) : 0;
+        const cx = spread * this.radius * 0.30;
+        const cy = -this.radius * 0.30 + Math.abs(spread) * this.radius * 0.16;
+        const eyePulse = 0.55 + 0.45 * Math.sin(time * 1.6 + this.membranePhase + c * 1.9);
+        const eyeX = this.radius * 0.055;
+        const glowR = this.radius * 0.22 * (0.7 + 0.3 * eyePulse);
+        drawGlow(ctx, cx - eyeX, cy, glowR, 0, 0.55 * eyePulse);
+        drawGlow(ctx, cx + eyeX, cy, glowR, 0, 0.55 * eyePulse);
+        ctx.globalAlpha = 1;
+        // Tight bright pupil dots over the glow so each gaze has a centre.
+        ctx.fillStyle = `hsla(8, 100%, 80%, ${0.85 * eyePulse})`;
+        ctx.beginPath();
+        ctx.arc(cx - eyeX, cy, 1.2, 0, TAU);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx + eyeX, cy, 1.2, 0, TAU);
+        ctx.fill();
+      }
     }
 
     const isPlain = this.kind === "normal" || this.kind === "asteroidWithGem";
@@ -5637,8 +5814,23 @@ export class Asteroid {
     const lungeMix = lungeCfg.lungeDuration > 0
       ? Math.min(1, Math.max(0, this.lungeActiveT / lungeCfg.lungeDuration))
       : 0;
-    const hue = this.hue + (0 - this.hue) * lungeMix * 0.35;
-    const R = this.radius;
+    // Windup mix ramps 0→1 as the telegraph completes (it counts DOWN, so
+    // invert), so the coil tightens and the eyes redden right up to ignition —
+    // the player's cue to break off.
+    const windupMix = this.wraithMode === "windup" && lungeCfg.windupDuration > 0
+      ? Math.min(1, Math.max(0, 1 - this.windupActiveT / lungeCfg.windupDuration))
+      : 0;
+    // Recovery mix 1→0 across the vulnerable window; dims and slackens the body
+    // so "hit it NOW" is legible at a glance.
+    const recoverMix = this.wraithMode === "recover" && lungeCfg.recoverDuration > 0
+      ? Math.min(1, Math.max(0, this.wraithModeT / lungeCfg.recoverDuration))
+      : 0;
+    // Both the strike phases pull the body toward red; recovery pulls nothing
+    // (it stays violet, and goes dim).
+    const heatMix = Math.max(lungeMix, windupMix);
+    const hue = this.hue + (0 - this.hue) * heatMix * 0.35;
+    // Coil: contract during the windup, sag outward while spent.
+    const R = this.radius * (1 - 0.16 * windupMix + 0.10 * recoverMix);
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
@@ -5646,8 +5838,10 @@ export class Asteroid {
 
     // (1) Outer aura — dim purple haze, larger than the body. Sells the
     // "this thing has a presence around it" read without using shadowBlur.
-    const auraAlpha = 0.28 * emerge * (0.7 + 0.3 * Math.sin(phase * 0.7));
-    drawGlow(ctx, 0, 0, R * 2.6, hue, auraAlpha);
+    // Windup swells the aura (pressure building); recovery guts it.
+    const auraAlpha = 0.28 * emerge * (0.7 + 0.3 * Math.sin(phase * 0.7))
+      * (1 + 0.8 * windupMix) * (1 - 0.55 * recoverMix);
+    drawGlow(ctx, 0, 0, R * (2.6 + 0.5 * windupMix), hue, auraAlpha);
     ctx.globalAlpha = 1;
 
     // (2) Three drifting noisy body layers. Each layer is a closed wobble
@@ -5690,7 +5884,10 @@ export class Asteroid {
     for (const baseAngle of this.wraithTendrils) {
       const a = baseAngle + Math.sin(phase * 0.4 + baseAngle) * 0.25;
       // Length ramps with lungeMix — tendrils extend during a lunge.
-      const lengthMul = 0.95 + 0.55 * Math.sin(phase * 0.8 + baseAngle * 1.3) + lungeMix * 0.6;
+      // Tendrils draw IN as it coils (windupMix), whip out during the strike,
+      // and hang slack while spent.
+      const lengthMul = 0.95 + 0.55 * Math.sin(phase * 0.8 + baseAngle * 1.3)
+        + lungeMix * 0.6 - windupMix * 0.45 - recoverMix * 0.25;
       const length = R * lengthMul;
       for (let s = 0; s < tendrilSegments; s++) {
         const f0 = s / tendrilSegments;
@@ -5736,8 +5933,11 @@ export class Asteroid {
     const gazeY = Math.sin(this.rotation) * R * 0.18;
     const perpX = -Math.sin(this.rotation) * R * 0.10;
     const perpY =  Math.cos(this.rotation) * R * 0.10;
-    const eyeHue = 286 - lungeMix * 280;  // violet → red
-    const eyeBright = 0.6 + 0.4 * Math.sin(time * 5 + phase) + lungeMix * 0.8;
+    const eyeHue = 286 - heatMix * 280;  // violet → red
+    // The windup is the telegraph, so the eyes must be at their brightest
+    // BEFORE the strike, not during it.
+    const eyeBright = (0.6 + 0.4 * Math.sin(time * 5 + phase) + heatMix * 0.8 + windupMix * 0.5)
+      * (1 - 0.5 * recoverMix);
     const eyeR = R * 0.18 * (0.6 + 0.4 * eyeBright);
     ctx.globalCompositeOperation = "lighter";
     drawGlow(ctx, gazeX + perpX, gazeY + perpY, eyeR, eyeHue, 0.7 * eyeBright * emerge);

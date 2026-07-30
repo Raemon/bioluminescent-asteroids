@@ -20,15 +20,20 @@ const shipHullVertices = (ship: Ship): Vec[] => [
 // shares the combo halo's snap-and-fade so every ship light rides one rhythm.
 // bonusFlash (0..1) blooms the whole hull toward bright white on a free life:
 // the outline desaturates up to full white and the fill floods opaque.
+// cooldownDim (0..1) drains the cyan to a dull grey while the laser sits in its
+// refire lockout, so a spent weapon is readable on the hull itself.
 const paintShipHull = (
   ctx: CanvasRenderingContext2D, verts: Vec[], invuln: number, beatPulse: number, bonusFlash: number,
+  cooldownDim: number,
 ) => {
   const beatBrightness = 0.7 + 0.3 * beatPulse;
   // Pull the cyan hue's saturation down toward 0 (white) and force full opacity
   // as the flash rides, so the ship reads as a searing white silhouette.
-  const sat = 100 - bonusFlash * 100;
+  const sat = (100 - bonusFlash * 100) * (1 - 0.9 * cooldownDim);
   const strokeA = Math.min(1, 0.95 * beatBrightness * invuln + bonusFlash);
-  ctx.strokeStyle = `hsla(195, ${sat}%, ${75 + bonusFlash * 25}%, ${strokeA})`;
+  // Grey reads as "spent" only if it also loses some brightness against the
+  // charged hull — but stays light enough to keep the silhouette legible.
+  ctx.strokeStyle = `hsla(195, ${sat}%, ${75 - cooldownDim * 15 + bonusFlash * 25}%, ${strokeA})`;
   ctx.lineWidth = 1.5 + bonusFlash * 1.5;
   ctx.beginPath();
   ctx.moveTo(verts[0].x, verts[0].y);
@@ -36,7 +41,7 @@ const paintShipHull = (
   ctx.closePath();
   ctx.stroke();
   const fillA = 0.12 * invuln + bonusFlash * 0.85;
-  ctx.fillStyle = `hsla(195, ${sat}%, ${60 + bonusFlash * 40}%, ${fillA})`;
+  ctx.fillStyle = `hsla(195, ${sat}%, ${60 - cooldownDim * 12 + bonusFlash * 40}%, ${fillA})`;
   ctx.fill();
 };
 
@@ -212,7 +217,7 @@ export const renderShipBody = (ctx: CanvasRenderingContext2D, ship: Ship, t: num
   ctx.globalCompositeOperation = "lighter";
   renderComboHalo(ctx, ship, beatPulse);
   paintSuperLaserCharge(ctx, ship, t);
-  paintShipHull(ctx, verts, invuln, beatPulse, bonusFlash);
+  paintShipHull(ctx, verts, invuln, beatPulse, bonusFlash, ship.laserCooldownDim);
   paintThrustFlame(ctx, ship);
   paintRetroFlares(ctx, ship);
   paintSideJets(ctx, ship);

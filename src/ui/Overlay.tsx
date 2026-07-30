@@ -102,14 +102,21 @@ export const Overlay = () => {
           spellCheck={false}
           autoCapitalize="characters"
         />
+        {/* Google sign-in / callsign-claim area. Populated imperatively by
+            game/scoreEntry.ts; hidden when VITE_GOOGLE_CLIENT_ID is unset. */}
+        <div id="score-entry-auth" className="hidden" />
         <label id="replay-save-toggle">
           <input id="replay-save-toggle-input" type="checkbox" />
           <span>Save replay</span>
         </label>
         <button type="submit" id="score-entry-submit">Save</button>
         <p id="score-entry-status" className="score-entry-status" />
+        <p id="score-entry-stats" className="score-entry-stats hidden" />
       </form>
       <div id="leaderboard" className="hidden">
+        {/* Claimed-pilot stats banner; shown/populated by game/scoreEntry.ts on
+            the pilot-profile view, hidden on the hall-of-fame / standing views. */}
+        <div id="leaderboard-profile-banner" className="hidden" />
         <ol id="leaderboard-list" />
         <div id="leaderboard-footer">
           <label id="leaderboard-top-only">

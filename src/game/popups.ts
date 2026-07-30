@@ -231,9 +231,15 @@ export const popupStreakBonus = (pos: Vec, points: number): Popup => ({
 //   action you most control), amber = off-beat *hit* (a softer near-miss). Amber
 //   stays clear of the saturated gold combo halo so a loss never looks like a
 //   reward.
-export const popupComboLost = (pos: Vec, reason: "fire" | "hit"): Popup => {
+export const popupComboLost = (pos: Vec, reason: "fire" | "hit", timing?: "early" | "late"): Popup => {
   const labelFont = "700 16px 'Space Grotesk', system-ui, sans-serif";
-  const subtitle = reason === "fire" ? "(Didn't fire on beat)" : "(Didn't hit on beat)";
+  // off-beat *hits* also name which side of the beat missed — with travel time between
+  //   press and impact, "early"/"late" is the correction the player can act on. A
+  //   mistimed press needs no such hint (the press *is* the moment), and it's dropped
+  //   when the event landed inside the window anyway (a stale off-beat bullet), where
+  //   early/late would point the wrong way.
+  const base = reason === "fire" ? "Didn't fire on beat" : "Didn't hit on beat";
+  const subtitle = reason === "hit" && timing ? `(${base} — too ${timing})` : `(${base})`;
   const titleFill = reason === "fire" ? "#ff6a6a" : "#ffae4d";
   const titleShadow = reason === "fire" ? "rgba(255, 90, 90, 0.85)" : "rgba(255, 150, 50, 0.85)";
   const subFill = reason === "fire" ? "#ffb3b3" : "#ffd9a8";

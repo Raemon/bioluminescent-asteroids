@@ -274,8 +274,20 @@ const approachGlow = (current: number, target: number, dt: number): number => {
 // Called each frame after Ship.update. The normal fireBullets path is
 // suppressed by lasershotActive inside shipPhysics; this owns fire input
 // while the upgrade is active.
+// Seconds for the hull to drain to grey / bloom back to cyan across the refire
+// lockout edge — short enough to read as a state change, long enough not to snap.
+const COOLDOWN_DIM_FADE = 0.18;
+
 export const tickLaserShot = (game: Game, dt: number) => {
   const ship = game.ship;
+  // Hull colour follows the refire lockout: grey while the laser is spent,
+  // cyan again the instant it can refire. Updated before every early return
+  // below so the ship never strands mid-grey.
+  const dimTarget = ship.lasershotActive && ship.alive && !laserReady(game) ? 1 : 0;
+  const dimStep = dt / COOLDOWN_DIM_FADE;
+  ship.laserCooldownDim = dimTarget > ship.laserCooldownDim
+    ? Math.min(dimTarget, ship.laserCooldownDim + dimStep)
+    : Math.max(dimTarget, ship.laserCooldownDim - dimStep);
   // A banked torus super-laser charge takes priority over the held-charge
   // upgrade — defer this frame so the fire press spends the super charge (see
   // tickSuperLaserFire) instead of starting a held charge.

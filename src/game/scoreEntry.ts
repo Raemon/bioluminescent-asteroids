@@ -19,6 +19,16 @@ import {
 } from "./highscores";
 import { uploadReplay, fetchReplay } from "./replayApi";
 import { startReplay } from "./lifecycle";
+import {
+  claimUsername,
+  currentUser,
+  isAuthAvailable,
+  isSignedIn,
+  onAuthChange,
+  renderSignInButton,
+  signOut,
+  type PublicUser,
+} from "./auth";
 
 // one module owns the score-entry form + leaderboard so lifecycle.ts and
 // gameUpdate.ts don't have to know about DOM details or network state.
@@ -56,10 +66,14 @@ const handleSubmit = async (game: Game, ev: Event) => {
   game.replaySaveCheckboxEl.disabled = true;
   setStatus(game, "Transmitting…", "info");
   try {
-    const saved = await submitHighscore(rawName, game);
+    const result = await submitHighscore(rawName, game);
+    const saved = result.score;
     saveRecentName(rawName);
     game.lastRunScoreId = saved.id;
     game.lastRunScore = saved.score;
+    // Signed-in submit came back with refreshed lifetime stats — show them
+    //   under the form so the pilot sees their totals tick up.
+    if (result.user) renderSubmitStats(result.user);
     // Arm the one-shot "your standing" view and pre-fetch its rows now, while
     //   the player is still reading the game-over screen, so returning home
     //   renders the centred neighborhood without a loading flash. The catch
@@ -128,6 +142,7 @@ const bindListeners = (game: Game) => {
 
 export const showScoreEntry = (game: Game) => {
   bindListeners(game);
+  bindAuthUi(game);
   // ram-only or otherwise score-less runs shouldn't pester for a name —
   // there's nothing meaningful to record. Prefer the frozen run summary: a
   // running highlight clip has reset live game.score to its re-sim value.
@@ -142,8 +157,12 @@ export const showScoreEntry = (game: Game) => {
   game.replaySaveCheckboxEl.disabled = false;
   game.replaySaveCheckboxEl.checked = getSaveReplayPref();
   game.scoreEntryInputEl.value = getRecentName();
+  hideSubmitStats();
   setStatus(game, "Esc to skip", "info");
   game.scoreEntryFormEl.classList.remove("hidden");
+  // Paint the sign-in / claim controls (may lock the input to a claimed
+  //   callsign). Safe no-op when Google sign-in isn't configured.
+  syncScoreEntryAuth(game);
   // Defer focus so the overlay reveal animation doesn't fight the input.
   setTimeout(() => {
     if (!game.scoreEntryFormEl.classList.contains("hidden")) game.scoreEntryInputEl.focus();
@@ -153,6 +172,160 @@ export const showScoreEntry = (game: Game) => {
 export const hideScoreEntry = (game: Game) => {
   game.scoreEntryFormEl.classList.add("hidden");
   game.scoreEntryInputEl.blur();
+  hideSubmitStats();
+};
+
+// ---- Google sign-in / callsign claim UI ----
+// The score-entry form gains a sign-in area (#score-entry-auth) and an
+//   after-submit stats line (#score-entry-stats). Everything degrades to a
+//   plain guest form when VITE_GOOGLE_CLIENT_ID is unset (isAuthAvailable()).
+
+const fmt = (n: number) => n.toLocaleString();
+
+let authBound = false;
+
+const bindAuthUi = (game: Game) => {
+  if (authBound) return;
+  authBound = true;
+  const area = document.getElementById("score-entry-auth");
+  if (!area) return;
+  // Controls are re-rendered on every state change, so delegate their clicks.
+  area.addEventListener("click", (ev) => {
+    const el = ev.target as HTMLElement | null;
+    if (!el) return;
+    if (el.closest("[data-auth-signout]")) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      signOut();
+      return;
+    }
+    if (el.closest("[data-auth-claim]")) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void handleClaim(game);
+    }
+  });
+  // Re-sync when auth flips (a sign-in resolves, a claim lands) while visible.
+  onAuthChange(() => {
+    if (!game.scoreEntryFormEl.classList.contains("hidden")) syncScoreEntryAuth(game);
+  });
+};
+
+const handleClaim = async (game: Game) => {
+  const desired = game.scoreEntryInputEl.value.trim();
+  if (!desired) {
+    setStatus(game, "Type a callsign to claim.", "error");
+    return;
+  }
+  setStatus(game, "Claiming callsign…", "info");
+  try {
+    const user = await claimUsername(desired);
+    saveRecentName(user.username ?? desired);
+    setStatus(game, `Callsign "${user.username}" is yours. Press enter to save.`, "success");
+    syncScoreEntryAuth(game);
+  } catch (err) {
+    setStatus(game, (err as Error).message, "error");
+  }
+};
+
+// Render the sign-in / claim controls for the current auth state.
+const syncScoreEntryAuth = (game: Game) => {
+  const area = document.getElementById("score-entry-auth");
+  if (!area) return;
+  if (!isAuthAvailable()) {
+    area.classList.add("hidden");
+    return;
+  }
+  area.classList.remove("hidden");
+
+  if (!isSignedIn()) {
+    game.scoreEntryInputEl.readOnly = false;
+    area.innerHTML =
+      `<span class="auth-hint">Claim your callsign so no one else can use it:</span>` +
+      `<div id="score-entry-google-btn" class="auth-google-btn"></div>`;
+    const btn = document.getElementById("score-entry-google-btn");
+    if (btn) void renderSignInButton(btn);
+    return;
+  }
+
+  const user = currentUser();
+  const claimed = user?.username ?? null;
+  if (claimed) {
+    // Locked to the claimed callsign — that's the identity they submit under.
+    game.scoreEntryInputEl.value = claimed;
+    game.scoreEntryInputEl.readOnly = true;
+    area.innerHTML =
+      `<span class="auth-signed">Playing as <strong>${escapeHtml(claimed)}</strong> ` +
+      `<span class="auth-check">✓ claimed</span></span>` +
+      `<button type="button" class="auth-link" data-auth-signout>sign out</button>`;
+  } else {
+    game.scoreEntryInputEl.readOnly = false;
+    const who = user?.displayName ? escapeHtml(user.displayName) : "Google";
+    area.innerHTML =
+      `<span class="auth-signed">Signed in as ${who}</span>` +
+      `<button type="button" class="auth-link auth-claim-btn" data-auth-claim>Claim this callsign</button>` +
+      `<button type="button" class="auth-link" data-auth-signout>sign out</button>`;
+  }
+};
+
+const renderSubmitStats = (user: PublicUser) => {
+  const el = document.getElementById("score-entry-stats");
+  if (!el) return;
+  const s = user.stats;
+  const who = user.username ? `${user.username}: ` : "";
+  el.textContent =
+    `★ ${who}${fmt(s.gamesPlayed)} run${s.gamesPlayed === 1 ? "" : "s"} · ` +
+    `best ${fmt(s.bestScore)} · wave ${fmt(s.bestWave)} · ${fmt(s.bestCombo)}× combo`;
+  el.classList.remove("hidden");
+};
+
+const hideSubmitStats = () => {
+  const el = document.getElementById("score-entry-stats");
+  if (el) {
+    el.classList.add("hidden");
+    el.textContent = "";
+  }
+};
+
+// ---- Pilot-profile stats banner ----
+
+const statCell = (label: string, value: string) =>
+  `<div class="pilot-stat"><span class="pilot-stat-value">${escapeHtml(value)}</span>` +
+  `<span class="pilot-stat-label">${escapeHtml(label)}</span></div>`;
+
+const formatMemberSince = (iso: string): string => {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "—";
+  return new Date(t).toLocaleDateString(undefined, { year: "numeric", month: "short" });
+};
+
+// Show the claimed-pilot banner above the profile board, or hide it (guest
+//   pilots / other views pass null).
+const renderProfileBanner = (user: PublicUser | null) => {
+  const el = document.getElementById("leaderboard-profile-banner");
+  if (!el) return;
+  if (!user || !user.username) {
+    el.classList.add("hidden");
+    el.innerHTML = "";
+    return;
+  }
+  const s = user.stats;
+  const avatar = user.picture
+    ? `<img class="pilot-avatar" src="${escapeHtml(user.picture)}" alt="" referrerpolicy="no-referrer" />`
+    : `<div class="pilot-avatar pilot-avatar-fallback">${escapeHtml((user.username[0] ?? "?").toUpperCase())}</div>`;
+  el.innerHTML =
+    `<div class="pilot-banner-head">${avatar}` +
+    `<div class="pilot-banner-id"><span class="pilot-banner-name">${escapeHtml(user.username)}</span>` +
+    `<span class="pilot-banner-badge">✓ claimed pilot</span></div></div>` +
+    `<div class="pilot-banner-stats">` +
+    statCell("Runs", fmt(s.gamesPlayed)) +
+    statCell("Best score", fmt(s.bestScore)) +
+    statCell("Best wave", fmt(s.bestWave)) +
+    statCell("Best combo", `${fmt(s.bestCombo)}×`) +
+    statCell("Total kills", fmt(s.totalKills)) +
+    statCell("Member since", formatMemberSince(user.memberSince)) +
+    `</div>`;
+  el.classList.remove("hidden");
 };
 
 // captureFrame fires in the update loop and serialize() is awaited inside
@@ -530,8 +703,11 @@ const renderPlayerProfile = async (game: Game, name: string) => {
   game.leaderboardListEl.innerHTML =
     `<li class="leaderboard-status">Loading ${escapeHtml(name)}'s scores…</li>`;
   let rows: HighscoreRow[];
+  let profileUser: PublicUser | null = null;
   try {
-    rows = await fetchPlayerScores(name);
+    const profile = await fetchPlayerScores(name);
+    rows = profile.scores;
+    profileUser = profile.user;
   } catch {
     // A failed fetch shouldn't strand the player on a blank list; clear the
     //   filter (and the URL) and drop back to the global board.
@@ -549,6 +725,8 @@ const renderPlayerProfile = async (game: Game, name: string) => {
     renderHallOfFame(game);
     return;
   }
+  // Claimed-pilot stats banner above the board (hidden for guest pilots).
+  renderProfileBanner(profileUser);
   game.leaderboardAllRows = rows;
   game.leaderboardTopPilots = rows;
   // The union's score slice covered the top PLAYER_CATEGORY_LIMIT runs, so that's
@@ -604,6 +782,7 @@ const renderHallOfFame = (game: Game) => {
   syncFooterVisibility(false);
   syncTopOnlyVisibility(false);
   syncTitleBackAffordance(game, false);
+  renderProfileBanner(null);
   game.leaderboardSort = "score";
   // Paint cached rows immediately so the title screen is never blank on reload;
   //   the in-flight fetch will swap them out with fresh data when it lands.
@@ -641,6 +820,7 @@ const showNeighborhoodLeaderboard = async (
   syncFooterVisibility(true);
   syncShowMoreVisibility(game);
   syncTitleBackAffordance(game, false);
+  renderProfileBanner(null);
   game.leaderboardListEl.innerHTML =
     `<li class="leaderboard-status">Loading your standing…</li>`;
   const result = await pending;

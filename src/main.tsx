@@ -8,6 +8,7 @@ import { Game } from "./Game";
 import { loadSoundConfig } from "./soundConfig";
 import { installBetaTest } from "./game/betaTest";
 import { installInstructionsDemos } from "./instructions";
+import { initAuth } from "./game/auth";
 
 // Mount React first and force a synchronous commit so the HUD/Overlay
 // markup is on the page before bindHudElements() runs inside `new Game()`.
@@ -29,6 +30,10 @@ if (!canvas) throw new Error("Canvas #stage not found");
 // values from the very first shot. We don't block boot on this — if the
 // fetch fails, sounds fall back to hardcoded defaults inside Sound.ts.
 loadSoundConfig();
+
+// Restore any cached Google session and warm the sign-in client so the
+//   score-entry form can offer callsign claiming without a load hitch.
+initAuth();
 
 const game = new Game(canvas);
 (window as any).__game = game;

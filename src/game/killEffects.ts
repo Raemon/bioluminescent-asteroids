@@ -1,5 +1,5 @@
 import type { Game } from "../Game";
-import { Asteroid, isBurstGem, isMetalHull, isPhasedKind } from "../Asteroid";
+import { Asteroid, isBurstGem, isGlassPrison, isMetalHull, isPhasedKind } from "../Asteroid";
 import { Alien } from "../Alien";
 import { AlienBullet } from "../AlienBullet";
 import { Comet } from "../Comet";
@@ -67,7 +67,7 @@ const asteroidBucket = (a: Asteroid): KillBucket => {
   if (isBurstGem(a.kind)) return "burstGem";
   if (a.kind === "solidCrystal" || a.kind === "solidCrystalSmall") return "solidCrystal";
   if (isMetalHull(a.kind)) return "metalChunk";
-  if (a.kind === "glassPrison") return "glassPrison";
+  if (isGlassPrison(a.kind)) return "glassPrison";
   if (a.kind === "wraith") return "wraith";
   return `asteroid_${a.size}`;
 };
@@ -94,7 +94,7 @@ export const hitSoundFor = (
   // The prison's shell IS cut glass — same shatter as a solid crystal. The
   // scream is layered ON TOP by finishAsteroidKillCore (it isn't returned
   // here because callers also use this for the on-crack chip sound).
-  if (a.kind === "glassPrison") return "crystalShatterLarge";
+  if (isGlassPrison(a.kind)) return "crystalShatterLarge";
   // Wraith hit / death — the killing hit plays wraithScream as a second
   // overlay in finishAsteroidKillCore; this is the per-shot thud.
   if (a.kind === "wraith") return "wraithHit";
@@ -238,7 +238,7 @@ const finishAsteroidKillCore = (
   // is physical glass that should shatter into Shard objects), but the
   // particle layer is dark/wisp-y rather than sparky; the wraith emits no
   // shards and only a dispersing wisp cloud.
-  if (a.kind === "glassPrison") {
+  if (isGlassPrison(a.kind)) {
     emitGlassPrisonShatter(game.particles, game.shards, a);
     // Haunting cry — layered ON TOP of the shatter sound the caller will
     // play (crystalShatterLarge). Position-aware so the cry pans from where

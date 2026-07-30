@@ -321,37 +321,94 @@ export const ENTITY_CONFIG = {
   },
 
   // Glass prison — appears from display-level 11 onward (internal wave 12+,
-  // immediately after the boss fight). Fragile indigo crystal shell with
-  // wraiths locked inside; the single killing hit shatters the shell and
-  // frees a brood of wraiths.
+  // immediately after the boss fight). Fragile indigo crystal shell with a
+  // single wraith locked inside; the killing hit shatters the shell and frees
+  // it. One-on-one on purpose: the wraith's stalk/lunge duel (see below) only
+  // reads if the player has exactly one thing circling them.
   // Combat stats (hp/score/radius) live in ENTITY_STATS.
   glassPrison: {
     firstWave: 12,
     perSpawnChance: 0.33,
-    // Wraiths released when the shell shatters (inclusive range).
-    minWraiths: 2,
-    maxWraiths: 4,
+    // Wraiths released when the shell shatters. Exactly one — the brood lives
+    // in bigGlassPrison.
+    wraithCount: 1,
     // Heavy — drifts in slower so the player can read "crack this open?" first.
     spawnSpeedMul: 0.55,
   },
 
-  // Wraith — what spawns out of a shattered prison. No standalone spawn; it
-  // exists only as a glassPrison drop. Low HP relative to its menace, but
-  // pursues the ship and writhes so cleanly lining up the kill is the trick.
+  // Big glass prison — the rare oversized cousin (display-level 14+). Same
+  // black-diamond shell, roughly double the radius, two shell HP instead of
+  // one (so you watch it crack before it goes), and a brood of 2-4 wraiths
+  // inside. Cracking one open commits the player to a real fight, so it drifts
+  // in slower still and is worth far more.
+  // Combat stats (hp/score/radius) live in ENTITY_STATS.
+  bigGlassPrison: {
+    firstWave: 15,
+    perSpawnChance: 0.12,
+    // Wraiths released when the shell shatters (inclusive range).
+    minWraiths: 2,
+    maxWraiths: 4,
+    spawnSpeedMul: 0.4,
+  },
+
+  // Wraith — what crawls out of a shattered prison. No standalone spawn.
+  //
+  // Two-range behaviour, so fighting one is a dance rather than a chase:
+  //   FAR (beyond lungeRange): it stalks. It steers for a standoff point
+  //     flankDist behind the ship's tail and swirls tangentially to get there
+  //     the long way round, so it is always trying to sit where you aren't
+  //     looking. Turning to face it invalidates its anchor and it starts the
+  //     arc again — the player keeps the pressure off by keeping it in front.
+  //   CLOSE (inside lungeRange): it strikes. windup (telegraph, brakes hard,
+  //     eyes flare) → lunge (direction LOCKED at ignition, so it is dodgeable)
+  //     → recover (heavily damped, no steering: the window to kill it).
   // Combat stats (hp/score/radius) live in ENTITY_STATS.
   wraith: {
     // Fade-in / damage-immune window (s) after emerging — a beat to react.
     emergeDuration: 0.9,
-    // Pursuit acceleration (px/s/s) while drifting toward the ship.
-    pursuitAccel: 36,
-    // Pursuit speed cap (px/s) outside of lunges.
-    maxPursuitSpeed: 95,
-    // Lunge: an additional burst toward the ship. Fires on a beat-aligned
-    // cadence (every lungePeriodMeasures bass measures). Per-wraith phase
-    // offset is set at spawn so several wraiths stagger across the grid.
-    lungePeriodMeasures: 2,
-    lungeDuration: 0.65,
-    lungeAccel: 800,
+    // Inside this distance (px) the wraith arms a strike; it must climb back
+    // past stalkRange to give up and go back to flanking (hysteresis, so a
+    // wraith hovering at the boundary doesn't flicker between modes).
+    lungeRange: 250,
+    stalkRange: 330,
+    // Stalk: standoff anchor sits this far (px) behind the ship's tail. Kept
+    // INSIDE lungeRange on purpose — completing the flank is what arms a
+    // strike, so a wraith that gets behind you has earned its shot.
+    flankDist: 190,
+    // While it has NOT worked its way behind you it refuses to close, holding
+    // this radius (px) instead — comfortably outside stalkRange so a player who
+    // keeps their nose on it can hold it off indefinitely. That standoff is the
+    // whole point: facing the wraith is a real defensive option.
+    holdRadius: 300,
+    // Speed cap multiplier (× maxStalkSpeed) while circling out at the standoff
+    // ring. Below 1 so the arc doesn't fling itself wide on centrifugal
+    // overshoot — it settles into a readable ~390px patrol instead.
+    circleSpeedMul: 0.7,
+    // How far round the ship counts as "behind" (radians of |bearing| off the
+    // ship's nose). Past this it stops circling and dives for the flank anchor.
+    behindAngle: 2.1,
+    // Steering accel (px/s/s) toward the anchor + speed cap while stalking.
+    stalkAccel: 165,
+    maxStalkSpeed: 200,
+    // Tangential accel (px/s/s) that sweeps it around the ship — toward your
+    // tail while it circles, and holding its orbit once close. Dominant while
+    // circling so the arc doesn't collapse into a head-on charge.
+    swirlAccel: 190,
+    // Enforced hover (s) after a recovery before it may arm the next strike, so
+    // a close-quarters fight breathes between strikes instead of chain-lunging.
+    strikeCooldown: 1.2,
+    // Strike cycle. The windup is snapped to the beat grid on ignition.
+    windupDuration: 0.5,
+    // Braking factor per second applied during the windup — it coils before
+    // it strikes, which is what makes the telegraph readable.
+    windupDrag: 3.0,
+    lungeDuration: 0.45,
+    lungeAccel: 1500,
+    // Speed cap multiplier (× maxStalkSpeed) while mid-lunge.
+    lungeSpeedMul: 2.6,
+    // Post-lunge vulnerability: no steering at all, heavy damping.
+    recoverDuration: 0.85,
+    recoverDrag: 2.2,
   },
 
   // Torus — a mechanical ring that solidifies in display-level 11+ (internal
@@ -576,6 +633,15 @@ export const ENTITY_STATS: Partial<Record<AsteroidKind, EntityStats>> = {
     hp: 1,
     score: 600,
     radius: 46,
+    hue: 270,
+    outlineSamples: 8,
+  },
+  // Roughly double the shell radius, 2 HP so it visibly cracks first, and a
+  // payout matching the brood it lets out.
+  bigGlassPrison: {
+    hp: 2,
+    score: 1600,
+    radius: 88,
     hue: 270,
     outlineSamples: 8,
   },

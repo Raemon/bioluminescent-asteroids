@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { prisma } from "./_lib/prisma.js";
+import { verifyGoogleToken } from "./_lib/googleAuth.js";
+import { toPublicUser } from "./_lib/users.js";
 
 const MAX_NAME_LEN = 16;
 const MAX_LIMIT = 100;
@@ -27,6 +29,10 @@ type IncomingScore = {
   max_combo?: unknown;
   kill_count?: unknown;
   kill_summary?: unknown;
+  // Optional Google ID token. When present and valid, the row is linked to that
+  //   pilot's account and their lifetime stats are bumped. Required to submit
+  //   under a callsign someone has claimed.
+  idToken?: unknown;
 };
 
 type RowOut = {
@@ -427,8 +433,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const rows = offset > 0
           ? await fetchPlayerPage(name, offset, limit)
           : await fetchPlayerScores(name);
+        // Only the initial (offset 0) load carries the profile banner — if this
+        //   callsign is claimed, hand back its owner's lifetime stats. Paged
+        //   "load more" requests skip the extra lookup.
+        let user = null;
+        if (offset === 0) {
+          const owner = await prisma.user.findUnique({
+            where: { usernameLower: name.toLowerCase() },
+          });
+          if (owner && owner.username) user = toPublicUser(owner);
+        }
         setEdgeCache(res);
-        res.status(200).json({ scores: rows });
+        res.status(200).json({ scores: rows, user });
       } catch (err) {
         console.error("[highscores GET player] db read failed:", err);
         res.status(500).json({ error: "DB read failed" });
@@ -510,9 +526,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     try {
-      const row = await prisma.highscore.create({
-        data: { name, score, wave, maxCombo, killCount, killSummary },
+      // Resolve the submitter's account (if they sent a valid Google token) and
+      //   whoever, if anyone, owns this callsign.
+      const identity = await verifyGoogleToken(body.idToken);
+      const authedUser = identity
+        ? await prisma.user.findUnique({ where: { googleSub: identity.sub } })
+        : null;
+      const claimOwner = await prisma.user.findUnique({
+        where: { usernameLower: name.toLowerCase() },
       });
+      // A claimed callsign can only be used by its owner. Unclaimed names stay
+      //   open to anyone (guest play is unchanged).
+      if (claimOwner && (!authedUser || authedUser.id !== claimOwner.id)) {
+        res.status(403).json({
+          error: "That callsign is claimed. Sign in with Google to submit under it.",
+        });
+        return;
+      }
+
+      const row = await prisma.highscore.create({
+        data: { name, score, wave, maxCombo, killCount, killSummary, userId: authedUser?.id ?? null },
+      });
+
+      // Bump the signed-in pilot's lifetime stats. Non-fatal: the score is
+      //   already saved, so a stats hiccup shouldn't fail the submission.
+      let publicUser = null;
+      if (authedUser) {
+        try {
+          const updated = await prisma.user.update({
+            where: { id: authedUser.id },
+            data: {
+              gamesPlayed: { increment: 1 },
+              totalKills: { increment: killCount },
+              totalScore: { increment: BigInt(score) },
+              lastPlayedAt: new Date(),
+              ...(score > authedUser.bestScore ? { bestScore: score } : {}),
+              ...(wave > authedUser.bestWave ? { bestWave: wave } : {}),
+              ...(maxCombo > authedUser.bestCombo ? { bestCombo: maxCombo } : {}),
+            },
+          });
+          publicUser = toPublicUser(updated);
+        } catch (statErr) {
+          console.error("[highscores POST] stat bump failed:", statErr);
+        }
+      }
       // Clear local cache so the next read on this instance reflects the new
       //   row. Other warm instances still serve their cached payload until
       //   their TTL expires or they receive their own POST.
@@ -528,7 +585,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       void fetchRecentRows().catch((err) =>
         console.error("[highscores POST] cache warm recent failed:", err),
       );
-      res.status(201).json({ score: toRowOut(row) });
+      res.status(201).json({ score: toRowOut(row), user: publicUser });
     } catch (err) {
       console.error("[highscores POST] db write failed:", err);
       res.status(500).json({ error: "DB write failed" });

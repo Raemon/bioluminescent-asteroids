@@ -1291,8 +1291,14 @@ const tickWraiths = (game: Game, dt: number) => {
   for (const a of game.asteroids) {
     if (a.kind !== "wraith") continue;
     const shipImg = nearestImageOf(game.ship.pos, a.pos, game.w, game.h);
-    const didLunge = a.tickWraith(dt, shipImg.x, shipImg.y, game.beatTime);
-    if (didLunge) game.sound.play("wraithLunge", 1, a.pos);
+    // The wraith flanks relative to where the ship is POINTING, so it needs the
+    // heading as well as the position (see Asteroid.tickWraith).
+    const strike = a.tickWraith(dt, shipImg.x, shipImg.y, game.ship.heading, game.beatTime);
+    // The windup is the telegraph — the cry lands there, half a beat before the
+    // strike, so the player hears it in time to break off. The lunge itself
+    // gets a shorter, closer hit of the same voice.
+    if (strike === "windup") game.sound.play("wraithScream", 0.55, a.pos);
+    else if (strike === "lunge") game.sound.play("wraithLunge", 1, a.pos);
   }
 };
 

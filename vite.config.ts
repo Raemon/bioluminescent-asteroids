@@ -166,6 +166,7 @@ const devApi = () => {
   const routes: Record<string, string> = {
     "/api/highscores": "/api/highscores.ts",
     "/api/replays": "/api/replays.ts",
+    "/api/auth": "/api/auth.ts",
   };
 
   const decorateRes = (res: ServerResponse) => {

@@ -79,6 +79,7 @@ const ASTEROID_TILES: Record<AsteroidKind, AsteroidTile | null> = {
   solidCrystal: { label: "Crystal", group: "Special Rock", size: "medium" },
   solidCrystalSmall: { label: "Crystal (sm)", group: "Special Rock", size: "small" },
   glassPrison: { label: "Glass Prison", group: "Special Rock" },
+  bigGlassPrison: { label: "Big Prison", group: "Special Rock" },
   metalChunk: { label: "Metal Chunk", group: "Special Rock", size: "medium" },
   metalShard: null,
   torus: { label: "Torus Ring", group: "Special Rock" },
@@ -255,6 +256,7 @@ const iconFor = (id: string): string => {
   if (id === "solidCrystal") return `<svg viewBox="0 0 24 24"><polygon points="12,3 19,8 17,16 12,21 7,16 5,8" fill="${c}" opacity="0.35" stroke="${c}" stroke-width="1.5"/><path d="M12,3 L12,21 M5,8 L19,8 M7,16 L17,16" stroke="${c}" stroke-width="0.8" opacity="0.5"/></svg>`;
   if (id === "solidCrystalSmall") return `<svg viewBox="0 0 24 24"><polygon points="12,7 17,10 16,16 12,19 8,16 7,10" fill="${c}" opacity="0.35" stroke="${c}" stroke-width="1.4"/></svg>`;
   if (id === "glassPrison") return `<svg viewBox="0 0 24 24"><polygon points="12,2 20,12 12,22 4,12" fill="${c}" opacity="0.18" stroke="${c}" stroke-width="1.5"/><path d="M9 9 L9 15 M12 8 L12 16 M15 9 L15 15" stroke="${c}" stroke-width="1.2" opacity="0.8"/></svg>`;
+  if (id === "bigGlassPrison") return `<svg viewBox="0 0 24 24"><polygon points="12,1 23,12 12,23 1,12" fill="${c}" opacity="0.18" stroke="${c}" stroke-width="1.5"/><path d="M7 10 L7 14 M10 8 L10 16 M14 8 L14 16 M17 10 L17 14" stroke="${c}" stroke-width="1.2" opacity="0.8"/></svg>`;
   if (id === "boss") return `<svg viewBox="0 0 24 24"><polygon points="12,2 22,9 18,21 6,21 2,9" fill="none" stroke="${c}" stroke-width="1.7"/><circle cx="12" cy="13" r="3" fill="${c}"/></svg>`;
   if (id === "comet") return `<svg viewBox="0 0 24 24"><circle cx="17" cy="7" r="3" fill="${c}"/><path d="M14 10 L4 20" stroke="${c}" stroke-width="2" stroke-linecap="round"/></svg>`;
   if (id === "shockwave") return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="${c}" stroke-width="1.5"/><circle cx="12" cy="12" r="7" fill="none" stroke="${c}" stroke-width="1.5" opacity="0.6"/><circle cx="12" cy="12" r="11" fill="none" stroke="${c}" stroke-width="1.5" opacity="0.3"/></svg>`;

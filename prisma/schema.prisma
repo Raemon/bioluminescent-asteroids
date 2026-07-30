@@ -21,6 +21,44 @@ model Highscore {
   replayData  String?  @map("replay_data")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
+  // Set when a signed-in pilot submits (or when an anonymous row is adopted by a
+  //   callsign claim). Null for legacy/guest rows. On-delete SetNull so removing
+  //   a user doesn't erase their leaderboard history.
+  userId Int?  @map("user_id")
+  user   User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
   @@index([score(sort: Desc), createdAt(sort: Desc)], map: "highscores_score_desc")
+  @@index([userId], map: "highscores_user_id")
   @@map("highscores")
+}
+
+// A pilot who signed in with Google and claimed a callsign. googleSub is the
+//   stable Google account id (the JWT `sub`). username is the claimed callsign;
+//   usernameLower enforces case-insensitive uniqueness, matching the
+//   leaderboard's case-insensitive pilot grouping. Aggregate stats are
+//   denormalized here and recomputed on claim / bumped on each signed-in submit
+//   so the profile banner is a single cheap read.
+model User {
+  id            Int         @id @default(autoincrement())
+  googleSub     String      @unique @map("google_sub")
+  email         String?
+  displayName   String?     @map("display_name")
+  picture       String?
+  username      String?     @unique
+  usernameLower String?     @unique @map("username_lower")
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  lastLoginAt   DateTime?   @map("last_login_at") @db.Timestamptz
+
+  // Denormalized lifetime stats across all linked highscores.
+  gamesPlayed  Int       @default(0) @map("games_played")
+  bestScore    Int       @default(0) @map("best_score")
+  bestWave     Int       @default(0) @map("best_wave")
+  bestCombo    Int       @default(0) @map("best_combo")
+  totalKills   Int       @default(0) @map("total_kills")
+  totalScore   BigInt    @default(0) @map("total_score")
+  lastPlayedAt DateTime? @map("last_played_at") @db.Timestamptz
+
+  scores Highscore[]
+
+  @@map("users")
 }
