@@ -2198,10 +2198,19 @@ li.lb-self .lb-name-link:hover {
 
 .settings-check input { width: 15px; height: 15px; accent-color: #4cb6ff; cursor: pointer; }
 
+/* One row per action: label + a chip per binding slot. Single column — two
+   chips plus a chord label ("shift+←") no longer fit a half-width row. */
 .settings-controls-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 18px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0 18px;
+}
+
+.settings-note {
+  margin: -4px 0 2px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: rgba(150, 200, 235, 0.6);
 }
 
 .settings-control-row {

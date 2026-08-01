@@ -11,6 +11,8 @@ import {
 import {
   ACTION_LABELS,
   ACTION_ORDER,
+  BINDING_SLOTS,
+  SLOT_LABELS,
   type Bindings,
   type ControlAction,
   chordFromEvent,
@@ -32,7 +34,8 @@ const OFFSET_MIN_MS = -200;
 const OFFSET_MAX_MS = 350;
 const OFFSET_STEP_MS = 5;
 
-type CaptureTarget = { action: ControlAction } | null;
+// Each action has BINDING_SLOTS chips (primary / alternate); capture targets one.
+type CaptureTarget = { action: ControlAction; slot: number } | null;
 type Tab = "audio" | "controls";
 
 const TAB_LABELS: Record<Tab, string> = {
@@ -102,7 +105,7 @@ export const SettingsDialog = () => {
         if (e.key === "Escape") { setCapture(null); return; }
         const key = normalizeKey(e.key);
         if (isModifier(key)) return; // wait for the main key (or this key's release)
-        applyBinding(target.action, chordFromEvent(e, key));
+        applyBinding(target.action, target.slot, chordFromEvent(e, key));
         setCapture(null);
         return;
       }
@@ -121,7 +124,7 @@ export const SettingsDialog = () => {
       if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
       e.preventDefault();
       e.stopPropagation();
-      applyBinding(target.action, key);
+      applyBinding(target.action, target.slot, key);
       setCapture(null);
     };
     document.addEventListener("keydown", onKey, true);
@@ -151,23 +154,32 @@ export const SettingsDialog = () => {
     saveRecentName(v);
   };
 
-  const applyBinding = (action: ControlAction, key: string) => {
+  // Slots are positional while editing but stored compacted, so clearing the
+  //   primary promotes the alternate rather than leaving a hole.
+  const writeSlot = (keys: string[], slot: number, key: string): string[] => {
+    const slots = Array.from({ length: BINDING_SLOTS }, (_, i) => keys[i] ?? "");
+    slots[slot] = key;
+    return slots.filter((k) => k.length > 0);
+  };
+
+  const applyBinding = (action: ControlAction, slot: number, key: string) => {
     setBindings((prev) => {
       const next: Bindings = { ...prev } as Bindings;
+      // A key belongs to one slot only — strip it from every other slot, including
+      //   this action's other slot, so binding W to thrust twice can't happen.
       for (const a of ACTION_ORDER) {
-        if (a === action) continue;
-        const filtered = prev[a].filter((k) => k !== key);
+        const filtered = prev[a].filter((k, i) => k !== key || (a === action && i === slot));
         if (filtered.length !== prev[a].length) next[a] = filtered;
       }
-      next[action] = [key];
+      next[action] = writeSlot(next[action], slot, key);
       saveBindings(next);
       return next;
     });
   };
 
-  const clearBinding = (action: ControlAction) => {
+  const clearBinding = (action: ControlAction, slot: number) => {
     setBindings((prev) => {
-      const next: Bindings = { ...prev, [action]: [] } as Bindings;
+      const next: Bindings = { ...prev, [action]: writeSlot(prev[action], slot, "") } as Bindings;
       saveBindings(next);
       return next;
     });
@@ -282,28 +294,36 @@ export const SettingsDialog = () => {
               <span className="settings-section-title">Controls</span>
               <button type="button" className="settings-link" onClick={resetControls}>Reset defaults ▸</button>
             </div>
+            <p className="settings-note">
+              Two keys per action — arrows and WASD are both live by default.
+            </p>
             <div className="settings-controls-grid">
-              {ACTION_ORDER.map((action) => {
-                const k = bindings[action][0];
-                const isCapturing = capture?.action === action;
-                return (
-                  <div key={action} className="settings-control-row">
-                    <span className="settings-control-label">{ACTION_LABELS[action]}</span>
-                    <button
-                      type="button"
-                      className={`settings-key-chip${isCapturing ? " settings-key-chip--listening" : ""}${!k ? " settings-key-chip--empty" : ""}`}
-                      onClick={() => setCapture({ action })}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        if (k) clearBinding(action);
-                      }}
-                      title={k ? "Click to rebind · Right-click to clear" : "Click to bind"}
-                    >
-                      {isCapturing ? "press a key…" : k ? formatKey(k) : "—"}
-                    </button>
-                  </div>
-                );
-              })}
+              {ACTION_ORDER.map((action) => (
+                <div key={action} className="settings-control-row">
+                  <span className="settings-control-label">{ACTION_LABELS[action]}</span>
+                  <span className="settings-control-keys">
+                    {Array.from({ length: BINDING_SLOTS }, (_, slot) => {
+                      const k = bindings[action][slot];
+                      const isCapturing = capture?.action === action && capture.slot === slot;
+                      return (
+                        <button
+                          key={slot}
+                          type="button"
+                          className={`settings-key-chip${isCapturing ? " settings-key-chip--listening" : ""}${!k ? " settings-key-chip--empty" : ""}`}
+                          onClick={() => setCapture({ action, slot })}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            if (k) clearBinding(action, slot);
+                          }}
+                          title={`${SLOT_LABELS[slot]} — ${k ? "click to rebind · right-click to clear" : "click to bind"}`}
+                        >
+                          {isCapturing ? "press a key…" : k ? formatKey(k) : "—"}
+                        </button>
+                      );
+                    })}
+                  </span>
+                </div>
+              ))}
             </div>
           </section>
         )}

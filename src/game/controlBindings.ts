@@ -1,8 +1,10 @@
 import type { IInput } from "../Input";
 
-// Player-editable keyboard bindings. Each action holds a single binding string,
-//   which may be a plain key ("arrowleft", " ") or a modifier chord
-//   ("shift+arrowleft"). Stored in localStorage so it survives page reloads.
+// Player-editable keyboard bindings. Each action holds up to BINDING_SLOTS
+//   binding strings (slot 0 = primary, slot 1 = alternate), each of which may be
+//   a plain key ("arrowleft", " ") or a modifier chord ("shift+arrowleft"). Any
+//   slot firing triggers the action, which is how arrows and WASD both drive the
+//   ship out of the box. Stored in localStorage so it survives page reloads.
 //
 // Chord matching is EXACT on modifiers: a binding fires only when the set of
 //   modifiers currently held equals the set the binding declares. So bare
@@ -26,16 +28,21 @@ export type Bindings = Record<ControlAction, string[]>;
 
 const STORAGE_KEY = "pulsar.controls.v1";
 
-// Arrow-key defaults; the controls editor exposes one slot per action. A slot
-//   may hold a modifier chord (e.g. side thrust = shift + arrow).
+// Primary + alternate slot per action; the controls editor exposes both.
+export const BINDING_SLOTS = 2;
+export const SLOT_LABELS: readonly string[] = ["Primary", "Alternate"];
+
+// Arrows primary, WASD alternate — both live at once so a player can use either
+//   without touching Settings. A slot may hold a modifier chord (side thrust =
+//   shift + turn key, on whichever scheme they're using).
 export const DEFAULT_BINDINGS: Bindings = {
-  rotateLeft: ["arrowleft"],
-  rotateRight: ["arrowright"],
+  rotateLeft: ["arrowleft", "a"],
+  rotateRight: ["arrowright", "d"],
   precisionTurn: ["control"],
-  thrust: ["arrowup"],
-  reverse: ["arrowdown"],
-  sidePort: ["shift+arrowleft"],
-  sideStarboard: ["shift+arrowright"],
+  thrust: ["arrowup", "w"],
+  reverse: ["arrowdown", "s"],
+  sidePort: ["shift+arrowleft", "shift+a"],
+  sideStarboard: ["shift+arrowright", "shift+d"],
   fire: [" "],
   pause: ["escape"],
 };
@@ -99,30 +106,61 @@ const cloneDefaults = (): Bindings => ({
   pause: [...DEFAULT_BINDINGS.pause],
 });
 
-const sanitize = (raw: unknown): Bindings => {
+const sanitize = (raw: unknown, backfill = false): Bindings => {
   const out = cloneDefaults();
   if (!raw || typeof raw !== "object") return out;
   const obj = raw as Record<string, unknown>;
+  const stored: Partial<Record<ControlAction, string[]>> = {};
   for (const action of ACTION_ORDER) {
     const v = obj[action];
     if (Array.isArray(v)) {
-      const keys = v.filter((k): k is string => typeof k === "string" && k.length > 0).slice(0, 1);
+      const keys = v.filter((k): k is string => typeof k === "string" && k.length > 0).slice(0, BINDING_SLOTS);
+      stored[action] = keys;
       out[action] = keys;
     }
   }
+  if (backfill) backfillAlternates(out, stored);
   return out;
+};
+
+// Payloads written before the alternate slot existed hold one key per action, so
+//   a returning player would silently miss the WASD scheme new players get. Top
+//   each short action back up from the defaults, skipping any default key the
+//   player has explicitly bound elsewhere — their own bindings always win.
+const backfillAlternates = (out: Bindings, stored: Partial<Record<ControlAction, string[]>>) => {
+  const claimed = new Set<string>();
+  for (const action of ACTION_ORDER) for (const k of stored[action] ?? []) claimed.add(k);
+  for (const action of ACTION_ORDER) {
+    if (!stored[action] || out[action].length >= BINDING_SLOTS) continue;
+    for (const fallback of DEFAULT_BINDINGS[action]) {
+      if (out[action].length >= BINDING_SLOTS) break;
+      if (claimed.has(fallback) || out[action].includes(fallback)) continue;
+      out[action].push(fallback);
+      claimed.add(fallback);
+    }
+  }
 };
 
 // Exposed for the replay path: the recorded header carries a generic
 //   Record<string,string[]> from an older or future build, and we want to drop
-//   keys we don't recognise + default any missing actions before using it.
+//   keys we don't recognise + default any missing actions before using it. No
+//   backfill here — a replay must respond to exactly the keys it was recorded
+//   with, not to alternates the recording's build never had.
 export const normalizeBindings = (raw: unknown): Bindings => sanitize(raw);
+
+// Marker written alongside the actions once the payload is known to have been
+//   authored against the two-slot editor. Its absence means a pre-alternates
+//   payload that still needs the one-time backfill; its presence means every
+//   slot is deliberate, so an alternate the player cleared stays cleared.
+const SLOTS_MARKER = "_slots";
 
 const readFromStorage = (): Bindings => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return cloneDefaults();
-    return sanitize(JSON.parse(raw));
+    const parsed = JSON.parse(raw);
+    const legacy = !parsed || typeof parsed !== "object" || !(SLOTS_MARKER in parsed);
+    return sanitize(parsed, legacy);
   } catch {
     return cloneDefaults();
   }
@@ -136,7 +174,7 @@ export const getBindings = (): Bindings => {
 export const saveBindings = (next: Bindings) => {
   cached = sanitize(next);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cached));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...cached, [SLOTS_MARKER]: BINDING_SLOTS }));
   } catch {
     // ignore
   }
