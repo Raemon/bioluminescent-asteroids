@@ -1,5 +1,21 @@
 [
   {
+    "id": "2026-08-01-820a93a",
+    "date": "2026-08-01",
+    "title": "Varied wording for rhythm-miss hints",
+    "sections": [
+      {
+        "heading": "Changed",
+        "items": [
+          "The hint shown when you miss a hit on beat now rotates through several different phrasings to keep the feedback fresh across a session."
+        ]
+      }
+    ],
+    "commits": [
+      "820a93a"
+    ]
+  },
+  {
     "id": "2026-08-01-59b5e77",
     "date": "2026-08-01",
     "title": "Wraiths, bonus lives, comet SFX & Google sign-in",
