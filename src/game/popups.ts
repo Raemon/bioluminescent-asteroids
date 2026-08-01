@@ -239,7 +239,17 @@ export const popupComboLost = (pos: Vec, reason: "fire" | "hit", timing?: "early
   //   when the event landed inside the window anyway (a stale off-beat bullet), where
   //   early/late would point the wrong way.
   const base = reason === "fire" ? "Didn't fire on beat" : "Didn't hit on beat";
-  const subtitle = reason === "hit" && timing ? `(${base} — too ${timing})` : `(${base})`;
+  // the timed hit-miss rotates through a few phrasings — repetition dulls the
+  //   correction, so varied wording keeps the hint readable across a session.
+  const hitTimingVariants = timing ? [
+    `Didn't hit on beat (${timing})`,
+    `Hit too ${timing}`,
+    "Aim for the target",
+    "Didn't hit on beat",
+  ] : [];
+  const subtitle = reason === "hit" && timing
+    ? hitTimingVariants[Math.floor(Math.random() * hitTimingVariants.length)]
+    : `(${base})`;
   const titleFill = reason === "fire" ? "#ff6a6a" : "#ffae4d";
   const titleShadow = reason === "fire" ? "rgba(255, 90, 90, 0.85)" : "rgba(255, 150, 50, 0.85)";
   const subFill = reason === "fire" ? "#ffb3b3" : "#ffd9a8";
