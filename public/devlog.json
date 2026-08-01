@@ -1,5 +1,41 @@
 [
   {
+    "id": "2026-08-01-59b5e77",
+    "date": "2026-08-01",
+    "title": "Wraiths, bonus lives, comet SFX & Google sign-in",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Wraith enemies now have full sound effects: hit, lunge, scream, and death.",
+          "Earning a bonus life triggers a full-screen flash and a new choral sound.",
+          "Comets now burst apart at end of life instead of quietly warping away.",
+          "Comet destruction plays distinct sounds depending on whether you shot it.",
+          "Sign in with Google to claim your callsign so only you can submit under it.",
+          "Signed-in pilots accumulate persistent lifetime stats visible on the leaderboard."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Rapid same-sound playback no longer causes audio clipping or pileup."
+        ]
+      }
+    ],
+    "commits": [
+      "59b5e77",
+      "05b0d19",
+      "6c8cc71",
+      "717832f",
+      "8551175",
+      "ea718e5",
+      "68cf6e2",
+      "faae0c0",
+      "9f3c003",
+      "b019d94"
+    ]
+  },
+  {
     "id": "2026-07-14-5a70f21",
     "date": "2026-07-14",
     "title": "Citadel asteroids, wave-skip portals, boss laser overhaul",
