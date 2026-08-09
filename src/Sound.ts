@@ -416,6 +416,12 @@ type AssetJob = {
   wave: number;
   order: number;
   started: boolean;
+  /**
+   * Set once the job starts. Awaiting a started job has to await THIS, not a
+   * fresh resolved promise — the export prewarm drains the whole queue and
+   * would otherwise skip right over everything the pacer had in flight.
+   */
+  inFlight: Promise<unknown> | null;
   /** `immediate` skips the shared decode pacing — see decodeAsset. */
   run: (immediate: boolean) => Promise<unknown>;
 };
@@ -847,15 +853,16 @@ export class Sound {
   private loadWave = 1;
 
   private enqueueAsset(id: string, wave: number, order: number, run: (immediate: boolean) => Promise<unknown>): AssetJob {
-    const job: AssetJob = { id, wave, order, started: false, run };
+    const job: AssetJob = { id, wave, order, started: false, inFlight: null, run };
     this.assetJobs.push(job);
     return job;
   }
 
   private startAsset(job: AssetJob, immediate = false): Promise<unknown> {
-    if (job.started) return Promise.resolve();
+    if (job.started) return job.inFlight ?? Promise.resolve();
     job.started = true;
-    return job.run(immediate);
+    job.inFlight = job.run(immediate);
+    return job.inFlight;
   }
 
   // The run has reached a new wave: anything that wave introduces becomes
@@ -2322,17 +2329,17 @@ export class Sound {
     const loads: Promise<unknown>[] = [];
     for (const variation of haloVariations) {
       if (variation === "none") continue;
-      loads.push(this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient")));
-      loads.push(this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic")));
-      loads.push(this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3")));
+      loads.push(this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient"), true));
+      loads.push(this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic"), true));
+      loads.push(this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3"), true));
     }
     for (const song of Object.keys(FULL_HALO_SONGS) as FullHaloSongId[]) {
-      for (let i = 1; i <= 6; i++) loads.push(this.loadHaloMusicBuffer(this.haloFullMusicUrl(song, i)));
+      for (let i = 1; i <= 6; i++) loads.push(this.loadHaloMusicBuffer(this.haloFullMusicUrl(song, i), true));
     }
-    loads.push(this.loadHaloMusicBuffer(Sound.STREAK_LOOP_BASE_URL));
-    loads.push(this.loadHaloMusicBuffer(Sound.STREAK_LOOP_RISE_URL));
+    loads.push(this.loadHaloMusicBuffer(Sound.STREAK_LOOP_BASE_URL, true));
+    loads.push(this.loadHaloMusicBuffer(Sound.STREAK_LOOP_RISE_URL, true));
     for (const milestone of [6, 12]) {
-      for (const url of pilotLogUrlsForIndex(milestone)) loads.push(this.loadPilotLogBuffer(url));
+      for (const url of pilotLogUrlsForIndex(milestone)) loads.push(this.loadPilotLogBuffer(url, true));
     }
     loads.push(this.loadGuitarSample());
     void loadMusicConfig();
@@ -5369,10 +5376,12 @@ export class Sound {
     // Different variation playing — fade out the old node before swapping.
     if (this.haloMusic) this.stopHaloMusic();
 
+    // immediate: these play the moment they resolve, so they must not wait
+    // for an idle slot behind the background queue.
     const [ambientBuf, melodicBuf, layer3Buf] = await Promise.all([
-      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient")),
-      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic")),
-      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3")),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient"), true),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic"), true),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3"), true),
     ]);
     if (!this.ctx || !this.master) return;
     if (!ambientBuf || !melodicBuf) return;
@@ -5491,10 +5500,12 @@ export class Sound {
     // buffers for this one are still loading.
     outgoing.climaxActive = true;
 
+    // immediate: these play the moment they resolve, so they must not wait
+    // for an idle slot behind the background queue.
     const [ambientBuf, melodicBuf, layer3Buf] = await Promise.all([
-      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient")),
-      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic")),
-      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3")),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "ambient"), true),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "melodic"), true),
+      this.loadHaloMusicBuffer(this.haloMusicUrl(variation, "layer3"), true),
     ]);
     if (!this.ctx || !this.master) return;
     if (!ambientBuf || !melodicBuf) return;
@@ -5680,7 +5691,7 @@ export class Sound {
     if (this.haloMusic) this.stopHaloMusic();
 
     const bufs = await Promise.all(
-      Array.from({ length: 6 }, (_, i) => this.loadHaloMusicBuffer(this.haloFullMusicUrl(song, i + 1))),
+      Array.from({ length: 6 }, (_, i) => this.loadHaloMusicBuffer(this.haloFullMusicUrl(song, i + 1), true)),
     );
     if (!this.ctx || !this.master) return;
     if (this.haloFullMusic) return;  // raced with another start
@@ -5971,16 +5982,16 @@ export class Sound {
   // ElevenLabs takes with bandpass + bitcrush + hiss applied so they already
   // sound like a scratchy astronaut radio. Decoded once per URL and cached;
   // subsequent plays are buffer-source cheap.
-  private loadPilotLogBuffer(url: string): Promise<AudioBuffer | null> {
+  private loadPilotLogBuffer(url: string, immediate = false): Promise<AudioBuffer | null> {
     const existing = this.pilotLogLoading.get(url);
     if (existing) return existing;
     if (this.pilotLogBuffers.has(url)) return Promise.resolve(this.pilotLogBuffers.get(url)!);
     if (!this.ctx) return Promise.resolve(null);
     const p = fetch(url)
       .then((r) => (r.ok ? r.arrayBuffer() : null))
-      // Vocal takes are long files and are wanted a whole combo milestone
-      // ahead of when they play, so their decode is paced like the rest.
-      .then((ab) => (ab ? this.decodeAsset(ab, false) : null))
+      // Preloads (a milestone ahead of the line) pace; playPilotLog passes
+      // immediate because it has already reserved its downbeat slot.
+      .then((ab) => (ab ? this.decodeAsset(ab, immediate) : null))
       .then((buf) => {
         if (buf) this.pilotLogBuffers.set(url, buf);
         this.pilotLogLoading.delete(url);
@@ -6020,7 +6031,7 @@ export class Sound {
     //   re-sim picks the exact take the original run played.
     const url = urls[Math.floor(cosmeticRng() * urls.length)];
     const targetStartTime = this.ctx.currentTime + Math.max(0, delaySec);
-    const buf = await this.loadPilotLogBuffer(url);
+    const buf = await this.loadPilotLogBuffer(url, true);
     if (!buf || !this.ctx || !this.chVocalsBaked) return 0;
     const src = this.ctx.createBufferSource();
     src.buffer = buf;

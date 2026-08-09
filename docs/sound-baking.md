@@ -77,10 +77,30 @@ the worst frame stall is indistinguishable from the loop's own jitter.
 
 A **cache miss at play time skips all of it**: `playBaked` promotes that job
 and decodes it immediately. Pacing exists to protect the frame loop from work
-nobody is waiting on; there, somebody is. The video exporter calls
-`loadAllAssets()` to drain the queue with no pacing at all, because it steps
-frames faster than real time and a background load resolving mid-sweep would
-land against a clock that had already raced past the moment the voice needed.
+nobody is waiting on; there, somebody is.
+
+### Export inverts the rules
+
+Gameplay is happy to render a voice live while its mp3 lands. The replay
+exporter is not: it steps frames faster than real time, so a load resolving
+mid-sweep resolves against a clock that has already raced past the moment the
+voice needed to start. Everything must be resident before frame one, which is
+what `prewarmForExport` → `loadAllAssets()` is for.
+
+Two rules follow, and both are easy to break by accident:
+
+- **Awaiting a job that is already in flight must await *that* load**, not a
+  fresh resolved promise. `AssetJob.inFlight` exists only for this; without it
+  the prewarm skips straight over the handful the pacer happens to be holding.
+- **Anything that awaits a buffer in order to play it now decodes
+  immediately** — `startHaloMusic`, `crossfadeHaloMusic`, `startHaloFullMusic`,
+  `playPilotLog`. They each reserve a start time and then await; routing that
+  await through the idle-paced queue makes the cue late or drops it, in normal
+  play as well as in an export. Only true preloads pace.
+
+`npm run check:export-audio` drives the real prewarm → capture-context →
+offline-render path and asserts the render is stereo, non-silent, and
+non-silent in every second it fired a voice.
 
 One consequence worth knowing: **`bgBeat`'s intensity buckets are derived from
 `CFG.bgBeatIntensity`**, not hardcoded. The ramp runs 0.6 → 1.0 over 30 waves,
