@@ -10,6 +10,7 @@ import { FULL_HALO_TIER_THRESHOLDS, FULL_HALO_SONGS, type FullHaloSong } from ".
 import { fullHaloLayerOffset, loadHaloFullConfig } from "./haloFullConfig";
 import { cosmeticRng } from "./game/rng";
 import { HALO_MUSIC_POOL, HAUNTING_MUSIC_POOL, BOSS_MUSIC_VARIATION } from "./game/haloMusicConfig";
+import { SOUND_LOAD_SCHEDULE, STREAK_SHIMMER_POOL_SIZE, FIRST_DOT_HUM_POOL_SIZE } from "./game/soundSchedule";
 
 type ToneModule = typeof import("tone");
 let toneModulePromise: Promise<ToneModule> | null = null;
@@ -408,6 +409,17 @@ const pilotLogUrlsForIndex = (milestone: number): string[] => {
   return pool.map((f) => `/sounds/vocals/in-use/${milestone}x/${f}`);
 };
 
+// One queued asset load. `wave` is the earliest wave it can be heard on and
+// `order` its position in the schedule — together they decide what loads next.
+type AssetJob = {
+  id: string;
+  wave: number;
+  order: number;
+  started: boolean;
+  /** `immediate` skips the shared decode pacing — see decodeAsset. */
+  run: (immediate: boolean) => Promise<unknown>;
+};
+
 export class Sound {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
@@ -628,16 +640,10 @@ export class Sound {
     // be created before the context exists, so this is the earliest we can do
     // it — runs once, on first user interaction.
     this.prewarmNoiseBuffers();
-    this.prerenderLaserShots();
-    this.prerenderChargeBeds();
-    this.prerenderStreakShimmerNotes();
-    this.prerenderThrust();
-    this.prerenderReverseThrust();
-    this.prerenderSideThrust();
-    this.prerenderBassteroidDrones();
-    this.prerenderAlienDrones();
-    this.prerenderFirstDotHums();
-    this.prerenderWarbleDrones();
+    // The prerender* helpers used to be fired here, which meant ~48 mp3s went
+    // out the moment the context existed, outside the loader and ahead of the
+    // gate they were competing with. They are now purely on-miss demand loads;
+    // warmBakedCache below schedules the same keys in wave order.
     this.loadGuitarSample();
     // Kick off the baked-mp3 fetch + decode for every voice that has a baked
     // recipe. The title screen awaits bakedCacheReady() before letting the
@@ -774,149 +780,217 @@ export class Sound {
   // each promise resolves. Safe to call repeatedly — playBaked's in-flight
   // guard de-dupes.
   private warmBakedCache() {
-    // bgBeat is the first sound the player hears every run — and unlike all
-    // other voices, its playBgBeat path *requires* a baked buffer (the live
-    // Tone fallback was removed because its scheduler lookahead made the
-    // first few beats drift before the cache caught up). Bake the early-wave
-    // downbeat buckets before anything else so the first downbeats at game
-    // start aren't dropped silently.
-    const fetches: Promise<unknown>[] = [];
-    const enqueue = (name: SoundName, pitchRatio: number) => {
-      const key = this.bakedKey(name, pitchRatio);
-      // Seed the debug map so the overlay shows "queued" before each fetch
-      // actually starts — queueBake will flip it to "fetching" → "loaded".
-      if (!this.bakedLoadStates.has(key)) this.bakedLoadStates.set(key, "queued");
-      fetches.push(this.queueBake(name, pitchRatio));
-    };
-    for (let bucket = 0; bucket <= 2; bucket++) {
-      const intensityBucket = bucket / 10;
-      enqueue("bgBeat", 1 * 100 + intensityBucket);
-    }
-    // Per-sound list of pitch ratios to pre-bake. Mirrors the values Game
-    // passes at runtime: bassteroid split levels use BASS_SPLIT_PITCH_RATIO
-    // ([1, 1, 0.8409]); bgBeat uses 1 or 1.122 (offbeats), composited with
-    // an intensity bucket (0..1 in 0.1 steps → ~11 buckets).
-    const standardPitches = [1, 0.8409];
-    // cometNote: one entry per active melody index (skip the rest at idx=5).
-    // pitchRatio encodes the index — see bakeSound's cometNote case.
-    const cometIdxs = [0, 1, 2, 3, 4, 6, 7];
-    const oneShots: Array<[SoundName, number[]]> = [
-      ["fireBeat", [1]],
-      ["chime", [1]],
-      ["powerup", [1]],
-      ["bonusLife", [1]],
-      ["waveClear", [1]],
-      ["bassKick", standardPitches],
-      ["bassBoom", standardPitches],
-      ["bassPluck", standardPitches],
-      ["bassSnap", standardPitches],
-      ["cometNote", cometIdxs],
-      // Comet-hit death sounds + the major-key bonus-life bong: long-tailed
-      // pure-WebAudio one-shots, one committed mp3 each (pitchRatio unused).
-      ["cometDestroyed", [1]],
-      ["cometDestroyedSad", [1]],
-      // Hold-to-charge laser bed: one committed loop per tier (pitchRatio=tier).
-      ["chargeBed", [0, 1, 2, 3, 4]],
-      // Laser-shot thunderclap: one committed one-shot per tier (pitchRatio=tier).
-      ["laserShot", [0, 1, 2, 3, 4]],
-      // Streak-shimmer tine: one committed one-shot per pool pitch index.
-      ["streakShimmer", Sound.STREAK_SHIMMER_POOL.map((_, i) => i)],
-      // Engine drones: single committed loop each (pitchRatio unused).
-      ["thrust", [1]],
-      ["reverseThrust", [1]],
-      ["sideThrust", [1]],
-      // Bassteroid ambient drone: one committed loop per (kind, size) pair.
-      ["bassteroidDrone", [0, 1, 2, 3, 4, 5, 6, 7]],
-      // Alien theremin drone: one committed loop per size.
-      ["alienDrone", [0, 1, 2]],
-      // First-dot hum drone tone: one committed loop per hum instance.
-      ["firstDotHum", Sound.FIRST_DOT_HUM_PITCH.map((_, i) => i)],
-      // Warble drone: one committed loop per morph endpoint (phased-in/out).
-      ["warbleDrone", [0, 1]],
-      // Wave-summary drain chime: one variant per harmonic over A3.
-      ["drainChime", [1, 2, 3, 4, 6, 8]],
-      // Wraith voices: ElevenLabs one-shots, one committed mp3 each.
-      ["wraithScream", [1]],
-      ["wraithHit", [1]],
-      ["wraithLunge", [1]],
-      ["wraithDeath", [1]],
-    ];
-    for (const [name, pitches] of oneShots) {
-      for (const p of pitches) {
-        enqueue(name, p);
+    if (import.meta.env.DEV) {
+      // The schedule carries these sizes as literals (importing them would
+      // close a module cycle). A pool that grew without the schedule growing
+      // would silently strand its new indices with no file — and both pools
+      // are silent-on-miss voices, so the drift would be inaudible until
+      // someone noticed a tine or a hum had gone missing.
+      if (Sound.STREAK_SHIMMER_POOL.length !== STREAK_SHIMMER_POOL_SIZE ||
+          Sound.FIRST_DOT_HUM_PITCH.length !== FIRST_DOT_HUM_POOL_SIZE) {
+        // eslint-disable-next-line no-console
+        console.warn("[sound] soundSchedule pool sizes are stale — update STREAK_SHIMMER_POOL_SIZE / FIRST_DOT_HUM_POOL_SIZE");
       }
     }
-    // Remaining bgBeat variants: full 11-bucket sweep × {downbeat, offbeat} ×
-    // {main, light-eighth}. The early downbeat buckets above already queued
-    // — queueBake dedupes, so re-listing them here is a no-op.
-    for (const basePitch of [1, 1.122]) {
-      for (let bucket = 0; bucket <= 10; bucket++) {
-        const intensityBucket = bucket / 10;
-        enqueue("bgBeat", basePitch * 100 + intensityBucket);
-        enqueue("bgBeat", basePitch * 100 + intensityBucket + 1000);
+    const gate: Promise<unknown>[] = [];
+    let order = 0;
+    for (const entry of SOUND_LOAD_SCHEDULE) {
+      for (const key of entry.keys) {
+        const id = this.bakedKey(entry.name, key);
+        // Seed the debug map so the overlay shows "queued" before the fetch
+        // starts — queueBake flips it to "fetching" → "loaded".
+        if (!this.bakedLoadStates.has(id)) this.bakedLoadStates.set(id, "queued");
+        const job = this.enqueueAsset(id, entry.wave, order++, (immediate) => this.queueBake(entry.name, key, immediate));
+        // The gate is what the title screen waits on, so it runs immediately
+        // and in parallel rather than through the pacer — there is no frame
+        // loop to protect yet, and every millisecond here is start latency.
+        if (entry.gate) gate.push(this.startAsset(job, true));
       }
     }
-    // ── Lazily-warmed voices ──────────────────────────────────────────────
-    // Every one-shot below keeps a live-synth fallback (see its play* wrapper),
-    // so a buffer that hasn't landed yet just renders live for that one hit
-    // instead of silent-missing. That means they must NOT join the start gate:
-    // the title screen would sit there downloading a hundred extra mp3s to
-    // avoid an outcome — playing the sound the way the game played it before
-    // this cache existed — that is completely inaudible.
-    const lazyFetches: Promise<unknown>[] = [];
-    const enqueueLazy = (name: SoundName, pitchRatio: number) => {
-      const key = this.bakedKey(name, pitchRatio);
-      if (!this.bakedLoadStates.has(key)) this.bakedLoadStates.set(key, "queued");
-      lazyFetches.push(this.queueBake(name, pitchRatio));
-    };
-    // Voices with a single committed render (pitchRatio unused, always 1).
-    const fixedOneShots: SoundName[] = [
-      "fire", "calibrationTap", "death", "bassHit", "bassEcho", "comboTick",
-      "tink", "shieldPop", "warble", "pulsarHum", "shockwaveCharge",
-      "shockwaveBoom", "alienFireSmall", "alienHit", "alienExplode",
-      "canisterAppear", "canisterDestroyed", "comboLost", "comboLostFire",
-      "bossPulse", "bossHit", "bossEyeOpenStinger", "meteorShower", "gemSwarm",
-      "laserChargeFail", "explosionLarge", "explosionMedium", "explosionSmall",
-      "asteroidBoomBeat",
-    ];
-    for (const name of fixedOneShots) enqueueLazy(name, 1);
-    const lazyVariants: Array<[SoundName, number[]]> = [
-      // bell: the asteroid-kill toll (1) and the wave-summary row toll (C_BELL).
-      ["bell", [1, 1.189]],
-      // scoreBlip: the distinct pitches of the summary drain's 16-step line.
-      ["scoreBlip", [1, 1.122, 1.189, 1.335, 1.498, 1.587, 1.682]],
-      // comboSparkle: full-length on-beat reward, and the killed-parade half.
-      ["comboSparkle", [1, 0.5]],
-      // crystalShatter: ringPitchRatio 0 is the on-beat "snap to G" sentinel,
-      // 1 the natural pitch. The music page's arbitrary pitches stay live.
-      ["crystalShatterLarge", [0, 1]],
-      ["crystalShatterSmall", [0, 1]],
-      // summary downbeat: one per chord of the i-VI-III-VII rotation, ducked
-      // and unducked.
-      ["summaryDownbeat", [0, 1, 2, 3]],
-      ["summaryDownbeatDucked", [0, 1, 2, 3]],
-      ["driftShotHit", [1, 2, 3, 4, 5, 6]],
-      ["laserCharge", [1, 2, 3, 4]],
-      // Big/medium alien fire: the 8-shot riff holds 4 distinct renders.
-      ["alienFireBig", [0, 1, 2, 3]],
-      ["alienFireMedium", [0, 1, 2, 3]],
-      // comboChime: keyed by the note's fundamental, so the three modal scales
-      // share every pitch they have in common.
-      ["comboChime", [...Sound.COMBO_CHIME_PITCHES]],
-    ];
-    for (const [name, keys] of lazyVariants) {
-      for (const k of keys) enqueueLazy(name, k);
-    }
-    // Gameplay never waits on these, but a video export does: a capture that
-    // rendered half its hits live and half from cache would be inconsistent
-    // with itself, so prewarmForExport blocks until the lazy set has landed.
-    this.lazyBakesReadyPromise = Promise.allSettled(lazyFetches).then(() => undefined);
-
-    // Single promise the title screen can await before letting the player
-    // start. Tolerant of individual fetch failures — a missing mp3 just means
-    // that one voice will silent-miss in-game rather than blocking the run.
-    this.bakedCacheReadyPromise = Promise.allSettled(fetches).then(() => undefined);
+    // Tolerant of individual failures: a missing mp3 means one voice
+    // silent-misses or renders live, not a run that never starts.
+    this.bakedCacheReadyPromise = Promise.allSettled(gate).then(() => undefined);
+    this.pumpAssets();
   }
+
+  // ── Paced asset loading ───────────────────────────────────────────────
+  // Everything the game fetches after the gate — the rest of the baked mp3s,
+  // the halo music stems, the pilot-log takes — goes through one queue,
+  // ordered by the wave it can first be heard on (see soundSchedule.ts).
+  //
+  // Two separate limits, because there are two separate costs. Fetches are
+  // network-bound and nearly free on the main thread, so a few run at once.
+  // decodeAudioData is the expensive one and is what starves the beat
+  // scheduler when a hundred of them land together, so decodes are strictly
+  // serialized AND each one waits for an idle callback with real slack in it.
+  // The net effect is that background loading only ever consumes time the
+  // frame loop didn't want.
+  private static readonly ASSET_MAX_IN_FLIGHT = 6;
+  // Upper bound on how long the queue can wait for an idle slot. Only bites
+  // on a page that is never idle; normally rIC fires long before this.
+  private static readonly ASSET_IDLE_TIMEOUT_MS = 500;
+  // Fallback pacing where requestIdleCallback doesn't exist (Safari).
+  private static readonly ASSET_FALLBACK_GAP_MS = 120;
+  // How long one idle slot may spend decoding before handing the frame back.
+  private static readonly DECODE_SLOT_BUDGET_MS = 6;
+
+  private assetJobs: AssetJob[] = [];
+  private assetsInFlight = 0;
+  private assetPumpScheduled = false;
+  // Background decodes across every loader — baked one-shots, music stems,
+  // vocals — share one queue so they can't pile onto the audio thread
+  // together. Drained by pumpDecodes in frame slack.
+  private decodeQueue: Array<{ bytes: ArrayBuffer; resolve: (b: AudioBuffer | null) => void }> = [];
+  private decodePumpScheduled = false;
+  // Highest wave the run has reached. Jobs at or below it are urgent; the
+  // rest are ordered by how far ahead they are.
+  private loadWave = 1;
+
+  private enqueueAsset(id: string, wave: number, order: number, run: (immediate: boolean) => Promise<unknown>): AssetJob {
+    const job: AssetJob = { id, wave, order, started: false, run };
+    this.assetJobs.push(job);
+    return job;
+  }
+
+  private startAsset(job: AssetJob, immediate = false): Promise<unknown> {
+    if (job.started) return Promise.resolve();
+    job.started = true;
+    return job.run(immediate);
+  }
+
+  // The run has reached a new wave: anything that wave introduces becomes
+  // urgent, and the ordering behind it shifts with us. Cheap enough to call
+  // on every wave — the queue is a few hundred entries and this is a compare.
+  setLoadWave(wave: number) {
+    if (wave <= this.loadWave) return;
+    this.loadWave = wave;
+    this.pumpAssets();
+  }
+
+  // Drain the whole queue at once, pacing be damned. Only the video exporter
+  // wants this: it steps frames as fast as the CPU allows, so a background
+  // load that resolves mid-sweep lands against a clock that has already raced
+  // past the moment the voice needed to start. Everything must be resident
+  // before the first frame.
+  async loadAllAssets(): Promise<void> {
+    await Promise.allSettled(this.assetJobs.map((job) => this.startAsset(job, true)));
+  }
+
+  // A voice needed a buffer that isn't cached. Pull it out of the background
+  // queue and load it unpaced — pacing protects the frame loop from work
+  // nobody is waiting on, and here somebody is. Idempotent: queueBake's
+  // in-flight guard makes repeat calls while it loads free.
+  private demandBake(name: SoundName, pitchRatio: number) {
+    if (this.demandAsset(this.bakedKey(name, pitchRatio))) return;
+    void this.queueBake(name, pitchRatio, true);
+  }
+
+  // A play-time cache miss: this asset is needed NOW, so it skips the queue
+  // and the decode pacing both. Pacing exists to protect the frame loop from
+  // work nobody is waiting on; here somebody is.
+  private demandAsset(id: string): boolean {
+    const job = this.assetJobs.find((j) => j.id === id && !j.started);
+    if (!job) return false;
+    void this.startAsset(job, true);
+    return true;
+  }
+
+  private nextAssetJob(): AssetJob | null {
+    let best: AssetJob | null = null;
+    let bestRank = Infinity;
+    for (const job of this.assetJobs) {
+      if (job.started) continue;
+      // Anything the current wave has already reached ranks equally urgent;
+      // beyond that, nearest wave first, then declaration order.
+      const rank = Math.max(0, job.wave - this.loadWave);
+      if (rank < bestRank || (rank === bestRank && best !== null && job.order < best.order)) {
+        best = job;
+        bestRank = rank;
+      }
+    }
+    return best;
+  }
+
+  // Note this does NOT wait for idle: starting a fetch is a few microseconds
+  // and the response is assembled off the main thread. The expensive half is
+  // the decode, and that is where the idle gating lives (pumpDecodes). Gating
+  // the fetch too just added a frame of latency per file for no benefit.
+  private pumpAssets() {
+    if (this.assetPumpScheduled) return;
+    this.assetPumpScheduled = true;
+    queueMicrotask(() => {
+      this.assetPumpScheduled = false;
+      while (this.assetsInFlight < Sound.ASSET_MAX_IN_FLIGHT) {
+        const job = this.nextAssetJob();
+        if (!job) return;
+        this.assetsInFlight++;
+        void this.startAsset(job)
+          .catch(() => undefined)
+          .then(() => {
+            this.assetsInFlight--;
+            this.pumpAssets();
+          });
+      }
+    });
+  }
+
+  // Run `cb` in slack the frame loop didn't use. requestIdleCallback already
+  // means "the browser has nothing better to do", so we take whatever slot it
+  // hands us rather than second-guessing it on timeRemaining() — an earlier
+  // version demanded 4 ms of headroom and, on a page that never had that much,
+  // spun until the timeout fired and throughput collapsed to one slot per
+  // 800 ms. The timeout stays as the floor: a permanently busy page still
+  // makes progress instead of starving the queue forever.
+  private whenIdle(cb: () => void) {
+    const w = window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    };
+    if (typeof w.requestIdleCallback !== "function") {
+      setTimeout(cb, Sound.ASSET_FALLBACK_GAP_MS);
+      return;
+    }
+    w.requestIdleCallback(cb, { timeout: Sound.ASSET_IDLE_TIMEOUT_MS });
+  }
+
+
+  // decodeAudioData, either right now (something is waiting on it) or from
+  // the shared background queue (nothing is).
+  //
+  // The background queue is drained inside idle callbacks, several per slot
+  // while the slot still has room. One-decode-per-callback was safe but slow:
+  // requestIdleCallback fires roughly once a frame at best, so a couple of
+  // hundred files took minutes. A wall-clock budget per slot keeps the hit
+  // bounded while letting a run of small files clear in one go.
+  private decodeAsset(bytes: ArrayBuffer, immediate: boolean): Promise<AudioBuffer | null> {
+    const ctx = this.ctx;
+    if (!ctx) return Promise.resolve(null);
+    if (immediate) return ctx.decodeAudioData(bytes).catch(() => null);
+    return new Promise<AudioBuffer | null>((resolve) => {
+      this.decodeQueue.push({ bytes, resolve });
+      this.pumpDecodes();
+    });
+  }
+
+  private pumpDecodes() {
+    if (this.decodePumpScheduled || this.decodeQueue.length === 0) return;
+    this.decodePumpScheduled = true;
+    this.whenIdle(async () => {
+      this.decodePumpScheduled = false;
+      const ctx = this.ctx;
+      const startedAt = performance.now();
+      // decodeAudioData is async, so the idle deadline object is stale by the
+      // time one finishes — measure against the clock instead.
+      while (this.decodeQueue.length > 0 && performance.now() - startedAt < Sound.DECODE_SLOT_BUDGET_MS) {
+        const item = this.decodeQueue.shift();
+        if (!item) break;
+        if (!ctx) { item.resolve(null); continue; }
+        const buf = await ctx.decodeAudioData(item.bytes).catch(() => null);
+        item.resolve(buf);
+      }
+      this.pumpDecodes();
+    });
+  }
+
 
   // Promise resolves once warmBakedCache's first-pass fetches all complete.
   // Returns an already-resolved promise if warming hasn't started yet (e.g.
@@ -934,12 +1008,12 @@ export class Sound {
   // path in prod and only hit it on first dev play after a synth-recipe
   // edit. In dev the rendered buffer is POSTed back to /__bake-dump__ so
   // the next reload is fully fetch-only.
-  private queueBake(name: SoundName, pitchRatio: number): Promise<void> {
+  private queueBake(name: SoundName, pitchRatio: number, immediate = false): Promise<void> {
     const key = this.bakedKey(name, pitchRatio);
     if (this.bakedBuffers.has(key) || this.bakingInFlight.has(key)) return Promise.resolve();
     this.bakingInFlight.add(key);
     this.bakedLoadStates.set(key, "fetching");
-    return this.fetchBakedMp3(name, pitchRatio).then((fetched) => {
+    return this.fetchBakedMp3(name, pitchRatio, immediate).then((fetched) => {
       if (fetched) {
         this.bakedBuffers.set(key, fetched);
         this.bakingInFlight.delete(key);
@@ -991,7 +1065,6 @@ export class Sound {
   private bakedCacheReadyPromise: Promise<void> | null = null;
   // Same, for the lazily-warmed one-shots that keep a live-synth fallback and
   // therefore stay out of the start gate. Only the export path awaits it.
-  private lazyBakesReadyPromise: Promise<void> | null = null;
   // Per-key load state for the ?debug=true overlay. "queued" = warmBakedCache
   // listed it but the fetch hasn't started; "fetching" = fetch in flight;
   // "loaded" = decoded AudioBuffer in bakedBuffers; "failed" = fetch returned
@@ -1134,13 +1207,16 @@ export class Sound {
   // Fetch a pre-baked MP3 from public/sounds/baked/. Returns the decoded
   // AudioBuffer on hit, null on 404 (so queueBake can fall through to a live
   // Tone bake — which in dev also POSTs the result back for next time).
-  private async fetchBakedMp3(name: SoundName, pitchRatio: number): Promise<AudioBuffer | null> {
+  private async fetchBakedMp3(name: SoundName, pitchRatio: number, immediate = false): Promise<AudioBuffer | null> {
     if (!this.ctx) return null;
     try {
       const r = await fetch(this.bakedFileUrl(name, pitchRatio));
       if (!r.ok) return null;
       const ab = await r.arrayBuffer();
-      return await this.ctx.decodeAudioData(ab);
+      // Fetching is cheap on the main thread; decoding is not. Background
+      // loads hand the decode to the shared serialized queue, which only runs
+      // it in frame slack. A demand load decodes straight away.
+      return await this.decodeAsset(ab, immediate);
     } catch {
       return null;
     }
@@ -1228,6 +1304,12 @@ export class Sound {
     laserChargeFail: 0.35,
     comboChime: 5.3,
   };
+
+  // One-shots whose graph holds a stereo node and so must render in a
+  // 2-channel offline context. Only asteroidBoomBeat qualifies: its
+  // ConvolverNode runs a 2-channel IR whose channels are independent noise
+  // draws. Every other newly-baked voice is oscillators plus mono noise.
+  private static readonly STEREO_BAKES: ReadonlySet<SoundName> = new Set<SoundName>(["asteroidBoomBeat"]);
 
   // Hardcoded fallbacks for the explosion trio's semantic config block.
   private static readonly EXPLOSION_DEFAULTS: Record<ExplosionName, { volume: number; lowpassStart: number; duration: number }> = {
@@ -1337,8 +1419,10 @@ export class Sound {
       }
       return true;
     }
-    // Kick off async bake; subsequent calls will hit the cache.
-    this.queueBake(name, pitchRatio);
+    // Not cached. Somebody is waiting on this one now, so pull it out of the
+    // background queue and load it without pacing; the voice renders live (or
+    // silent-misses) this once and hits cache from the next play on.
+    this.demandBake(name, pitchRatio);
     return false;
   }
 
@@ -1544,7 +1628,12 @@ export class Sound {
     const oneShot = this.oneShotGraph(name, pitchRatio);
     if (oneShot) {
       const len = Math.ceil(sr * (Sound.ONE_SHOT_BAKE_LEN[name] ?? 1.5));
-      const offline = new OACearly(1, len, sr);
+      // Mono unless the graph contains a genuinely stereo node. A 1-channel
+      // render downmixes such a node to 0.5·(L+R), which for the decorrelated
+      // noise in a reverb IR costs ~3 dB of wet level and all of the width —
+      // the live path plays it into a stereo destination and keeps both.
+      const channels = Sound.STEREO_BAKES.has(name) ? 2 : 1;
+      const offline = new OACearly(channels, len, sr);
       const masterIn = this.buildBakedMasterChain(offline);
       oneShot(offline, masterIn);
       return offline.startRendering();
@@ -2226,7 +2315,7 @@ export class Sound {
   async prewarmForExport(): Promise<void> {
     this.ensureContext();
     await this.bakedCacheReady();
-    await (this.lazyBakesReadyPromise ?? Promise.resolve());
+    await this.loadAllAssets();
     const haloVariations = new Set<HaloMusicVariation>([
       ...HALO_MUSIC_POOL, ...HAUNTING_MUSIC_POOL, BOSS_MUSIC_VARIATION,
     ]);
@@ -2411,7 +2500,7 @@ export class Sound {
   // Warm all 3 committed alien-drone loops (big/medium/small).
   private prerenderAlienDrones() {
     for (let i = 0; i < Sound.ALIEN_DRONE_SIZES.length; i++) {
-      void this.queueBake("alienDrone", i);
+      this.demandBake("alienDrone", i);
     }
   }
 
@@ -2540,8 +2629,8 @@ export class Sound {
 
   // Warm both committed warble-drone endpoint loops (phased-in, phased-out).
   private prerenderWarbleDrones() {
-    void this.queueBake("warbleDrone", 0);
-    void this.queueBake("warbleDrone", 1);
+    this.demandBake("warbleDrone", 0);
+    this.demandBake("warbleDrone", 1);
   }
 
   // Open a warble's sustained voice: two baked endpoint loops (phased-in,
@@ -2719,7 +2808,7 @@ export class Sound {
 
   // Warm all 9 committed first-dot-hum drone-tone loops.
   private prerenderFirstDotHums() {
-    for (let i = 0; i < Sound.FIRST_DOT_HUM_PITCH.length; i++) void this.queueBake("firstDotHum", i);
+    for (let i = 0; i < Sound.FIRST_DOT_HUM_PITCH.length; i++) this.demandBake("firstDotHum", i);
   }
 
   // shared voice builder for the first-dot hums: looks up the baked drone-tone loop for
@@ -3421,7 +3510,7 @@ export class Sound {
   //   buildStreakShimmerNoteGraph offline render that gets dumped to disk.
   //   Fire-and-forget; queueBake de-dupes in-flight/cached.
   private prerenderStreakShimmerNotes() {
-    for (let i = 0; i < Sound.STREAK_SHIMMER_POOL.length; i++) void this.queueBake("streakShimmer", i);
+    for (let i = 0; i < Sound.STREAK_SHIMMER_POOL.length; i++) this.demandBake("streakShimmer", i);
   }
 
   // Music-box tine voice: a sine fundamental with a slow decay plus two
@@ -3800,7 +3889,7 @@ export class Sound {
   // Warm all 8 committed bassteroid-drone loops (4 kinds × 2 sizes).
   private prerenderBassteroidDrones() {
     for (let i = 0; i < Sound.BASS_DRONE_KINDS.length * Sound.BASS_DRONE_SIZES.length; i++) {
-      void this.queueBake("bassteroidDrone", i);
+      this.demandBake("bassteroidDrone", i);
     }
   }
 
@@ -5178,16 +5267,15 @@ export class Sound {
     }
   }
 
-  private loadHaloMusicBuffer(url: string): Promise<AudioBuffer | null> {
+  private loadHaloMusicBuffer(url: string, immediate = false): Promise<AudioBuffer | null> {
     const cached = this.haloMusicBuffers.get(url);
     if (cached) return Promise.resolve(cached);
     const inflight = this.haloMusicLoading.get(url);
     if (inflight) return inflight;
     if (!this.ctx) return Promise.resolve(null);
-    const ctx = this.ctx;
     const p = fetch(url)
       .then((r) => (r.ok ? r.arrayBuffer() : null))
-      .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
+      .then((ab) => (ab ? this.decodeAsset(ab, immediate) : null))
       .then((buf) => {
         if (buf) this.haloMusicBuffers.set(url, buf);
         this.haloMusicLoading.delete(url);
@@ -5888,10 +5976,11 @@ export class Sound {
     if (existing) return existing;
     if (this.pilotLogBuffers.has(url)) return Promise.resolve(this.pilotLogBuffers.get(url)!);
     if (!this.ctx) return Promise.resolve(null);
-    const ctx = this.ctx;
     const p = fetch(url)
       .then((r) => (r.ok ? r.arrayBuffer() : null))
-      .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
+      // Vocal takes are long files and are wanted a whole combo milestone
+      // ahead of when they play, so their decode is paced like the rest.
+      .then((ab) => (ab ? this.decodeAsset(ab, false) : null))
       .then((buf) => {
         if (buf) this.pilotLogBuffers.set(url, buf);
         this.pilotLogLoading.delete(url);
@@ -6161,15 +6250,19 @@ export class Sound {
   //          are firing in succession.
 
   private playAlienFireBig() {
+    // The riff position only advances on a shot that actually sounds — a shot
+    // fired before the WAV decodes must not eat a note, or the first audible
+    // shot of a session lands somewhere else in the cycle than it should.
     const step = this.bigAlienFireStep;
-    this.bigAlienFireStep = (step + 1) % Sound.ALIEN_FIRE_CYCLE;
     const variant = Sound.alienFireVariant(step);
-    if (this.playBaked("alienFireBig", variant)) return;
+    const advance = () => { this.bigAlienFireStep = (step + 1) % Sound.ALIEN_FIRE_CYCLE; };
+    if (this.playBaked("alienFireBig", variant)) { advance(); return; }
     if (!this.ctx || !this.master) return;
     if (!this.guitarSampleJazz || !this.guitarSampleGretsch) {
       this.loadGuitarSample();
       return;
     }
+    advance();
     this.buildAlienFireBigGraph(this.ctx, this.master, this.voiceTime("alienFireBig"), variant);
   }
 
@@ -6229,14 +6322,15 @@ export class Sound {
 
   private playAlienFireMedium() {
     const step = this.mediumAlienFireStep;
-    this.mediumAlienFireStep = (step + 1) % Sound.ALIEN_FIRE_CYCLE;
     const variant = Sound.alienFireVariant(step);
-    if (this.playBaked("alienFireMedium", variant)) return;
+    const advance = () => { this.mediumAlienFireStep = (step + 1) % Sound.ALIEN_FIRE_CYCLE; };
+    if (this.playBaked("alienFireMedium", variant)) { advance(); return; }
     if (!this.ctx || !this.master) return;
     if (!this.guitarSampleJazz || !this.guitarSampleGretsch) {
       this.loadGuitarSample();
       return;
     }
+    advance();
     this.buildAlienFireMediumGraph(this.ctx, this.master, this.voiceTime("alienFireMedium"), variant);
   }
 
@@ -7131,7 +7225,7 @@ export class Sound {
   // through queueBake: fetch the committed mp3, and only in dev fall back to
   // a buildThrustGraph offline render that gets dumped to disk.
   private prerenderThrust() {
-    void this.queueBake("thrust", 1);
+    this.demandBake("thrust", 1);
   }
 
   private startThrust() {
@@ -7345,7 +7439,7 @@ export class Sound {
   // and only in dev fall back to a buildChargeBedGraph offline render that gets
   // dumped to disk. Fire-and-forget; queueBake de-dupes in-flight/cached.
   private prerenderChargeBeds() {
-    for (let tier = 0; tier <= 4; tier++) void this.queueBake("chargeBed", tier);
+    for (let tier = 0; tier <= 4; tier++) this.demandBake("chargeBed", tier);
   }
 
   // Hold-to-charge bed. Plays all five baked tier loops at once, each through
@@ -7497,7 +7591,7 @@ export class Sound {
 
   // Warm the committed reverse-thrust loop (single buffer, pitchRatio unused).
   private prerenderReverseThrust() {
-    void this.queueBake("reverseThrust", 1);
+    this.demandBake("reverseThrust", 1);
   }
 
   private startReverseThrust() {
@@ -7595,7 +7689,7 @@ export class Sound {
 
   // Warm the committed side-thrust loop (single buffer, pitchRatio unused).
   private prerenderSideThrust() {
-    void this.queueBake("sideThrust", 1);
+    this.demandBake("sideThrust", 1);
   }
 
   private startSideThrust() {
@@ -8448,7 +8542,7 @@ export class Sound {
   // render that gets dumped to disk. Fire-and-forget; queueBake de-dupes
   // in-flight/cached.
   private prerenderLaserShots() {
-    for (let tier = 0; tier <= 4; tier++) void this.queueBake("laserShot", tier);
+    for (let tier = 0; tier <= 4; tier++) this.demandBake("laserShot", tier);
   }
 
   // Laser-shot weapon (the "lasershot" upgrade). A pre-baked THUNDERCLAP —

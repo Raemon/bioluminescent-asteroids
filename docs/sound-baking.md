@@ -30,9 +30,70 @@ Key facts:
 
 ---
 
+## When each sound loads
+
+`src/game/soundSchedule.ts` declares, for every baked variant, the earliest
+wave it can be heard on — and those numbers are mostly `CFG.<thing>.firstWave`,
+the same value the wave director gates the spawn on, so a spawn rule and its
+sound can't drift apart. `Sound` walks that schedule and loads in that order.
+
+**The gate** is the set marked `gate: true`: 21 files, ~560 KB, and it is the
+only thing the title screen waits on. The bar for joining it is narrow — a
+cache miss on this voice is *silent* (its play path has no live-synth
+fallback) **and** it can be heard in the first seconds. That's `bgBeat`'s
+opening intensity bucket, `fireBeat`, the three engine drones, the charge bed
+and laser-shot tiers, and the first three hover hums. Everything with a live
+fallback stays out: the worst case there is one hit rendering the way the game
+rendered it before the cache existed, which is inaudible, and not worth a
+second of start latency.
+
+**Everything else** drains through one paced queue, ordered by
+`max(0, job.wave - currentWave)` and then by declaration order.
+`setLoadWave(wave)` (called from `updateBgBeatIntensity`, so once per wave)
+moves the front of the queue along with the run.
+
+The pacing has two separate limits because there are two separate costs:
+
+- **Fetches** are network-bound and nearly free on the main thread, so they
+  are not idle-gated at all — 6 run at once and the response is assembled off
+  the main thread.
+- **`decodeAudioData` is the expensive one**, and a hundred of them landing
+  together is what starves the beat scheduler (the symptom that already forced
+  the halo-music preload to be hand-spread). Every background decode in the
+  game — baked one-shots, music stems, vocal takes — goes into one queue,
+  drained inside `requestIdleCallback` with a 6 ms wall-clock budget per slot.
+
+  Two things about that were learned the hard way and are worth not
+  re-litigating. Gating the *fetch* on idle too just cost a frame of latency
+  per file for nothing. And demanding a minimum `timeRemaining()` before
+  taking an idle slot is worse than useless: on a page that never has that
+  much headroom the queue spins until the timeout fires and throughput
+  collapses to one slot per timeout. `requestIdleCallback` firing already
+  means the browser has nothing better to do — take the slot.
+
+Measured on a synthetic frame loop that deliberately burns 8 ms of every
+frame: gate resolves in ~200 ms, the remaining ~180 files drain at ~2.4/s, and
+the worst frame stall is indistinguishable from the loop's own jitter.
+
+A **cache miss at play time skips all of it**: `playBaked` promotes that job
+and decodes it immediately. Pacing exists to protect the frame loop from work
+nobody is waiting on; there, somebody is. The video exporter calls
+`loadAllAssets()` to drain the queue with no pacing at all, because it steps
+frames faster than real time and a background load resolving mid-sweep would
+land against a clock that had already raced past the moment the voice needed.
+
+One consequence worth knowing: **`bgBeat`'s intensity buckets are derived from
+`CFG.bgBeatIntensity`**, not hardcoded. The ramp runs 0.6 → 1.0 over 30 waves,
+so only 5 of the 11 buckets are reachable and the other 24 files are never
+requested. They stay on disk deliberately — retuning the ramp re-schedules
+them and the file is already there, and `bgBeat` is the one voice where a miss
+is always silent.
+
+---
+
 ## Inventory
 
-### Now baked (this pass added 94 variants)
+### Now baked (this pass added 97 variants)
 
 | Voice | Variants baked | Key | Notes |
 | --- | --- | --- | --- |
@@ -42,10 +103,10 @@ Key facts:
 | `asteroidBoomBeat` | 1 | — | rendered flat; the ±3% per-hit wobble rides as a `playbackRate` |
 | `death` | 1 | — | config-driven |
 | `bassHit`, `bassEcho` | 2 | — | |
-| `bell` | 2 | pitch ratio | `1` (asteroid toll) and `1.189` (wave-summary row) |
+| `bell` | 3 | pitch ratio | `1` (asteroid toll), `1.189` (wave-summary row), `0.55` (non-lethal chip) |
 | `warble`, `comboTick`, `tink`, `shieldPop` | 4 | — | |
 | `comboSparkle` | 2 | duration scale | `1` in game, `0.5` in the killed parade |
-| `crystalShatterLarge/Small` | 4 | ring pitch ratio | `0` = the on-beat "snap to G" sentinel, `1` = natural |
+| `crystalShatterLarge/Small` | 6 | ring pitch ratio | `0` = the on-beat "snap to G" sentinel, `1` = natural, `0.55` = non-lethal chip |
 | `scoreBlip` | 7 | pitch ratio | the distinct pitches of the drain's 16-step line |
 | `summaryDownbeat` / `…Ducked` | 8 | chord index | the i–VI–III–VII rotation, ducked and not |
 | `pulsarHum` | 1 | — | 20 s graph, rendered to 5 s (see *tails*) |
@@ -76,7 +137,7 @@ and the four ElevenLabs `wraith*` one-shots.
 | `startCometShimmer` | An indefinite pad whose first ~4 s is a scripted entrance (whoosh sweep, tension cluster) and whose remainder is a steady drone with three independent slow tremolos. | Split it the way `warbleDrone` is split: bake the entrance as a one-shot, bake the steady state as a seamless loop with every LFO rate snapped by `snapToLoop`, and cross the two at the seam. |
 | `startHaloAmbient` | Same shape, plus two live morphs (`setHaloAmbientTier`, `setHaloAmbientCometMode`) that reshape the voicing while it sustains. | Bake one seamless loop per endpoint state and crossfade, exactly as `warbleDrone` does for phased-in/phased-out. |
 | `playChime` at non-1 pitch | Already plays the baked buffer through `playbackRate`. | — |
-| `bell` / `scoreBlip` / `crystalShatter` at pitches outside the tables above | The music page's piano roll can trigger them at arbitrary pitch. | Nothing — the live fallback is the feature here. |
+| `bell` / `scoreBlip` / `crystalShatter` at pitches outside the tables above | The music page's piano roll can trigger them at arbitrary pitch. | Nothing — the live fallback is the feature here. But check gameplay call sites before assuming a pitch is rare: `onAsteroidCrackedByBullet` plays the body's own kill sound at 0.55 for a non-lethal chip, which is a *common* key and is baked. |
 | `playComboChime` at `durationScale ≠ 1` | Only the killed-parade replay shortens the note; a stretched buffer would shorten the attack and detune it. | — |
 
 ### The comboChime refactor
@@ -133,9 +194,16 @@ particular recipe, and it is why the *master* limiter is still live.
 throws away reverb/echo tails that the live path would have kept ringing
 (`asteroidBoomBeat`'s 1.3 s convolution tail outlasts every oscillator in the
 graph). Overshooting is nearly free — trailing silence is what VBR mp3
-compresses best. Two entries deliberately undershoot the graph's stop time:
-`pulsarHum` runs oscillators for 20 s but its bus is at −80 dB by 4.5 s, and
-`shockwaveCharge` is capped at its own 12 s duration.
+compresses best. One entry deliberately undershoots the graph's stop time:
+`pulsarHum` runs oscillators for 20 s but the rendered file is already at
+−71 dBFS by 4.9 s, so cutting at 5.0 s is inaudible.
+
+**3b. Channel count.** A one-shot renders mono unless it's listed in
+`STEREO_BAKES`. A 1-channel offline context downmixes any genuinely stereo
+node to `0.5·(L+R)`, which for the decorrelated noise in a reverb IR costs
+~3 dB of wet level and all of the stereo width — the live path plays it into a
+stereo destination and keeps both. `asteroidBoomBeat` is the only newly-baked
+voice this applies to (its convolver runs a 2-channel IR).
 
 **4. Noise buffers are shared, and only within a session.** The live path
 caches one white-noise buffer per duration (`makeNoiseBuffer`), so repeated
@@ -205,6 +273,13 @@ means bakes are not bit-reproducible across machines.
    the builder into `this.master` at `this.voiceTime(name)`.
 3. Register the builder in `Sound.oneShotGraph` and add a length to
    `Sound.ONE_SHOT_BAKE_LEN`.
-4. Enumerate the variants in `warmBakedCache`'s lazy list. Lazy, not gated:
-   the start gate exists for voices with no fallback, and these have one.
+4. Add the variants to `SOUND_LOAD_SCHEDULE` with the earliest wave they can
+   be heard on — prefer `CFG.<thing>.firstWave` over a literal. Leave `gate`
+   off: the gate is for voices with no fallback, and a voice you just added to
+   the registry has one.
 5. `npm run bake`, then commit the mp3s.
+
+If you add a variant whose key the game computes rather than declares (a pitch
+threaded through `play()`, a config-scaled ratio like `bassPluck`'s), check the
+call sites — a key nobody scheduled loads on demand at first play, every
+session, forever.
