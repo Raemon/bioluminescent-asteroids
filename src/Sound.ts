@@ -369,7 +369,21 @@ export type SoundName =
   // live between the two loops each frame as the rock's ghost01 rides the
   // continuous morph in between; only the crossfade gains and mainGain stay
   // live, the oscillator/vibrato/filter synthesis is baked into each endpoint.
-  | "warbleDrone";
+  | "warbleDrone"
+  // Voices that aren't dispatched through play() — they have their own public
+  // entry points — but are baked one-shots all the same. The key each one
+  // uses: driftShotHit = drift tier (1..6), laserCharge = charge dot (1..4),
+  // comboChime = the note's fundamental in Hz (see COMBO_CHIME_PITCHES),
+  // laserChargeFail / calibrationTap = unused (always 1).
+  | "driftShotHit"
+  | "laserCharge"
+  | "laserChargeFail"
+  | "comboChime"
+  | "calibrationTap";
+
+// The three explosion voices share one graph and differ only by the config
+// block they read, so the builder takes the name rather than three numbers.
+export type ExplosionName = "explosionLarge" | "explosionMedium" | "explosionSmall";
   // Note: "thrust" / "reverseThrust" / "sideThrust" are declared above (with
   // the rest of the play() switch names) but are ALSO baked one-shots now —
   // each is one committed seamless loop, pitchRatio unused (always 1). Built
@@ -842,6 +856,62 @@ export class Sound {
         enqueue("bgBeat", basePitch * 100 + intensityBucket + 1000);
       }
     }
+    // ── Lazily-warmed voices ──────────────────────────────────────────────
+    // Every one-shot below keeps a live-synth fallback (see its play* wrapper),
+    // so a buffer that hasn't landed yet just renders live for that one hit
+    // instead of silent-missing. That means they must NOT join the start gate:
+    // the title screen would sit there downloading a hundred extra mp3s to
+    // avoid an outcome — playing the sound the way the game played it before
+    // this cache existed — that is completely inaudible.
+    const lazyFetches: Promise<unknown>[] = [];
+    const enqueueLazy = (name: SoundName, pitchRatio: number) => {
+      const key = this.bakedKey(name, pitchRatio);
+      if (!this.bakedLoadStates.has(key)) this.bakedLoadStates.set(key, "queued");
+      lazyFetches.push(this.queueBake(name, pitchRatio));
+    };
+    // Voices with a single committed render (pitchRatio unused, always 1).
+    const fixedOneShots: SoundName[] = [
+      "fire", "calibrationTap", "death", "bassHit", "bassEcho", "comboTick",
+      "tink", "shieldPop", "warble", "pulsarHum", "shockwaveCharge",
+      "shockwaveBoom", "alienFireSmall", "alienHit", "alienExplode",
+      "canisterAppear", "canisterDestroyed", "comboLost", "comboLostFire",
+      "bossPulse", "bossHit", "bossEyeOpenStinger", "meteorShower", "gemSwarm",
+      "laserChargeFail", "explosionLarge", "explosionMedium", "explosionSmall",
+      "asteroidBoomBeat",
+    ];
+    for (const name of fixedOneShots) enqueueLazy(name, 1);
+    const lazyVariants: Array<[SoundName, number[]]> = [
+      // bell: the asteroid-kill toll (1) and the wave-summary row toll (C_BELL).
+      ["bell", [1, 1.189]],
+      // scoreBlip: the distinct pitches of the summary drain's 16-step line.
+      ["scoreBlip", [1, 1.122, 1.189, 1.335, 1.498, 1.587, 1.682]],
+      // comboSparkle: full-length on-beat reward, and the killed-parade half.
+      ["comboSparkle", [1, 0.5]],
+      // crystalShatter: ringPitchRatio 0 is the on-beat "snap to G" sentinel,
+      // 1 the natural pitch. The music page's arbitrary pitches stay live.
+      ["crystalShatterLarge", [0, 1]],
+      ["crystalShatterSmall", [0, 1]],
+      // summary downbeat: one per chord of the i-VI-III-VII rotation, ducked
+      // and unducked.
+      ["summaryDownbeat", [0, 1, 2, 3]],
+      ["summaryDownbeatDucked", [0, 1, 2, 3]],
+      ["driftShotHit", [1, 2, 3, 4, 5, 6]],
+      ["laserCharge", [1, 2, 3, 4]],
+      // Big/medium alien fire: the 8-shot riff holds 4 distinct renders.
+      ["alienFireBig", [0, 1, 2, 3]],
+      ["alienFireMedium", [0, 1, 2, 3]],
+      // comboChime: keyed by the note's fundamental, so the three modal scales
+      // share every pitch they have in common.
+      ["comboChime", [...Sound.COMBO_CHIME_PITCHES]],
+    ];
+    for (const [name, keys] of lazyVariants) {
+      for (const k of keys) enqueueLazy(name, k);
+    }
+    // Gameplay never waits on these, but a video export does: a capture that
+    // rendered half its hits live and half from cache would be inconsistent
+    // with itself, so prewarmForExport blocks until the lazy set has landed.
+    this.lazyBakesReadyPromise = Promise.allSettled(lazyFetches).then(() => undefined);
+
     // Single promise the title screen can await before letting the player
     // start. Tolerant of individual fetch failures — a missing mp3 just means
     // that one voice will silent-miss in-game rather than blocking the run.
@@ -919,6 +989,9 @@ export class Sound {
   // some browsers (Firefox w/ resistFingerprinting and similar privacy
   // setups) stub Web Audio in ways that crash Tone's destination init.
   private bakedCacheReadyPromise: Promise<void> | null = null;
+  // Same, for the lazily-warmed one-shots that keep a live-synth fallback and
+  // therefore stay out of the start gate. Only the export path awaits it.
+  private lazyBakesReadyPromise: Promise<void> | null = null;
   // Per-key load state for the ?debug=true overlay. "queued" = warmBakedCache
   // listed it but the fetch hasn't started; "fetching" = fetch in flight;
   // "loaded" = decoded AudioBuffer in bakedBuffers; "failed" = fetch returned
@@ -1100,14 +1173,76 @@ export class Sound {
   // at the head of the render and gapless-trim differences across decoders.
   private static readonly LOOP_BAKE_PAD = 0.25;
 
-  // Render length (seconds) for the pure-WebAudio comet/bonus-life bakes. Each
-  // must cover its graph's full stop time (crack + sub + tail/drone) plus the
-  // stop-pad and a hair of settle so the exponential fades reach true silence.
-  private static readonly COMET_BAKE_LEN: Record<string, number> = {
+  // Render length (seconds) for every pure-WebAudio one-shot bake. Each entry
+  // must cover its graph's latest stop() plus a hair of settle, so the trailing
+  // exponential fades reach true silence inside the buffer instead of being
+  // chopped (a chop is an audible click, and it also loses the reverb/echo
+  // tail the live path would have kept ringing). Overshooting costs almost
+  // nothing — trailing silence is what VBR mp3 compresses best.
+  private static readonly ONE_SHOT_BAKE_LEN: Partial<Record<SoundName, number>> = {
     cometDestroyed: 15.4,
     cometDestroyedSad: 6.4,
     bonusLife: 15.4,
+    fire: 1.0,
+    calibrationTap: 1.0,
+    explosionLarge: 1.3,
+    explosionMedium: 1.1,
+    explosionSmall: 0.9,
+    // convolver tail (1.3s IR) rings on past the 1.15s sub stop
+    asteroidBoomBeat: 2.7,
+    death: 2.3,
+    bassHit: 0.7,
+    bassEcho: 1.4,
+    bell: 1.7,
+    warble: 0.8,
+    comboTick: 0.15,
+    comboSparkle: 0.4,
+    tink: 0.6,
+    crystalShatterLarge: 3.9,
+    crystalShatterSmall: 2.7,
+    scoreBlip: 0.6,
+    summaryDownbeat: 1.6,
+    summaryDownbeatDucked: 1.6,
+    shieldPop: 0.5,
+    // the whole bus is at -80 dB by 4.5s even though the oscillators run 20s
+    pulsarHum: 5.0,
+    shockwaveCharge: 12.2,
+    shockwaveBoom: 3.4,
+    // the guitar sample stretches to ~6s at the medium alien's C2 rate
+    alienFireBig: 2.2,
+    alienFireMedium: 6.3,
+    alienFireSmall: 0.3,
+    alienHit: 0.3,
+    alienExplode: 2.9,
+    meteorShower: 2.6,
+    gemSwarm: 1.5,
+    canisterAppear: 1.3,
+    canisterDestroyed: 1.25,
+    comboLost: 0.55,
+    comboLostFire: 0.45,
+    bossPulse: 0.65,
+    bossHit: 0.55,
+    bossEyeOpenStinger: 1.25,
+    driftShotHit: 1.9,
+    laserCharge: 0.6,
+    laserChargeFail: 0.35,
+    comboChime: 5.3,
   };
+
+  // Hardcoded fallbacks for the explosion trio's semantic config block.
+  private static readonly EXPLOSION_DEFAULTS: Record<ExplosionName, { volume: number; lowpassStart: number; duration: number }> = {
+    explosionLarge: { volume: 0.7, lowpassStart: 160, duration: 0.55 },
+    explosionMedium: { volume: 0.55, lowpassStart: 230, duration: 0.42 },
+    explosionSmall: { volume: 0.4, lowpassStart: 340, duration: 0.3 },
+  };
+
+  // Shots per big/medium alien riff cycle, and the four distinct renders that
+  // cycle actually contains: the sample flips at the halfway point and the
+  // riff note alternates every shot, so step → (note bit, sample bit).
+  private static readonly ALIEN_FIRE_CYCLE = 8;
+  private static alienFireVariant(step: number): number {
+    return (step % 2) + (step < Sound.ALIEN_FIRE_CYCLE / 2 ? 0 : 2);
+  }
 
   // Snap a periodic rate to a whole number of cycles per loopLen. EVERY
   // oscillator and LFO baked into a loop must land exactly back on its
@@ -1141,7 +1276,7 @@ export class Sound {
   // Play a pre-rendered buffer through the live master bus. Returns true if
   // a baked buffer was found and played; false if the caller should fall
   // back to live synthesis (typically while the first bake is still running).
-  private playBaked(name: SoundName, pitchRatio: number): boolean {
+  private playBaked(name: SoundName, pitchRatio: number, playbackRate = 1): boolean {
     if (!this.ctx) return false;
     // Pick the channel sink: bgBeat is the background pulsar pulse and rides
     // the basePulse slider; everything else baked is an SFX one-shot.
@@ -1152,6 +1287,9 @@ export class Sound {
     if (buf) {
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
+      // Per-play detune (asteroidBoomBeat's ±3% wobble). Left at 1 the source
+      // plays at its rendered pitch, so this costs nothing for every other voice.
+      if (playbackRate !== 1) src.playbackRate.value = playbackRate;
       const when = this.scheduledWhenForCall;
       const now = this.ctx.currentTime;
       const startAt = when !== null ? Math.max(when, now) : now;
@@ -1209,6 +1347,77 @@ export class Sound {
   // OfflineAudioContext, trigger the voice at t=0, and let it render its
   // full natural decay. Duration is chosen per-sound to fit the longest
   // envelope+release+reverb tail.
+  // Registry of the pure-WebAudio one-shot graphs — every voice that is a
+  // deterministic function of (name, key) and needs neither Tone nor the
+  // reverb bus. Returns a closure that builds the voice at time origin 0 into
+  // `dest`, or null when this pair has no offline recipe (Tone-engine voices,
+  // the ElevenLabs mp3s, and the seamless drone loops all take other paths).
+  //
+  // The same builders run live — see each play* wrapper, which falls back to
+  // building straight into this.master while the mp3 is still in flight — so
+  // there is exactly one definition of each sound and the bake cannot drift
+  // away from what the game plays.
+  private oneShotGraph(name: SoundName, key: number): ((ctx: BaseAudioContext, dest: AudioNode) => void) | null {
+    switch (name) {
+      case "cometDestroyed": return (c, d) => this.buildCometDestroyedGraph(c, d);
+      case "cometDestroyedSad": return (c, d) => this.buildCometDestroyedSadGraph(c, d);
+      case "bonusLife": return (c, d) => this.buildBonusLifeGraph(c, d);
+      case "fire": return (c, d) => this.buildFireGraph(c, d, 0);
+      case "calibrationTap": return (c, d) => this.buildCalibrationTapGraph(c, d, 0);
+      case "death": return (c, d) => this.buildDeathGraph(c, d, 0);
+      case "bassHit": return (c, d) => this.buildBassHitGraph(c, d, 0);
+      case "bassEcho": return (c, d) => this.buildBassEchoGraph(c, d, 0);
+      case "comboTick": return (c, d) => this.buildComboTickGraph(c, d, 0);
+      case "tink": return (c, d) => this.buildTinkGraph(c, d, 0);
+      case "shieldPop": return (c, d) => this.buildShieldPopGraph(c, d, 0);
+      case "warble": return (c, d) => this.buildWarbleGraph(c, d, 0);
+      case "pulsarHum": return (c, d) => this.buildPulsarHumGraph(c, d, 0);
+      case "shockwaveCharge": return (c, d) => this.buildShockwaveChargeGraph(c, d, 0);
+      case "shockwaveBoom": return (c, d) => this.buildShockwaveBoomGraph(c, d, 0);
+      case "alienFireSmall": return (c, d) => this.buildAlienFireSmallGraph(c, d, 0);
+      case "alienHit": return (c, d) => this.buildAlienHitGraph(c, d, 0);
+      case "alienExplode": return (c, d) => this.buildAlienExplodeGraph(c, d, 0);
+      case "canisterAppear": return (c, d) => this.buildCanisterAppearGraph(c, d, 0);
+      case "canisterDestroyed": return (c, d) => this.buildCanisterDestroyedGraph(c, d, 0);
+      case "comboLost": return (c, d) => this.buildComboLostGraph(c, d, 0);
+      case "comboLostFire": return (c, d) => this.buildComboLostFireGraph(c, d, 0);
+      case "bossPulse": return (c, d) => this.buildBossPulseGraph(c, d, 0);
+      case "bossHit": return (c, d) => this.buildBossHitGraph(c, d, 0);
+      case "bossEyeOpenStinger": return (c, d) => this.buildBossEyeOpenStingerGraph(c, d, 0);
+      case "meteorShower": return (c, d) => this.buildMeteorShowerGraph(c, d, 0);
+      case "gemSwarm": return (c, d) => this.buildGemSwarmGraph(c, d, 0);
+      case "laserChargeFail": return (c, d) => this.buildLaserChargeFailGraph(c, d, 0);
+      case "explosionLarge":
+      case "explosionMedium":
+      case "explosionSmall":
+        return (c, d) => this.buildExplosionGraph(c, d, 0, name);
+      // Rendered flat; the ±3% per-hit wobble rides as a playbackRate.
+      case "asteroidBoomBeat": return (c, d) => this.buildAsteroidBoomBeatGraph(c, d, 0, 1);
+      case "bell": return (c, d) => this.buildBellGraph(c, d, 0, key);
+      case "scoreBlip": return (c, d) => this.buildScoreBlipGraph(c, d, 0, key);
+      case "comboSparkle": return (c, d) => this.buildComboSparkleGraph(c, d, 0, key);
+      case "crystalShatterLarge": return (c, d) => this.buildCrystalShatterGraph(c, d, 0, "large", key);
+      case "crystalShatterSmall": return (c, d) => this.buildCrystalShatterGraph(c, d, 0, "small", key);
+      case "summaryDownbeat": return (c, d) => this.buildSummaryDownbeatGraph(c, d, 0, key, false);
+      case "summaryDownbeatDucked": return (c, d) => this.buildSummaryDownbeatGraph(c, d, 0, key, true);
+      case "driftShotHit": return (c, d) => this.buildDriftShotHitGraph(c, d, 0, key);
+      case "laserCharge": return (c, d) => this.buildLaserChargeGraph(c, d, 0, key);
+      // Only the full-length note is baked (durationScale 1); the key is the
+      // fundamental in Hz.
+      case "comboChime": return (c, d) => this.buildComboChimeGraph(c, d, 0, key, 1);
+      case "alienFireBig":
+      case "alienFireMedium": {
+        // Sample-backed: with no WAV decoded there's nothing to render, and a
+        // silent mp3 on disk would permanently mute the voice.
+        if (!this.guitarSampleJazz || !this.guitarSampleGretsch) return null;
+        return name === "alienFireBig"
+          ? (c, d) => this.buildAlienFireBigGraph(c, d, 0, key)
+          : (c, d) => this.buildAlienFireMediumGraph(c, d, 0, key);
+      }
+      default: return null;
+    }
+  }
+
   private async bakeSound(name: SoundName, pitchRatio: number): Promise<AudioBuffer | null> {
     if (!this.ctx) return null;
     if (!import.meta.env.DEV) return null;
@@ -1319,20 +1528,25 @@ export class Sound {
       this.buildWarbleDroneGraph(offline, offline.destination, phaseState);
       return offline.startRendering();
     }
-    // cometDestroyed / cometDestroyedSad / bonusLife are pure-WebAudio one-shots
-    // (no Tone, no reverb bus) that were formerly played LIVE straight into
-    // this.master. The live master applied a compressor + brick-wall limiter on
-    // playback; baked buffers skip that (they play through bakedSum straight to
-    // destination), so we bake the same master chain into the render here to
-    // keep the baked clip bit-for-bit what the live path produced. Their graphs
-    // run long (6–15s tails) — see COMET_BAKE_LEN.
-    if (name === "cometDestroyed" || name === "cometDestroyedSad" || name === "bonusLife") {
-      const len = Math.ceil(sr * Sound.COMET_BAKE_LEN[name]);
+    // Every pure-WebAudio one-shot (no Tone, no reverb bus) renders through
+    // one path: look the graph builder up in the registry, run it at time
+    // origin 0 into a baked copy of the live master chain, done. These voices
+    // are played LIVE into this.master when their mp3 hasn't landed yet, and
+    // the live master applies a compressor + brick-wall limiter on playback
+    // that baked buffers skip (they reach bakedSum, which joins the live leg
+    // only at the limiter) — so the render has to carry that chain itself or
+    // the baked clip would come back hotter and less glued than the live one.
+    // The two sampled-guitar alien voices can't render until their WAV is
+    // decoded — wait for it rather than baking silence.
+    if ((name === "alienFireBig" || name === "alienFireMedium") && !this.guitarSampleJazz) {
+      await this.loadGuitarSample();
+    }
+    const oneShot = this.oneShotGraph(name, pitchRatio);
+    if (oneShot) {
+      const len = Math.ceil(sr * (Sound.ONE_SHOT_BAKE_LEN[name] ?? 1.5));
       const offline = new OACearly(1, len, sr);
       const masterIn = this.buildBakedMasterChain(offline);
-      if (name === "cometDestroyed") this.buildCometDestroyedGraph(offline, masterIn);
-      else if (name === "cometDestroyedSad") this.buildCometDestroyedSadGraph(offline, masterIn);
-      else this.buildBonusLifeGraph(offline, masterIn);
+      oneShot(offline, masterIn);
       return offline.startRendering();
     }
 
@@ -1748,8 +1962,14 @@ export class Sound {
   //   exponential ramp on the body/partial — so the perceived onset coincides
   //   with the keypress and the player can hear the click sync against the beat.
   playCalibrationTap() {
+    // No `enabled` gate on purpose: the beat calibrator has to click even
+    // when the player has muted the game's sound effects.
+    if (this.playBaked("calibrationTap", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildCalibrationTapGraph(this.ctx, this.master, this.voiceTime("calibrationTap"));
+  }
+
+  private buildCalibrationTapGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     const bodyHz = cfgN("fire", "bodyHz", 392);
     const bodyPeak = cfgN("fire", "bodyPeak", 0.16);
     const bodyDecay = cfgN("fire", "bodyDecay", 0.11);
@@ -1761,42 +1981,42 @@ export class Sound {
     const tickPeak = cfgN("fire", "tickPeak", 0.04);
     const tickDecay = cfgN("fire", "tickDecay", 0.02);
 
-    const body = this.ctx.createOscillator();
-    const bodyGain = this.ctx.createGain();
+    const body = ctx.createOscillator();
+    const bodyGain = ctx.createGain();
     body.type = "sine";
     body.frequency.value = bodyHz;
     bodyGain.gain.setValueAtTime(bodyPeak, t);
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + bodyDecay);
     body.connect(bodyGain);
-    bodyGain.connect(this.master);
+    bodyGain.connect(dest);
     body.start(t);
     body.stop(t + bodyDecay + 0.02);
 
-    const partial = this.ctx.createOscillator();
-    const partialGain = this.ctx.createGain();
+    const partial = ctx.createOscillator();
+    const partialGain = ctx.createGain();
     partial.type = "sine";
     partial.frequency.value = partialHz;
     partialGain.gain.setValueAtTime(partialPeak, t);
     partialGain.gain.exponentialRampToValueAtTime(0.0001, t + partialDecay);
     partial.connect(partialGain);
-    partialGain.connect(this.master);
+    partialGain.connect(dest);
     partial.start(t);
     partial.stop(t + partialDecay + 0.02);
 
-    const tickBuf = this.makeNoiseBuffer(Math.max(tickDecay, 0.005));
+    const tickBuf = this.noiseBuffer(ctx, Math.max(tickDecay, 0.005));
     if (!tickBuf) return;
-    const tick = this.ctx.createBufferSource();
+    const tick = ctx.createBufferSource();
     tick.buffer = tickBuf;
-    const tickFilter = this.ctx.createBiquadFilter();
+    const tickFilter = ctx.createBiquadFilter();
     tickFilter.type = "bandpass";
     tickFilter.frequency.value = tickHz;
     tickFilter.Q.value = tickQ;
-    const tickGain = this.ctx.createGain();
+    const tickGain = ctx.createGain();
     tickGain.gain.setValueAtTime(tickPeak, t);
     tickGain.gain.exponentialRampToValueAtTime(0.0001, t + tickDecay);
     tick.connect(tickFilter);
     tickFilter.connect(tickGain);
-    tickGain.connect(this.master);
+    tickGain.connect(dest);
     tick.start(t);
     tick.stop(t + tickDecay + 0.005);
   }
@@ -2006,6 +2226,7 @@ export class Sound {
   async prewarmForExport(): Promise<void> {
     this.ensureContext();
     await this.bakedCacheReady();
+    await (this.lazyBakesReadyPromise ?? Promise.resolve());
     const haloVariations = new Set<HaloMusicVariation>([
       ...HALO_MUSIC_POOL, ...HAUNTING_MUSIC_POOL, BOSS_MUSIC_VARIATION,
     ]);
@@ -4371,25 +4592,29 @@ export class Sound {
   playMeteorShower() {
     if (!this.enabled) return;
     this.ensureContext();
+    if (this.playBaked("meteorShower", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildMeteorShowerGraph(this.ctx, this.master, this.voiceTime("meteorShower"));
+  }
+
+  private buildMeteorShowerGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
 
     // ── Descending shriek: three detuned saws screaming from ~1.8kHz down to
     // ~180Hz over 0.7s through a resonant lowpass that tracks them, so the
     // sweep reads as a single fat falling tone with teeth.
-    const shriekLp = this.ctx.createBiquadFilter();
+    const shriekLp = ctx.createBiquadFilter();
     shriekLp.type = "lowpass";
     shriekLp.Q.value = 6;
     shriekLp.frequency.setValueAtTime(2400, t);
     shriekLp.frequency.exponentialRampToValueAtTime(260, t + 0.7);
-    const shriekGain = this.ctx.createGain();
+    const shriekGain = ctx.createGain();
     shriekGain.gain.setValueAtTime(0.0001, t);
     shriekGain.gain.exponentialRampToValueAtTime(0.3, t + 0.04);
     shriekGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.95);
     shriekLp.connect(shriekGain);
-    shriekGain.connect(this.master);
+    shriekGain.connect(dest);
     for (const detune of [0.99, 1.0, 1.013]) {
-      const osc = this.ctx.createOscillator();
+      const osc = ctx.createOscillator();
       osc.type = "sawtooth";
       osc.frequency.setValueAtTime(1800 * detune, t);
       osc.frequency.exponentialRampToValueAtTime(180 * detune, t + 0.7);
@@ -4399,37 +4624,37 @@ export class Sound {
     }
 
     // ── Sub boom: chest-punch sine sweeping down — the weight under the flock.
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.setValueAtTime(160, t);
     sub.frequency.exponentialRampToValueAtTime(34, t + 1.1);
-    const subGain = this.ctx.createGain();
+    const subGain = ctx.createGain();
     subGain.gain.setValueAtTime(0.0001, t);
     subGain.gain.exponentialRampToValueAtTime(0.6, t + 0.02);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
     sub.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(dest);
     sub.start(t);
     sub.stop(t + 1.7);
 
     // ── Bright streak: broadband noise through a bandpass sweeping high→mid,
     // the air-tearing hiss of many bodies entering at once. Short and sharp.
-    const streakBuf = this.makeNoiseBuffer(2.5);
+    const streakBuf = this.noiseBuffer(ctx, 2.5);
     if (streakBuf) {
-      const streak = this.ctx.createBufferSource();
+      const streak = ctx.createBufferSource();
       streak.buffer = streakBuf;
-      const streakBp = this.ctx.createBiquadFilter();
+      const streakBp = ctx.createBiquadFilter();
       streakBp.type = "bandpass";
       streakBp.Q.value = 1.2;
       streakBp.frequency.setValueAtTime(6000, t);
       streakBp.frequency.exponentialRampToValueAtTime(700, t + 1.3);
-      const streakGain = this.ctx.createGain();
+      const streakGain = ctx.createGain();
       streakGain.gain.setValueAtTime(0.0001, t);
       streakGain.gain.exponentialRampToValueAtTime(0.4, t + 0.05);
       streakGain.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
       streak.connect(streakBp);
       streakBp.connect(streakGain);
-      streakGain.connect(this.master);
+      streakGain.connect(dest);
       streak.start(t);
       streak.stop(t + 2.5);
     }
@@ -4445,10 +4670,12 @@ export class Sound {
   playGemSwarm() {
     if (!this.enabled) return;
     this.ensureContext();
+    if (this.playBaked("gemSwarm", 1)) return;
     if (!this.ctx || !this.master) return;
-    const ctx = this.ctx;
-    const master = this.master;
-    const t = ctx.currentTime;
+    this.buildGemSwarmGraph(this.ctx, this.master, this.voiceTime("gemSwarm"));
+  }
+
+  private buildGemSwarmGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
 
     // C-major pentatonic climbing C5 → E5 → G5 → A5 → C6 → D6, the last two
     // notes ringing into the octave so the gesture feels like it lifts off.
@@ -4474,7 +4701,7 @@ export class Sound {
         g.gain.exponentialRampToValueAtTime(lvl, nt + 0.008);
         g.gain.exponentialRampToValueAtTime(0.0001, nt + ring);
         osc.connect(g);
-        g.connect(master);
+        g.connect(dest);
         osc.start(nt);
         osc.stop(nt + ring + 0.05);
       }
@@ -4484,7 +4711,7 @@ export class Sound {
     // shimmering tremolo so it reads as a fine spray of glints behind the
     // arpeggio rather than a flat hiss. Rises in with the run, fades after.
     const dur = notes.length * step + 0.6;
-    const sparkleBuf = this.makeNoiseBuffer(1.3);
+    const sparkleBuf = this.noiseBuffer(ctx, 1.3);
     if (sparkleBuf) {
       const sparkle = ctx.createBufferSource();
       sparkle.buffer = sparkleBuf;
@@ -4509,7 +4736,7 @@ export class Sound {
       trem.stop(t + dur + 0.2);
       sparkle.connect(bp);
       bp.connect(sg);
-      sg.connect(master);
+      sg.connect(dest);
       sparkle.start(t);
       sparkle.stop(t + dur + 0.2);
     }
@@ -5791,6 +6018,21 @@ export class Sound {
     return buf;
   }
 
+  // Noise source for a graph builder, which may be running live or inside an
+  // OfflineAudioContext. Live renders keep hitting the shared per-duration
+  // cache (same allocation behaviour as before); an offline bake gets its own
+  // fresh draw, since the live cache's buffers belong to the live context.
+  // Either way the content is white noise with the same distribution, so the
+  // bake is statistically — not sample-for-sample — the live sound.
+  private noiseBuffer(ctx: BaseAudioContext, duration: number): AudioBuffer | null {
+    if (ctx === this.ctx) return this.makeNoiseBuffer(duration);
+    const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
+    const buf = ctx.createBuffer(1, length, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
   play(name: SoundName, pitchRatio = 1, pos?: Pos) {
     if (!this.enabled) return;
     this.ensureContext();
@@ -5841,9 +6083,9 @@ export class Sound {
     switch (name) {
       case "fire": this.playFire(); break;
       case "fireBeat": this.playFireBeat(); break;
-      case "explosionLarge": this.playExplosion(cfgN("explosionLarge", "volume", 0.7), cfgN("explosionLarge", "lowpassStart", 160), cfgN("explosionLarge", "duration", 0.55)); break;
-      case "explosionMedium": this.playExplosion(cfgN("explosionMedium", "volume", 0.55), cfgN("explosionMedium", "lowpassStart", 230), cfgN("explosionMedium", "duration", 0.42)); break;
-      case "explosionSmall": this.playExplosion(cfgN("explosionSmall", "volume", 0.4), cfgN("explosionSmall", "lowpassStart", 340), cfgN("explosionSmall", "duration", 0.3)); break;
+      case "explosionLarge": this.playExplosion("explosionLarge"); break;
+      case "explosionMedium": this.playExplosion("explosionMedium"); break;
+      case "explosionSmall": this.playExplosion("explosionSmall"); break;
       case "asteroidBoomBeat": this.playAsteroidBoomBeat(); break;
       case "thrust": this.startThrust(); break;
       case "reverseThrust": this.startReverseThrust(); break;
@@ -5919,28 +6161,28 @@ export class Sound {
   //          are firing in succession.
 
   private playAlienFireBig() {
-    if (!this.ctx || !this.master) return;
-    const ctx = this.ctx;
-    const master = this.master;
-    const t = ctx.currentTime;
-    // A/B switch: first 4 shots of the 8-shot cycle use sample A (Jazz),
-    // second 4 use sample B (Gretsch). Hearing both within one firing
-    // burst makes the difference easy to compare.
     const step = this.bigAlienFireStep;
-    const buf = step < 4 ? this.guitarSampleJazz : this.guitarSampleGretsch;
-    if (!buf) {
+    this.bigAlienFireStep = (step + 1) % Sound.ALIEN_FIRE_CYCLE;
+    const variant = Sound.alienFireVariant(step);
+    if (this.playBaked("alienFireBig", variant)) return;
+    if (!this.ctx || !this.master) return;
+    if (!this.guitarSampleJazz || !this.guitarSampleGretsch) {
       this.loadGuitarSample();
       return;
     }
+    this.buildAlienFireBigGraph(this.ctx, this.master, this.voiceTime("alienFireBig"), variant);
+  }
+
+  private buildAlienFireBigGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, variant: number) {
+    const buf = variant < 2 ? this.guitarSampleJazz : this.guitarSampleGretsch;
+    if (!buf) return;
 
     // Both candidate WAVs are recorded at A3 (220 Hz).
     const SAMPLE_RECORDED_HZ = 220.0;
 
-    // Riff cycle: C1 E1 C1 E1 C1 E1 C1 E1 — sits in C major against
-    // the bassteroid bed. One note per shot.
-    const NOTE_CYCLE_HZ = [32.70, 41.20, 32.70, 41.20, 32.70, 41.20, 32.70, 41.20];
-    const rootHz = NOTE_CYCLE_HZ[step % NOTE_CYCLE_HZ.length];
-    this.bigAlienFireStep = (step + 1) % NOTE_CYCLE_HZ.length;
+    // Riff cycle: C1 E1 C1 E1 … — sits in C major against the bassteroid
+    // bed. One note per shot; the variant's low bit picks which.
+    const rootHz = variant % 2 === 0 ? 32.70 : 41.20;
 
     // Single plucked note per shot. The riff across consecutive shots
     // carries the musicality — no chord stack. Flat gain so the WAV's
@@ -5975,7 +6217,7 @@ export class Sound {
 
     hp.connect(scoop);
     scoop.connect(voiceGain);
-    voiceGain.connect(master);
+    voiceGain.connect(dest);
 
     const src = ctx.createBufferSource();
     src.buffer = buf;
@@ -5986,30 +6228,32 @@ export class Sound {
   }
 
   private playAlienFireMedium() {
-    if (!this.ctx || !this.master) return;
-    const ctx = this.ctx;
-    const master = this.master;
-    const t = ctx.currentTime;
-    // Same A/B split as the big alien — first 4 use Jazz, last 4 use Gretsch.
     const step = this.mediumAlienFireStep;
-    const buf = step < 4 ? this.guitarSampleJazz : this.guitarSampleGretsch;
-    if (!buf) {
+    this.mediumAlienFireStep = (step + 1) % Sound.ALIEN_FIRE_CYCLE;
+    const variant = Sound.alienFireVariant(step);
+    if (this.playBaked("alienFireMedium", variant)) return;
+    if (!this.ctx || !this.master) return;
+    if (!this.guitarSampleJazz || !this.guitarSampleGretsch) {
       this.loadGuitarSample();
       return;
     }
+    this.buildAlienFireMediumGraph(this.ctx, this.master, this.voiceTime("alienFireMedium"), variant);
+  }
+
+  private buildAlienFireMediumGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, variant: number) {
+    const buf = variant < 2 ? this.guitarSampleJazz : this.guitarSampleGretsch;
+    if (!buf) return;
     // Same sampled-guitar voice as the big alien, one octave up so the
-    // two sizes still read as distinct in the mix. Cycle: C2 E2 C2 E2…
+    // two sizes still read as distinct. Cycle: C2 E2 C2 E2…
     const SAMPLE_RECORDED_HZ = 220.0;
-    const NOTE_CYCLE_HZ = [65.41, 82.41, 65.41, 82.41, 65.41, 82.41, 65.41, 82.41];
-    const rootHz = NOTE_CYCLE_HZ[step % NOTE_CYCLE_HZ.length];
-    this.mediumAlienFireStep = (step + 1) % NOTE_CYCLE_HZ.length;
+    const rootHz = variant % 2 === 0 ? 65.41 : 82.41;
     const rate = rootHz / SAMPLE_RECORDED_HZ;
     const playbackDur = buf.duration / rate;
     const voiceGain = ctx.createGain();
     voiceGain.gain.setValueAtTime(0.55, t);
     voiceGain.gain.setValueAtTime(0.55, t + playbackDur - 0.020);
     voiceGain.gain.linearRampToValueAtTime(0.0001, t + playbackDur);
-    voiceGain.connect(master);
+    voiceGain.connect(dest);
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.playbackRate.value = rate;
@@ -6018,28 +6262,32 @@ export class Sound {
   }
 
   private playAlienFireSmall() {
+    if (this.playBaked("alienFireSmall", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildAlienFireSmallGraph(this.ctx, this.master, this.voiceTime("alienFireSmall"));
+  }
+
+  private buildAlienFireSmallGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     const f0 = 784; // G5
     // Triangle carrier with a fast vibrato — sits in the upper mid, doesn't
     // mask anything else even when fired every half-beat.
-    const osc = this.ctx.createOscillator();
+    const osc = ctx.createOscillator();
     osc.type = "triangle";
     osc.frequency.setValueAtTime(f0 * 0.95, t);
     osc.frequency.exponentialRampToValueAtTime(f0, t + 0.025);
-    const lfo = this.ctx.createOscillator();
+    const lfo = ctx.createOscillator();
     lfo.type = "sine";
     lfo.frequency.value = 16;
-    const lfoDepth = this.ctx.createGain();
+    const lfoDepth = ctx.createGain();
     lfoDepth.gain.value = 18;
     lfo.connect(lfoDepth);
     lfoDepth.connect(osc.frequency);
-    const gain = this.ctx.createGain();
+    const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, t);
     gain.gain.exponentialRampToValueAtTime(0.13, t + 0.006);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
     osc.connect(gain);
-    gain.connect(this.master);
+    gain.connect(dest);
     osc.start(t);
     lfo.start(t);
     osc.stop(t + 0.18);
@@ -6047,15 +6295,15 @@ export class Sound {
 
     // Tiny upward partial — fifth above — gives each shot a 8-bit chip
     // character.
-    const p2 = this.ctx.createOscillator();
+    const p2 = ctx.createOscillator();
     p2.type = "sine";
     p2.frequency.value = f0 * 1.5;
-    const p2Gain = this.ctx.createGain();
+    const p2Gain = ctx.createGain();
     p2Gain.gain.setValueAtTime(0.0001, t);
     p2Gain.gain.exponentialRampToValueAtTime(0.05, t + 0.004);
     p2Gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
     p2.connect(p2Gain);
-    p2Gain.connect(this.master);
+    p2Gain.connect(dest);
     p2.start(t);
     p2.stop(t + 0.1);
   }
@@ -6064,36 +6312,40 @@ export class Sound {
   // without being as heavy as bassHit. Bandpassed noise + a high triangle
   // ping.
   private playAlienHit() {
+    if (this.playBaked("alienHit", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
-    const noiseBuf = this.makeNoiseBuffer(0.08);
+    this.buildAlienHitGraph(this.ctx, this.master, this.voiceTime("alienHit"));
+  }
+
+  private buildAlienHitGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
+    const noiseBuf = this.noiseBuffer(ctx, 0.08);
     if (!noiseBuf) return;
-    const noise = this.ctx.createBufferSource();
+    const noise = ctx.createBufferSource();
     noise.buffer = noiseBuf;
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = "bandpass";
     filter.frequency.setValueAtTime(2400, t);
     filter.frequency.exponentialRampToValueAtTime(1200, t + 0.08);
     filter.Q.value = 1.4;
-    const nGain = this.ctx.createGain();
+    const nGain = ctx.createGain();
     nGain.gain.setValueAtTime(0.22, t);
     nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
     noise.connect(filter);
     filter.connect(nGain);
-    nGain.connect(this.master);
+    nGain.connect(dest);
     noise.start(t);
     noise.stop(t + 0.1);
 
-    const ping = this.ctx.createOscillator();
+    const ping = ctx.createOscillator();
     ping.type = "triangle";
     ping.frequency.setValueAtTime(1320, t);
     ping.frequency.exponentialRampToValueAtTime(660, t + 0.1);
-    const pingGain = this.ctx.createGain();
+    const pingGain = ctx.createGain();
     pingGain.gain.setValueAtTime(0.0001, t);
     pingGain.gain.exponentialRampToValueAtTime(0.16, t + 0.004);
     pingGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
     ping.connect(pingGain);
-    pingGain.connect(this.master);
+    pingGain.connect(dest);
     ping.start(t);
     ping.stop(t + 0.15);
   }
@@ -6104,27 +6356,31 @@ export class Sound {
   // voice trailing off, and a faint C2 sub that swells in late and lingers
   // as the absence. No explosion thud — the kill should land as loss.
   private playAlienExplode() {
+    if (this.playBaked("alienExplode", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildAlienExplodeGraph(this.ctx, this.master, this.voiceTime("alienExplode"));
+  }
+
+  private buildAlienExplodeGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
 
     // Gasp — bandpassed noise puff, short and high so it reads as a breath
     // catching rather than a body bursting.
-    const gaspBuf = this.makeNoiseBuffer(0.18);
+    const gaspBuf = this.noiseBuffer(ctx, 0.18);
     if (gaspBuf) {
-      const gasp = this.ctx.createBufferSource();
+      const gasp = ctx.createBufferSource();
       gasp.buffer = gaspBuf;
-      const gFilter = this.ctx.createBiquadFilter();
+      const gFilter = ctx.createBiquadFilter();
       gFilter.type = "bandpass";
       gFilter.frequency.setValueAtTime(1800, t);
       gFilter.frequency.exponentialRampToValueAtTime(700, t + 0.18);
       gFilter.Q.value = 2.2;
-      const gGain = this.ctx.createGain();
+      const gGain = ctx.createGain();
       gGain.gain.setValueAtTime(0.0001, t);
       gGain.gain.exponentialRampToValueAtTime(0.12, t + 0.012);
       gGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
       gasp.connect(gFilter);
       gFilter.connect(gGain);
-      gGain.connect(this.master);
+      gGain.connect(dest);
       gasp.start(t);
       gasp.stop(t + 0.22);
     }
@@ -6137,8 +6393,8 @@ export class Sound {
     const bellPeak = 0.18;
     const bellDecay = 2.6;
     for (let i = 0; i < bellRatios.length; i++) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.value = bellFund * bellRatios[i];
       const peak = bellPeak / (i + 1.4);
@@ -6147,7 +6403,7 @@ export class Sound {
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
       osc.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(t);
       osc.stop(t + decay + 0.05);
     }
@@ -6155,40 +6411,40 @@ export class Sound {
     // The sigh — sine glissando G4 → Eb4 → C4 → Bb3 over ~0.9s, a voice
     // settling downward through the C-minor scale and out. Lowpass closes
     // as it falls so the timbre darkens with the pitch.
-    const sigh = this.ctx.createOscillator();
+    const sigh = ctx.createOscillator();
     sigh.type = "sine";
     sigh.frequency.setValueAtTime(392.00, t + 0.04);        // G4
     sigh.frequency.exponentialRampToValueAtTime(311.13, t + 0.32); // Eb4
     sigh.frequency.exponentialRampToValueAtTime(261.63, t + 0.62); // C4
     sigh.frequency.exponentialRampToValueAtTime(233.08, t + 0.95); // Bb3
-    const sighFilter = this.ctx.createBiquadFilter();
+    const sighFilter = ctx.createBiquadFilter();
     sighFilter.type = "lowpass";
     sighFilter.Q.value = 0.9;
     sighFilter.frequency.setValueAtTime(1800, t);
     sighFilter.frequency.exponentialRampToValueAtTime(420, t + 1.0);
-    const sighGain = this.ctx.createGain();
+    const sighGain = ctx.createGain();
     sighGain.gain.setValueAtTime(0.0001, t);
     sighGain.gain.exponentialRampToValueAtTime(0.14, t + 0.08);
     sighGain.gain.setTargetAtTime(0.08, t + 0.4, 0.25);
     sighGain.gain.exponentialRampToValueAtTime(0.0001, t + 1.05);
     sigh.connect(sighFilter);
     sighFilter.connect(sighGain);
-    sighGain.connect(this.master);
+    sighGain.connect(dest);
     sigh.start(t + 0.04);
     sigh.stop(t + 1.1);
 
     // The absence — a C2 sub that fades in late, after the sigh is gone,
     // and lingers as the chest-pressure of "something is missing now".
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.value = 65.41; // C2
-    const subGain = this.ctx.createGain();
+    const subGain = ctx.createGain();
     subGain.gain.setValueAtTime(0.0001, t);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
     subGain.gain.exponentialRampToValueAtTime(0.18, t + 1.1);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + 2.6);
     sub.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(dest);
     sub.start(t);
     sub.stop(t + 2.7);
   }
@@ -6201,42 +6457,46 @@ export class Sound {
   // quadratic angular acceleration on screen, and a snare-roll noise wash
   // that ducks to silence right before the apex.
   private playShockwaveCharge() {
+    if (this.playBaked("shockwaveCharge", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildShockwaveChargeGraph(this.ctx, this.master, this.voiceTime("shockwaveCharge"));
+  }
+
+  private buildShockwaveChargeGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     const duration = 12.0;
 
     // Sub carrier — held low for the first 60% of the windup then sweeps up
     // sharply so the tension peak lands right before the drop.
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sawtooth";
     sub.frequency.setValueAtTime(28, t);
     sub.frequency.exponentialRampToValueAtTime(36, t + duration * 0.6);
     sub.frequency.exponentialRampToValueAtTime(190, t + duration);
-    const subFilter = this.ctx.createBiquadFilter();
+    const subFilter = ctx.createBiquadFilter();
     subFilter.type = "lowpass";
     subFilter.Q.value = 8;
     subFilter.frequency.setValueAtTime(120, t);
     subFilter.frequency.exponentialRampToValueAtTime(900, t + duration);
-    const subGain = this.ctx.createGain();
+    const subGain = ctx.createGain();
     subGain.gain.setValueAtTime(0.0001, t);
     subGain.gain.exponentialRampToValueAtTime(0.42, t + duration);
     sub.connect(subFilter);
     subFilter.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(dest);
     sub.start(t);
     sub.stop(t + duration + 0.05);
 
     // Near-DC reinforcement — gives the long windup real chest pressure even
     // before the sub carrier starts climbing.
-    const subSine = this.ctx.createOscillator();
+    const subSine = ctx.createOscillator();
     subSine.type = "sine";
     subSine.frequency.setValueAtTime(22, t);
     subSine.frequency.exponentialRampToValueAtTime(90, t + duration);
-    const subSineGain = this.ctx.createGain();
+    const subSineGain = ctx.createGain();
     subSineGain.gain.setValueAtTime(0.0001, t);
     subSineGain.gain.exponentialRampToValueAtTime(0.55, t + duration);
     subSine.connect(subSineGain);
-    subSineGain.connect(this.master);
+    subSineGain.connect(dest);
     subSine.start(t);
     subSine.stop(t + duration + 0.05);
 
@@ -6244,7 +6504,7 @@ export class Sound {
     // quadratic angular acceleration on the visual side) so the player hears
     // the pulsar speeding up. We sample the curve at 24 control points so
     // it sweeps smoothly without us having to schedule one ramp per frame.
-    const whine = this.ctx.createOscillator();
+    const whine = ctx.createOscillator();
     whine.type = "sawtooth";
     const startHz = 120;
     const endHz = 1800;
@@ -6255,12 +6515,12 @@ export class Sound {
       const f = startHz + (endHz - startHz) * ti * ti;
       whine.frequency.linearRampToValueAtTime(f, t + ti * duration);
     }
-    const whineFilter = this.ctx.createBiquadFilter();
+    const whineFilter = ctx.createBiquadFilter();
     whineFilter.type = "bandpass";
     whineFilter.Q.value = 3;
     whineFilter.frequency.setValueAtTime(startHz, t);
     whineFilter.frequency.exponentialRampToValueAtTime(endHz, t + duration);
-    const whineGain = this.ctx.createGain();
+    const whineGain = ctx.createGain();
     whineGain.gain.setValueAtTime(0.0001, t);
     // Stays quiet for the first second so the windup builds, then climbs
     // hard. Capped well below the sub so the spin-up colours the sound
@@ -6269,7 +6529,7 @@ export class Sound {
     whineGain.gain.exponentialRampToValueAtTime(0.22, t + duration);
     whine.connect(whineFilter);
     whineFilter.connect(whineGain);
-    whineGain.connect(this.master);
+    whineGain.connect(dest);
     whine.start(t);
     whine.stop(t + duration + 0.05);
 
@@ -6277,23 +6537,23 @@ export class Sound {
     // jitter does, so the last second feels like the universe is about to
     // tear. Bandpass swept upward; gain ramps in late and ducks just before
     // the drop to leave silence at the apex.
-    const noiseBuf = this.makeNoiseBuffer(duration);
+    const noiseBuf = this.noiseBuffer(ctx, duration);
     if (noiseBuf) {
-      const noise = this.ctx.createBufferSource();
+      const noise = ctx.createBufferSource();
       noise.buffer = noiseBuf;
-      const nFilter = this.ctx.createBiquadFilter();
+      const nFilter = ctx.createBiquadFilter();
       nFilter.type = "bandpass";
       nFilter.frequency.setValueAtTime(400, t);
       nFilter.frequency.exponentialRampToValueAtTime(3500, t + duration);
       nFilter.Q.value = 1.2;
-      const nGain = this.ctx.createGain();
+      const nGain = ctx.createGain();
       nGain.gain.setValueAtTime(0.0001, t);
       nGain.gain.exponentialRampToValueAtTime(0.0001, t + duration * 0.5);
       nGain.gain.exponentialRampToValueAtTime(0.18, t + duration * 0.95);
       nGain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
       noise.connect(nFilter);
       nFilter.connect(nGain);
-      nGain.connect(this.master);
+      nGain.connect(dest);
       noise.start(t);
       noise.stop(t + duration + 0.05);
     }
@@ -6304,82 +6564,86 @@ export class Sound {
   // for grit, and a wide noise wash for the wavefront. Designed to feel
   // like the floor dropping out under the player.
   private playShockwaveBoom() {
+    if (this.playBaked("shockwaveBoom", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildShockwaveBoomGraph(this.ctx, this.master, this.voiceTime("shockwaveBoom"));
+  }
+
+  private buildShockwaveBoomGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
 
     // Sub thud — louder, lower, and with a long decay so the floor stays
     // gone for a beat.
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.setValueAtTime(95, t);
     sub.frequency.exponentialRampToValueAtTime(12, t + 1.0);
-    const subGain = this.ctx.createGain();
+    const subGain = ctx.createGain();
     subGain.gain.setValueAtTime(0.0001, t);
     subGain.gain.exponentialRampToValueAtTime(1.0, t + 0.012);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + 3.2);
     sub.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(dest);
     sub.start(t);
     sub.stop(t + 3.3);
 
     // Body — fat sawtooth pitch-down with hard front transient.
-    const body = this.ctx.createOscillator();
+    const body = ctx.createOscillator();
     body.type = "sawtooth";
     body.frequency.setValueAtTime(150, t);
     body.frequency.exponentialRampToValueAtTime(22, t + 1.2);
-    const bodyFilter = this.ctx.createBiquadFilter();
+    const bodyFilter = ctx.createBiquadFilter();
     bodyFilter.type = "lowpass";
     bodyFilter.Q.value = 4;
     bodyFilter.frequency.setValueAtTime(900, t);
     bodyFilter.frequency.exponentialRampToValueAtTime(90, t + 2.5);
-    const bodyGain = this.ctx.createGain();
+    const bodyGain = ctx.createGain();
     bodyGain.gain.setValueAtTime(0.0001, t);
     bodyGain.gain.exponentialRampToValueAtTime(0.85, t + 0.02);
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 3.0);
     body.connect(bodyFilter);
     bodyFilter.connect(bodyGain);
-    bodyGain.connect(this.master);
+    bodyGain.connect(dest);
     body.start(t);
     body.stop(t + 3.1);
 
     // Square sub-octave growl — adds the gritty edge classic bass drops have
     // without taking the low end out of pure-sine territory.
-    const growl = this.ctx.createOscillator();
+    const growl = ctx.createOscillator();
     growl.type = "square";
     growl.frequency.setValueAtTime(58, t);
     growl.frequency.exponentialRampToValueAtTime(20, t + 1.4);
-    const growlFilter = this.ctx.createBiquadFilter();
+    const growlFilter = ctx.createBiquadFilter();
     growlFilter.type = "lowpass";
     growlFilter.Q.value = 2;
     growlFilter.frequency.setValueAtTime(220, t);
     growlFilter.frequency.exponentialRampToValueAtTime(70, t + 2.0);
-    const growlGain = this.ctx.createGain();
+    const growlGain = ctx.createGain();
     growlGain.gain.setValueAtTime(0.0001, t);
     growlGain.gain.exponentialRampToValueAtTime(0.32, t + 0.03);
     growlGain.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
     growl.connect(growlFilter);
     growlFilter.connect(growlGain);
-    growlGain.connect(this.master);
+    growlGain.connect(dest);
     growl.start(t);
     growl.stop(t + 2.5);
 
     // Wide noise wash — the wavefront passing over you.
-    const noiseBuf = this.makeNoiseBuffer(2.5);
+    const noiseBuf = this.noiseBuffer(ctx, 2.5);
     if (noiseBuf) {
-      const noise = this.ctx.createBufferSource();
+      const noise = ctx.createBufferSource();
       noise.buffer = noiseBuf;
-      const nFilter = this.ctx.createBiquadFilter();
+      const nFilter = ctx.createBiquadFilter();
       nFilter.type = "bandpass";
       nFilter.frequency.setValueAtTime(1600, t);
       nFilter.frequency.exponentialRampToValueAtTime(60, t + 1.8);
       nFilter.Q.value = 1.0;
-      const nGain = this.ctx.createGain();
+      const nGain = ctx.createGain();
       nGain.gain.setValueAtTime(0.0001, t);
       nGain.gain.exponentialRampToValueAtTime(0.48, t + 0.025);
       nGain.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
       noise.connect(nFilter);
       nFilter.connect(nGain);
-      nGain.connect(this.master);
+      nGain.connect(dest);
       noise.start(t);
       noise.stop(t + 2.5);
     }
@@ -6391,34 +6655,38 @@ export class Sound {
   // The whole bus envelopes up fast and decays quickly so the tremolo swells
   // read as in-time pulses rather than a long sustained hum.
   private playPulsarHum() {
+    if (this.playBaked("pulsarHum", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildPulsarHumGraph(this.ctx, this.master, this.voiceTime("pulsarHum"));
+  }
+
+  private buildPulsarHumGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     const duration = 20;
 
     // Decay quickly so the bass hum doesn't drown out subsequent beats —
     // most of the audible body lives in the first ~3 seconds.
-    const bus = this.ctx.createGain();
+    const bus = ctx.createGain();
     bus.gain.setValueAtTime(0.0001, t);
     bus.gain.exponentialRampToValueAtTime(0.32, t + 0.3);
     bus.gain.exponentialRampToValueAtTime(0.0001, t + 4.5);
-    bus.connect(this.master);
+    bus.connect(dest);
 
     // Tremolo locked to 2× the beat rate (BEAT_GRID = 0.5s → 2 Hz beat, so
     // 4 Hz tremolo). Depth bumped up so each pulse reads distinctly.
-    const tremoloGain = this.ctx.createGain();
+    const tremoloGain = ctx.createGain();
     tremoloGain.gain.value = 1.0;
     tremoloGain.connect(bus);
-    const lfo = this.ctx.createOscillator();
+    const lfo = ctx.createOscillator();
     lfo.type = "sine";
     lfo.frequency.value = 4;
-    const lfoDepth = this.ctx.createGain();
+    const lfoDepth = ctx.createGain();
     lfoDepth.gain.value = 0.55;
     lfo.connect(lfoDepth);
     lfoDepth.connect(tremoloGain.gain);
     lfo.start(t);
     lfo.stop(t + duration + 0.2);
 
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.Q.value = 4;
     filter.frequency.setValueAtTime(180, t);
@@ -6426,10 +6694,10 @@ export class Sound {
     filter.frequency.exponentialRampToValueAtTime(120, t + duration);
     filter.connect(tremoloGain);
 
-    const saw1 = this.ctx.createOscillator();
+    const saw1 = ctx.createOscillator();
     saw1.type = "sawtooth";
     saw1.frequency.value = 51;
-    const saw2 = this.ctx.createOscillator();
+    const saw2 = ctx.createOscillator();
     saw2.type = "sawtooth";
     saw2.frequency.value = 57.3;
     saw1.connect(filter);
@@ -6439,25 +6707,25 @@ export class Sound {
     saw1.stop(t + duration + 0.2);
     saw2.stop(t + duration + 0.2);
 
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.value = 36;
-    const subGain = this.ctx.createGain();
+    const subGain = ctx.createGain();
     subGain.gain.value = 0.6;
     sub.connect(subGain);
     subGain.connect(bus);
     sub.start(t);
     sub.stop(t + duration + 0.2);
 
-    const noiseBuf = this.makeNoiseBuffer(duration + 0.5);
+    const noiseBuf = this.noiseBuffer(ctx, duration + 0.5);
     if (noiseBuf) {
-      const noise = this.ctx.createBufferSource();
+      const noise = ctx.createBufferSource();
       noise.buffer = noiseBuf;
-      const nFilter = this.ctx.createBiquadFilter();
+      const nFilter = ctx.createBiquadFilter();
       nFilter.type = "bandpass";
       nFilter.frequency.value = 240;
       nFilter.Q.value = 1.5;
-      const nGain = this.ctx.createGain();
+      const nGain = ctx.createGain();
       nGain.gain.value = 0.08;
       noise.connect(nFilter);
       nFilter.connect(nGain);
@@ -6498,8 +6766,12 @@ export class Sound {
   // mode and the rhythm shot is the obvious power tier. Same musical-pluck
   // shape (G4 fundamental, octave partial, soft tick) at reduced gain.
   private playFire() {
+    if (this.playBaked("fire", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildFireGraph(this.ctx, this.master, this.voiceTime("fire"));
+  }
+
+  private buildFireGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     const bodyHz = cfgN("fire", "bodyHz", 392);
     const bodyPeak = cfgN("fire", "bodyPeak", 0.16);
     const bodyDecay = cfgN("fire", "bodyDecay", 0.11);
@@ -6511,44 +6783,44 @@ export class Sound {
     const tickPeak = cfgN("fire", "tickPeak", 0.04);
     const tickDecay = cfgN("fire", "tickDecay", 0.02);
 
-    const body = this.ctx.createOscillator();
-    const bodyGain = this.ctx.createGain();
+    const body = ctx.createOscillator();
+    const bodyGain = ctx.createGain();
     body.type = "sine";
     body.frequency.value = bodyHz;
     bodyGain.gain.setValueAtTime(0.0001, t);
     bodyGain.gain.exponentialRampToValueAtTime(bodyPeak, t + 0.004);
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + bodyDecay);
     body.connect(bodyGain);
-    bodyGain.connect(this.master);
+    bodyGain.connect(dest);
     body.start(t);
     body.stop(t + bodyDecay + 0.02);
 
-    const partial = this.ctx.createOscillator();
-    const partialGain = this.ctx.createGain();
+    const partial = ctx.createOscillator();
+    const partialGain = ctx.createGain();
     partial.type = "sine";
     partial.frequency.value = partialHz;
     partialGain.gain.setValueAtTime(0.0001, t);
     partialGain.gain.exponentialRampToValueAtTime(partialPeak, t + 0.003);
     partialGain.gain.exponentialRampToValueAtTime(0.0001, t + partialDecay);
     partial.connect(partialGain);
-    partialGain.connect(this.master);
+    partialGain.connect(dest);
     partial.start(t);
     partial.stop(t + partialDecay + 0.02);
 
-    const tickBuf = this.makeNoiseBuffer(Math.max(tickDecay, 0.005));
+    const tickBuf = this.noiseBuffer(ctx, Math.max(tickDecay, 0.005));
     if (!tickBuf) return;
-    const tick = this.ctx.createBufferSource();
+    const tick = ctx.createBufferSource();
     tick.buffer = tickBuf;
-    const tickFilter = this.ctx.createBiquadFilter();
+    const tickFilter = ctx.createBiquadFilter();
     tickFilter.type = "bandpass";
     tickFilter.frequency.value = tickHz;
     tickFilter.Q.value = tickQ;
-    const tickGain = this.ctx.createGain();
+    const tickGain = ctx.createGain();
     tickGain.gain.setValueAtTime(tickPeak, t);
     tickGain.gain.exponentialRampToValueAtTime(0.0001, t + tickDecay);
     tick.connect(tickFilter);
     tickFilter.connect(tickGain);
-    tickGain.connect(this.master);
+    tickGain.connect(dest);
     tick.start(t);
     tick.stop(t + tickDecay + 0.005);
   }
@@ -6567,30 +6839,38 @@ export class Sound {
     this.playBaked("fireBeat", 1);
   }
 
-  private playExplosion(volume: number, lowpassStart: number, duration: number) {
+  private playExplosion(name: ExplosionName) {
+    if (this.playBaked(name, 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
-    const noiseBuf = this.makeNoiseBuffer(duration);
+    this.buildExplosionGraph(this.ctx, this.master, this.voiceTime(name), name);
+  }
+
+  private buildExplosionGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, name: ExplosionName) {
+    const d = Sound.EXPLOSION_DEFAULTS[name];
+    const volume = cfgN(name, "volume", d.volume);
+    const lowpassStart = cfgN(name, "lowpassStart", d.lowpassStart);
+    const duration = cfgN(name, "duration", d.duration);
+    const noiseBuf = this.noiseBuffer(ctx, duration);
     if (!noiseBuf) return;
-    const source = this.ctx.createBufferSource();
+    const source = ctx.createBufferSource();
     source.buffer = noiseBuf;
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.frequency.setValueAtTime(lowpassStart * 4, t);
     filter.frequency.exponentialRampToValueAtTime(lowpassStart * 0.4, t + duration);
     filter.Q.value = 1.2;
-    const gain = this.ctx.createGain();
+    const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, t);
     gain.gain.exponentialRampToValueAtTime(volume, t + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
     source.connect(filter);
     filter.connect(gain);
-    gain.connect(this.master);
+    gain.connect(dest);
     source.start(t);
     source.stop(t + duration);
 
-    const sub = this.ctx.createOscillator();
-    const subGain = this.ctx.createGain();
+    const sub = ctx.createOscillator();
+    const subGain = ctx.createGain();
     sub.type = "sine";
     sub.frequency.setValueAtTime(lowpassStart * 0.6, t);
     sub.frequency.exponentialRampToValueAtTime(40, t + duration * 0.8);
@@ -6598,7 +6878,7 @@ export class Sound {
     subGain.gain.exponentialRampToValueAtTime(volume * 0.45, t + 0.02);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
     sub.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(dest);
     sub.start(t);
     sub.stop(t + duration);
   }
@@ -6626,12 +6906,15 @@ export class Sound {
   // ramp that lags the perceived peak. Peak alignment with the explosion's
   // 10 ms attack is the key fix from the previous iteration.
   private boomConvolverIR: AudioBuffer | null = null;
-  private getBoomReverbIR(): AudioBuffer | null {
-    if (!this.ctx) return null;
-    if (this.boomConvolverIR) return this.boomConvolverIR;
-    const sr = this.ctx.sampleRate;
+  // Decaying-noise IR for the boom's convolution reverb. Cached for the live
+  // context; an offline bake builds its own (a buffer belongs to the context
+  // that created it).
+  private boomReverbIR(ctx: BaseAudioContext): AudioBuffer | null {
+    const live = ctx === this.ctx;
+    if (live && this.boomConvolverIR) return this.boomConvolverIR;
+    const sr = ctx.sampleRate;
     const len = Math.floor(sr * 1.3);
-    const buf = this.ctx.createBuffer(2, len, sr);
+    const buf = ctx.createBuffer(2, len, sr);
     for (let ch = 0; ch < 2; ch++) {
       const data = buf.getChannelData(ch);
       for (let i = 0; i < len; i++) {
@@ -6641,13 +6924,12 @@ export class Sound {
         data[i] = (Math.random() * 2 - 1) * env * lowBias;
       }
     }
-    this.boomConvolverIR = buf;
+    if (live) this.boomConvolverIR = buf;
     return buf;
   }
 
-  private makeBoomSaturator(amount: number): WaveShaperNode | null {
-    if (!this.ctx) return null;
-    const ws = this.ctx.createWaveShaper();
+  private boomSaturator(ctx: BaseAudioContext, amount: number): WaveShaperNode | null {
+    const ws = ctx.createWaveShaper();
     const n = 1024;
     const curve = new Float32Array(n);
     const k = amount;
@@ -6661,36 +6943,43 @@ export class Sound {
   }
 
   private playAsteroidBoomBeat() {
+    // Per-hit pitch wobble (±3%) so a burst of on-beat kills doesn't read as
+    // one sample retriggering. The baked buffer is rendered flat (jitter 1)
+    // and gets the same wobble applied as a playbackRate at play time.
+    const jitter = 1 + (Math.random() - 0.5) * 0.06;
+    if (this.playBaked("asteroidBoomBeat", 1, jitter)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildAsteroidBoomBeatGraph(this.ctx, this.master, this.voiceTime("asteroidBoomBeat"), jitter);
+  }
+
+  private buildAsteroidBoomBeatGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, jitter: number) {
     const tail = 1.0;
 
-    const jitter = 1 + (Math.random() - 0.5) * 0.06;
 
-    const convolver = this.ctx.createConvolver();
-    const ir = this.getBoomReverbIR();
+    const convolver = ctx.createConvolver();
+    const ir = this.boomReverbIR(ctx);
     if (ir) convolver.buffer = ir;
-    const wetGain = this.ctx.createGain();
+    const wetGain = ctx.createGain();
     wetGain.gain.value = 0.32;
     convolver.connect(wetGain);
-    wetGain.connect(this.master);
+    wetGain.connect(dest);
 
-    const lowShelf = this.ctx.createBiquadFilter();
+    const lowShelf = ctx.createBiquadFilter();
     lowShelf.type = "lowshelf";
     lowShelf.frequency.value = 130;
     lowShelf.gain.value = 3.5;
-    lowShelf.connect(this.master);
+    lowShelf.connect(dest);
     lowShelf.connect(convolver);
 
-    const body = this.ctx.createOscillator();
+    const body = ctx.createOscillator();
     body.type = "sine";
     body.frequency.setValueAtTime(110 * jitter, t);
     body.frequency.exponentialRampToValueAtTime(65 * jitter, t + 0.18);
-    const bodyGain = this.ctx.createGain();
+    const bodyGain = ctx.createGain();
     bodyGain.gain.setValueAtTime(0.0001, t);
     bodyGain.gain.exponentialRampToValueAtTime(1.3, t + 0.002);
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
-    const bodySat = this.makeBoomSaturator(2.0);
+    const bodySat = this.boomSaturator(ctx, 2.0);
     body.connect(bodyGain);
     if (bodySat) {
       bodyGain.connect(bodySat);
@@ -6701,11 +6990,11 @@ export class Sound {
     body.start(t);
     body.stop(t + tail);
 
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.setValueAtTime(60 * jitter, t);
     sub.frequency.exponentialRampToValueAtTime(38 * jitter, t + 0.35);
-    const subGain = this.ctx.createGain();
+    const subGain = ctx.createGain();
     subGain.gain.setValueAtTime(0.0001, t);
     subGain.gain.exponentialRampToValueAtTime(1.4, t + 0.003);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + tail + 0.15);
@@ -6714,16 +7003,16 @@ export class Sound {
     sub.start(t);
     sub.stop(t + tail + 0.15);
 
-    const thumpBuf = this.makeNoiseBuffer(0.14);
+    const thumpBuf = this.noiseBuffer(ctx, 0.14);
     if (thumpBuf) {
-      const thump = this.ctx.createBufferSource();
+      const thump = ctx.createBufferSource();
       thump.buffer = thumpBuf;
-      const thumpFilter = this.ctx.createBiquadFilter();
+      const thumpFilter = ctx.createBiquadFilter();
       thumpFilter.type = "bandpass";
       thumpFilter.Q.value = 1.0;
       thumpFilter.frequency.setValueAtTime(230, t);
       thumpFilter.frequency.exponentialRampToValueAtTime(150, t + 0.14);
-      const thumpGain = this.ctx.createGain();
+      const thumpGain = ctx.createGain();
       thumpGain.gain.setValueAtTime(0.0001, t);
       thumpGain.gain.exponentialRampToValueAtTime(0.75, t + 0.003);
       thumpGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
@@ -6734,36 +7023,36 @@ export class Sound {
       thump.stop(t + 0.15);
     }
 
-    const clickBuf = this.makeNoiseBuffer(0.018);
+    const clickBuf = this.noiseBuffer(ctx, 0.018);
     if (clickBuf) {
-      const click = this.ctx.createBufferSource();
+      const click = ctx.createBufferSource();
       click.buffer = clickBuf;
-      const clickFilter = this.ctx.createBiquadFilter();
+      const clickFilter = ctx.createBiquadFilter();
       clickFilter.type = "bandpass";
       clickFilter.Q.value = 0.9;
       clickFilter.frequency.value = 340;
-      const clickGain = this.ctx.createGain();
+      const clickGain = ctx.createGain();
       clickGain.gain.setValueAtTime(0.0001, t);
       clickGain.gain.exponentialRampToValueAtTime(0.65, t + 0.001);
       clickGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.018);
       click.connect(clickFilter);
       clickFilter.connect(clickGain);
-      clickGain.connect(this.master);
+      clickGain.connect(dest);
       clickGain.connect(convolver);
       click.start(t);
       click.stop(t + 0.018);
     }
 
-    const shellBuf = this.makeNoiseBuffer(0.65);
+    const shellBuf = this.noiseBuffer(ctx, 0.65);
     if (shellBuf) {
-      const shell = this.ctx.createBufferSource();
+      const shell = ctx.createBufferSource();
       shell.buffer = shellBuf;
-      const shellFilter = this.ctx.createBiquadFilter();
+      const shellFilter = ctx.createBiquadFilter();
       shellFilter.type = "bandpass";
       shellFilter.Q.value = 1.8;
       shellFilter.frequency.setValueAtTime(260, t);
       shellFilter.frequency.exponentialRampToValueAtTime(120, t + 0.6);
-      const shellGain = this.ctx.createGain();
+      const shellGain = ctx.createGain();
       shellGain.gain.setValueAtTime(0.0001, t);
       shellGain.gain.exponentialRampToValueAtTime(0.55, t + 0.005);
       shellGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.65);
@@ -7352,8 +7641,12 @@ export class Sound {
   //   (5) bandpass noise rumble tail fading to silence ~1.6s in
   // Total body ~1.5s; fits inside the 1.8s `dyingTimer` in Game.respawn.
   private playDeath() {
+    if (this.playBaked("death", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildDeathGraph(this.ctx, this.master, this.voiceTime("death"));
+  }
+
+  private buildDeathGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
 
     const subStartHz = cfgN("death", "subStartHz", 85);
     const subEndHz = cfgN("death", "subEndHz", 26);
@@ -7369,8 +7662,8 @@ export class Sound {
     const tailDur = cfgN("death", "tailDur", 1.6);
 
     // (1) Sub-bass impact thump
-    const sub = this.ctx.createOscillator();
-    const subGain = this.ctx.createGain();
+    const sub = ctx.createOscillator();
+    const subGain = ctx.createGain();
     sub.type = "sine";
     sub.frequency.setValueAtTime(subStartHz, t);
     sub.frequency.exponentialRampToValueAtTime(subEndHz, t + subDecay * 0.75);
@@ -7378,45 +7671,45 @@ export class Sound {
     subGain.gain.exponentialRampToValueAtTime(subPeak, t + 0.01);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + subDecay);
     sub.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(dest);
     sub.start(t);
     sub.stop(t + subDecay + 0.05);
 
     // (2) Broadband noise crack with LP sweep
-    const crackBuf = this.makeNoiseBuffer(crackDur);
+    const crackBuf = this.noiseBuffer(ctx, crackDur);
     if (crackBuf) {
-      const crack = this.ctx.createBufferSource();
+      const crack = ctx.createBufferSource();
       crack.buffer = crackBuf;
-      const crackFilter = this.ctx.createBiquadFilter();
+      const crackFilter = ctx.createBiquadFilter();
       crackFilter.type = "lowpass";
       crackFilter.Q.value = 1.1;
       crackFilter.frequency.setValueAtTime(3000, t);
       crackFilter.frequency.exponentialRampToValueAtTime(110, t + crackDur);
-      const crackGain = this.ctx.createGain();
+      const crackGain = ctx.createGain();
       crackGain.gain.setValueAtTime(0.0001, t);
       crackGain.gain.exponentialRampToValueAtTime(crackVol, t + 0.015);
       crackGain.gain.exponentialRampToValueAtTime(0.0001, t + crackDur);
       crack.connect(crackFilter);
       crackFilter.connect(crackGain);
-      crackGain.connect(this.master);
+      crackGain.connect(dest);
       crack.start(t);
       crack.stop(t + crackDur + 0.05);
     }
 
     // (3) Detuned saw pair — the dying engine scream
-    const screamFilter = this.ctx.createBiquadFilter();
+    const screamFilter = ctx.createBiquadFilter();
     screamFilter.type = "lowpass";
     screamFilter.Q.value = 4.5;
     screamFilter.frequency.setValueAtTime(1800, t);
     screamFilter.frequency.exponentialRampToValueAtTime(180, t + screamDur);
-    const screamGain = this.ctx.createGain();
+    const screamGain = ctx.createGain();
     screamGain.gain.setValueAtTime(0.0001, t);
     screamGain.gain.exponentialRampToValueAtTime(screamPeak, t + 0.03);
     screamGain.gain.exponentialRampToValueAtTime(0.0001, t + screamDur);
     screamFilter.connect(screamGain);
-    screamGain.connect(this.master);
+    screamGain.connect(dest);
     for (const detune of [-7, 6]) {
-      const saw = this.ctx.createOscillator();
+      const saw = ctx.createOscillator();
       saw.type = "sawtooth";
       saw.detune.value = detune;
       saw.frequency.setValueAtTime(screamStartHz, t);
@@ -7427,8 +7720,8 @@ export class Sound {
     }
 
     // (4) Sub-octave sine doubling for weight
-    const octave = this.ctx.createOscillator();
-    const octaveGain = this.ctx.createGain();
+    const octave = ctx.createOscillator();
+    const octaveGain = ctx.createGain();
     octave.type = "sine";
     octave.frequency.setValueAtTime(screamStartHz * 0.5, t);
     octave.frequency.exponentialRampToValueAtTime(screamEndHz * 0.5, t + screamDur * 0.85);
@@ -7436,27 +7729,27 @@ export class Sound {
     octaveGain.gain.exponentialRampToValueAtTime(screamPeak * 0.55, t + 0.03);
     octaveGain.gain.exponentialRampToValueAtTime(0.0001, t + screamDur);
     octave.connect(octaveGain);
-    octaveGain.connect(this.master);
+    octaveGain.connect(dest);
     octave.start(t);
     octave.stop(t + screamDur + 0.05);
 
     // (5) Bandpass noise rumble tail — wreckage echo
-    const tailBuf = this.makeNoiseBuffer(tailDur);
+    const tailBuf = this.noiseBuffer(ctx, tailDur);
     if (tailBuf) {
-      const tail = this.ctx.createBufferSource();
+      const tail = ctx.createBufferSource();
       tail.buffer = tailBuf;
-      const tailFilter = this.ctx.createBiquadFilter();
+      const tailFilter = ctx.createBiquadFilter();
       tailFilter.type = "bandpass";
       tailFilter.Q.value = 1.4;
       tailFilter.frequency.setValueAtTime(400, t);
       tailFilter.frequency.exponentialRampToValueAtTime(70, t + tailDur);
-      const tailGain = this.ctx.createGain();
+      const tailGain = ctx.createGain();
       tailGain.gain.setValueAtTime(0.0001, t);
       tailGain.gain.exponentialRampToValueAtTime(tailVol, t + 0.1);
       tailGain.gain.exponentialRampToValueAtTime(0.0001, t + tailDur);
       tail.connect(tailFilter);
       tailFilter.connect(tailGain);
-      tailGain.connect(this.master);
+      tailGain.connect(dest);
       tail.start(t);
       tail.stop(t + tailDur + 0.05);
     }
@@ -7503,33 +7796,37 @@ export class Sound {
   // a sawtooth sweep crashing into the bass register paired with a heavily
   // low-passed noise transient that sounds like cracking stone, not a tink.
   private playBassHit() {
+    if (this.playBaked("bassHit", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildBassHitGraph(this.ctx, this.master, this.voiceTime("bassHit"));
+  }
+
+  private buildBassHitGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
 
     // Body: detuned sawtooth pair sweeping from low-mid into the sub-bass
     // floor. Two oscs a tiny semitone-fraction apart fatten the sound and
     // give the slight beating that reads as "gravelly".
-    const oscA = this.ctx.createOscillator();
-    const oscB = this.ctx.createOscillator();
+    const oscA = ctx.createOscillator();
+    const oscB = ctx.createOscillator();
     oscA.type = "sawtooth";
     oscB.type = "sawtooth";
     oscA.frequency.setValueAtTime(180, t);
     oscA.frequency.exponentialRampToValueAtTime(48, t + 0.22);
     oscB.frequency.setValueAtTime(186, t);
     oscB.frequency.exponentialRampToValueAtTime(50, t + 0.22);
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.Q.value = 6;
     filter.frequency.setValueAtTime(900, t);
     filter.frequency.exponentialRampToValueAtTime(180, t + 0.28);
-    const gain = this.ctx.createGain();
+    const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, t);
     gain.gain.exponentialRampToValueAtTime(0.42, t + 0.008);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
     oscA.connect(filter);
     oscB.connect(filter);
     filter.connect(gain);
-    gain.connect(this.master);
+    gain.connect(dest);
     oscA.start(t);
     oscB.start(t);
     oscA.stop(t + 0.42);
@@ -7538,22 +7835,22 @@ export class Sound {
     // Crunch transient: noise pushed through a tight LOW band so it reads
     // as crumbling rock rather than a metallic tink. Centre frequency drops
     // through the hit so the texture goes from "crack" to "rumble".
-    const noiseBuf = this.makeNoiseBuffer(0.22);
+    const noiseBuf = this.noiseBuffer(ctx, 0.22);
     if (!noiseBuf) return;
-    const noise = this.ctx.createBufferSource();
+    const noise = ctx.createBufferSource();
     noise.buffer = noiseBuf;
-    const nFilter = this.ctx.createBiquadFilter();
+    const nFilter = ctx.createBiquadFilter();
     nFilter.type = "lowpass";
     nFilter.Q.value = 1.4;
     nFilter.frequency.setValueAtTime(700, t);
     nFilter.frequency.exponentialRampToValueAtTime(140, t + 0.2);
-    const nGain = this.ctx.createGain();
+    const nGain = ctx.createGain();
     nGain.gain.setValueAtTime(0.0001, t);
     nGain.gain.exponentialRampToValueAtTime(0.5, t + 0.005);
     nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
     noise.connect(nFilter);
     nFilter.connect(nGain);
-    nGain.connect(this.master);
+    nGain.connect(dest);
     noise.start(t);
     noise.stop(t + 0.24);
   }
@@ -7565,30 +7862,34 @@ export class Sound {
   // (which would leak nodes if the page is held open for a long session).
   // Stays sub-100 Hz so it sits below the kick/pluck without masking them.
   private playBassEcho() {
+    if (this.playBaked("bassEcho", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildBassEchoGraph(this.ctx, this.master, this.voiceTime("bassEcho"));
+  }
+
+  private buildBassEchoGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     const echoCount = 4;
     const echoSpacing = 0.22;
     const echoIndices = Array.from({ length: echoCount }, (_, i) => i);
     for (const i of echoIndices) {
       const start = t + i * echoSpacing;
       const decay = Math.pow(0.55, i);
-      const osc = this.ctx.createOscillator();
+      const osc = ctx.createOscillator();
       osc.type = "sine";
       osc.frequency.setValueAtTime(82.4, start); // E2
       osc.frequency.exponentialRampToValueAtTime(45, start + 0.22);
-      const filter = this.ctx.createBiquadFilter();
+      const filter = ctx.createBiquadFilter();
       filter.type = "lowpass";
       filter.frequency.value = 600 * Math.pow(0.7, i);
       filter.Q.value = 0.7;
-      const gain = this.ctx.createGain();
+      const gain = ctx.createGain();
       const peak = 0.34 * decay;
       gain.gain.setValueAtTime(0.0001, start);
       gain.gain.exponentialRampToValueAtTime(peak, start + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28);
       osc.connect(filter);
       filter.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(start);
       osc.stop(start + 0.32);
     }
@@ -7629,8 +7930,12 @@ export class Sound {
   // Lower bell with inharmonic partials — feels like a temple bell rather
   // than a wind-chime.
   private playBell(pitchRatio = 1) {
+    if (this.playBaked("bell", pitchRatio)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.voiceTime("bell");
+    this.buildBellGraph(this.ctx, this.master, this.voiceTime("bell"), pitchRatio);
+  }
+
+  private buildBellGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, pitchRatio: number) {
     const fundamentalFreq = cfgN("bell", "fundamentalHz", 220) * pitchRatio;
     // when pitched (i.e. wave-summary use at C4), scale peak down so the
     //   tolling bell sits under the drain melody instead of overpowering it.
@@ -7644,8 +7949,8 @@ export class Sound {
       cfgN("bell", "partial3Ratio", 8.93),
     ];
     for (let i = 0; i < partialRatios.length; i++) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.value = fundamentalFreq * partialRatios[i];
       const peak = peakBase / (i + 1.2);
@@ -7654,7 +7959,7 @@ export class Sound {
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
       osc.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(t);
       osc.stop(t + decay + 0.05);
     }
@@ -7664,22 +7969,26 @@ export class Sound {
   // burst, very short and quiet so it sits underneath the existing fire sound
   // rather than masking it.
   private playComboTick() {
+    if (this.playBaked("comboTick", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
-    const noiseBuf = this.makeNoiseBuffer(0.04);
+    this.buildComboTickGraph(this.ctx, this.master, this.voiceTime("comboTick"));
+  }
+
+  private buildComboTickGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
+    const noiseBuf = this.noiseBuffer(ctx, 0.04);
     if (!noiseBuf) return;
-    const noise = this.ctx.createBufferSource();
+    const noise = ctx.createBufferSource();
     noise.buffer = noiseBuf;
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = "highpass";
     filter.frequency.value = 4200;
     filter.Q.value = 0.7;
-    const gain = this.ctx.createGain();
+    const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.18, t);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
     noise.connect(filter);
     filter.connect(gain);
-    gain.connect(this.master);
+    gain.connect(dest);
     noise.start(t);
     noise.stop(t + 0.05);
   }
@@ -7689,14 +7998,18 @@ export class Sound {
   // original sparkle so repeated on-beat kills don't fatigue the ear; the
   // sharper original lives on as the dedicated "tink" asteroid sound.
   private playComboSparkle(durationScale: number = 1) {
+    if (this.playBaked("comboSparkle", durationScale)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildComboSparkleGraph(this.ctx, this.master, this.voiceTime("comboSparkle"), durationScale);
+  }
+
+  private buildComboSparkleGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, durationScale: number) {
     const partialFrequencies = [880, 1318.5]; // A5, E6 (perfect fifth)
     const decay = 0.22 * durationScale;
     const stop = 0.24 * durationScale;
     for (let i = 0; i < partialFrequencies.length; i++) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.setValueAtTime(partialFrequencies[i], t);
       const peak = 0.07 / (i + 1);
@@ -7704,7 +8017,7 @@ export class Sound {
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
       osc.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(t);
       osc.stop(t + stop);
     }
@@ -7731,8 +8044,13 @@ export class Sound {
   playDriftShotHit(tier = 1) {
     if (!this.enabled) return;
     this.ensureContext();
+    const clamped = Math.max(1, Math.min(6, Math.round(tier)));
+    if (this.playBaked("driftShotHit", clamped)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildDriftShotHitGraph(this.ctx, this.master, this.voiceTime("driftShotHit"), clamped);
+  }
+
+  private buildDriftShotHitGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, tier: number) {
     // 0..1 climb across the tier ladder — drives the sub-boom depth/gain so the
     // weight arrives gradually and peaks at the final tier rather than popping on.
     const tierClimb = Math.max(0, Math.min(1, (tier - 1) / 5));
@@ -7743,8 +8061,8 @@ export class Sound {
     const arpFreqs = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
     const stepSec = 0.025;
     for (let i = 0; i < arpFreqs.length; i++) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = "triangle";
       osc.frequency.value = arpFreqs[i];
       const start = t + i * stepSec;
@@ -7754,7 +8072,7 @@ export class Sound {
       gain.gain.exponentialRampToValueAtTime(peak, start + 0.008);
       gain.gain.exponentialRampToValueAtTime(0.0001, start + release);
       osc.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(start);
       osc.stop(start + release + 0.02);
     }
@@ -7763,8 +8081,8 @@ export class Sound {
     const bellPartials = [1, 2.76]; // shared ratio family with playBell
     const bellStart = t + (arpFreqs.length - 1) * stepSec;
     for (let i = 0; i < bellPartials.length; i++) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.value = bellFundamental * bellPartials[i];
       const peak = 0.09 * tierGain / (i + 1.2);
@@ -7773,26 +8091,26 @@ export class Sound {
       gain.gain.exponentialRampToValueAtTime(peak, bellStart + 0.006);
       gain.gain.exponentialRampToValueAtTime(0.0001, bellStart + decay);
       osc.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(bellStart);
       osc.stop(bellStart + decay + 0.05);
     }
     // 3) High-passed noise sparkle — fairy-dust top end that lifts the whole hit.
-    const noiseBuf = this.makeNoiseBuffer(0.18);
+    const noiseBuf = this.noiseBuffer(ctx, 0.18);
     if (noiseBuf) {
-      const noise = this.ctx.createBufferSource();
+      const noise = ctx.createBufferSource();
       noise.buffer = noiseBuf;
-      const filter = this.ctx.createBiquadFilter();
+      const filter = ctx.createBiquadFilter();
       filter.type = "highpass";
       filter.frequency.value = 6000;
       filter.Q.value = 0.8;
-      const gain = this.ctx.createGain();
+      const gain = ctx.createGain();
       gain.gain.setValueAtTime(0.0001, t);
       gain.gain.exponentialRampToValueAtTime(0.12 * tierGain, t + 0.005);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
       noise.connect(filter);
       filter.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       noise.start(t);
       noise.stop(t + 0.20);
     }
@@ -7802,7 +8120,7 @@ export class Sound {
     //    A short body sine an octave up (C2) gives it a punchy attack the pure
     //    sub can't carry on small speakers.
     if (tierClimb > 0) {
-      const boomGain = this.ctx.createGain();
+      const boomGain = ctx.createGain();
       // shaped swell: barely there at low tiers, dominant at the top (^1.6 curve).
       const boomPeak = 0.55 * Math.pow(tierClimb, 1.6) * tierGain;
       // slight pre-delay so the boom lands just after the bright transient — the
@@ -7813,14 +8131,14 @@ export class Sound {
       boomGain.gain.exponentialRampToValueAtTime(boomPeak, boomStart + 0.012);
       boomGain.gain.exponentialRampToValueAtTime(0.0001, boomStart + boomDecay);
       // gentle lowpass keeps it round (no fizzy harmonics) and protects tweeters.
-      const boomLp = this.ctx.createBiquadFilter();
+      const boomLp = ctx.createBiquadFilter();
       boomLp.type = "lowpass";
       boomLp.frequency.value = 220;
       boomLp.Q.value = 0.7;
       boomLp.connect(boomGain);
-      boomGain.connect(this.master);
+      boomGain.connect(dest);
       // sub: C2 (65.4 Hz) collapsing toward C1 (32.7 Hz) for that "drop" feel.
-      const sub = this.ctx.createOscillator();
+      const sub = ctx.createOscillator();
       sub.type = "sine";
       sub.frequency.setValueAtTime(65.41, boomStart);
       sub.frequency.exponentialRampToValueAtTime(32.70, boomStart + boomDecay * 0.7);
@@ -7828,12 +8146,12 @@ export class Sound {
       sub.start(boomStart);
       sub.stop(boomStart + boomDecay + 0.05);
       // body: C2 octave-up sine for attack punch, quieter and shorter than the sub.
-      const body = this.ctx.createGain();
+      const body = ctx.createGain();
       body.gain.setValueAtTime(0.0001, boomStart);
       body.gain.exponentialRampToValueAtTime(boomPeak * 0.45, boomStart + 0.008);
       body.gain.exponentialRampToValueAtTime(0.0001, boomStart + boomDecay * 0.5);
-      body.connect(this.master);
-      const bodyOsc = this.ctx.createOscillator();
+      body.connect(dest);
+      const bodyOsc = ctx.createOscillator();
       bodyOsc.type = "sine";
       bodyOsc.frequency.setValueAtTime(130.81, boomStart);
       bodyOsc.frequency.exponentialRampToValueAtTime(65.41, boomStart + boomDecay * 0.5);
@@ -7858,16 +8176,16 @@ export class Sound {
       130.81, // C3  — sub-octave root anchoring the spread (tier ≥ 6)
     ];
     const bloomCount = Math.max(1, Math.min(BLOOM_VOICES.length, tier));
-    const bloomBus = this.ctx.createGain();
+    const bloomBus = ctx.createGain();
     // Whole bloom swells with the tier so a tier-1 hit is a faint single note
     // and the top tier is a full, radiant chord.
     bloomBus.gain.value = 0.5 + 0.5 * tierClimb;
-    const bloomLp = this.ctx.createBiquadFilter();
+    const bloomLp = ctx.createBiquadFilter();
     bloomLp.type = "lowpass";
     bloomLp.frequency.value = 3200;
     bloomLp.Q.value = 0.5;
     bloomLp.connect(bloomBus);
-    bloomBus.connect(this.master);
+    bloomBus.connect(dest);
     // Land the bloom on the same beat as the bell so it reads as one resolved
     // event; a touch of attack so it swells in rather than clicking.
     const bloomStart = bellStart;
@@ -7879,11 +8197,11 @@ export class Sound {
       const peak = (0.07 / (1 + i * 0.35)) * tierGain;
       // two sines detuned ±5 cents = soft analog chorus, matching the hum voices.
       for (const detune of [-3, 3]) {
-        const osc = this.ctx.createOscillator();
+        const osc = ctx.createOscillator();
         osc.type = "sine";
         osc.frequency.value = BLOOM_VOICES[i];
         osc.detune.value = detune;
-        const g = this.ctx.createGain();
+        const g = ctx.createGain();
         g.gain.setValueAtTime(0.0001, bloomStart);
         g.gain.exponentialRampToValueAtTime(peak * 0.5, bloomStart + bloomAttack);
         g.gain.exponentialRampToValueAtTime(peak * 0.22, bloomStart + bloomAttack + bloomSustain);
@@ -8177,10 +8495,15 @@ export class Sound {
   playLaserCharge(dotIndex: number) {
     if (!this.enabled) return;
     this.ensureContext();
+    const clamped = Math.max(1, Math.min(4, Math.round(dotIndex)));
+    if (this.playBaked("laserCharge", clamped)) return;
     if (!this.ctx || !this.master) return;
+    this.buildLaserChargeGraph(this.ctx, this.master, this.voiceTime("laserCharge"), clamped);
+  }
+
+  private buildLaserChargeGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, dotIndex: number) {
     // voiceTime honors a scheduled start (playLaserChargeAt) so the accent lands
     //   on its beat slot; falls back to now for the immediate path.
-    const t = this.voiceTime("laserCharge");
     // C-major resolving climb: root, third, fifth, octave. The 4th dot lands on
     // C4 (the octave) so a maxed charge resolves rather than dangling on the 5th.
     const triad = [130.81, 164.81, 196.00, 261.63]; // C3, E3, G3, C4
@@ -8194,8 +8517,8 @@ export class Sound {
     // higher every tier, so the stack of ticks reads as a winding-up generator.
     // Short, bright, sits above the chord; sells "energy gathering" between dots.
     {
-      const whine = this.ctx.createOscillator();
-      const whineGain = this.ctx.createGain();
+      const whine = ctx.createOscillator();
+      const whineGain = ctx.createGain();
       whine.type = "sine";
       const wStart = hz * 2;
       const wEnd = hz * (3 + idx * 0.5);
@@ -8205,28 +8528,28 @@ export class Sound {
       whineGain.gain.exponentialRampToValueAtTime(0.04 * tierBoost, t + 0.02);
       whineGain.gain.exponentialRampToValueAtTime(0.0001, t + tail * 0.9);
       whine.connect(whineGain);
-      whineGain.connect(this.master);
+      whineGain.connect(dest);
       whine.start(t);
       whine.stop(t + tail + 0.04);
     }
 
     // Sub layer — sine at the root octave below for the felt depth.
-    const sub = this.ctx.createOscillator();
-    const subGain = this.ctx.createGain();
+    const sub = ctx.createOscillator();
+    const subGain = ctx.createGain();
     sub.type = "sine";
     sub.frequency.setValueAtTime(hz * 0.5, t);
     subGain.gain.setValueAtTime(0.0001, t);
     subGain.gain.exponentialRampToValueAtTime(0.16 * tierBoost, t + 0.005);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
     sub.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(dest);
     sub.start(t);
     sub.stop(t + tail + 0.04);
 
     // Body — triangle on the dot's chord note with a small upward chirp so the
     // tick feels like energy being deposited rather than a static pluck.
-    const body = this.ctx.createOscillator();
-    const bodyGain = this.ctx.createGain();
+    const body = ctx.createOscillator();
+    const bodyGain = ctx.createGain();
     body.type = "triangle";
     body.frequency.setValueAtTime(hz * 0.92, t);
     body.frequency.exponentialRampToValueAtTime(hz, t + 0.05);
@@ -8234,55 +8557,55 @@ export class Sound {
     bodyGain.gain.exponentialRampToValueAtTime(0.14 * tierBoost, t + 0.005);
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
     body.connect(bodyGain);
-    bodyGain.connect(this.master);
+    bodyGain.connect(dest);
     body.start(t);
     body.stop(t + tail + 0.04);
 
     // Octave-up partial — sine on the octave above gives definition.
-    const partial = this.ctx.createOscillator();
-    const partialGain = this.ctx.createGain();
+    const partial = ctx.createOscillator();
+    const partialGain = ctx.createGain();
     partial.type = "sine";
     partial.frequency.value = hz * 2;
     partialGain.gain.setValueAtTime(0.0001, t);
     partialGain.gain.exponentialRampToValueAtTime(0.07 * tierBoost, t + 0.004);
     partialGain.gain.exponentialRampToValueAtTime(0.0001, t + tail * 0.65);
     partial.connect(partialGain);
-    partialGain.connect(this.master);
+    partialGain.connect(dest);
     partial.start(t);
     partial.stop(t + tail * 0.65 + 0.04);
 
     // Fifth above for chord-fill at higher tiers — dot 2/3 get a richer harmonic
     // stack so the build sounds tonally fuller, not just louder.
     if (idx >= 1) {
-      const fifth = this.ctx.createOscillator();
-      const fifthGain = this.ctx.createGain();
+      const fifth = ctx.createOscillator();
+      const fifthGain = ctx.createGain();
       fifth.type = "sine";
       fifth.frequency.value = hz * 1.5;
       fifthGain.gain.setValueAtTime(0.0001, t);
       fifthGain.gain.exponentialRampToValueAtTime(0.05 * tierBoost, t + 0.004);
       fifthGain.gain.exponentialRampToValueAtTime(0.0001, t + tail * 0.7);
       fifth.connect(fifthGain);
-      fifthGain.connect(this.master);
+      fifthGain.connect(dest);
       fifth.start(t);
       fifth.stop(t + tail * 0.7 + 0.04);
     }
 
     // Crystalline sparkle — bandpassed noise pip on the front of the tick. Tiny
     // but it makes the dot land with a satisfying "click" instead of a soft hum.
-    const sparkleBuf = this.makeNoiseBuffer(0.04);
+    const sparkleBuf = this.noiseBuffer(ctx, 0.04);
     if (sparkleBuf) {
-      const noise = this.ctx.createBufferSource();
+      const noise = ctx.createBufferSource();
       noise.buffer = sparkleBuf;
-      const filter = this.ctx.createBiquadFilter();
+      const filter = ctx.createBiquadFilter();
       filter.type = "bandpass";
       filter.frequency.value = 2400 + idx * 600;
       filter.Q.value = 4;
-      const gain = this.ctx.createGain();
+      const gain = ctx.createGain();
       gain.gain.setValueAtTime(0.08 * tierBoost, t);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
       noise.connect(filter);
       filter.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       noise.start(t);
       noise.stop(t + 0.06);
     }
@@ -8295,8 +8618,12 @@ export class Sound {
   playLaserChargeFail() {
     if (!this.enabled) return;
     this.ensureContext();
+    if (this.playBaked("laserChargeFail", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildLaserChargeFailGraph(this.ctx, this.master, this.voiceTime("laserChargeFail"));
+  }
+
+  private buildLaserChargeFailGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     const tail = 0.18;
     // Two detuned triangle voices descending a fifth — A3 → D3-ish. The detune
     // gives the buzz that reads as "wrong" vs. a clean tone.
@@ -8305,14 +8632,14 @@ export class Sound {
       { start: 220.0, end: 130.81, detune: 18, level: 0.13 },
     ];
     for (const v of voices) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = "triangle";
       osc.frequency.setValueAtTime(v.start, t);
       osc.frequency.exponentialRampToValueAtTime(v.end, t + tail);
       osc.detune.value = v.detune;
       // Lowpass closes alongside the slide for the muffled "deflated" quality.
-      const filter = this.ctx.createBiquadFilter();
+      const filter = ctx.createBiquadFilter();
       filter.type = "lowpass";
       filter.frequency.setValueAtTime(1600, t);
       filter.frequency.exponentialRampToValueAtTime(420, t + tail);
@@ -8322,7 +8649,7 @@ export class Sound {
       gain.gain.exponentialRampToValueAtTime(0.0001, t + tail + 0.04);
       osc.connect(filter);
       filter.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(t);
       osc.stop(t + tail + 0.08);
     }
@@ -8338,59 +8665,82 @@ export class Sound {
   // Voice: soft sine pad — slow attack, long round decay, gentle detune for
   // analog-synth warmth. No spatial panning: a melody should sit centered in
   // the mix instead of jumping with each kill.
+  // Universal opening: root, fifth, ninth on the C pedal. Deep enough that
+  // the climb has 13 more steps to ascend before getting strained.
+  private static readonly COMBO_CHIME_ANCHORS: readonly number[] = [
+    65.41,   // C2
+    98.00,   // G2
+    146.83,  // D3
+  ];
+  // Scale tail (notes 3..15) per variation. Each is 13 ascending pitches
+  // chosen so the final note of the cycle lands somewhere bright but not
+  // piercing (<= ~880 Hz / A5) — well under the music's upper-layer centroid
+  // so the chime doesn't fight the music's high band.
+  private static readonly COMBO_CHIME_TAIL_MINOR_DORIAN: readonly number[] = [
+    // Eb, F, G, Bb, C, Eb, F, G, Bb, C, Eb, F, G — C minor pentatonic + F.
+    // Haunting: the Eb tracks the minor-third pad voicing.
+    155.56, 174.61, 196.00, 233.08, 261.63,
+    311.13, 349.23, 392.00, 466.16, 523.25,
+    622.25, 698.46, 783.99,
+  ];
+  private static readonly COMBO_CHIME_TAIL_MAJOR: readonly number[] = [
+    // E, G, A, C, D, E, G, A, C, D, E, G, A — C major pentatonic.
+    // Hopeful: pure C-major triadic colour.
+    164.81, 196.00, 220.00, 261.63, 293.66,
+    329.63, 392.00, 440.00, 523.25, 587.33,
+    659.25, 783.99, 880.00,
+  ];
+  private static readonly COMBO_CHIME_TAIL_NO_3RD: readonly number[] = [
+    // F, G, A, C, D, F, G, A, C, D, F, G, A — C dorian/mixolydian crossover
+    // with the major/minor 3rd avoided entirely. Mode-safe default when no
+    // halo music is playing.
+    174.61, 196.00, 220.00, 261.63, 293.66,
+    349.23, 392.00, 440.00, 523.25, 587.33,
+    698.46, 783.99, 880.00,
+  ];
+  // Every fundamental any (variation, combo) pair can land on. The three
+  // tails overlap heavily — 42 (variation, step) combinations collapse to
+  // this many distinct notes, which is what the bake enumerates. Keyed by
+  // the pitch itself (not a step index) so re-ordering or extending a tail
+  // reuses the notes it already has instead of invalidating every file.
+  static readonly COMBO_CHIME_PITCHES: readonly number[] = Array.from(new Set([
+    ...Sound.COMBO_CHIME_ANCHORS,
+    ...Sound.COMBO_CHIME_TAIL_MINOR_DORIAN,
+    ...Sound.COMBO_CHIME_TAIL_MAJOR,
+    ...Sound.COMBO_CHIME_TAIL_NO_3RD,
+  ])).sort((a, b) => a - b);
+
+  // Which fundamental this combo value rings, given the halo music's modal
+  // colour. Pure function of (variation, comboValue) — the bake key.
+  private comboChimeFundamental(comboValue: number): number {
+    const v = this.haloMusic?.variation;
+    const tail = v === "synthwave-el"
+      ? Sound.COMBO_CHIME_TAIL_MAJOR
+      : (v === "musicbox-sb" || v === "cinematic-el")
+        ? Sound.COMBO_CHIME_TAIL_MINOR_DORIAN
+        : Sound.COMBO_CHIME_TAIL_NO_3RD;
+    const scale = [...Sound.COMBO_CHIME_ANCHORS, ...tail];
+    return scale[(comboValue - 2) % scale.length];
+  }
+
   playComboChime(comboValue: number, _pos?: Pos, durationScale: number = 1) {
     if (!this.enabled) return;
     this.ensureContext();
     if (!this.ctx || !this.master) return;
     if (comboValue < 2) return;
-    // Universal opening: root, fifth, ninth on the C pedal. Deep enough that
-    // the climb has 13 more steps to ascend before getting strained.
-    const ANCHOR_HZ: number[] = [
-      65.41,   // C2
-      98.00,   // G2
-      146.83,  // D3
-    ];
-    // Scale tail (notes 3..15) per variation. Each is 13 ascending pitches
-    // chosen so the final note of the cycle lands somewhere bright but not
-    // piercing (≤ ~880 Hz / A5) — well under the music's upper-layer centroid
-    // so the chime doesn't fight the music's high band.
-    const TAIL_MINOR_DORIAN: number[] = [
-      // Eb, F, G, Bb, C, Eb, F, G, Bb, C, Eb, F, G — C minor pentatonic + F.
-      // Haunting: the Eb tracks the minor-third pad voicing.
-      155.56, 174.61, 196.00, 233.08, 261.63,
-      311.13, 349.23, 392.00, 466.16, 523.25,
-      622.25, 698.46, 783.99,
-    ];
-    const TAIL_MAJOR: number[] = [
-      // E, G, A, C, D, E, G, A, C, D, E, G, A — C major pentatonic.
-      // Hopeful: pure C-major triadic colour.
-      164.81, 196.00, 220.00, 261.63, 293.66,
-      329.63, 392.00, 440.00, 523.25, 587.33,
-      659.25, 783.99, 880.00,
-    ];
-    const TAIL_NO_3RD: number[] = [
-      // F, G, A, C, D, F, G, A, C, D, F, G, A — C dorian/mixolydian crossover
-      // with the major/minor 3rd avoided entirely. Mode-safe default when no
-      // halo music is playing.
-      174.61, 196.00, 220.00, 261.63, 293.66,
-      349.23, 392.00, 440.00, 523.25, 587.33,
-      698.46, 783.99, 880.00,
-    ];
-    const tailFor = (): number[] => {
-      const v = this.haloMusic?.variation;
-      if (v === "synthwave-el") return TAIL_MAJOR;
-      if (v === "musicbox-sb" || v === "cinematic-el") return TAIL_MINOR_DORIAN;
-      return TAIL_NO_3RD;
-    };
-    const scale = [...ANCHOR_HZ, ...tailFor()];
-    const idx = (comboValue - 2) % scale.length;
-    const fundamental = scale[idx];
+    const fundamental = this.comboChimeFundamental(comboValue);
+    // Only the full-length note is baked — the killed-parade replay shortens
+    // it (durationScale 0.5), and a stretched buffer would shorten the attack
+    // and detune the note, so that variant stays live.
+    if (durationScale === 1 && this.playBaked("comboChime", fundamental)) return;
+    this.buildComboChimeGraph(this.ctx, this.master, this.voiceTime("comboChime"), fundamental, durationScale);
+  }
 
-    const t = this.ctx.currentTime;
+  private buildComboChimeGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, fundamental: number, durationScale: number) {
     // Three detuned sines per note — fundamental + ±7-cent detune pair gives
     // a soft analog-synth chorus without any extra hardware. Lowpass tracks
     // fundamental so high notes don't shrill; low notes keep body.
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.Q.value = 0.6;
     // Cap the cutoff so deep notes still pass; never below 1.2 kHz so the
@@ -8405,22 +8755,22 @@ export class Sound {
     const sustain = 2.0 * durationScale;
     const release = 3.0 * durationScale;
 
-    const env = this.ctx.createGain();
+    const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, t);
     env.gain.exponentialRampToValueAtTime(peak, t + attack);
     env.gain.exponentialRampToValueAtTime(peak * 0.45, t + attack + sustain);
     env.gain.exponentialRampToValueAtTime(0.0001, t + attack + sustain + release);
     env.connect(filter);
-    filter.connect(this.master);
+    filter.connect(dest);
 
     const detuneCents = [0, -7, +7];
     const voices: OscillatorNode[] = [];
     for (const cents of detuneCents) {
-      const osc = this.ctx.createOscillator();
+      const osc = ctx.createOscillator();
       osc.type = "sine";
       osc.frequency.value = fundamental;
       osc.detune.value = cents;
-      const vGain = this.ctx.createGain();
+      const vGain = ctx.createGain();
       vGain.gain.value = cents === 0 ? 0.5 : 0.32;
       osc.connect(vGain);
       vGain.connect(env);
@@ -8431,10 +8781,10 @@ export class Sound {
     // read as a defined pitch instead of a rumble. Fades fast so it doesn't
     // colour the higher notes.
     if (fundamental < 200) {
-      const shimmer = this.ctx.createOscillator();
+      const shimmer = ctx.createOscillator();
       shimmer.type = "sine";
       shimmer.frequency.value = fundamental * 2;
-      const sGain = this.ctx.createGain();
+      const sGain = ctx.createGain();
       sGain.gain.value = 0.18;
       shimmer.connect(sGain);
       sGain.connect(env);
@@ -8449,8 +8799,12 @@ export class Sound {
   // by the rare crystal asteroid kind. Designed to be ear-catching exactly
   // because it's uncommon; if it ever plays often, soften it back down.
   private playTink() {
+    if (this.playBaked("tink", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildTinkGraph(this.ctx, this.master, this.voiceTime("tink"));
+  }
+
+  private buildTinkGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     const peakBase = cfgN("tink", "peak", 0.18);
     const decay = cfgN("tink", "decay", 0.4);
     const partialFrequencies = [
@@ -8458,8 +8812,8 @@ export class Sound {
       cfgN("tink", "partial2Hz", 2637),
     ];
     for (let i = 0; i < partialFrequencies.length; i++) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.setValueAtTime(partialFrequencies[i], t);
       const peak = peakBase / (i + 1);
@@ -8467,7 +8821,7 @@ export class Sound {
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
       osc.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(t);
       osc.stop(t + decay + 0.02);
     }
@@ -8488,6 +8842,13 @@ export class Sound {
   // size === "large" gets a lower fundamental and a longer tail so a big
   // asteroid resonates longer than a fragment.
   private playCrystalShatter(size: "large" | "small", ringPitchRatio = 1) {
+    const name = size === "large" ? "crystalShatterLarge" : "crystalShatterSmall";
+    if (this.playBaked(name, ringPitchRatio)) return;
+    if (!this.ctx || !this.master) return;
+    this.buildCrystalShatterGraph(this.ctx, this.master, this.voiceTime(name), size, ringPitchRatio);
+  }
+
+  private buildCrystalShatterGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, size: "large" | "small", ringPitchRatio: number) {
     // ringPitchRatio === 0 sentinel: on-beat kill — snap the fundamental to
     // the fireBeat pluck note dropped an octave (G3 = 196 Hz for large, G4
     // for small) so the fork rings in key with the rhythm shot but sits in
@@ -8498,29 +8859,27 @@ export class Sound {
     const fundamental = snapToG
       ? (size === "large" ? G3 : G3 * 2)
       : baseHz * ringPitchRatio;
-    if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
     const isLarge = size === "large";
     const ringDur = isLarge ? 3.6 : 2.4;
     const ringPeak = isLarge ? 0.16 : 0.12;
     // Soft mallet onset — the fork meeting the glass. Lowpassed noise pop,
     // very brief, sits well below the partials so it's felt more than heard.
     const tapDur = 0.05;
-    const tapBuf = this.makeNoiseBuffer(tapDur);
+    const tapBuf = this.noiseBuffer(ctx, tapDur);
     if (tapBuf) {
-      const src = this.ctx.createBufferSource();
+      const src = ctx.createBufferSource();
       src.buffer = tapBuf;
-      const lp = this.ctx.createBiquadFilter();
+      const lp = ctx.createBiquadFilter();
       lp.type = "lowpass";
       lp.frequency.value = isLarge ? 900 : 1400;
-      const g = this.ctx.createGain();
+      const g = ctx.createGain();
       const tapPeak = isLarge ? 0.08 : 0.06;
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(tapPeak, t + 0.004);
       g.gain.exponentialRampToValueAtTime(0.0001, t + tapDur);
       src.connect(lp);
       lp.connect(g);
-      g.connect(this.master);
+      g.connect(dest);
       src.start(t);
       src.stop(t + tapDur);
     }
@@ -8536,8 +8895,8 @@ export class Sound {
       { ratio: 4.0, gain: 0.08, decayMul: 0.30, attack: 0.008 }, // two octaves
     ];
     for (const { ratio, gain: gMul, decayMul, attack } of partials) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.setValueAtTime(fundamental * ratio, t);
       const peak = ringPeak * gMul;
@@ -8546,22 +8905,22 @@ export class Sound {
       gain.gain.exponentialRampToValueAtTime(peak, t + attack);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + tail);
       osc.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(t);
       osc.stop(t + tail + 0.02);
     }
     // Sub-octave body — adds weight to large rings without muddying small
     // frags. Slower attack so it blooms underneath the fundamental.
     const subPeak = ringPeak * (isLarge ? 0.55 : 0.30);
-    const subOsc = this.ctx.createOscillator();
-    const subGain = this.ctx.createGain();
+    const subOsc = ctx.createOscillator();
+    const subGain = ctx.createGain();
     subOsc.type = "sine";
     subOsc.frequency.setValueAtTime(fundamental * 0.5, t);
     subGain.gain.setValueAtTime(0.0001, t);
     subGain.gain.exponentialRampToValueAtTime(subPeak, t + 0.08);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + ringDur);
     subOsc.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(dest);
     subOsc.start(t);
     subOsc.stop(t + ringDur + 0.02);
   }
@@ -8574,8 +8933,12 @@ export class Sound {
   // inharmonic sparkle so the tone is round rather than glassy. Longer tail
   // (~0.32s) lets adjacent notes overlap into a continuous haunted line.
   private playScoreBlip(pitchRatio = 1) {
+    if (this.playBaked("scoreBlip", pitchRatio)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.voiceTime("scoreBlip");
+    this.buildScoreBlipGraph(this.ctx, this.master, this.voiceTime("scoreBlip"), pitchRatio);
+  }
+
+  private buildScoreBlipGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, pitchRatio: number) {
     // Dropped an octave (E4 → E3) so the drain line sits in a baritone /
     //   cello register instead of music-box height. Upper-harmonic peaks
     //   pulled down so the bright triangle partial doesn't reintroduce the
@@ -8589,15 +8952,15 @@ export class Sound {
       { freq: root * 3,      peak: 0.003, decay: 0.08, type: "triangle" },
     ];
     for (const { freq, peak, decay, type } of layers) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = type;
       osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, t);
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.006);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
       osc.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(t);
       osc.stop(t + decay + 0.02);
     }
@@ -8611,13 +8974,19 @@ export class Sound {
   // The drain melody's downbeat notes are chord tones of these voicings, so
   // the two voices interlock instead of fighting.
   private playSummaryDownbeat(chordIndex = 0, duckPad = false) {
+    const name = duckPad ? "summaryDownbeatDucked" : "summaryDownbeat";
+    const chord = ((chordIndex % 4) + 4) % 4;
+    if (this.playBaked(name, chord)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.voiceTime("summaryDownbeat");
+    this.buildSummaryDownbeatGraph(this.ctx, this.master, this.voiceTime(name), chord, duckPad);
+  }
+
+  private buildSummaryDownbeatGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, chordIndex: number, duckPad: boolean) {
     // Body: sine at A1 (~55 Hz) with a tiny initial pitch snap for "thump".
     //   Dropped a major third lower than before so it sits under the deeper
     //   scoreBlip without crowding the melody register.
-    const body = this.ctx.createOscillator();
-    const bodyGain = this.ctx.createGain();
+    const body = ctx.createOscillator();
+    const bodyGain = ctx.createGain();
     body.type = "sine";
     body.frequency.setValueAtTime(110, t);
     body.frequency.exponentialRampToValueAtTime(55, t + 0.014);
@@ -8625,28 +8994,28 @@ export class Sound {
     bodyGain.gain.exponentialRampToValueAtTime(0.40, t + 0.003);
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
     body.connect(bodyGain);
-    bodyGain.connect(this.master);
+    bodyGain.connect(dest);
     body.start(t);
     body.stop(t + 0.24);
     // Click: short bandpassed noise so the transient locks the beat in time.
     //   Centered lower (900 Hz vs the old 1800) so it reads as a soft mallet
     //   rather than a crisp tick — fits the haunting palette.
-    const noise = this.ctx.createBufferSource();
-    const buf = this.ctx.createBuffer(1, 512, this.ctx.sampleRate);
+    const noise = ctx.createBufferSource();
+    const buf = ctx.createBuffer(1, 512, ctx.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
     noise.buffer = buf;
-    const bp = this.ctx.createBiquadFilter();
+    const bp = ctx.createBiquadFilter();
     bp.type = "bandpass";
     bp.frequency.value = 900;
     bp.Q.value = 1.4;
-    const noiseGain = this.ctx.createGain();
+    const noiseGain = ctx.createGain();
     noiseGain.gain.setValueAtTime(0.0001, t);
     noiseGain.gain.exponentialRampToValueAtTime(0.05, t + 0.001);
     noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.025);
     noise.connect(bp);
     bp.connect(noiseGain);
-    noiseGain.connect(this.master);
+    noiseGain.connect(dest);
     noise.start(t);
     noise.stop(t + 0.04);
 
@@ -8670,8 +9039,8 @@ export class Sound {
     //   then fades just in time for the next downbeat's chord to take over.
     for (let i = 0; i < chord.length; i++) {
       const freq = chord[i];
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.value = freq;
       const peak = (0.085 / (1 + i * 0.35)) * padScale; // root loudest, top quietest
@@ -8679,7 +9048,7 @@ export class Sound {
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.06);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
       osc.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(t);
       osc.stop(t + 1.45);
     }
@@ -8704,14 +9073,18 @@ export class Sound {
   // than "pickup confirmed". Bandpass-filtered white-noise wash underneath
   // gives the air-suspended pod a breath of presence.
   private playCanisterAppear() {
+    if (this.playBaked("canisterAppear", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildCanisterAppearGraph(this.ctx, this.master, this.voiceTime("canisterAppear"));
+  }
+
+  private buildCanisterAppearGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     // Cmaj9 partials: C6, E6, G6, D7 — open, airy, unambiguously friendly.
     const partialFrequencies = [1046.5, 1318.5, 1568.0, 2349.3];
     for (let i = 0; i < partialFrequencies.length; i++) {
       const start = t + i * 0.085;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.setValueAtTime(partialFrequencies[i], start);
       const peak = 0.085 / (1 + i * 0.25);
@@ -8719,27 +9092,27 @@ export class Sound {
       gain.gain.exponentialRampToValueAtTime(peak, start + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.9);
       osc.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(start);
       osc.stop(start + 0.95);
     }
     // Soft airy halo — bandpassed noise behind the partials.
-    const noiseBuf = this.makeNoiseBuffer(0.6);
+    const noiseBuf = this.noiseBuffer(ctx, 0.6);
     if (noiseBuf) {
-      const noise = this.ctx.createBufferSource();
+      const noise = ctx.createBufferSource();
       noise.buffer = noiseBuf;
-      const filter = this.ctx.createBiquadFilter();
+      const filter = ctx.createBiquadFilter();
       filter.type = "bandpass";
       filter.frequency.setValueAtTime(2400, t);
       filter.frequency.exponentialRampToValueAtTime(5000, t + 0.5);
       filter.Q.value = 1.4;
-      const nGain = this.ctx.createGain();
+      const nGain = ctx.createGain();
       nGain.gain.setValueAtTime(0.0001, t);
       nGain.gain.exponentialRampToValueAtTime(0.04, t + 0.08);
       nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
       noise.connect(filter);
       filter.connect(nGain);
-      nGain.connect(this.master);
+      nGain.connect(dest);
       noise.start(t);
       noise.stop(t + 0.6);
     }
@@ -8751,8 +9124,12 @@ export class Sound {
   // pod's "regret" rather than another blast. Heavily attenuated so it
   // colors the explosion instead of competing with it.
   private playCanisterDestroyed() {
+    if (this.playBaked("canisterDestroyed", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildCanisterDestroyedGraph(this.ctx, this.master, this.voiceTime("canisterDestroyed"));
+  }
+
+  private buildCanisterDestroyedGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     // Voice pairs: [startHz, endHz]. The fall from a major triad partial
     // into a minor one is what gives this its "aw, no" quality.
     const voices: Array<[number, number]> = [
@@ -8762,16 +9139,16 @@ export class Sound {
     ];
     for (let i = 0; i < voices.length; i++) {
       const [fStart, fEnd] = voices[i];
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.setValueAtTime(fStart, t + 0.04);
       osc.frequency.exponentialRampToValueAtTime(fEnd, t + 0.7);
       // Slow vibrato — gives the descent a vocal, almost weeping quality.
-      const lfo = this.ctx.createOscillator();
+      const lfo = ctx.createOscillator();
       lfo.type = "sine";
       lfo.frequency.value = 5.5;
-      const lfoDepth = this.ctx.createGain();
+      const lfoDepth = ctx.createGain();
       lfoDepth.gain.value = fStart * 0.012;
       lfo.connect(lfoDepth);
       lfoDepth.connect(osc.frequency);
@@ -8780,7 +9157,7 @@ export class Sound {
       gain.gain.exponentialRampToValueAtTime(peak, t + 0.06);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
       osc.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(t);
       lfo.start(t);
       osc.stop(t + 1.15);
@@ -8808,64 +9185,68 @@ export class Sound {
   // a heartbeat through the floor — the boss thinking. Short (~0.45s) so a
   // burst of pulses on a busy slot doesn't smear into one continuous hum.
   private playBossPulse() {
+    if (this.playBaked("bossPulse", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildBossPulseGraph(this.ctx, this.master, this.voiceTime("bossPulse"));
+  }
+
+  private buildBossPulseGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     // Sub sine — the lowest layer, pitches down slightly across the tail.
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.setValueAtTime(58, t);
     sub.frequency.exponentialRampToValueAtTime(38, t + 0.42);
-    const subGain = this.ctx.createGain();
+    const subGain = ctx.createGain();
     subGain.gain.setValueAtTime(0.0001, t);
     subGain.gain.exponentialRampToValueAtTime(0.85, t + 0.012);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
     sub.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(dest);
     sub.start(t);
     sub.stop(t + 0.58);
     // Body — detuned-saw growl through a closing lowpass. Provides the
     // gritty edge so the pulse reads as "machine breathing" instead of just
     // a kick drum.
     for (const detune of [-8, 8]) {
-      const body = this.ctx.createOscillator();
+      const body = ctx.createOscillator();
       body.type = "sawtooth";
       body.frequency.setValueAtTime(82, t);
       body.frequency.exponentialRampToValueAtTime(46, t + 0.45);
       body.detune.value = detune;
-      const lp = this.ctx.createBiquadFilter();
+      const lp = ctx.createBiquadFilter();
       lp.type = "lowpass";
       lp.Q.value = 3;
       lp.frequency.setValueAtTime(420, t);
       lp.frequency.exponentialRampToValueAtTime(110, t + 0.42);
-      const g = this.ctx.createGain();
+      const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.22, t + 0.018);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
       body.connect(lp);
       lp.connect(g);
-      g.connect(this.master);
+      g.connect(dest);
       body.start(t);
       body.stop(t + 0.52);
     }
     // Hot front transient — a tiny noise burst at the front shaped by a
     // bandpass. Adds the percussive "clap" so the start of the pulse is
     // crisp instead of muddy.
-    const noiseBuf = this.makeNoiseBuffer(0.18);
+    const noiseBuf = this.noiseBuffer(ctx, 0.18);
     if (noiseBuf) {
-      const n = this.ctx.createBufferSource();
+      const n = ctx.createBufferSource();
       n.buffer = noiseBuf;
-      const bp = this.ctx.createBiquadFilter();
+      const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
       bp.frequency.setValueAtTime(1800, t);
       bp.frequency.exponentialRampToValueAtTime(220, t + 0.12);
       bp.Q.value = 0.9;
-      const g = this.ctx.createGain();
+      const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.18, t + 0.005);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
       n.connect(bp);
       bp.connect(g);
-      g.connect(this.master);
+      g.connect(dest);
       n.start(t);
       n.stop(t + 0.16);
     }
@@ -8878,20 +9259,24 @@ export class Sound {
   // and a short bright noise crack for the point of contact. Tuned to land as
   // a meaty "CHONK" distinct from the boss's own bossPulse voice.
   private playBossHit() {
+    if (this.playBaked("bossHit", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildBossHitGraph(this.ctx, this.master, this.voiceTime("bossHit"));
+  }
+
+  private buildBossHitGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
 
     // Sub thud — fast attack, quick pitch-drop, the mass of the impact.
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.setValueAtTime(150, t);
     sub.frequency.exponentialRampToValueAtTime(46, t + 0.16);
-    const subGain = this.ctx.createGain();
+    const subGain = ctx.createGain();
     subGain.gain.setValueAtTime(0.0001, t);
     subGain.gain.exponentialRampToValueAtTime(0.95, t + 0.006);
     subGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
     sub.connect(subGain);
-    subGain.connect(this.master);
+    subGain.connect(dest);
     sub.start(t);
     sub.stop(t + 0.36);
 
@@ -8899,40 +9284,40 @@ export class Sound {
     // the armor plate reads as struck metal, not a tuned note. Longer decay
     // than the sub so the hit has a tail.
     for (const partial of [196, 271]) {
-      const o = this.ctx.createOscillator();
+      const o = ctx.createOscillator();
       o.type = "triangle";
       o.frequency.setValueAtTime(partial * 2.3, t);
       o.frequency.exponentialRampToValueAtTime(partial, t + 0.06);
-      const bp = this.ctx.createBiquadFilter();
+      const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
       bp.frequency.value = partial * 1.6;
       bp.Q.value = 4;
-      const g = this.ctx.createGain();
+      const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.3, t + 0.004);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
       o.connect(bp);
       bp.connect(g);
-      g.connect(this.master);
+      g.connect(dest);
       o.start(t);
       o.stop(t + 0.42);
     }
 
     // Contact crack — a short bright noise transient for the point of impact.
-    const noiseBuf = this.makeNoiseBuffer(0.12);
+    const noiseBuf = this.noiseBuffer(ctx, 0.12);
     if (noiseBuf) {
-      const n = this.ctx.createBufferSource();
+      const n = ctx.createBufferSource();
       n.buffer = noiseBuf;
-      const hp = this.ctx.createBiquadFilter();
+      const hp = ctx.createBiquadFilter();
       hp.type = "highpass";
       hp.frequency.value = 1400;
-      const g = this.ctx.createGain();
+      const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.35, t + 0.003);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
       n.connect(hp);
       hp.connect(g);
-      g.connect(this.master);
+      g.connect(dest);
       n.start(t);
       n.stop(t + 0.1);
     }
@@ -8948,8 +9333,12 @@ export class Sound {
   // tail. Tuned loud (peak ~0.65) so it cuts through whatever halo music
   // happens to be playing.
   private playBossEyeOpenStinger() {
+    if (this.playBaked("bossEyeOpenStinger", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildBossEyeOpenStingerGraph(this.ctx, this.master, this.voiceTime("bossEyeOpenStinger"));
+  }
+
+  private buildBossEyeOpenStingerGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
 
     // Tritone bite — three detuned saws on each note for a thick cluster.
     // Eb4 = 311.13 Hz, A4 = 440.0 Hz (the augmented fourth = devil's interval).
@@ -8958,7 +9347,7 @@ export class Sound {
     const noteHz = [311.13, 440.0];
     for (const baseHz of noteHz) {
       for (const detune of [-12, 0, 12]) {
-        const o = this.ctx.createOscillator();
+        const o = ctx.createOscillator();
         o.type = "sawtooth";
         o.frequency.setValueAtTime(baseHz, t);
         // Pitch-down dive over 0.7s — slides each note down a major sixth.
@@ -8966,19 +9355,19 @@ export class Sound {
         o.detune.value = detune;
         // Closing lowpass — bright at the front (the bite), darker as it
         // dives so the dissonance becomes a low menacing growl.
-        const lp = this.ctx.createBiquadFilter();
+        const lp = ctx.createBiquadFilter();
         lp.type = "lowpass";
         lp.Q.value = 6;
         lp.frequency.setValueAtTime(2400, t);
         lp.frequency.exponentialRampToValueAtTime(380, t + 0.85);
-        const g = this.ctx.createGain();
+        const g = ctx.createGain();
         g.gain.setValueAtTime(0.0001, t);
         g.gain.exponentialRampToValueAtTime(0.18, t + 0.005);
         g.gain.linearRampToValueAtTime(0.18, t + 0.30);
         g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
         o.connect(lp);
         lp.connect(g);
-        g.connect(this.master);
+        g.connect(dest);
         o.start(t);
         o.stop(t + 1.15);
       }
@@ -8986,36 +9375,36 @@ export class Sound {
 
     // Sub-bass C1 thump under the cluster — pushes the dissonance down into
     // the chest. Pure sine so it doesn't fight the saw growl above it.
-    const sub = this.ctx.createOscillator();
+    const sub = ctx.createOscillator();
     sub.type = "sine";
     sub.frequency.setValueAtTime(32.7, t);
     sub.frequency.exponentialRampToValueAtTime(22, t + 0.9);
-    const subG = this.ctx.createGain();
+    const subG = ctx.createGain();
     subG.gain.setValueAtTime(0.0001, t);
     subG.gain.exponentialRampToValueAtTime(0.85, t + 0.012);
     subG.gain.exponentialRampToValueAtTime(0.0001, t + 1.0);
     sub.connect(subG);
-    subG.connect(this.master);
+    subG.connect(dest);
     sub.start(t);
     sub.stop(t + 1.05);
 
     // Noise crash tail at the start — sells the impact of the eye opening.
-    const noiseBuf = this.makeNoiseBuffer(0.5);
+    const noiseBuf = this.noiseBuffer(ctx, 0.5);
     if (noiseBuf) {
-      const n = this.ctx.createBufferSource();
+      const n = ctx.createBufferSource();
       n.buffer = noiseBuf;
-      const bp = this.ctx.createBiquadFilter();
+      const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
       bp.frequency.setValueAtTime(3000, t);
       bp.frequency.exponentialRampToValueAtTime(280, t + 0.45);
       bp.Q.value = 0.7;
-      const g = this.ctx.createGain();
+      const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.35, t + 0.006);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
       n.connect(bp);
       bp.connect(g);
-      g.connect(this.master);
+      g.connect(dest);
       n.start(t);
       n.stop(t + 0.5);
     }
@@ -9026,8 +9415,12 @@ export class Sound {
   // tonal opposite of the cyan→gold combo halo lighting up. Kept short
   // (~0.4s) so it doesn't step on the shot or hit that triggered the loss.
   private playComboLost() {
+    if (this.playBaked("comboLost", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildComboLostGraph(this.ctx, this.master, this.voiceTime("comboLost"));
+  }
+
+  private buildComboLostGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     // Two slightly detuned triangle voices — the small detune is what
     // gives the tail its buzzy "wrrr" character instead of a clean sigh.
     const voices: Array<{ start: number; end: number; detune: number; level: number }> = [
@@ -9035,25 +9428,25 @@ export class Sound {
       { start: 392.0, end: 130.8, detune: 12, level: 0.12 },  // detuned twin
     ];
     for (const v of voices) {
-      const osc = this.ctx.createOscillator();
+      const osc = ctx.createOscillator();
       osc.type = "triangle";
       osc.frequency.setValueAtTime(v.start, t);
       osc.frequency.exponentialRampToValueAtTime(v.end, t + 0.34);
       osc.detune.value = v.detune;
       // Lowpass closes alongside the pitch drop — kills the brightness so
       // the tail genuinely fades into the floor instead of buzzing on.
-      const filter = this.ctx.createBiquadFilter();
+      const filter = ctx.createBiquadFilter();
       filter.type = "lowpass";
       filter.Q.value = 1.2;
       filter.frequency.setValueAtTime(1800, t);
       filter.frequency.exponentialRampToValueAtTime(380, t + 0.34);
-      const gain = this.ctx.createGain();
+      const gain = ctx.createGain();
       gain.gain.setValueAtTime(0.0001, t);
       gain.gain.exponentialRampToValueAtTime(v.level, t + 0.025);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
       osc.connect(filter);
       filter.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(t);
       osc.stop(t + 0.45);
     }
@@ -9066,30 +9459,34 @@ export class Sound {
   // shot. The two losses share a family so the player groups them as "rhythm
   // broke", yet are distinguishable so they learn which half they got wrong.
   private playComboLostFire() {
+    if (this.playBaked("comboLostFire", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
+    this.buildComboLostFireGraph(this.ctx, this.master, this.voiceTime("comboLostFire"));
+  }
+
+  private buildComboLostFireGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
     const voices: Array<{ start: number; end: number; detune: number; level: number }> = [
       { start: 523.3, end: 196.0, detune: 0, level: 0.14 },   // C5 → G3
       { start: 523.3, end: 196.0, detune: -22, level: 0.11 }, // sour twin, wider detune
     ];
     for (const v of voices) {
-      const osc = this.ctx.createOscillator();
+      const osc = ctx.createOscillator();
       osc.type = "sawtooth";
       osc.frequency.setValueAtTime(v.start, t);
       osc.frequency.exponentialRampToValueAtTime(v.end, t + 0.22);
       osc.detune.value = v.detune;
-      const filter = this.ctx.createBiquadFilter();
+      const filter = ctx.createBiquadFilter();
       filter.type = "lowpass";
       filter.Q.value = 1.4;
       filter.frequency.setValueAtTime(2600, t);
       filter.frequency.exponentialRampToValueAtTime(520, t + 0.22);
-      const gain = this.ctx.createGain();
+      const gain = ctx.createGain();
       gain.gain.setValueAtTime(0.0001, t);
       gain.gain.exponentialRampToValueAtTime(v.level, t + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
       osc.connect(filter);
       filter.connect(gain);
-      gain.connect(this.master);
+      gain.connect(dest);
       osc.start(t);
       osc.stop(t + 0.33);
     }
@@ -9097,10 +9494,14 @@ export class Sound {
 
   // Soft glassy "ting" with a quick noise wash — the shield absorbing a hit.
   private playShieldPop() {
+    if (this.playBaked("shieldPop", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+    this.buildShieldPopGraph(this.ctx, this.master, this.voiceTime("shieldPop"));
+  }
+
+  private buildShieldPopGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
     osc.type = "sine";
     osc.frequency.setValueAtTime(880, t);
     osc.frequency.exponentialRampToValueAtTime(440, t + 0.3);
@@ -9108,48 +9509,52 @@ export class Sound {
     gain.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
     osc.connect(gain);
-    gain.connect(this.master);
+    gain.connect(dest);
     osc.start(t);
     osc.stop(t + 0.38);
 
-    const noiseBuf = this.makeNoiseBuffer(0.18);
+    const noiseBuf = this.noiseBuffer(ctx, 0.18);
     if (!noiseBuf) return;
-    const noise = this.ctx.createBufferSource();
+    const noise = ctx.createBufferSource();
     noise.buffer = noiseBuf;
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = "bandpass";
     filter.frequency.value = 3000;
     filter.Q.value = 2;
-    const nGain = this.ctx.createGain();
+    const nGain = ctx.createGain();
     nGain.gain.setValueAtTime(0.16, t);
     nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
     noise.connect(filter);
     filter.connect(nGain);
-    nGain.connect(this.master);
+    nGain.connect(dest);
     noise.start(t);
     noise.stop(t + 0.2);
   }
 
   // Sine carrier with a fast vibrato — a vocal "ooo" warble.
   private playWarble() {
+    if (this.playBaked("warble", 1)) return;
     if (!this.ctx || !this.master) return;
-    const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
+    this.buildWarbleGraph(this.ctx, this.master, this.voiceTime("warble"));
+  }
+
+  private buildWarbleGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
+    const osc = ctx.createOscillator();
     osc.type = "sine";
     osc.frequency.value = 587.33; // D5
-    const lfo = this.ctx.createOscillator();
+    const lfo = ctx.createOscillator();
     lfo.type = "sine";
     lfo.frequency.value = 8;
-    const lfoDepth = this.ctx.createGain();
+    const lfoDepth = ctx.createGain();
     lfoDepth.gain.value = 25;
     lfo.connect(lfoDepth);
     lfoDepth.connect(osc.frequency);
-    const gain = this.ctx.createGain();
+    const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, t);
     gain.gain.exponentialRampToValueAtTime(0.22, t + 0.05);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
     osc.connect(gain);
-    gain.connect(this.master);
+    gain.connect(dest);
     osc.start(t);
     lfo.start(t);
     osc.stop(t + 0.62);
