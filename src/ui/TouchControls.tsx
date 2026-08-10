@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { isTouchDevice } from "./touch";
-import { getBindings, DEFAULT_BINDINGS, type ControlAction } from "../game/controlBindings";
+import { getBindings, parseChord, type ControlAction } from "../game/controlBindings";
 import type { Input } from "../Input";
-
-// On-screen movement pad for touch devices. Synthesizes virtual key state
-//   into Game.localInput so the rest of the input pipeline (controlBindings,
-//   replayRecorder) keeps working unchanged. Each button presses the *first*
-//   key currently bound to its action, so rebinding in Settings carries
-//   through to the touch surface.
 
 type ActionDef = {
   action: ControlAction;
@@ -39,10 +33,11 @@ const PAD_ACTIONS: Partial<Record<ControlAction, ActionDef>> = {
 };
 
 const keysForAction = (action: ControlAction): string[] => {
-  const bound = getBindings()[action][0] || DEFAULT_BINDINGS[action][0] || "";
-  if (!bound.includes("+")) return bound ? [bound] : [];
-  const parts = bound.split("+").filter((p) => p.length > 0);
-  return parts.length > 0 ? parts : DEFAULT_BINDINGS[action];
+  const bound = getBindings()[action][0] || "";
+  if (!bound) return [];
+  const chord = parseChord(bound);
+  if (!chord.main) return [];
+  return [...chord.mods, chord.main];
 };
 
 const getInput = (): Input | null => {
@@ -60,6 +55,34 @@ export const TouchControls = () => {
   const [visible, setVisible] = useState<boolean>(() => getInitialVisible());
   const [pressed, setPressed] = useState<ControlAction[]>([]);
   const heldRef = useRef<Map<number, Held>>(new Map());
+  const keyCountRef = useRef<Map<string, number>>(new Map());
+  const actionCountRef = useRef<Map<ControlAction, number>>(new Map());
+
+  const acquireKeys = (input: Input | null, keys: string[]) => {
+    for (const k of keys) {
+      keyCountRef.current.set(k, (keyCountRef.current.get(k) ?? 0) + 1);
+      input?.setVirtual(k, true);
+    }
+  };
+
+  const releaseKeys = (input: Input | null, keys: string[]) => {
+    for (const k of keys) {
+      const next = (keyCountRef.current.get(k) ?? 0) - 1;
+      if (next > 0) {
+        keyCountRef.current.set(k, next);
+      } else {
+        keyCountRef.current.delete(k);
+        input?.setVirtual(k, false);
+      }
+    }
+  };
+
+  const bumpAction = (action: ControlAction, delta: number) => {
+    const next = (actionCountRef.current.get(action) ?? 0) + delta;
+    if (next > 0) actionCountRef.current.set(action, next);
+    else actionCountRef.current.delete(action);
+    setPressed([...actionCountRef.current.keys()]);
+  };
 
   useEffect(() => {
     if (!enabled) return;
@@ -67,11 +90,11 @@ export const TouchControls = () => {
       const detail = (e as CustomEvent<{ state: string }>).detail;
       const playing = detail.state === "playing" || detail.state === "dying";
       if (!playing) {
-        // release every held virtual key on state-out so a finger that was
-        //   down at game-over doesn't keep the ship spinning into the menu.
         const input = getInput();
-        if (input) for (const held of heldRef.current.values()) for (const k of held.keys) input.setVirtual(k, false);
+        for (const held of heldRef.current.values()) releaseKeys(input, held.keys);
         heldRef.current.clear();
+        keyCountRef.current.clear();
+        actionCountRef.current.clear();
         setPressed([]);
       }
       setVisible(playing);
@@ -90,39 +113,32 @@ export const TouchControls = () => {
     if (keys.length === 0) return;
     const btn = e.currentTarget;
     btn.setPointerCapture?.(e.pointerId);
-    // Release whatever this pointer was holding before (covers a drag from
-    //   one button into another that briefly fires pointerdown without an
-    //   intervening pointerup).
     const prev = heldRef.current.get(e.pointerId);
-    if (prev) for (const k of prev.keys) if (!keys.includes(k)) input.setVirtual(k, false);
     heldRef.current.set(e.pointerId, { action, keys });
-    for (const k of keys) input.setVirtual(k, true);
-    setPressed((cur) => {
-      const rest = prev ? cur.filter((a) => a !== prev.action) : cur;
-      return rest.includes(action) ? rest : [...rest, action];
-    });
-    // Drop focus so a paired hardware keyboard's Space press doesn't
-    //   re-trigger this button's default click action.
+    acquireKeys(input, keys);
+    bumpAction(action, 1);
+    if (prev) {
+      releaseKeys(input, prev.keys);
+      bumpAction(prev.action, -1);
+    }
     btn.blur();
   };
 
   const releasePointer = (e: React.PointerEvent<HTMLButtonElement>) => {
-    const input = getInput();
     const held = heldRef.current.get(e.pointerId);
     if (!held) return;
-    if (input) for (const k of held.keys) input.setVirtual(k, false);
     heldRef.current.delete(e.pointerId);
-    setPressed((cur) => cur.filter((a) => a !== held.action));
+    releaseKeys(getInput(), held.keys);
+    bumpAction(held.action, -1);
   };
 
-  const renderBtn = (def: ActionDef, group?: "rotate" | "thrust") => (
+  const renderBtn = (def: ActionDef) => (
     <button
       key={def.action}
       type="button"
       tabIndex={-1}
       className={[
         "tc-btn",
-        group ? `tc-btn--${group}` : "",
         `tc-btn--${def.action}`,
         pressed.includes(def.action) ? "tc-btn--pressed" : "",
       ].filter(Boolean).join(" ")}
@@ -140,13 +156,13 @@ export const TouchControls = () => {
   return (
     <div id="touch-controls">
       <div className="tc-cluster tc-cluster--rotate">
-        {renderBtn(PAD_ACTIONS.rotateLeft!, "rotate")}
-        {renderBtn(PAD_ACTIONS.rotateRight!, "rotate")}
+        {renderBtn(PAD_ACTIONS.rotateLeft!)}
+        {renderBtn(PAD_ACTIONS.rotateRight!)}
       </div>
       <div className="tc-cluster tc-cluster--action">
         <div className="tc-stack">
-          {renderBtn(PAD_ACTIONS.thrust!, "thrust")}
-          {renderBtn(PAD_ACTIONS.reverse!, "thrust")}
+          {renderBtn(PAD_ACTIONS.thrust!)}
+          {renderBtn(PAD_ACTIONS.reverse!)}
         </div>
         {renderBtn(PAD_ACTIONS.fire!)}
       </div>

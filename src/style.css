@@ -3294,7 +3294,6 @@ li.lb-self .lb-name-link:hover {
   filter: drop-shadow(0 0 4px rgba(140, 224, 255, 0.7));
 }
 
-.tc-btn:active,
 .tc-btn--pressed {
   background: radial-gradient(circle at 50% 35%, rgba(180, 235, 255, 0.45), rgba(20, 40, 80, 0.7) 70%);
   border-color: rgba(200, 235, 255, 0.95);
@@ -3323,7 +3322,6 @@ li.lb-self .lb-name-link:hover {
   filter: drop-shadow(0 0 5px rgba(255, 214, 130, 0.75));
 }
 
-.tc-btn--fire:active,
 .tc-btn--fire.tc-btn--pressed {
   background: radial-gradient(circle at 50% 35%, rgba(255, 236, 180, 0.55), rgba(70, 40, 10, 0.75) 70%);
   border-color: rgba(255, 244, 205, 0.95);

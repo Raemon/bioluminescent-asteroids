@@ -213,8 +213,8 @@ export const chordFromEvent = (
 // Split a binding string into its modifier prefix keys and its main key. The
 //   last "+"-separated part is the main key; everything before it must be a
 //   modifier. "shift+arrowleft" → { mods:["shift"], main:"arrowleft" }.
-type Chord = { mods: string[]; main: string };
-const parseChord = (binding: string): Chord => {
+export type Chord = { mods: string[]; main: string };
+export const parseChord = (binding: string): Chord => {
   const parts = binding.split("+");
   const main = parts[parts.length - 1];
   const mods = parts.slice(0, -1).filter(isModifier);
