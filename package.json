@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "build": "prisma generate && tsc -b && tsc -p api && vite build",
+    "build": "prisma generate && node scripts/migrate-if-db.mjs && tsc -b && tsc -p api && vite build",
     "preview": "vite preview",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
