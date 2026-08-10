@@ -452,14 +452,19 @@ const windowStart = (selection: number, total: number, size: number): number => 
   return Math.max(0, Math.min(maxStart, ideal));
 };
 
-const isOlderBuildReplay = (row: HighscoreRow): boolean =>
-  typeof row.replay_version === "number" && row.replay_version !== REPLAY_FORMAT_VERSION;
+type ReplayBuildMismatch = "older" | "newer" | null;
+
+const replayBuildMismatch = (row: HighscoreRow): ReplayBuildMismatch => {
+  const v = row.replay_version;
+  if (typeof v !== "number" || v === REPLAY_FORMAT_VERSION) return null;
+  return v < REPLAY_FORMAT_VERSION ? "older" : "newer";
+};
 
 const renderReplayButton = (row: HighscoreRow): string => {
-  const older = isOlderBuildReplay(row);
-  const cls = older ? "lb-replay lb-replay-older" : "lb-replay";
-  const title = older ? "Recorded on an older build" : "Watch replay";
-  const note = older ? `<span class="lb-replay-note">older build</span>` : "";
+  const mismatch = replayBuildMismatch(row);
+  const cls = mismatch ? "lb-replay lb-replay-older" : "lb-replay";
+  const title = mismatch ? `Recorded on a ${mismatch} build` : "Watch replay";
+  const note = mismatch ? `<span class="lb-replay-note">${mismatch} build</span>` : "";
   return `<button class="${cls}" data-replay-id="${row.id}" title="${title}" type="button">▶</button>${note}`;
 };
 
@@ -666,6 +671,7 @@ const exitPlayerProfile = (game: Game) => {
 };
 
 export const showLeaderboard = (game: Game) => {
+  hideLeaderboardNotice();
   bindLeaderboardClicks(game);
   bindLeaderboardFooter(game);
   bindPlayerPopstate(game);
@@ -696,6 +702,7 @@ export const showLeaderboard = (game: Game) => {
 //   work against this set; "show more" pages the pilot's remaining runs by score.
 //   Falls back to the hall-of-fame if the pilot has no rows or the fetch fails.
 const renderPlayerProfile = async (game: Game, name: string) => {
+  hideLeaderboardNotice();
   game.leaderboardNeighborhood = false;
   game.leaderboardRankBase = 0;
   game.leaderboardTopOnly = false;
@@ -1113,7 +1120,21 @@ const showLeaderboardNotice = (msg: string) => {
   leaderboardNoticeTimer = window.setTimeout(() => el.classList.add("hidden"), LEADERBOARD_NOTICE_MS);
 };
 
+const hideLeaderboardNotice = () => {
+  window.clearTimeout(leaderboardNoticeTimer);
+  document.getElementById("leaderboard-notice")?.classList.add("hidden");
+};
+
+const OLDER_BUILD_NOTICE = "Replay from an older build — can't be played.";
+const NEWER_BUILD_NOTICE = "Replay from a newer build — refresh to watch.";
+
 const launchReplay = async (game: Game, scoreId: number) => {
+  const row = game.leaderboardRows.find((r) => r.id === scoreId);
+  const mismatch = row ? replayBuildMismatch(row) : null;
+  if (mismatch) {
+    showLeaderboardNotice(mismatch === "newer" ? NEWER_BUILD_NOTICE : OLDER_BUILD_NOTICE);
+    return;
+  }
   try {
     const bytes = await fetchReplay(scoreId);
     await startReplay(game, bytes);
@@ -1121,7 +1142,7 @@ const launchReplay = async (game: Game, scoreId: number) => {
     console.error("[replay launch] failed:", err);
     showLeaderboardNotice(
       err instanceof UnsupportedReplayVersionError
-        ? "Replay from an older build — can't be played."
+        ? OLDER_BUILD_NOTICE
         : "Replay unavailable — couldn't load that run.",
     );
   }

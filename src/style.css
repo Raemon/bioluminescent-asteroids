@@ -1606,9 +1606,9 @@ li.lb-self .lb-name-link:hover {
   text-transform: uppercase;
 }
 
-.leaderboard-notice {
+#overlay .leaderboard-notice {
   font-size: 11px;
-  color: #ffd27a;
+  color: #ffd86a;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   text-align: center;

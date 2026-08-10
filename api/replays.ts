@@ -6,6 +6,7 @@ import { prisma } from "./_lib/prisma.js";
 //   ~3-8 KB gzipped, so this caps clearly-malicious payloads without rejecting
 //   any real run.
 const MAX_REPLAY_B64_LEN = 256 * 1024;
+const MAX_REPLAY_INFLATED_BYTES = 16 * 1024 * 1024;
 const MAX_NAME_LEN = 16;
 
 type IncomingReplay = {
@@ -32,10 +33,14 @@ const isBase64 = (s: string): boolean => /^[A-Za-z0-9+/=]+$/.test(s);
 
 const readReplayVersion = (b64: string): number | null => {
   try {
-    const json = gunzipSync(new Uint8Array(Buffer.from(b64, "base64"))).toString("utf8");
+    const buf = Buffer.from(b64, "base64");
+    const json = gunzipSync(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), {
+      maxOutputLength: MAX_REPLAY_INFLATED_BYTES,
+    }).toString("utf8");
     const payload = JSON.parse(json) as { header?: { v?: unknown } };
     const v = payload?.header?.v;
-    return typeof v === "number" && Number.isInteger(v) ? v : null;
+    if (typeof v !== "number" || !Number.isInteger(v)) return null;
+    return sanitizeInt(v, 0, 2_147_483_647);
   } catch {
     return null;
   }
