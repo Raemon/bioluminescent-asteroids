@@ -360,10 +360,19 @@ if (process.env.TRACE_TO && game.replayPlayer) {
   console.log(`=== end trace ===\n`);
 }
 
-if (!divs.length) {
-  console.log("RESULT: ✅ no checkpoint divergence — the re-sim reproduced the recording exactly.\n");
+const { __stepReplayFrameForTest: stepToEnd } = await import("../src/game/gameUpdate.ts");
+while (game.replayPlayer && stepToEnd(game)) {}
+const finalScore = game.score;
+const scoreOk = finalScore === payload.header.score;
+console.log(`  end state — recorded score ${payload.header.score} → replayed ${finalScore} ${scoreOk ? "✅" : "❌"}\n`);
+
+if (!divs.length && scoreOk) {
+  console.log("RESULT: ✅ no checkpoint divergence and the final score matches — the re-sim reproduced the recording exactly.\n");
   process.exit(0);
 }
+
+if (!scoreOk) console.log(`RESULT: ❌ final-score mismatch — recorded ${payload.header.score}, replayed ${finalScore}.`);
+if (!divs.length) { console.log(); process.exit(1); }
 
 console.log(`RESULT: ❌ ${divs.length} divergent checkpoint(s).`);
 const f0 = divs[0];

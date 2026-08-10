@@ -984,7 +984,7 @@ export class Sound {
     const now = this.ctx!.currentTime;
     const when = this.scheduledWhenForCall;
     if (when === null) return now;
-    if (import.meta.env.DEV && when < now - 0.001) {
+    if ((import.meta.env as unknown as { DEV?: boolean })?.DEV && when < now - 0.001) {
       // eslint-disable-next-line no-console
       console.warn(`[pulse-late] ${name} scheduled ${((now - when) * 1000).toFixed(1)}ms in the past`);
     }
@@ -1077,7 +1077,7 @@ export class Sound {
   // public/sounds/baked/ as MP3. The plugin no-ops if the file already exists,
   // so this is safe to call on every bake.
   private async dumpBakedToDev(name: SoundName, pitchRatio: number, buf: AudioBuffer): Promise<void> {
-    if (!import.meta.env.DEV) return;
+    if (!(import.meta.env as unknown as { DEV?: boolean })?.DEV) return;
     try {
       const wav = this.encodeWav(buf);
       await fetch(`/__bake-dump__?key=${encodeURIComponent(this.bakedFileSlug(name, pitchRatio))}`, {
@@ -1189,7 +1189,7 @@ export class Sound {
         // beat still plays, and surface the deficit in DEV so a frame-cost
         // regression that eats the lookahead budget shows up loudly in the
         // console instead of as subtle audible pulse lag.
-        if (import.meta.env.DEV && when < now - 0.001) {
+        if ((import.meta.env as unknown as { DEV?: boolean })?.DEV && when < now - 0.001) {
           // eslint-disable-next-line no-console
           console.warn(`[pulse-late] ${name} scheduled ${((now - when) * 1000).toFixed(1)}ms in the past`);
         }
@@ -1211,7 +1211,7 @@ export class Sound {
   // envelope+release+reverb tail.
   private async bakeSound(name: SoundName, pitchRatio: number): Promise<AudioBuffer | null> {
     if (!this.ctx) return null;
-    if (!import.meta.env.DEV) return null;
+    if (!(import.meta.env as unknown as { DEV?: boolean })?.DEV) return null;
     const sr = this.ctx.sampleRate;
     const OACearly = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
     if (!OACearly) return null;
