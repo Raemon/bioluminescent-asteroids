@@ -118,6 +118,7 @@ export const Overlay = () => {
             the pilot-profile view, hidden on the hall-of-fame / standing views. */}
         <div id="leaderboard-profile-banner" className="hidden" />
         <ol id="leaderboard-list" />
+        <p id="leaderboard-notice" className="leaderboard-notice hidden" />
         <div id="leaderboard-footer">
           <label id="leaderboard-top-only">
             <input id="leaderboard-top-only-input" type="checkbox" defaultChecked />

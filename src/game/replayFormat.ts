@@ -242,6 +242,13 @@ export const encodeReplay = async (payload: ReplayPayload): Promise<Uint8Array> 
   return await gzip(bytes);
 };
 
+export class UnsupportedReplayVersionError extends Error {
+  constructor(readonly version: number) {
+    super(`Unsupported replay version ${version} (expected ${REPLAY_FORMAT_VERSION})`);
+    this.name = "UnsupportedReplayVersionError";
+  }
+}
+
 export const decodeReplay = async (gz: Uint8Array): Promise<ReplayPayload> => {
   const bytes = await gunzip(gz);
   const json = new TextDecoder().decode(bytes);
@@ -250,7 +257,7 @@ export const decodeReplay = async (gz: Uint8Array): Promise<ReplayPayload> => {
   //   / wave-transition / respawn timing or lack recorded resnap corrections, so
   //   they'd drift off the recording. Better a clear failure than a wrong replay.
   if (payload.header.v !== REPLAY_FORMAT_VERSION) {
-    throw new Error(`Unsupported replay version ${payload.header.v} (expected ${REPLAY_FORMAT_VERSION})`);
+    throw new UnsupportedReplayVersionError(payload.header.v);
   }
   return payload;
 };

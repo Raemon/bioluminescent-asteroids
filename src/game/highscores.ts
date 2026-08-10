@@ -37,6 +37,7 @@ export type HighscoreRow = {
   kill_count: number;
   kill_summary: Record<string, number>;
   has_replay?: boolean;
+  replay_version?: number | null;
   created_at: string;
 };
 

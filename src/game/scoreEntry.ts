@@ -18,6 +18,7 @@ import {
   type HighscoreRow,
 } from "./highscores";
 import { uploadReplay, fetchReplay } from "./replayApi";
+import { REPLAY_FORMAT_VERSION, UnsupportedReplayVersionError } from "./replayFormat";
 import { startReplay } from "./lifecycle";
 import {
   claimUsername,
@@ -451,6 +452,17 @@ const windowStart = (selection: number, total: number, size: number): number => 
   return Math.max(0, Math.min(maxStart, ideal));
 };
 
+const isOlderBuildReplay = (row: HighscoreRow): boolean =>
+  typeof row.replay_version === "number" && row.replay_version !== REPLAY_FORMAT_VERSION;
+
+const renderReplayButton = (row: HighscoreRow): string => {
+  const older = isOlderBuildReplay(row);
+  const cls = older ? "lb-replay lb-replay-older" : "lb-replay";
+  const title = older ? "Recorded on an older build" : "Watch replay";
+  const note = older ? `<span class="lb-replay-note">older build</span>` : "";
+  return `<button class="${cls}" data-replay-id="${row.id}" title="${title}" type="button">▶</button>${note}`;
+};
+
 const renderLeaderboard = (game: Game) => {
   const rows = game.leaderboardRows;
   if (rows.length === 0) {
@@ -480,9 +492,7 @@ const renderLeaderboard = (game: Game) => {
     const comboTier = combo >= 12 ? "white" : combo >= 4 ? "gold" : combo >= 2 ? "cyan" : "dim";
     const wave = row.wave ?? 1;
     const cls = i === game.leaderboardSelection ? ' class="lb-self"' : "";
-    const replayBtn = row.has_replay
-      ? `<button class="lb-replay" data-replay-id="${row.id}" title="Watch replay" type="button">▶</button>`
-      : "";
+    const replayBtn = row.has_replay ? renderReplayButton(row) : "";
     const fromNow = formatFromNow(row.created_at);
     const exactDate = escapeHtml(formatExactDate(row.created_at));
     const dateCell = fromNow
@@ -1091,12 +1101,29 @@ const bindLeaderboardClicks = (game: Game) => {
   });
 };
 
+const LEADERBOARD_NOTICE_MS = 6000;
+let leaderboardNoticeTimer = 0;
+
+const showLeaderboardNotice = (msg: string) => {
+  const el = document.getElementById("leaderboard-notice");
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove("hidden");
+  window.clearTimeout(leaderboardNoticeTimer);
+  leaderboardNoticeTimer = window.setTimeout(() => el.classList.add("hidden"), LEADERBOARD_NOTICE_MS);
+};
+
 const launchReplay = async (game: Game, scoreId: number) => {
   try {
     const bytes = await fetchReplay(scoreId);
     await startReplay(game, bytes);
   } catch (err) {
     console.error("[replay launch] failed:", err);
+    showLeaderboardNotice(
+      err instanceof UnsupportedReplayVersionError
+        ? "Replay from an older build — can't be played."
+        : "Replay unavailable — couldn't load that run.",
+    );
   }
 };
 
