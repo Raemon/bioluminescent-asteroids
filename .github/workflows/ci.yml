@@ -1,13 +1,18 @@
 name: CI
 
 on:
-  push:
+  push: { branches: [main] }
   pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
     name: Typecheck + replay determinism
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

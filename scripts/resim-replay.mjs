@@ -140,10 +140,10 @@ const localStorage = {
 const makeAudioNode = () => makeStub({
   connect: (n) => n ?? makeAudioNode(), disconnect() {}, start() {}, stop() {},
   gain: { value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {}, setTargetAtTime() {} },
-  frequency: { value: 440, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} },
+  frequency: { value: 440, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, setTargetAtTime() {} },
   detune: { value: 0, setValueAtTime() {} },
   Q: { value: 1, setValueAtTime() {} },
-  pan: { value: 0, setValueAtTime() {} },
+  pan: { value: 0, setValueAtTime() {}, setTargetAtTime() {} },
   type: "sine",
   buffer: null,
   getByteFrequencyData(arr) { if (arr && arr.fill) arr.fill(0); },
@@ -323,8 +323,10 @@ await startReplay(game, bytes);
 //    window.__replayDivergences + window.__firstDivergence.
 // ---------------------------------------------------------------------------
 
-const divs = windowStub.__replayDivergences ?? game.replayPlayer?.divergences ?? [];
+const pass1Divergences = windowStub.__replayDivergences ?? game.replayPlayer?.divergences ?? [];
 const first = windowStub.__firstDivergence ?? null;
+
+const { __stepReplayFrameForTest } = await import("../src/game/gameUpdate.ts");
 
 // ---------------------------------------------------------------------------
 // 4b. Optional per-frame entity trace around a frame window. After the sweep the
@@ -335,7 +337,6 @@ const first = windowStub.__firstDivergence ?? null;
 //     Usage: TRACE_FROM=1290 TRACE_TO=1325 node scripts/resim-replay.mjs <id>
 // ---------------------------------------------------------------------------
 if (process.env.TRACE_TO && game.replayPlayer) {
-  const { __stepReplayFrameForTest } = await import("../src/game/gameUpdate.ts");
   const from = Number(process.env.TRACE_FROM ?? 0);
   const to = Number(process.env.TRACE_TO);
   const fmt = (n) => (typeof n === "number" ? n.toFixed(2) : "·");
@@ -360,21 +361,30 @@ if (process.env.TRACE_TO && game.replayPlayer) {
   console.log(`=== end trace ===\n`);
 }
 
-const { __stepReplayFrameForTest: stepToEnd } = await import("../src/game/gameUpdate.ts");
-while (game.replayPlayer && stepToEnd(game)) {}
+const player = game.replayPlayer;
+if (player) player.logDivergences = false;
+while (player && __stepReplayFrameForTest(game)) {}
+const pass2Divergences = player ? [...player.divergences] : [];
+if (player) player.logDivergences = true;
+
 const finalScore = game.score;
 const scoreOk = finalScore === payload.header.score;
 console.log(`  end state — recorded score ${payload.header.score} → replayed ${finalScore} ${scoreOk ? "✅" : "❌"}\n`);
 
-if (!divs.length && scoreOk) {
+if (pass1Divergences.length === 0 && pass2Divergences.length === 0 && scoreOk) {
   console.log("RESULT: ✅ no checkpoint divergence and the final score matches — the re-sim reproduced the recording exactly.\n");
   process.exit(0);
 }
 
-if (!scoreOk) console.log(`RESULT: ❌ final-score mismatch — recorded ${payload.header.score}, replayed ${finalScore}.`);
+const failures = [];
+if (!scoreOk) failures.push(`final-score mismatch (recorded ${payload.header.score}, replayed ${finalScore})`);
+if (pass1Divergences.length) failures.push(`${pass1Divergences.length} divergent checkpoint(s) in the precompute sweep`);
+if (pass2Divergences.length) failures.push(`${pass2Divergences.length} divergent checkpoint(s) in the step-to-end pass`);
+console.log(`RESULT: ❌ ${failures.join("; ")}.`);
+
+const divs = pass1Divergences.length ? pass1Divergences : pass2Divergences;
 if (!divs.length) { console.log(); process.exit(1); }
 
-console.log(`RESULT: ❌ ${divs.length} divergent checkpoint(s).`);
 const f0 = divs[0];
 console.log(`\nFIRST divergence — frame ${f0.frame} (${f0.timeSec.toFixed(2)}s in):`);
 for (const fld of f0.fields) console.log(`    ${fld.field}: recorded ${fld.recorded} → replayed ${fld.replayed}  (Δ ${fld.delta})`);
