@@ -12,6 +12,8 @@
     "db:studio": "prisma studio",
     "postinstall": "prisma generate",
     "devlog": "node scripts/devlog-gen.mjs",
+    "bake": "node scripts/bake-sounds.mjs",
+    "check:export-audio": "node scripts/check-export-audio.mjs",
     "merge": "bash scripts/merge.sh"
   },
   "devDependencies": {
@@ -21,6 +23,7 @@
     "@vercel/node": "^5.8.5",
     "@vitejs/plugin-react": "^4.7.0",
     "dotenv": "^17.4.2",
+    "playwright-core": "^1.62.1",
     "prisma": "^7.8.0",
     "tailwindcss": "^4.3.0",
     "tsx": "^4.22.3",
