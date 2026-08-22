@@ -14,6 +14,7 @@
     "devlog": "node scripts/devlog-gen.mjs",
     "bake": "node scripts/bake-sounds.mjs",
     "check:export-audio": "node scripts/check-export-audio.mjs",
+    "check:mix-stress": "node scripts/check-mix-stress.mjs",
     "merge": "bash scripts/merge.sh"
   },
   "devDependencies": {
