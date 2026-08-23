@@ -188,13 +188,28 @@ Worth reading before adding a voice to the registry — most of these are the
 reason a baked sound comes out subtly wrong rather than obviously broken.
 
 **1. The master chain differs between the two legs.** Live voices run
-`voice → chSfxLive → liveSum → compressor → limiter → destination`; baked
-buffers run `buffer → chSfxBaked → bakedSum → limiter → destination`, skipping
-the compressor because the mp3 is supposed to already carry it. So every bake
-renders through `buildBakedMasterChain` — the same compressor and limiter
-settings as `buildMixGraph`. Miss this and the baked clip comes back hotter
-and less glued than the live one. `MASTER_BASE_GAIN` and `BAKED_BASE_GAIN` are
+`voice → chSfxLive → liveSum → compressor → limiter → soft clip →
+destination`; baked buffers run `buffer → chSfxBaked → bakedSum → glue →
+limiter → soft clip → destination`. The baked leg swaps the compressor for a
+glue stage because the mp3 is supposed to already carry the compressor: every
+bake renders through `buildBakedMasterChain` — the compressor and limiter
+settings frozen into every file on disk (do not retune that method without
+re-baking everything). Miss this and the baked clip comes back hotter and
+less glued than the live one. `MASTER_BASE_GAIN` and `BAKED_BASE_GAIN` are
 both 1.0, so there is no level offset between the legs.
+
+The glue (2.5:1 above −10 dB, slow release, trimmed by `BAKED_GLUE_TRIM` to
+unity for a lone voice) exists because per-file compression cannot duck one
+voice against another: without it, a same-frame stack of pre-limited mp3s
+hit the master limiter with the full linear sum, which the limiter — a
+DynamicsCompressor at 20:1, not a true brick wall — passed partly through to
+hard-clip at the DAC, while its old 10 ms release pumped at audio rate on
+bass content. `scripts/check-mix-stress.mjs` replays busy-moment schedules of
+the real mp3s through the chain and measures this: pre-fix, a 12-sound
+mayhem left 3.5% of samples beyond full scale with 1.7 dB/5 ms gain ripple;
+the shipped chain leaves zero (the soft clip is the true ceiling) with a
+third of the ripple. Keep the script's `current` variant in lockstep with
+`buildMixGraph`, and retune `BAKED_GLUE_TRIM` there if the glue changes.
 
 Two residual differences are inherent to the design and predate this work:
 the baked leg is limited twice (once into the file, once on the shared bus),
@@ -207,7 +222,8 @@ that was already baked.
 sound in isolation. Live, `bassKick` and `explosionLarge` landing together duck
 each other; baked, each one carries the compression it had when rendered
 alone. This is the fundamental limit of the approach, not a bug in any
-particular recipe, and it is why the *master* limiter is still live.
+particular recipe, and it is why the master limiter — and since the stacking
+fix, the baked leg's glue compressor — is still live.
 
 **3. Tails get chopped.** `ONE_SHOT_BAKE_LEN` must cover the graph's latest
 `stop()`, not its perceptual length. A chop is an audible click, and it also

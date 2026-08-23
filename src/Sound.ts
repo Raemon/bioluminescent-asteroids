@@ -19,12 +19,10 @@ async function loadTone(): Promise<ToneModule> {
   return toneModulePromise;
 }
 
-// Tone.js master bus. Every voice — both Tone-native synths (bassKick,
-// chimeSynth, etc.) and the hand-built WebAudio voices (playFire,
-// playExplosion, etc.) — feeds into this chain: dry → toneMaster, wet →
-// reverbSend → chorus → reverb → toneMaster, then toneMaster → compressor
-// → limiter → destination. Hand-built voices connect via Sound.master,
-// which routes into voiceBusDry/Wet.
+// Master bus. Every voice feeds one of two summing legs (see buildMixGraph):
+// live-built WebAudio graphs via Sound.master → liveSum → compressor, baked
+// buffers via Sound.bakedOut → bakedSum → glue compressor. Both legs join a
+// shared limiter, then a soft-clip safety, then the analyser + destination.
 // Per-alien drone voice. Two detuned sines through a slow-sweeping lowpass,
 // modulated by an LFO on amplitude for the theremin pulse. Held open for the
 // lifetime of an alien; torn down on death or mute. The tonal content
@@ -464,9 +462,36 @@ export class Sound {
   // back if it's too hot on their setup.
   private static readonly MASTER_BASE_GAIN = 1.0;
   private static readonly BAKED_BASE_GAIN = 1.0;
+  // Cancels the baked glue compressor's built-in makeup gain so a lone baked
+  // voice passes the glue at unity (measured: 0.04 dB net on a single
+  // explosion) — the stage only bites when several voices stack. Retune with
+  // scripts/check-mix-stress.mjs if the glue settings change.
+  private static readonly BAKED_GLUE_TRIM = 0.83;
   // Window (seconds) within which repeats of the same baked sound count as
   // one burst and get progressively ducked — see playBaked.
   private static readonly BAKED_RETRIGGER_WINDOW = 0.03;
+
+  // Final safety stage after the master limiter: identity below the knee,
+  // tanh-rounded above it, saturating at the ceiling. A WaveShaper clamps
+  // input outside [-1, 1] to its endpoint values, so nothing the limiter
+  // lets through — 1/20th of any overage, plus transients inside its attack
+  // — can reach the DAC's hard clip. Limited material peaks below the knee,
+  // so in normal play this stage is bit-transparent.
+  private static softClipCurveCache: Float32Array<ArrayBuffer> | null = null;
+  private static softClipCurve(): Float32Array<ArrayBuffer> {
+    if (Sound.softClipCurveCache) return Sound.softClipCurveCache;
+    const N = 8192, knee = 0.87, ceiling = 0.985;
+    const curve = new Float32Array(new ArrayBuffer(N * 4));
+    for (let i = 0; i < N; i++) {
+      const x = (i / (N - 1)) * 2 - 1;
+      const a = Math.abs(x);
+      curve[i] = a <= knee
+        ? x
+        : Math.sign(x) * (knee + (ceiling - knee) * Math.tanh((a - knee) / (ceiling - knee)));
+    }
+    Sound.softClipCurveCache = curve;
+    return curve;
+  }
   // Wave-scaled intensity (0..1) for the background pulsar-approach beat.
   // 0 = silent, 1 = full ominous rumble at wave 30. Set by Game each wave;
   // read by playBgBeat when each beat fires.
@@ -561,9 +586,10 @@ export class Sound {
   private haloMusicLoading: Map<string, Promise<AudioBuffer | null>> = new Map();
   // Pilot's Log vocal one-shots. Decoded once on first play, cached forever.
   // Voiced (ElevenLabs) + post-processed to scratchy astronaut-radio character;
-  // mixed dry to bakedOut so the comp/limiter/reverb master chain doesn't
-  // smear the spoken word. pilotLogPlaying is a soft mutex so a repeated
-  // trigger doesn't stack a second voice on top of the first.
+  // mixed via the baked leg so the live master compressor + reverb don't
+  // smear the spoken word (the glue there stays at unity unless the whole
+  // mix piles up). pilotLogPlaying is a soft mutex so a repeated trigger
+  // doesn't stack a second voice on top of the first.
   //
   // Cache is keyed by URL (not just index) because index 1 (combo-x6 unlock)
   // picks a random take from a pool each fire — see PILOT_LOG_1_TAKES.
@@ -666,18 +692,26 @@ export class Sound {
   private buildMixGraph() {
     if (!this.ctx) return;
     // liveSum / bakedSum are the two summing buses every channel feeds into.
-    // liveSum runs through the master compressor + limiter (live voices need
-    // it; their dynamics aren't pre-baked). bakedSum skips the compressor —
-    // pre-baked mp3s already carry it in their tail — but joins the live leg
-    // at the limiter: each mp3 is limited individually, so several playing
-    // at once still sum past full scale, and without the limiter the
-    // destination hard-clips the overage into audible distortion.
+    // liveSum runs through the master compressor (live voices need it; their
+    // dynamics aren't pre-baked). bakedSum runs through its own glue
+    // compressor instead: each mp3 already carries the master compressor in
+    // its tail, but that per-file render can never duck one voice against
+    // another the way a shared live compressor does, so a same-frame stack of
+    // different one-shots used to hit the limiter with the full linear sum.
+    // The glue is trimmed to unity for a lone voice (BAKED_GLUE_TRIM cancels
+    // the node's built-in makeup gain) and only leans on pileups, which is
+    // exactly the program-dependent stage the live leg always had.
+    //
+    // Both legs join one shared limiter, and a soft-clip WaveShaper sits
+    // after it as the true ceiling. The limiter alone is not one: a
+    // DynamicsCompressor at 20:1 still passes 1/20th of the overage plus
+    // whatever escapes its attack, and scripts/check-mix-stress.mjs measured
+    // 3-4% of samples beyond full scale in a busy moment — hard-clipped by
+    // the DAC into the crackle this chain exists to prevent. The limiter's
+    // old 10 ms release was also audio-rate gain pumping on bass content;
+    // 120 ms keeps its gain moves below the rate that reads as distortion.
     this.liveSum = this.ctx.createGain();
     this.liveSum.gain.value = Sound.MASTER_BASE_GAIN * this.volume * this.pauseFadeFactor;
-    // Native compressor + brick-wall limiter mirroring the settings Tone's
-    // master chain used to apply (Compressor: -18/3/0.01/0.18/12; Limiter:
-    // -1/20/0.003/0.01). Runtime is identical in dev and prod — Tone is only
-    // loaded during the dev-only bake render in bakeSound.
     const masterCompressor = this.ctx.createDynamicsCompressor();
     masterCompressor.threshold.value = -18;
     masterCompressor.ratio.value = 3;
@@ -685,11 +719,13 @@ export class Sound {
     masterCompressor.release.value = 0.18;
     masterCompressor.knee.value = 12;
     const masterLimiter = this.ctx.createDynamicsCompressor();
-    masterLimiter.threshold.value = -1;
+    masterLimiter.threshold.value = -2;
     masterLimiter.ratio.value = 20;
     masterLimiter.attack.value = 0.003;
-    masterLimiter.release.value = 0.01;
-    masterLimiter.knee.value = 0;
+    masterLimiter.release.value = 0.12;
+    masterLimiter.knee.value = 6;
+    const softClip = this.ctx.createWaveShaper();
+    softClip.curve = Sound.softClipCurve();
     // Master-bus analyser tap. Both the live and baked legs route through it
     // on their way to destination, so getByteFrequencyData() sees the full
     // mix — sfx, halo music, vocals, base pulse — with zero per-voice wiring.
@@ -704,11 +740,22 @@ export class Sound {
 
     this.liveSum.connect(masterCompressor);
     masterCompressor.connect(masterLimiter);
-    masterLimiter.connect(analyser);
+    masterLimiter.connect(softClip);
+    softClip.connect(analyser);
 
     this.bakedSum = this.ctx.createGain();
     this.bakedSum.gain.value = Sound.BAKED_BASE_GAIN * this.volume * this.pauseFadeFactor;
-    this.bakedSum.connect(masterLimiter);
+    const bakedGlue = this.ctx.createDynamicsCompressor();
+    bakedGlue.threshold.value = -10;
+    bakedGlue.ratio.value = 2.5;
+    bakedGlue.attack.value = 0.006;
+    bakedGlue.release.value = 0.25;
+    bakedGlue.knee.value = 12;
+    const bakedGlueTrim = this.ctx.createGain();
+    bakedGlueTrim.gain.value = Sound.BAKED_GLUE_TRIM;
+    this.bakedSum.connect(bakedGlue);
+    bakedGlue.connect(bakedGlueTrim);
+    bakedGlueTrim.connect(masterLimiter);
 
     // Build the four channel pairs (live + baked legs each). Each leg is a
     // gain node whose value is the player's per-channel volume; it sits
@@ -1084,17 +1131,18 @@ export class Sound {
   // next starts.
   bakeChain: Promise<unknown> = Promise.resolve();
   // Dedicated GainNode for baked-buffer playback. Baked buffers already
-  // contain the full Tone bus chain (compressor+chorus+reverb+limiter), so
-  // they bypass this.master (which is itself routed through the Tone bus in
-  // tone mode) — otherwise the bus chain would be applied twice. They still
-  // pass through the shared master limiter, which only acts when several
-  // buffers sum past full scale (see buildMixGraph).
+  // contain the master FX chain (compressor+reverb+limiter) in their tail,
+  // so they bypass this.master — otherwise that chain would be applied
+  // twice. They route through the baked leg's glue compressor (unity for a
+  // lone voice, ducking pileups) and the shared master limiter + soft clip
+  // (see buildMixGraph).
   bakedOut: GainNode | null = null;
   // Per-channel mix gains. Each channel has two legs — a "live" leg that
-  // routes into the master compressor/limiter chain (for hand-built voices),
-  // and a "baked" leg that skips the compressor but shares the limiter
-  // (pre-baked mp3s already carry the master FX chain in their tail).
-  // setChannelVolume() updates both legs of a channel together.
+  // routes into the master compressor (for hand-built voices), and a "baked"
+  // leg that swaps the compressor for the stack-taming glue (pre-baked mp3s
+  // already carry the master FX chain in their tail). Both legs share the
+  // master limiter + soft clip. setChannelVolume() updates both legs of a
+  // channel together.
   //
   // chSfx{Live,Baked} are aliased by this.master and this.bakedOut so the
   // existing voice methods (which connect to those fields directly) sit on
@@ -1623,10 +1671,10 @@ export class Sound {
     // one path: look the graph builder up in the registry, run it at time
     // origin 0 into a baked copy of the live master chain, done. These voices
     // are played LIVE into this.master when their mp3 hasn't landed yet, and
-    // the live master applies a compressor + brick-wall limiter on playback
-    // that baked buffers skip (they reach bakedSum, which joins the live leg
-    // only at the limiter) — so the render has to carry that chain itself or
-    // the baked clip would come back hotter and less glued than the live one.
+    // the live master applies a compressor + limiter on playback that baked
+    // buffers skip (their leg swaps the compressor for the unity-trimmed
+    // glue) — so the render has to carry that chain itself or the baked clip
+    // would come back hotter and less glued than the live one.
     // The two sampled-guitar alien voices can't render until their WAV is
     // decoded — wait for it rather than baking silence.
     if ((name === "alienFireBig" || name === "alienFireMedium") && !this.guitarSampleJazz) {
@@ -4237,12 +4285,12 @@ export class Sound {
     this.playBaked("cometDestroyed", 1);
   }
 
-  // Build a compressor → brick-wall limiter into an offline render context,
-  // matching the LIVE master chain (see buildMixGraph). Returns the chain's
-  // input node — a raw one-shot graph connects to it instead of straight to
-  // destination so the baked buffer contains the same dynamics the live path
-  // used to apply on playback (at runtime baked buffers skip this compressor
-  // and only share the master limiter).
+  // Build a compressor → limiter into an offline render context so the baked
+  // buffer contains the same per-voice dynamics the live leg applies on
+  // playback — at runtime baked buffers trade this compressor for the
+  // unity-trimmed glue (see buildMixGraph). The settings here are frozen
+  // into every mp3 already on disk; retuning the live chain must NOT touch
+  // them, or fresh bakes would stop matching the shipped files.
   private buildBakedMasterChain(ctx: BaseAudioContext): AudioNode {
     const compressor = ctx.createDynamicsCompressor();
     compressor.threshold.value = -18;
