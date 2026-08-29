@@ -1,5 +1,30 @@
 [
   {
+    "id": "2026-08-29-8c092d8",
+    "date": "2026-08-29",
+    "title": "Dual key bindings: arrows and WASD both work by default",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Each control action now supports two bindings — a primary and an alternate.",
+          "Arrow keys and WASD are both active out of the box with no setup required.",
+          "The controls screen now shows two key chips per action, each independently rebindable or clearable.",
+          "New intro hint lines added to the tip rotation."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Existing saved bindings are automatically upgraded to add the WASD alternates where they do not conflict with your custom keys."
+        ]
+      }
+    ],
+    "commits": [
+      "8c092d8"
+    ]
+  },
+  {
     "id": "2026-08-01-820a93a",
     "date": "2026-08-01",
     "title": "Varied wording for rhythm-miss hints",
