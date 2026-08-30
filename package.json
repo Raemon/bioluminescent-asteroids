@@ -5,14 +5,21 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "build": "prisma generate && node scripts/migrate-if-db.mjs && tsc -b && tsc -p api && vite build",
+    "build": "prisma generate && node scripts/migrate-if-db.mjs && npm run typecheck && vite build",
     "preview": "vite preview",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "postinstall": "prisma generate",
     "devlog": "node scripts/devlog-gen.mjs",
-    "merge": "bash scripts/merge.sh"
+    "bake": "node scripts/bake-sounds.mjs",
+    "check:export-audio": "node scripts/check-export-audio.mjs",
+    "check:mix-stress": "node scripts/check-mix-stress.mjs",
+    "merge": "bash scripts/merge.sh",
+    "typecheck": "tsc -b && tsc -p api",
+    "replay:closed-loop": "node scripts/record-resim.mjs",
+    "replay:golden:record": "SEED=20260810 FRAMES=20000 node scripts/record-resim.mjs --save scripts/golden/replay.json",
+    "replay:golden:verify": "node scripts/resim-replay.mjs --file scripts/golden/replay.json"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
@@ -21,6 +28,7 @@
     "@vercel/node": "^5.8.5",
     "@vitejs/plugin-react": "^4.7.0",
     "dotenv": "^17.4.2",
+    "playwright-core": "^1.62.1",
     "prisma": "^7.8.0",
     "tailwindcss": "^4.3.0",
     "tsx": "^4.22.3",

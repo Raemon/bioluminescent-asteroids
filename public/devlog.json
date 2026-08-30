@@ -1,5 +1,82 @@
 [
   {
+    "id": "2026-08-30-cf83bb3",
+    "date": "2026-08-30",
+    "title": "Phone support, audio fixes, and prong tuning",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Touch controls now include a fire button, making the game fully playable on phones and tablets."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Replays no longer go missing when you take longer than one loop to enter your name on the game-over screen.",
+          "Stacked sound effects no longer distort or clip when many things happen at once."
+        ]
+      },
+      {
+        "heading": "Tuning",
+        "items": [
+          "Prong fan spread narrowed to 30° per prong for tighter shot grouping.",
+          "Game sounds load faster at startup — initial download drops from ~2.6 MB to ~560 KB."
+        ]
+      }
+    ],
+    "commits": [
+      "cf83bb3",
+      "1e4d4ea",
+      "2f89268",
+      "80f32ab",
+      "6580f5a",
+      "8d77a84",
+      "ee15fae",
+      "80a6f37",
+      "d7fd0c8",
+      "66036a4",
+      "9fb7b66",
+      "6900d52",
+      "e0d5212",
+      "9b4e07b",
+      "ac49d29",
+      "8121692",
+      "6c4f465",
+      "9ed2fa6",
+      "7de1694",
+      "e5c0a53",
+      "434d856",
+      "11f8b59",
+      "f9ec0d1"
+    ]
+  },
+  {
+    "id": "2026-08-29-8c092d8",
+    "date": "2026-08-29",
+    "title": "Dual key bindings: arrows and WASD both work by default",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Each control action now supports two bindings — a primary and an alternate.",
+          "Arrow keys and WASD are both active out of the box with no setup required.",
+          "The controls screen now shows two key chips per action, each independently rebindable or clearable.",
+          "New intro hint lines added to the tip rotation."
+        ]
+      },
+      {
+        "heading": "Changed",
+        "items": [
+          "Existing saved bindings are automatically upgraded to add the WASD alternates where they do not conflict with your custom keys."
+        ]
+      }
+    ],
+    "commits": [
+      "8c092d8"
+    ]
+  },
+  {
     "id": "2026-08-01-820a93a",
     "date": "2026-08-01",
     "title": "Varied wording for rhythm-miss hints",

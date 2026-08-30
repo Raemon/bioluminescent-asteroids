@@ -11,6 +11,7 @@ const SLOT_1_POOL: readonly string[] = [
   "Listen to the stars.",
   "Feel the pulse.",
   "Feel the beat.",
+  "Aim for the target.",
 ];
 
 // The one hint that must wait out the start-of-run controls pane before it
@@ -20,6 +21,7 @@ export const FIRE_HIT_HINT = "Fire on the beat. Hit on the beat.";
 const SLOT_2_POOL: readonly string[] = [
   "Aim carefully.",
   "One shot. One kill.",
+  "Hit on the beat.",
   "It's okay to wait.",
   "Patience.",
   "Drift gently.",
@@ -36,7 +38,7 @@ const SLOT_2_POOL: readonly string[] = [
 const SLOT_3_POOL: readonly string[] = [
   "Dance with the void.",
   "Keep a warm mug of coffee. This'll be a long job.",
-  "Don't forget the dream.",
+  "Don't forget your son.",
   "Don't lose contact with command.",
   "Tell your son you'll be home soon.",
   "Remember your promise to your wife.",
