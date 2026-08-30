@@ -791,7 +791,7 @@ export class Sound {
   // missing entries still work (lazy alloc on first call), they just pay
   // the spawn-time stutter you're avoiding here.
   private prewarmNoiseBuffers() {
-    const durations = [0.018, 0.025, 0.08, 0.18, 0.3, 0.34, 0.4, 0.55, 1.3, 2.5, 3, 4, 6, 8];
+    const durations = [0.018, 0.025, 0.04, 0.06, 0.08, 0.18, 0.3, 0.34, 0.4, 0.55, 1.3, 2.5, 3, 4, 6, 8];
     for (const d of durations) this.makeNoiseBuffer(d);
   }
 

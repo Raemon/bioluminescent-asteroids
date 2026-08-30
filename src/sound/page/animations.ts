@@ -41,7 +41,8 @@ export type ObjectId =
   | "ship-death"
   | "bullet-weak"
   | "bullet-rhythm"
-  | "bullet-bomb"
+  | "bullet-bomb-weak"
+  | "bullet-bomb-rhythm"
   | "bullet-prong"
   | "asteroid-normal"
   | "asteroid-bassA"
@@ -377,7 +378,8 @@ export const ANIMATIONS: Record<ObjectId, () => Animator> = {
   "ship-death": () => drawShip({ death: true }),
   "bullet-weak": () => drawBullet({ onBeat: false, boosted: false, count: 1 }),
   "bullet-rhythm": () => drawBullet({ onBeat: true, boosted: false, count: 1 }),
-  "bullet-bomb": () => drawBullet({ onBeat: true, boosted: false, count: 1, bomb: true }),
+  "bullet-bomb-weak": () => drawBullet({ onBeat: false, boosted: false, count: 1, bomb: true }),
+  "bullet-bomb-rhythm": () => drawBullet({ onBeat: true, boosted: false, count: 1, bomb: true }),
   "bullet-prong": () => drawBullet({ onBeat: true, boosted: true, count: 2 }),
   "asteroid-normal": () => drawAsteroid("normal", "chip"),
   "asteroid-bassA": () => drawAsteroid("bassA", "chip"),

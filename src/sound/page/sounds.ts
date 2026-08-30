@@ -116,12 +116,19 @@ export const OBJECTS: GameObject[] = [
     ],
   },
   {
-    id: "bullet-bomb",
-    label: "bomb bullet",
-    about: "bomb upgrade — two octaves under the normal shot",
+    id: "bullet-bomb-weak",
+    label: "off-beat bomb bullet",
+    about: "bomb upgrade, off the rhythm grid",
     actions: [
-      { verb: "fires off-beat", sound: "fireBomb", trigger: beat(1, 0.5) },
-      { verb: "fires on-beat", sound: "fireBombBeat", trigger: beat(1) },
+      { verb: "fires", sound: "fireBomb", trigger: beat(1, 0.5) },
+    ],
+  },
+  {
+    id: "bullet-bomb-rhythm",
+    label: "on-beat bomb bullet",
+    about: "bomb upgrade, on the grid — two octaves under the normal shot",
+    actions: [
+      { verb: "fires", sound: "fireBombBeat", trigger: beat(1) },
     ],
   },
   {
