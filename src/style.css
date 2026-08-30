@@ -1330,6 +1330,18 @@ html:has(#sound-root), body:has(> #sound-root) {
 }
 .lb-replay:hover { color: #6ad7ff; }
 
+.lb-replay-older { color: rgba(106, 215, 255, 0.28); }
+.lb-replay-older:hover { color: rgba(106, 215, 255, 0.5); }
+
+.lb-replay-note {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  color: #6ad7ff;
+  opacity: 0.35;
+  white-space: nowrap;
+}
+
 #leaderboard {
   pointer-events: none;
   margin-top: 56px;
@@ -1593,6 +1605,17 @@ li.lb-self .lb-name-link:hover {
   letter-spacing: 0.22em;
   text-transform: uppercase;
 }
+
+#overlay .leaderboard-notice {
+  font-size: 11px;
+  color: #ffd86a;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-align: center;
+  margin: 0;
+}
+
+.leaderboard-notice.hidden { display: none; }
 
 #leaderboard-footer {
   pointer-events: auto;

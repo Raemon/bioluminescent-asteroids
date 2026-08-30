@@ -44,6 +44,7 @@ type RowOut = {
   kill_count: number;
   kill_summary: KillSummary;
   has_replay: boolean;
+  replay_version: number | null;
   created_at: Date | string;
 };
 
@@ -86,6 +87,7 @@ const toRowOut = (r: {
   killCount: number;
   killSummary: unknown;
   replayData?: string | null;
+  replayVersion?: number | null;
   createdAt: Date;
 }): RowOut => ({
   id: r.id,
@@ -96,6 +98,7 @@ const toRowOut = (r: {
   kill_count: r.killCount,
   kill_summary: (r.killSummary ?? {}) as KillSummary,
   has_replay: !!r.replayData,
+  replay_version: r.replayVersion ?? null,
   created_at: r.createdAt,
 });
 
@@ -182,6 +185,7 @@ const LEADERBOARD_COLUMNS = {
   maxCombo: true,
   killCount: true,
   killSummary: true,
+  replayVersion: true,
   createdAt: true,
 } as const;
 
@@ -193,6 +197,7 @@ type RawRow = {
   maxCombo: number;
   killCount: number;
   killSummary: unknown;
+  replayVersion: number | null;
   createdAt: Date;
 };
 
