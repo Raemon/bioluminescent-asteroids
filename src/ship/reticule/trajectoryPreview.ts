@@ -2,17 +2,28 @@ import { Vec, TAU } from "../../vec";
 import { ConeFrame, clipRayToCone, targetIsInsideCone, toroidalDelta } from "./coneGeometry";
 import { RETICULE_DASH_HSL } from "./radarCone";
 import { TUTORIAL_CONTROL_ACTIONS, type TutorialControlsUsed } from "../../game/controlBindings";
+import { bulletCoreRadius } from "../../Bullet";
 
-// shared bullet-overlap radius constant so trajectory dots and aim discs use the same hit reach.
-export const BULLET_HIT_RADIUS_ON_BEAT = 1.8 * 2.38 * 2.5;
-export const BULLET_HIT_RADIUS_OFF_BEAT = 1.8 * 2.5;
-// The REAL on-beat collision reach — matches Bullet.hitRadius() for an on-beat bullet
-// (effectiveRadius 1.8×2.38 × headGlowRadiusMul 10 × GLOW_VISIBLE_FRACTION 0.6). This is much
-// larger than the cosmetic BULLET_HIT_RADIUS_ON_BEAT disc above, and it's what the collision pass
-// actually tests against. We pull each on-beat aim dot one of these toward the ship so the bullet's
-// leading EDGE (not its center) meets the target surface ON the beat; otherwise the oversized hitbox
-// connects ~one bullet-reach early — before the beat — and the impact-window gate rejects the hit.
-export const BULLET_COLLISION_RADIUS_ON_BEAT = 1.8 * 2.38 * 10 * 0.6;
+// The painted aim discs, for a STOCK bullet. Deliberately smaller than the shot's
+// true collision reach (bulletCollisionRadius): the outer on-beat ring is 42% of it
+// (10.7 painted vs 25.7 real) and the inner off-beat ring 69% (4.5 vs 6.5), so the
+// sight under-promises and a shot you judged as landing always lands. To make a ring
+// literally the hit area instead, its multiplier below becomes 6 (on-beat) or 3.6
+// (off-beat) — that widens the lock thresholds for every weapon, so it is a
+// game-feel decision, not a bug fix.
+//
+// Derived from the bullet's own core radius rather than copied from it: these used
+// to be hand-transcribed numbers, and the moment a weapon changed the bullet's size
+// the sight went on drawing the old one.
+//
+// A weapon whose shells are bigger scales the WHOLE sight by that same factor
+// (bulletSizeScale) — discs, crosshair, lock ring, pulses, and every proximity
+// threshold. The sight is a scale model of the hit area, so "put the target in the
+// ring" stays equally true whatever you are firing. That factor rides the render as
+// `sightScale`.
+const BULLET_SIGHT_RADIUS_MUL = 2.5;
+export const BULLET_SIGHT_RADIUS_ON_BEAT = bulletCoreRadius({ onBeat: true, bomb: false }) * BULLET_SIGHT_RADIUS_MUL;
+export const BULLET_SIGHT_RADIUS_OFF_BEAT = bulletCoreRadius({ onBeat: false, bomb: false }) * BULLET_SIGHT_RADIUS_MUL;
 
 // top-level toggles for individual trajectory-preview overlays — flip to false to hide an
 // element without ripping out its code. Useful while tuning the visual language.
@@ -238,7 +249,7 @@ export const slotCrosshairLengthTrajectory = (slot: number): number =>
 // lock and the player's reticule read as the same kind of mark — kept in sync by inlining the
 // same numeric constants here rather than cross-importing.
 const FOCUSED_FIRST_DOT_HSL = "0, 0%, 100%";
-const FOCUSED_FIRST_DOT_RING_RADIUS = BULLET_HIT_RADIUS_ON_BEAT;
+const FOCUSED_FIRST_DOT_RING_RADIUS = BULLET_SIGHT_RADIUS_ON_BEAT;
 const FOCUSED_FIRST_DOT_RING_LINE_WIDTH = 1;
 const FOCUSED_FIRST_DOT_RING_DASH: number[] = [4, 4];
 const FOCUSED_FIRST_DOT_CROSSHAIR_GAP = 3;
@@ -311,6 +322,15 @@ export type TrajectoryContext = {
   trajectoryTracks: TrajectoryTrackMap;
   doubletime: boolean;
   tutorialHighlight: boolean;
+  // How much bigger this weapon's shells are than a stock bullet (bulletSizeScale).
+  // Multiplies every painted length in the sight AND every proximity threshold, so a
+  // bigger shell both looks and locks like the wider catch area it really has.
+  sightScale: number;
+  // The live weapon's true collision reach for an on-beat shot. Each on-beat aim dot
+  // is pulled this far toward the ship so the shell's leading edge — not its center —
+  // meets the target surface ON the beat; aim the center at the surface and contact
+  // happens one full reach early, before the beat, and the impact gate rejects it.
+  collisionRadiusOnBeat: number;
   // per-slot beat-time the reticule first entered that slot's 75px approach zone (null = not in
   // zone). Drives the contracting approach ring's beat-aligned launch. Index 0 = 1-beat slot.
   hoverZoneEnterBySlot: Array<number | null>;
@@ -514,19 +534,19 @@ const paintAimIntersectionX = (
 };
 
 // detect whether the first-beat lock dot overlaps the aim disc, so the disc can brighten.
-const firstDotOverlapsReticule = (px: number, py: number, retX: number, retY: number): boolean => {
-  const R = BULLET_HIT_RADIUS_ON_BEAT;
+const firstDotOverlapsReticule = (px: number, py: number, retX: number, retY: number, sightScale: number): boolean => {
+  const R = BULLET_SIGHT_RADIUS_ON_BEAT * sightScale;
   const ddx = px - retX;
   const ddy = py - retY;
   return ddx * ddx + ddy * ddy <= (R + TRAJECTORY_FIRST_BEAT_DOT_RADIUS) * (R + TRAJECTORY_FIRST_BEAT_DOT_RADIUS);
 };
 
 // 0 = far away (no glow), 1 = touching the disc (full lit). Smooth ramp through the proximity pad.
-const firstDotProximity01 = (px: number, py: number, retX: number, retY: number): number => {
+const firstDotProximity01 = (px: number, py: number, retX: number, retY: number, sightScale: number): number => {
   const ddx = px - retX;
   const ddy = py - retY;
   const dist = Math.hypot(ddx, ddy);
-  const overlapDist = BULLET_HIT_RADIUS_ON_BEAT + TRAJECTORY_FIRST_BEAT_DOT_RADIUS;
+  const overlapDist = BULLET_SIGHT_RADIUS_ON_BEAT * sightScale + TRAJECTORY_FIRST_BEAT_DOT_RADIUS;
   if (dist <= overlapDist) return 1;
   const outerDist = overlapDist + TRAJECTORY_FIRST_BEAT_DOT_PROXIMITY_PAD;
   if (dist >= outerDist) return 0;
@@ -682,6 +702,7 @@ const drawBeatDotsAlongRay = (
   beatTime: number, beatGrid: number, hoverZoneEnterBySlot: Array<number | null>,
   onBeatDotOverrides: Array<[number, number] | null>,
   firstDotSecondary: [number, number] | null,
+  sightScale: number,
 ): DotWalkResult => {
   let overlapsReticule = false;
   const slotCount = reticulesBySlot.length;
@@ -748,9 +769,9 @@ const drawBeatDotsAlongRay = (
         let within75 = false;
         for (let r = 0; r < slotReticules.length; r++) {
           const [retXk, retYk] = slotReticules[r];
-          const proximityR = firstDotProximity01(px, py, retXk, retYk);
+          const proximityR = firstDotProximity01(px, py, retXk, retYk, sightScale);
           if (proximityR > bestProximity) { bestProximity = proximityR; bestRetIdx = r; }
-          if (slotIdx === 0 && firstDotOverlapsReticule(px, py, retXk, retYk)) anyStrictOverlap = true;
+          if (slotIdx === 0 && firstDotOverlapsReticule(px, py, retXk, retYk, sightScale)) anyStrictOverlap = true;
           if (withinApproachZone(px, py, retXk, retYk)) within75 = true;
         }
         if (within75) slotWithin75[slotIdx] = true;
@@ -895,10 +916,11 @@ const computeFirstDotPlayer = (
 const computeOnBeatDotPrimary = (
   cx: number, cy: number, velX: number, velY: number, radius: number,
   aimCenterX: number, aimCenterY: number, beatGrid: number, beatsAhead: number,
+  collisionRadiusOnBeat: number,
 ): [number, number] | null => {
   if (firstDotModeIs("edge")) return computeFirstDotEdge(cx, cy, velX, velY, radius, beatGrid, beatsAhead);
   return computeFirstDotPlayer(
-    cx, cy, velX, velY, radius, aimCenterX, aimCenterY, beatGrid, beatsAhead, BULLET_COLLISION_RADIUS_ON_BEAT,
+    cx, cy, velX, velY, radius, aimCenterX, aimCenterY, beatGrid, beatsAhead, collisionRadiusOnBeat,
   );
 };
 
@@ -909,13 +931,14 @@ const computeOnBeatDotPrimary = (
 const computeOnBeatDotOverrides = (
   cx: number, cy: number, velX: number, velY: number, radius: number,
   aimCenterX: number, aimCenterY: number, beatGrid: number, slotCount: number,
+  collisionRadiusOnBeat: number,
 ): { primaries: Array<[number, number] | null>; secondary: [number, number] | null } => {
   const primaries: Array<[number, number] | null> = [];
   for (let slot = 1; slot <= slotCount; slot++) {
-    primaries.push(computeOnBeatDotPrimary(cx, cy, velX, velY, radius, aimCenterX, aimCenterY, beatGrid, slot));
+    primaries.push(computeOnBeatDotPrimary(cx, cy, velX, velY, radius, aimCenterX, aimCenterY, beatGrid, slot, collisionRadiusOnBeat));
   }
   const secondary = firstDotModeIs("both")
-    ? computeFirstDotPlayer(cx, cy, velX, velY, radius, aimCenterX, aimCenterY, beatGrid, 1, BULLET_COLLISION_RADIUS_ON_BEAT)
+    ? computeFirstDotPlayer(cx, cy, velX, velY, radius, aimCenterX, aimCenterY, beatGrid, 1, collisionRadiusOnBeat)
     : null;
   return { primaries, secondary };
 };
@@ -924,7 +947,7 @@ type OnBeatAim = { x: number; y: number; reachable: boolean; willHitOnBeat: bool
 const computeOnBeatAim = (
   cx: number, cy: number, velX: number, velY: number, radius: number,
   aimCenterX: number, aimCenterY: number, aimRadius: number, beatGrid: number,
-  retX: number, retY: number,
+  retX: number, retY: number, sightScale: number,
 ): OnBeatAim => {
   const futureX = cx + velX * beatGrid;
   const futureY = cy + velY * beatGrid;
@@ -944,7 +967,7 @@ const computeOnBeatAim = (
   // hit detection compares the aim disc (bullet at t=beatGrid) to the target's future
   // CENTER with combined radii — same logic the actual collision test uses — not to the spot,
   // since the spot sits on the body surface and would under-detect by the target's radius.
-  const hitTol = radius + BULLET_HIT_RADIUS_ON_BEAT;
+  const hitTol = radius + BULLET_SIGHT_RADIUS_ON_BEAT * sightScale;
   const retDx = retX - futureX;
   const retDy = retY - futureY;
   const willHitOnBeat = reachable && retDx * retDx + retDy * retDy <= hitTol * hitTol;
@@ -1011,6 +1034,7 @@ const paintTrajectoryFromSnapshot = (
   // dot on the trail.
   const { primaries: onBeatDotOverrides, secondary: firstDotSecondary } = computeOnBeatDotOverrides(
     cx, cy, snap.velX, snap.velY, r, aimCenterX, aimCenterY, ctx.beatGrid, ctx.reticulesBySlot.length,
+    ctx.collisionRadiusOnBeat,
   );
   if (c) {
     c.save();
@@ -1029,11 +1053,12 @@ const paintTrajectoryFromSnapshot = (
     sMin, sMax, dotStep, dotOffset, entryFlashBoost, beatPulseBoost, focusBoost,
     ctx.w, ctx.h, ctx.doubletime, ctx.tutorialHighlight, showOnRhythmSpot,
     ctx.beatTime, ctx.beatGrid, ctx.hoverZoneEnterBySlot, onBeatDotOverrides, firstDotSecondary,
+    ctx.sightScale,
   );
   if (c && SHOW_ON_RHYTHM_RETICULE && showOnRhythmSpot) {
     const aim = computeOnBeatAim(
       cx, cy, snap.velX, snap.velY, r,
-      aimCenterX, aimCenterY, ctx.aimCircleRadius, ctx.beatGrid, retX, retY,
+      aimCenterX, aimCenterY, ctx.aimCircleRadius, ctx.beatGrid, retX, retY, ctx.sightScale,
     );
     const [aimDrawX, aimDrawY] = wrapToCanvas(aim.x, aim.y, ctx.w, ctx.h);
     paintOnRhythmSpot(c, aimDrawX, aimDrawY, aim.willHitOnBeat, aim.reachable, entryFlashBoost, beatPulseBoost, focusBoost);
@@ -1164,6 +1189,7 @@ const pickCenterMostTarget = (
 export const nearestFirstBeatDot = (
   apex: Vec, frame: ConeFrame, w: number, h: number, beatGrid: number,
   aimCenter: Vec, from: Vec, targets: ReadonlyArray<ReticuleTarget>,
+  collisionRadiusOnBeat: number,
 ): Vec | null => {
   if (frame.length <= 0) return null;
   const [aimDx, aimDy] = toroidalDelta(aimCenter.x - apex.x, aimCenter.y - apex.y, w, h);
@@ -1182,7 +1208,7 @@ export const nearestFirstBeatDot = (
     const cx = apex.x + dx;
     const cy = apex.y + dy;
     // arrow tracks the primary (interactive) 1-beat dot the draw loop uses, per FIRST_BEAT_DOT_MODE.
-    const primary = computeOnBeatDotPrimary(cx, cy, t.vel.x, t.vel.y, tr, aimX, aimY, beatGrid, 1);
+    const primary = computeOnBeatDotPrimary(cx, cy, t.vel.x, t.vel.y, tr, aimX, aimY, beatGrid, 1, collisionRadiusOnBeat);
     const dotX = primary ? primary[0] : cx + t.vel.x * beatGrid;
     const dotY = primary ? primary[1] : cy + t.vel.y * beatGrid;
     const [drawX, drawY] = wrapToCanvas(dotX, dotY, w, h);
