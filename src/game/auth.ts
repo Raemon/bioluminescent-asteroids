@@ -27,7 +27,10 @@ type AuthState = {
   user: PublicUser | null;
 };
 
-const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? "";
+// Optional-chained so the headless harnesses (scripts/record-resim.mjs and
+//   friends), which import the game graph under tsx with no Vite env injected,
+//   don't crash at import time.
+const CLIENT_ID = (import.meta.env?.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? "";
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 const TOKEN_KEY = "pulsar.auth.token";
 const USER_KEY = "pulsar.auth.user";

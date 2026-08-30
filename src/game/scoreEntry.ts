@@ -332,8 +332,11 @@ const renderProfileBanner = (user: PublicUser | null) => {
 //   finalizeRecorder — by the time the player has typed a name + hit Enter,
 //   the bytes are typically already on game.lastRunReplay. A short poll
 //   covers the edge case where submit lands within the first frame after
-//   gameover.
-const waitForReplayBytes = async (game: Game, timeoutMs = 2000): Promise<Uint8Array | null> => {
+//   gameover. The window is generous because a long run gzips several MB of
+//   JSON on a main thread that's also driving the game-over highlight clip —
+//   the loop exits the moment the bytes land, so the wait costs nothing when
+//   they're already there.
+const waitForReplayBytes = async (game: Game, timeoutMs = 15000): Promise<Uint8Array | null> => {
   const start = performance.now();
   while (!game.lastRunReplay && performance.now() - start < timeoutMs) {
     await new Promise((r) => setTimeout(r, 50));

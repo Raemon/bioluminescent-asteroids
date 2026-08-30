@@ -476,15 +476,18 @@ export const startGame = (game: Game, overrides?: {
     bindings: getBindings(),
   });
   game.replayPlayer = null;
-  game.lastRunReplay = null;
   game.highlightTimeline = new HighlightTimeline();
   game.highlightClip = null;
-  // A replay/highlight-clip rebuild (overrides set) must NOT wipe runSummary or
-  //   the loop's fade phase — the game-over screen is still showing the clip.
-  //   Only a genuine fresh run clears them (restartReplayWorld restores them
-  //   across the clip's own rebuilds).
+  // A replay/highlight-clip rebuild (overrides set) must NOT wipe runSummary,
+  //   the just-finished run's upload bytes, or the loop's fade phase — the
+  //   game-over screen is still showing the clip. Only a genuine fresh run
+  //   clears them (restartReplayWorld restores them across the clip's own
+  //   rebuilds). lastRunReplay especially: the clip loops every few seconds,
+  //   and each loop rebuilds the world, so clearing here would silently drop
+  //   the gzipped bytes the score form is about to upload.
   if (!overrides) {
     game.runSummary = null;
+    game.lastRunReplay = null;
     game.highlightLoop = null;
     document.getElementById("highlight-fade")?.classList.remove("fading");
   }
