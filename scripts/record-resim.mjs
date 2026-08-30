@@ -68,16 +68,35 @@ class ScriptedInput {
   }
 }
 
-// A repeating maneuver pattern that turns, thrusts, and fires on a cycle so the
-//   run actually shoots asteroids (exercising collisions, splits, scoring — the
-//   gameplay-rng path). Purely a function of frame index ⇒ identical every run.
-const driveInput = (input, f) => {
-  const cyc = f % 240;
-  input.set("arrowleft", cyc >= 0 && cyc < 30);
-  input.set("arrowright", cyc >= 120 && cyc < 150);
-  input.set("arrowup", (cyc >= 30 && cyc < 90) || (cyc >= 150 && cyc < 200));
-  // Fire on a steady 1-every-8-frames cadence whenever not turning hard.
-  input.set(" ", f % 8 === 0);
+const TAU = Math.PI * 2;
+const wrapDelta = (d, span) => (d > span / 2 ? d - span : d < -span / 2 ? d + span : d);
+
+const nearestAsteroid = (game) => {
+  const ship = game.ship;
+  let nearest = null;
+  for (const a of game.asteroids) {
+    const dx = wrapDelta(a.pos.x - ship.pos.x, game.w);
+    const dy = wrapDelta(a.pos.y - ship.pos.y, game.h);
+    const dist = Math.hypot(dx, dy);
+    if (!nearest || dist < nearest.dist) nearest = { dx, dy, dist };
+  }
+  return nearest;
+};
+
+const driveInput = (input, f, game) => {
+  const idle = () => { for (const k of ["arrowleft", "arrowright", "arrowup", "arrowdown", " "]) input.set(k, false); };
+  if (!game.ship) return idle();
+  const target = nearestAsteroid(game);
+  if (!target) return idle();
+  let diff = Math.atan2(target.dy, target.dx) - game.ship.heading;
+  while (diff > Math.PI) diff -= TAU;
+  while (diff < -Math.PI) diff += TAU;
+  const aimed = Math.abs(diff) < 0.12;
+  input.set("arrowleft", !aimed && diff < 0);
+  input.set("arrowright", !aimed && diff > 0);
+  input.set("arrowup", aimed && target.dist > 700 && f % 4 < 2);
+  input.set("arrowdown", target.dist < 220);
+  input.set(" ", aimed && f % 6 === 0);
 };
 
 const game = new Game(makeCanvas(DIMS.w, DIMS.h));
@@ -108,7 +127,7 @@ const recSnaps = [];
 //   advanceFrame → updatePlaying, which captures the frame + checkpoints.
 let aliveFrames = 0;
 for (let f = 0; f < FRAMES; f++) {
-  driveInput(scripted, f);
+  driveInput(scripted, f, game);
   game.update(DT);
   recSnaps.push(snap(game));
   // game.render() is intentionally NOT called — render runs live but not in the
@@ -130,7 +149,11 @@ console.log(`  final: score=${summary.score} wave=${game.wave} lives=${game.live
 console.log(`  checkpoints=${(payload.checkpoints ?? []).length} beatResnaps=${(payload.beatResnaps ?? []).length}\n`);
 
 const saveIdx = process.argv.indexOf("--save");
-if (saveIdx >= 0) { writeFileSync(process.argv[saveIdx + 1], JSON.stringify(payload)); console.log(`  wrote payload → ${process.argv[saveIdx + 1]}\n`); }
+if (saveIdx >= 0) {
+  payload.header.startedAt = 0;
+  writeFileSync(process.argv[saveIdx + 1], JSON.stringify(payload));
+  console.log(`  wrote payload → ${process.argv[saveIdx + 1]}\n`);
+}
 
 // ---- re-sim the freshly-recorded payload, stepping frame-by-frame ----
 const { encodeReplay } = await import("../src/game/replayFormat.ts");

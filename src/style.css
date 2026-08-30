@@ -3255,12 +3255,19 @@ li.lb-self .lb-name-link:hover {
   flex-direction: row;
 }
 
-.tc-cluster--thrust {
+.tc-cluster--action {
   right: 22px;
   bottom: 28px;
-  /* Natural "up = forward" gesture: DOM order is [thrust, reverse], plain
-     `column` puts thrust on top, reverse below. */
+  flex-direction: row;
+  align-items: flex-end;
+}
+
+/* Natural "up = forward" gesture: DOM order is [thrust, reverse], plain
+   `column` puts thrust on top, reverse below. */
+.tc-stack {
+  display: flex;
   flex-direction: column;
+  gap: inherit;
   align-items: flex-end;
 }
 
@@ -3297,7 +3304,7 @@ li.lb-self .lb-name-link:hover {
   filter: drop-shadow(0 0 4px rgba(140, 224, 255, 0.7));
 }
 
-.tc-btn:active {
+.tc-btn--pressed {
   background: radial-gradient(circle at 50% 35%, rgba(180, 235, 255, 0.45), rgba(20, 40, 80, 0.7) 70%);
   border-color: rgba(200, 235, 255, 0.95);
   box-shadow:
@@ -3307,6 +3314,31 @@ li.lb-self .lb-name-link:hover {
 }
 
 .tc-btn:focus { outline: none; }
+
+.tc-btn--fire {
+  width: 108px;
+  height: 108px;
+  color: #ffe6a0;
+  background: radial-gradient(circle at 50% 35%, rgba(255, 216, 106, 0.26), rgba(30, 18, 8, 0.6) 70%);
+  border-color: rgba(255, 216, 106, 0.55);
+  box-shadow:
+    0 0 18px rgba(255, 190, 80, 0.3),
+    inset 0 0 16px rgba(255, 190, 80, 0.2);
+}
+
+.tc-btn--fire svg {
+  width: 46px;
+  height: 46px;
+  filter: drop-shadow(0 0 5px rgba(255, 214, 130, 0.75));
+}
+
+.tc-btn--fire.tc-btn--pressed {
+  background: radial-gradient(circle at 50% 35%, rgba(255, 236, 180, 0.55), rgba(70, 40, 10, 0.75) 70%);
+  border-color: rgba(255, 244, 205, 0.95);
+  box-shadow:
+    0 0 30px rgba(255, 206, 110, 0.7),
+    inset 0 0 22px rgba(255, 206, 110, 0.4);
+}
 
 /* Landscape: side rails. Vertically anchored just below centre so the
    thumb sits at a relaxed angle; clusters stack vertically so both rails
@@ -3319,7 +3351,7 @@ li.lb-self .lb-name-link:hover {
     transform: translateY(-25%);
     flex-direction: column;
   }
-  .tc-cluster--thrust {
+  .tc-cluster--action {
     right: 22px;
     top: 50%;
     bottom: auto;
@@ -3332,14 +3364,18 @@ li.lb-self .lb-name-link:hover {
 @media (orientation: portrait) and (max-width: 380px) {
   .tc-btn { width: 58px; height: 58px; }
   .tc-btn svg { width: 24px; height: 24px; }
+  .tc-btn--fire { width: 94px; height: 94px; }
+  .tc-btn--fire svg { width: 40px; height: 40px; }
   .tc-cluster { gap: 14px; }
   .tc-cluster--rotate { left: 14px; bottom: 22px; }
-  .tc-cluster--thrust { right: 14px; bottom: 22px; }
+  .tc-cluster--action { right: 14px; bottom: 22px; }
 }
 
 @media (orientation: landscape) and (max-height: 420px) {
   .tc-btn { width: 56px; height: 56px; }
   .tc-btn svg { width: 22px; height: 22px; }
+  .tc-btn--fire { width: 88px; height: 88px; }
+  .tc-btn--fire svg { width: 36px; height: 36px; }
   .tc-cluster { gap: 12px; }
 }
 

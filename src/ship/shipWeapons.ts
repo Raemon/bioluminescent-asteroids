@@ -4,14 +4,14 @@ import { Bullet } from "../Bullet";
 import { PowerupKind } from "../Canister";
 import { BEAT_GRID } from "../game/rhythmConstants";
 
-// each prong upgrade adds one more bullet, every prong 45° from its neighbour, wrapping
-// into a full ring at 8 shots (8 × 45° = 360°) and continuing to overlap beyond that.
+// each prong upgrade adds one more bullet, every prong 30° from its neighbour, wrapping
+// into a full ring at 12 shots (12 × 30° = 360°) and continuing to overlap beyond that.
 // Exported so metalChunk can lay two shards on the first-tier prong pair's rays
 // (±half a step off the heading) — see Asteroid.split.
-export const PRONG_ANGLE_STEP = Math.PI / 4;
+export const PRONG_ANGLE_STEP = Math.PI / 6;
 
 // prongCount n yields n+1 shots fanned symmetrically about the heading (centred on the front).
-// count 0 → [0]; 1 → ±22.5°; 2 → -45,0,+45; 3 → ±22.5,±67.5; 7 → full ring every 45°.
+// count 0 → [0]; 1 → ±15°; 2 → -30,0,+30; 3 → ±15,±45; 11 → full ring every 30°.
 //
 // INVARIANT: a weapon's fire loop and its reticule must iterate the SAME fan —
 // every entry fires a shot AND draws an aim glyph. Don't compute a single aim
