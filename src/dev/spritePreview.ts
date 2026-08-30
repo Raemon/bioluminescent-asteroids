@@ -84,7 +84,7 @@ const ASTEROID_GROUPS: { group: string; kinds: AsteroidKind[] }[] = [
   { group: "Boss", kinds: ["boss", "bossHemisphere", "bossEye", "bossPlate", "bossIrisShard", "bossEmber"] },
 ];
 
-const POWERUPS: PowerupKind[] = ["prong", "shield", "slow", "radar", "longshot", "sideEngines", "lasershot"];
+const POWERUPS: PowerupKind[] = ["prong", "shield", "slow", "radar", "longshot", "sideEngines", "lasershot", "bomb"];
 
 const makeAsteroid = (group: string, kind: AsteroidKind, size: AsteroidSize): Subject => {
   const a = new Asteroid({ x: 0, y: 0 }, { x: 0, y: 0 }, size, undefined, kind);

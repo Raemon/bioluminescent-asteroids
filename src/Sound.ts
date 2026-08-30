@@ -283,6 +283,8 @@ export type Pos = { x: number; y: number };
 export type SoundName =
   | "fire"
   | "fireBeat"
+  | "fireBomb"
+  | "fireBombBeat"
   | "explosionLarge"
   | "explosionMedium"
   | "explosionSmall"
@@ -789,7 +791,7 @@ export class Sound {
   // missing entries still work (lazy alloc on first call), they just pay
   // the spawn-time stutter you're avoiding here.
   private prewarmNoiseBuffers() {
-    const durations = [0.018, 0.025, 0.08, 0.18, 0.3, 0.34, 0.4, 0.55, 1.3, 2.5, 3, 4, 6, 8];
+    const durations = [0.018, 0.025, 0.04, 0.06, 0.08, 0.18, 0.3, 0.34, 0.4, 0.55, 1.3, 2.5, 3, 4, 6, 8];
     for (const d of durations) this.makeNoiseBuffer(d);
   }
 
@@ -1502,6 +1504,8 @@ export class Sound {
       case "cometDestroyedSad": return (c, d) => this.buildCometDestroyedSadGraph(c, d);
       case "bonusLife": return (c, d) => this.buildBonusLifeGraph(c, d);
       case "fire": return (c, d) => this.buildFireGraph(c, d, 0);
+      case "fireBomb": return (c, d) => this.buildFireBombGraph(c, d, 0);
+      case "fireBombBeat": return (c, d) => this.buildFireBombBeatGraph(c, d, 0);
       case "calibrationTap": return (c, d) => this.buildCalibrationTapGraph(c, d, 0);
       case "death": return (c, d) => this.buildDeathGraph(c, d, 0);
       case "bassHit": return (c, d) => this.buildBassHitGraph(c, d, 0);
@@ -6231,6 +6235,8 @@ export class Sound {
     switch (name) {
       case "fire": this.playFire(); break;
       case "fireBeat": this.playFireBeat(); break;
+      case "fireBomb": this.playFireBomb(); break;
+      case "fireBombBeat": this.playFireBombBeat(); break;
       case "explosionLarge": this.playExplosion("explosionLarge"); break;
       case "explosionMedium": this.playExplosion("explosionMedium"); break;
       case "explosionSmall": this.playExplosion("explosionSmall"); break;
@@ -6990,6 +6996,129 @@ export class Sound {
     // removed because some browsers stub Web Audio in ways that crash Tone's
     // destination init; silent-miss is preferable to a frozen game.
     this.playBaked("fireBeat", 1);
+  }
+
+  // Bomb-upgrade muzzle voice, off the grid. Same pluck shape as playFire —
+  // sine body, octave partial, bandpassed tick — transposed two octaves down
+  // to G2/G3 with the tick dropped from a 1.6 kHz zing to a 520 Hz wooden
+  // knock. Two octaves keeps it the same pitch class as the G4 normal shot, so
+  // a mixed volley harmonizes instead of clashing; the longer decays are what
+  // sell the heavier shell.
+  private playFireBomb() {
+    if (this.playBaked("fireBomb", 1)) return;
+    if (!this.ctx || !this.master) return;
+    this.buildFireBombGraph(this.ctx, this.master, this.voiceTime("fireBomb"));
+  }
+
+  private buildFireBombGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
+    this.buildPluckGraph(ctx, dest, t, {
+      bodyHz: cfgN("fireBomb", "bodyHz", 98),
+      bodyPeak: cfgN("fireBomb", "bodyPeak", 0.26),
+      bodyDecay: cfgN("fireBomb", "bodyDecay", 0.2),
+      partialHz: cfgN("fireBomb", "partialHz", 196),
+      partialPeak: cfgN("fireBomb", "partialPeak", 0.1),
+      partialDecay: cfgN("fireBomb", "partialDecay", 0.1),
+      tickHz: cfgN("fireBomb", "tickHz", 520),
+      tickQ: cfgN("fireBomb", "tickQ", 1.4),
+      tickPeak: cfgN("fireBomb", "tickPeak", 0.06),
+      tickDecay: cfgN("fireBomb", "tickDecay", 0.04),
+    });
+  }
+
+  // Bomb-upgrade muzzle voice, on the grid. Sits an octave under playFireBeat's
+  // C3 body (C2 with a G2 fifth on top), so it stacks with the bass bed rather
+  // than fighting it, and the body pitch-drops a fourth over its decay to read
+  // as a mortar cough rather than a pluck. Louder and longer-tailed than the
+  // off-beat bomb shot for the same reason fireBeat outweighs fire.
+  private playFireBombBeat() {
+    if (this.playBaked("fireBombBeat", 1)) return;
+    if (!this.ctx || !this.master) return;
+    this.buildFireBombBeatGraph(this.ctx, this.master, this.voiceTime("fireBombBeat"));
+  }
+
+  private buildFireBombBeatGraph(ctx: BaseAudioContext, dest: AudioNode, t: number) {
+    const bodyHz = cfgN("fireBombBeat", "bodyHz", 65.41);
+    const bodyEndHz = cfgN("fireBombBeat", "bodyEndHz", 49);
+    const bodyPeak = cfgN("fireBombBeat", "bodyPeak", 0.5);
+    const bodyDecay = cfgN("fireBombBeat", "bodyDecay", 0.42);
+    const fifthHz = cfgN("fireBombBeat", "fifthHz", 98);
+    const fifthPeak = cfgN("fireBombBeat", "fifthPeak", 0.2);
+    const fifthDecay = cfgN("fireBombBeat", "fifthDecay", 0.22);
+
+    const body = ctx.createOscillator();
+    const bodyGain = ctx.createGain();
+    body.type = "sine";
+    body.frequency.setValueAtTime(bodyHz, t);
+    body.frequency.exponentialRampToValueAtTime(bodyEndHz, t + bodyDecay);
+    bodyGain.gain.setValueAtTime(0.0001, t);
+    bodyGain.gain.exponentialRampToValueAtTime(bodyPeak, t + 0.006);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + bodyDecay);
+    body.connect(bodyGain);
+    bodyGain.connect(dest);
+    body.start(t);
+    body.stop(t + bodyDecay + 0.02);
+
+    this.buildPluckGraph(ctx, dest, t, {
+      bodyHz: fifthHz,
+      bodyPeak: fifthPeak,
+      bodyDecay: fifthDecay,
+      partialHz: fifthHz * 2,
+      partialPeak: fifthPeak * 0.35,
+      partialDecay: fifthDecay * 0.5,
+      tickHz: cfgN("fireBombBeat", "tickHz", 320),
+      tickQ: cfgN("fireBombBeat", "tickQ", 1.1),
+      tickPeak: cfgN("fireBombBeat", "tickPeak", 0.12),
+      tickDecay: cfgN("fireBombBeat", "tickDecay", 0.06),
+    });
+  }
+
+  // The playFire pluck — sine body, octave partial, bandpassed noise tick —
+  // as one reusable graph so the bomb voices restate only their tuning.
+  private buildPluckGraph(ctx: BaseAudioContext, dest: AudioNode, t: number, p: {
+    bodyHz: number; bodyPeak: number; bodyDecay: number;
+    partialHz: number; partialPeak: number; partialDecay: number;
+    tickHz: number; tickQ: number; tickPeak: number; tickDecay: number;
+  }) {
+    const body = ctx.createOscillator();
+    const bodyGain = ctx.createGain();
+    body.type = "sine";
+    body.frequency.value = p.bodyHz;
+    bodyGain.gain.setValueAtTime(0.0001, t);
+    bodyGain.gain.exponentialRampToValueAtTime(p.bodyPeak, t + 0.005);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, t + p.bodyDecay);
+    body.connect(bodyGain);
+    bodyGain.connect(dest);
+    body.start(t);
+    body.stop(t + p.bodyDecay + 0.02);
+
+    const partial = ctx.createOscillator();
+    const partialGain = ctx.createGain();
+    partial.type = "sine";
+    partial.frequency.value = p.partialHz;
+    partialGain.gain.setValueAtTime(0.0001, t);
+    partialGain.gain.exponentialRampToValueAtTime(p.partialPeak, t + 0.004);
+    partialGain.gain.exponentialRampToValueAtTime(0.0001, t + p.partialDecay);
+    partial.connect(partialGain);
+    partialGain.connect(dest);
+    partial.start(t);
+    partial.stop(t + p.partialDecay + 0.02);
+
+    const tickBuf = this.noiseBuffer(ctx, Math.max(p.tickDecay, 0.005));
+    if (!tickBuf) return;
+    const tick = ctx.createBufferSource();
+    tick.buffer = tickBuf;
+    const tickFilter = ctx.createBiquadFilter();
+    tickFilter.type = "bandpass";
+    tickFilter.frequency.value = p.tickHz;
+    tickFilter.Q.value = p.tickQ;
+    const tickGain = ctx.createGain();
+    tickGain.gain.setValueAtTime(p.tickPeak, t);
+    tickGain.gain.exponentialRampToValueAtTime(0.0001, t + p.tickDecay);
+    tick.connect(tickFilter);
+    tickFilter.connect(tickGain);
+    tickGain.connect(dest);
+    tick.start(t);
+    tick.stop(t + p.tickDecay + 0.005);
   }
 
   private playExplosion(name: ExplosionName) {

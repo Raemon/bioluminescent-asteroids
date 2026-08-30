@@ -5,7 +5,7 @@ import { ParticleSystem } from "../Particle";
 import { Bullet } from "../Bullet";
 import { Sound } from "../Sound";
 import { emitThrust, emitReverseThrust, emitSideThrust } from "./shipParticles";
-import { fireBullets } from "./shipWeapons";
+import { fireBullets, effectiveBulletSpeed } from "./shipWeapons";
 import { isDown } from "../game/controlBindings";
 import { FUEL_MODE_ENABLED, FUEL_THRUST_DRAIN, FUEL_SIDE_DRAIN, FUEL_RECHARGE, FUEL_RECHARGE_INTERVAL } from "../game/fuel";
 import { BEAT_GRID } from "../game/rhythmConstants";
@@ -48,7 +48,7 @@ const DRIFT_AIM_SNAP = true;
 // at 1 so a closer-than-reference target never *speeds up* rotation. Thrust is unaffected (it moves
 // the ship, not the reticule sweep), and the nearby approach zone keeps its full multiplier.
 const driftAimRotDistFactor = (ship: Ship, ringCenter: { x: number; y: number }) => {
-  const refDist = ship.bulletSpeed * BEAT_GRID;
+  const refDist = effectiveBulletSpeed(ship) * BEAT_GRID;
   const dist = Math.hypot(ringCenter.x - ship.pos.x, ringCenter.y - ship.pos.y);
   if (dist <= refDist || refDist <= 0) return 1;
   return refDist / dist;

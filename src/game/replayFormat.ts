@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 33;
+export const REPLAY_FORMAT_VERSION = 34;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -127,6 +127,10 @@ export const REPLAY_FORMAT_VERSION = 33;
 //   Shockwave-driven citadel breaks now get the ship pose too. Fragment
 //   positions and speeds all move, so v32 recordings with a citadel re-sim into
 //   different runs.
+// v34 adds the bomb powerup to the canister drop pool. The pool is picked from
+//   with a single seeded draw either way, so the RNG stream is untouched, but a
+//   v33 recording's canister would now resolve to a different upgrade — and a
+//   bomb changes bullet speed, size and damage, so the run diverges from there.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat

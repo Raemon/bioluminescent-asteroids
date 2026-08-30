@@ -4,6 +4,7 @@ import { Alien } from "../Alien";
 import { AlienBullet } from "../AlienBullet";
 import { Comet } from "../Comet";
 import { Bullet } from "../Bullet";
+import { effectiveBulletSpeed } from "../ship/shipWeapons";
 import { Vec, nearestImageOf } from "../vec";
 import { ENTITY_CONFIG } from "./entityConfig";
 import { spawnGemFan, spawnBurstGemFan } from "../Gem";
@@ -313,7 +314,7 @@ const finishAsteroidKillCore = (
     // where a prong shot fired right now would truly thread both.
     shipHeading: game.ship.heading,
     shipVel: game.ship.vel,
-    bulletSpeed: game.ship.bulletSpeed,
+    bulletSpeed: effectiveBulletSpeed(game.ship),
   });
   // sibling fragments share one beat-claim set so the two pieces target
   //   *different* beats — otherwise the player can only combo one of them

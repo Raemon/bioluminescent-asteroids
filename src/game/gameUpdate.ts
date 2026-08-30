@@ -970,7 +970,10 @@ const classifyNewBullets = (game: Game, firstNewIndex: number) => {
     registerOffBeatFire(game);
   }
   // deeper fireBeat pluck reinforces "you nailed the beat"; ship no longer plays its own.
-  game.sound.play(firedOnBeat ? "fireBeat" : "fire");
+  // The bomb's shells get their own pair of voices, two octaves down but the same
+  // pitch classes, so the heavier weapon sounds heavier without leaving the key.
+  const bomb = game.ship.bombActive;
+  game.sound.play(firedOnBeat ? (bomb ? "fireBombBeat" : "fireBeat") : bomb ? "fireBomb" : "fire");
 };
 
 // Bullet-only: tag the freshly-spawned projectiles with the live halo tier so

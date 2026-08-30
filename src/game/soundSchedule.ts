@@ -162,6 +162,9 @@ export const SOUND_LOAD_SCHEDULE: readonly SoundLoadEntry[] = [
   { name: "canisterAppear", keys: [1], wave: CFG.canister.firstWave },
   { name: "canisterDestroyed", keys: [1], wave: CFG.canister.firstWave },
   { name: "powerup", keys: [1], wave: CFG.canister.firstWave },
+  // The bomb's two muzzle voices can't be heard until its pod has dropped.
+  { name: "fireBomb", keys: [1], wave: CFG.canister.firstWave },
+  { name: "fireBombBeat", keys: [1], wave: CFG.canister.firstWave },
   { name: "shieldPop", keys: [1], wave: CFG.canister.firstWave },
   // An extra life is a score threshold, not a spawn — first plausible around
   // the time canisters start showing up.
