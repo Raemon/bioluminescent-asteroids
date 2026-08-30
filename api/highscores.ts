@@ -213,6 +213,16 @@ const fetchHasReplayIds = async (ids: number[]): Promise<Set<number>> => {
   return new Set(rows.map((r) => r.id));
 };
 
+// has_replay must never be baked into the module caches below. A replay is
+//   uploaded a beat AFTER its score row is written, so a cached row carries
+//   has_replay: false for the rest of its TTL and the run the pilot just saved
+//   renders with no play button. Resolve the flag fresh on every request
+//   instead — one indexed lookup over an already-bounded list of ids.
+const withFreshReplayFlags = async (rows: RowOut[]): Promise<RowOut[]> => {
+  const ids = await fetchHasReplayIds(rows.map((r) => r.id));
+  return rows.map((r) => ({ ...r, has_replay: ids.has(r.id) }));
+};
+
 const fetchTopPilots = async (): Promise<RowOut[]> => {
   const cached = readCache(topPilotsCache);
   if (cached) return cached;
@@ -230,16 +240,14 @@ const fetchTopPilots = async (): Promise<RowOut[]> => {
       select: LEADERBOARD_COLUMNS,
     });
     collected.push(...rows);
-    // has_replay doesn't affect dedupe; fill it for real only on the final set.
+    // has_replay doesn't affect dedupe, and the caller fills it in fresh.
     deduped = dedupeByPilot(withHasReplay(collected, new Set()));
     const distinctScores = new Set(deduped.map((r) => r.score));
     if (rows.length < TOP_PILOTS_BATCH) break;
     if (distinctScores.size >= TOP_PILOTS_DISTINCT_SCORES) break;
   }
-  const hasReplayIds = await fetchHasReplayIds(deduped.map((r) => r.id));
-  const withReplay = deduped.map((r) => ({ ...r, has_replay: hasReplayIds.has(r.id) }));
-  topPilotsCache = { value: withReplay, expires: Date.now() + CACHE_TTL_MS };
-  return withReplay;
+  topPilotsCache = { value: deduped, expires: Date.now() + CACHE_TTL_MS };
+  return deduped;
 };
 
 const fetchTopRows = async (): Promise<RowOut[]> => {
@@ -250,8 +258,7 @@ const fetchTopRows = async (): Promise<RowOut[]> => {
     take: TOP_ROWS_CACHE_LIMIT,
     select: LEADERBOARD_COLUMNS,
   });
-  const hasReplayIds = await fetchHasReplayIds(rows.map((r) => r.id));
-  const mapped = withHasReplay(rows, hasReplayIds);
+  const mapped = withHasReplay(rows, new Set());
   topRowsCache = { value: mapped, expires: Date.now() + CACHE_TTL_MS };
   return mapped;
 };
@@ -264,8 +271,7 @@ const fetchRecentRows = async (): Promise<RowOut[]> => {
     take: RECENT_ROWS_LIMIT,
     select: LEADERBOARD_COLUMNS,
   });
-  const hasReplayIds = await fetchHasReplayIds(rows.map((r) => r.id));
-  const mapped = withHasReplay(rows, hasReplayIds);
+  const mapped = withHasReplay(rows, new Set());
   recentRowsCache = { value: mapped, expires: Date.now() + CACHE_TTL_MS };
   return mapped;
 };
@@ -399,7 +405,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (mode === "top-pilots") {
       try {
-        const rows = await fetchTopPilots();
+        const rows = await withFreshReplayFlags(await fetchTopPilots());
         setEdgeCache(res);
         res.status(200).json({ scores: rows });
       } catch (err) {
@@ -411,7 +417,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (mode === "recent") {
       try {
-        const rows = await fetchRecentRows();
+        const rows = await withFreshReplayFlags(await fetchRecentRows());
         setEdgeCache(res);
         res.status(200).json({ scores: rows });
       } catch (err) {
@@ -491,9 +497,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     //   Paged reads past the cache window fall through to a direct DB query.
     if (offset === 0 && limit <= TOP_ROWS_CACHE_LIMIT) {
       try {
-        const rows = await fetchTopRows();
+        const rows = await withFreshReplayFlags((await fetchTopRows()).slice(0, limit));
         setEdgeCache(res);
-        res.status(200).json({ scores: rows.slice(0, limit) });
+        res.status(200).json({ scores: rows });
       } catch (err) {
         console.error("[highscores GET] db read failed:", err);
         res.status(500).json({ error: "DB read failed" });

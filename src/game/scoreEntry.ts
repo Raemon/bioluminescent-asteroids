@@ -10,6 +10,7 @@ import {
   getRecentName,
   getSaveReplayPref,
   getTopEntriesOnly,
+  markReplaySaved,
   saveCachedHighscores,
   saveRecentName,
   saveSaveReplayPref,
@@ -75,12 +76,6 @@ const handleSubmit = async (game: Game, ev: Event) => {
     // Signed-in submit came back with refreshed lifetime stats — show them
     //   under the form so the pilot sees their totals tick up.
     if (result.user) renderSubmitStats(result.user);
-    // Arm the one-shot "your standing" view and pre-fetch its rows now, while
-    //   the player is still reading the game-over screen, so returning home
-    //   renders the centred neighborhood without a loading flash. The catch
-    //   keeps the promise non-rejecting; null falls back to the hall-of-fame.
-    game.showNeighborhoodOnce = true;
-    game.neighborhoodFetch = fetchNeighborhood(saved.id, 25).catch(() => null);
     game.scoreEntryInputEl.blur();
     if (wantReplay) {
       setStatus(game, "Uploading replay…", "info");
@@ -90,6 +85,7 @@ const handleSubmit = async (game: Game, ev: Event) => {
           setStatus(game, "Score saved. Replay unavailable. Press enter to continue.", "success");
         } else {
           await uploadReplay(saved.id, rawName, bytes);
+          markReplaySaved(saved.id);
           setStatus(game, "Score + replay saved. Press enter to continue.", "success");
         }
       } catch (err) {
@@ -98,6 +94,15 @@ const handleSubmit = async (game: Game, ev: Event) => {
     } else {
       setStatus(game, "Score saved. Press enter to continue.", "success");
     }
+    // Arm the one-shot "your standing" view and pre-fetch its rows, so returning
+    //   home renders the centred neighborhood without a loading flash. Fetched
+    //   AFTER the replay upload, not before: the server reads has_replay off the
+    //   row, so a prefetch that overtakes the upload comes back saying the run
+    //   the pilot just saved has no replay, and renders it with no play button.
+    //   The catch keeps the promise non-rejecting; null falls back to the
+    //   hall-of-fame.
+    game.showNeighborhoodOnce = true;
+    game.neighborhoodFetch = fetchNeighborhood(saved.id, 25).catch(() => null);
     game.scoreSubmitState = "submitted";
   } catch (err) {
     game.scoreSubmitState = "idle";
