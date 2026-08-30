@@ -401,7 +401,10 @@ type IntentionallyOmitted =
   | "bossPulse" | "bossHit" | "bossEyeOpenStinger" | "chargeBed" | "summaryDownbeatDucked"
   // Baked internal voices of sounds already listed above (drone/one-shot
   // variants dispatched by the play paths, not directly triggerable).
-  | "laserShot" | "streakShimmer" | "bassteroidDrone" | "alienDrone" | "firstDotHum" | "warbleDrone";
+  | "laserShot" | "streakShimmer" | "bassteroidDrone" | "alienDrone" | "firstDotHum" | "warbleDrone"
+  // Baked voices with their own public entry point on Sound rather than a
+  // play() dispatch — the page has no generic way to trigger them.
+  | "driftShotHit" | "laserCharge" | "laserChargeFail" | "comboChime" | "calibrationTap";
 
 // Compile-time check: every SoundName must be in MENTIONED_SOUNDS or
 // IntentionallyOmitted. If you add a new SoundName and forget to wire it

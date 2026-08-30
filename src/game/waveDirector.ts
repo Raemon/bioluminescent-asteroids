@@ -165,6 +165,9 @@ export const markVeteranPilot = () => {
 };
 
 export const updateBgBeatIntensity = (game: Game) => {
+  // Tell the asset loader where the run is: everything this wave introduces
+  // becomes the front of its queue, and the waves behind it are already done.
+  game.sound.setLoadWave(game.wave);
   // a deliberate per-wave set wins over any in-flight calibration→play loudness ramp.
   game.beatIntensityRamp = null;
   const ramp = Math.max(0, Math.min(1, (game.wave - 1) / CFG.bgBeatIntensity.rampWaves));
