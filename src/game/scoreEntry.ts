@@ -96,11 +96,7 @@ const handleSubmit = async (game: Game, ev: Event) => {
     }
     // Arm the one-shot "your standing" view and pre-fetch its rows, so returning
     //   home renders the centred neighborhood without a loading flash. Fetched
-    //   AFTER the replay upload, not before: the server reads has_replay off the
-    //   row, so a prefetch that overtakes the upload comes back saying the run
-    //   the pilot just saved has no replay, and renders it with no play button.
-    //   The catch keeps the promise non-rejecting; null falls back to the
-    //   hall-of-fame.
+    //   AFTER the replay upload, not before.
     game.showNeighborhoodOnce = true;
     game.neighborhoodFetch = fetchNeighborhood(saved.id, 25).catch(() => null);
     game.scoreSubmitState = "submitted";
