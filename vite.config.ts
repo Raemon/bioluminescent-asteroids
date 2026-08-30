@@ -1,6 +1,6 @@
 import { defineConfig, type ViteDevServer } from "vite";
 import { resolve } from "node:path";
-import { writeFile, mkdir, access } from "node:fs/promises";
+import { writeFile, readFile, mkdir, access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { config as loadDotenv } from "dotenv";
@@ -95,9 +95,11 @@ const bakeDumpWriter = () => {
   };
   const encodeWavToMp3 = (wav: Buffer, outPath: string): Promise<void> =>
     new Promise((resolveEncode, rejectEncode) => {
-      // -y overwrite, -i pipe:0 WAV in, -codec:a libmp3lame, -q:a 4 (~165kbps VBR)
-      // -loglevel error keeps the dev console quiet on success.
-      const ff = spawn("ffmpeg", ["-y", "-loglevel", "error", "-i", "pipe:0", "-codec:a", "libmp3lame", "-q:a", "4", outPath]);
+      // -y overwrite, -i pipe:0 WAV in, -codec:a libmp3lame, -q:a 2 (~190kbps VBR)
+      // -loglevel error keeps the dev console quiet on success. The whole
+      // baked/ tree is a few MB, so the quality step above the old -q:a 4 buys
+      // headroom on the tonal voices for a size nobody will notice.
+      const ff = spawn("ffmpeg", ["-y", "-loglevel", "error", "-i", "pipe:0", "-codec:a", "libmp3lame", "-q:a", "2", outPath]);
       let stderr = "";
       ff.stderr.on("data", (c: Buffer) => { stderr += c.toString(); });
       ff.on("error", rejectEncode);
@@ -107,6 +109,26 @@ const bakeDumpWriter = () => {
       });
       ff.stdin.end(wav);
     });
+  // bake-gains.json maps file slug → the multiplier Sound applies after decode
+  // to undo the encode-time normalization. Merged rather than rewritten so a
+  // partial bake run never drops the gains of the files already on disk.
+  const gainsPath = resolve(dir, "bake-gains.json");
+  let gainWrite: Promise<void> = Promise.resolve();
+  const recordBakeGain = (key: string, gain: number) => {
+    if (!Number.isFinite(gain) || gain <= 0) return gainWrite;
+    gainWrite = gainWrite.then(async () => {
+      let gains: Record<string, number> = {};
+      try {
+        gains = JSON.parse(await readFile(gainsPath, "utf8")) as Record<string, number>;
+      } catch {
+        // No manifest yet — this bake starts one.
+      }
+      gains[key] = Number(gain.toFixed(6));
+      const sorted = Object.fromEntries(Object.entries(gains).sort(([a], [b]) => a.localeCompare(b)));
+      await writeFile(gainsPath, `${JSON.stringify(sorted, null, 2)}\n`);
+    });
+    return gainWrite;
+  };
   return {
     name: "bake-dump-writer",
     configureServer(server: {
@@ -119,12 +141,17 @@ const bakeDumpWriter = () => {
           return;
         }
         const [, search = ""] = url.split("?");
-        const key = new URLSearchParams(search).get("key") ?? "";
+        const params = new URLSearchParams(search);
+        const key = params.get("key") ?? "";
         if (!key || !safeKey(key)) {
           res.statusCode = 400;
           res.end("invalid key");
           return;
         }
+        // Playback multiplier that undoes the encode-time normalization. It
+        // lives beside the mp3s rather than inside them so the loader can read
+        // every gain in one fetch, before the first buffer decodes.
+        const gain = Number(params.get("gain") ?? "1");
         const chunks: Buffer[] = [];
         req.on("data", (c: Buffer) => chunks.push(c));
         req.on("end", async () => {
@@ -139,6 +166,7 @@ const bakeDumpWriter = () => {
             }
             const wav = Buffer.concat(chunks);
             await encodeWavToMp3(wav, out);
+            await recordBakeGain(key, gain);
             res.statusCode = 200;
             res.end(JSON.stringify({ ok: true, wrote: out }));
             // eslint-disable-next-line no-console
@@ -264,6 +292,10 @@ const devApi = () => {
 export default defineConfig({
   server: {
     host: true,
+    // A bake run writes into public/sounds/baked/ from the page it is driving.
+    // Vite full-reloads on any public/ write, which tore down that page mid-run
+    // — the bake would stop wherever the first file landed.
+    watch: { ignored: ["**/public/sounds/baked/**"] },
   },
   plugins: [
     react(),

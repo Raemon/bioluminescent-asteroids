@@ -67,13 +67,34 @@ const results = await page.evaluate(async () => {
   ];
   const MUSIC = ["halo-music/cinematic-el-ambient", "halo-music/cinematic-el-melodic"];
 
+  // Voices whose mp3 carries its own compressor + limiter (Tone recipes, the
+  // ElevenLabs one-shots). Mirrors Sound.PREMASTERED_BAKES: those play through
+  // the baked leg's glue; a raw-voice bake plays through the live leg, so a
+  // scenario has to route each file the way the game does.
+  const PREMASTERED = new Set([
+    "bgBeat", "fireBeat", "bassKick", "bassBoom", "bassPluck", "bassSnap",
+    "chime", "drainChime", "powerup", "waveClear", "cometNote",
+    "wraithScream", "wraithHit", "wraithLunge", "wraithDeath",
+  ]);
+  const gains = await fetch("/sounds/baked/bake-gains.json").then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+
   const decodeCtx = new AudioContext({ sampleRate: RATE });
   const buffers = {};
   const filePeaks = {};
+  const premastered = {};
   for (const name of [...FILES, ...MUSIC]) {
     const url = name.includes("/") ? `/sounds/${name}.mp3` : `/sounds/baked/${name}.mp3`;
     const ab = await (await fetch(url)).arrayBuffer();
     const buf = await decodeCtx.decodeAudioData(ab);
+    // Undo the encode-time normalization, exactly as Sound does on decode.
+    const g = gains[name] ?? 1;
+    if (g !== 1) {
+      for (let c = 0; c < buf.numberOfChannels; c++) {
+        const d = buf.getChannelData(c);
+        for (let i = 0; i < d.length; i++) d[i] *= g;
+      }
+    }
+    premastered[name] = PREMASTERED.has(name.split("__")[0]);
     buffers[name] = buf;
     let peak = 0;
     for (let c = 0; c < buf.numberOfChannels; c++) {
@@ -213,7 +234,10 @@ const results = await page.evaluate(async () => {
         const g = ctx.createGain();
         g.gain.value = (ev.gain ?? 1) * (dup > 1 ? 1 / Math.sqrt(k) : 1);
         src.connect(g);
-        g.connect(ev.ch === "music" ? liveSum : bakedSum);
+        // Music stems connect to chMusicLive; a raw-voice bake joins the live
+        // leg like the graph it was rendered from; only pre-mastered files
+        // take the glue leg.
+        g.connect(ev.ch !== "music" && premastered[ev.file] ? bakedSum : liveSum);
         src.start(ev.t);
       }
     }
@@ -292,8 +316,8 @@ const results = await page.evaluate(async () => {
   return { filePeaks, table };
 });
 
-console.log("\ndecoded file peaks (files are rendered through the baked master chain,");
-console.log("so ~0.9 = at the limiter ceiling before any bus gain):");
+console.log("\ndecoded file peaks, after the bake-gain is undone (a raw-voice bake is");
+console.log("the bare voice, so these are voice levels, not mastered ones):");
 for (const [f, p] of Object.entries(results.filePeaks)) console.log(`  ${p.toFixed(3)}  ${f}`);
 
 const failures = [];

@@ -20,9 +20,12 @@ async function loadTone(): Promise<ToneModule> {
 }
 
 // Master bus. Every voice feeds one of two summing legs (see buildMixGraph):
-// live-built WebAudio graphs via Sound.master → liveSum → compressor, baked
-// buffers via Sound.bakedOut → bakedSum → glue compressor. Both legs join a
-// shared limiter, then a soft-clip safety, then the analyser + destination.
+// Sound.master → liveSum → compressor takes hand-built graphs AND the baked
+// mp3s of those same graphs, which hold a bare voice and need the same
+// dynamics live synthesis got; Sound.bakedOut → bakedSum → glue compressor
+// takes only the files that already carry dynamics of their own (see
+// PREMASTERED_BAKES). Both legs join a shared limiter, then a soft-clip
+// safety, then the analyser + destination.
 // Per-alien drone voice. Two detuned sines through a slow-sweeping lowpass,
 // modulated by an LFO on amplitude for the theremin pulse. Held open for the
 // lifetime of an alien; torn down on death or mute. The tonal content
@@ -1130,19 +1133,18 @@ export class Sound {
   // here so each bake completes (and restores Tone's context) before the
   // next starts.
   bakeChain: Promise<unknown> = Promise.resolve();
-  // Dedicated GainNode for baked-buffer playback. Baked buffers already
-  // contain the master FX chain (compressor+reverb+limiter) in their tail,
-  // so they bypass this.master — otherwise that chain would be applied
-  // twice. They route through the baked leg's glue compressor (unity for a
-  // lone voice, ducking pileups) and the shared master limiter + soft clip
-  // (see buildMixGraph).
+  // Dedicated GainNode for playing back audio that already contains an FX
+  // chain in its tail — the Tone recipes and the ElevenLabs one-shots. Those
+  // bypass this.master, or the master compressor would be applied twice; they
+  // route through the baked leg's glue instead (unity for a lone voice,
+  // ducking pileups) and the shared limiter + soft clip. A raw-voice bake is
+  // NOT one of these: it goes to this.master like the graph it came from.
   bakedOut: GainNode | null = null;
-  // Per-channel mix gains. Each channel has two legs — a "live" leg that
-  // routes into the master compressor (for hand-built voices), and a "baked"
-  // leg that swaps the compressor for the stack-taming glue (pre-baked mp3s
-  // already carry the master FX chain in their tail). Both legs share the
-  // master limiter + soft clip. setChannelVolume() updates both legs of a
-  // channel together.
+  // Per-channel mix gains. Each channel has two legs — a "live" leg into the
+  // master compressor, and a "baked" leg that swaps the compressor for the
+  // stack-taming glue, for audio that already carries an FX chain in its
+  // tail. Both legs share the master limiter + soft clip.
+  // setChannelVolume() updates both legs of a channel together.
   //
   // chSfx{Live,Baked} are aliased by this.master and this.bakedOut so the
   // existing voice methods (which connect to those fields directly) sit on
@@ -1204,6 +1206,26 @@ export class Sound {
     }
   }
 
+  // Voices whose mp3 holds a finished mix rather than a bare voice: the Tone
+  // recipes, which render through the Tone engine's own compressor + limiter,
+  // and the ElevenLabs one-shots, which arrived as mastered audio. Those play
+  // through the baked leg's glue, which is what keeps a stack of pre-limited
+  // files off the master limiter. Everything else is a raw render of the same
+  // graph the live fallback builds, so it belongs on the live leg — through
+  // the master compressor, exactly as the live voice would be.
+  private static readonly PREMASTERED_BAKES: ReadonlySet<SoundName> = new Set<SoundName>([
+    "bgBeat", "fireBeat", "bassKick", "bassBoom", "bassPluck", "bassSnap",
+    "chime", "drainChime", "powerup", "waveClear", "cometNote",
+    "wraithScream", "wraithHit", "wraithLunge", "wraithDeath",
+  ]);
+
+  // Where a baked buffer joins the mix. bgBeat is the background pulsar pulse
+  // and rides the basePulse slider; everything else is an SFX voice.
+  private bakedSink(name: SoundName): GainNode | null {
+    if (name === "bgBeat") return this.chBasePulseBaked;
+    return Sound.PREMASTERED_BAKES.has(name) ? this.chSfxBaked : this.chSfxLive;
+  }
+
   private bakedKey(name: SoundName, pitchRatio: number): string {
     // Quantize to 4 decimals so floating-point noise doesn't fragment the cache.
     return `${name}|${pitchRatio.toFixed(4)}`;
@@ -1223,7 +1245,7 @@ export class Sound {
   // Encode an AudioBuffer as a 16-bit PCM WAV in a single Uint8Array. Used to
   // ship a freshly-rendered bake to the dev plugin for ffmpeg → MP3 conversion.
   // Stereo interleaved; sample rate from the buffer.
-  private encodeWav(buf: AudioBuffer): Uint8Array {
+  private encodeWav(buf: AudioBuffer, gain = 1): Uint8Array {
     const numCh = buf.numberOfChannels;
     const sr = buf.sampleRate;
     const frames = buf.length;
@@ -1251,12 +1273,44 @@ export class Sound {
     let off = 44;
     for (let i = 0; i < frames; i++) {
       for (let c = 0; c < numCh; c++) {
-        const s = Math.max(-1, Math.min(1, channels[c][i]));
+        const s = Math.max(-1, Math.min(1, channels[c][i] * gain));
         view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
         off += 2;
       }
     }
     return new Uint8Array(out);
+  }
+
+  // Peak every render is encoded at. A voice is scaled to this before it goes
+  // to ffmpeg and scaled back by BAKE_GAINS on decode, so a soft one-shot
+  // spends the codec's bits on the sound instead of on headroom it never uses.
+  private static readonly BAKE_ENCODE_PEAK = 0.89;
+  // Playback multipliers that undo that scaling, keyed by file slug. Fetched
+  // once from bake-gains.json, which the dev bake hook writes beside the mp3s.
+  private bakeGains: Map<string, number> | null = null;
+  private bakeGainsLoading: Promise<void> | null = null;
+
+  private loadBakeGains(): Promise<void> {
+    if (this.bakeGains) return Promise.resolve();
+    this.bakeGainsLoading ??= fetch("/sounds/baked/bake-gains.json")
+      .then((r) => (r.ok ? r.json() : {}))
+      .catch(() => ({}))
+      .then((json: Record<string, number>) => {
+        this.bakeGains = new Map(Object.entries(json).filter(([, g]) => Number.isFinite(g) && g > 0));
+      });
+    return this.bakeGainsLoading;
+  }
+
+  // Undo the encode-time normalization in place. A file with no manifest entry
+  // (the ElevenLabs one-shots, anything baked before the manifest existed)
+  // plays at the level it was rendered at, which is what it did before.
+  private applyBakeGain(slug: string, buf: AudioBuffer) {
+    const gain = this.bakeGains?.get(slug);
+    if (!gain || gain === 1) return;
+    for (let c = 0; c < buf.numberOfChannels; c++) {
+      const data = buf.getChannelData(c);
+      for (let i = 0; i < data.length; i++) data[i] *= gain;
+    }
   }
 
   // Fetch a pre-baked MP3 from public/sounds/baked/. Returns the decoded
@@ -1265,13 +1319,15 @@ export class Sound {
   private async fetchBakedMp3(name: SoundName, pitchRatio: number, immediate = false): Promise<AudioBuffer | null> {
     if (!this.ctx) return null;
     try {
-      const r = await fetch(this.bakedFileUrl(name, pitchRatio));
+      const [r] = await Promise.all([fetch(this.bakedFileUrl(name, pitchRatio)), this.loadBakeGains()]);
       if (!r.ok) return null;
       const ab = await r.arrayBuffer();
       // Fetching is cheap on the main thread; decoding is not. Background
       // loads hand the decode to the shared serialized queue, which only runs
       // it in frame slack. A demand load decodes straight away.
-      return await this.decodeAsset(ab, immediate);
+      const buf = await this.decodeAsset(ab, immediate);
+      if (buf) this.applyBakeGain(this.bakedFileSlug(name, pitchRatio), buf);
+      return buf;
     } catch {
       return null;
     }
@@ -1280,11 +1336,22 @@ export class Sound {
   // Dev-only: POST a freshly-rendered bake to the Vite plugin so it lands in
   // public/sounds/baked/ as MP3. The plugin no-ops if the file already exists,
   // so this is safe to call on every bake.
+  //
+  // The buffer handed here plays at the level the game wants; the file gets a
+  // normalized copy plus the gain that restores it, so encode headroom is a
+  // property of the file and never of the sound.
   private async dumpBakedToDev(name: SoundName, pitchRatio: number, buf: AudioBuffer): Promise<void> {
     if (!(import.meta.env as unknown as { DEV?: boolean })?.DEV) return;
     try {
-      const wav = this.encodeWav(buf);
-      await fetch(`/__bake-dump__?key=${encodeURIComponent(this.bakedFileSlug(name, pitchRatio))}`, {
+      let peak = 0;
+      for (let c = 0; c < buf.numberOfChannels; c++) {
+        const data = buf.getChannelData(c);
+        for (let i = 0; i < data.length; i++) { const a = Math.abs(data[i]); if (a > peak) peak = a; }
+      }
+      const norm = peak > 0 ? Sound.BAKE_ENCODE_PEAK / peak : 1;
+      const wav = this.encodeWav(buf, norm);
+      const slug = this.bakedFileSlug(name, pitchRatio);
+      await fetch(`/__bake-dump__?key=${encodeURIComponent(slug)}&gain=${(1 / norm).toFixed(6)}`, {
         method: "POST",
         headers: { "content-type": "audio/wav" },
         body: new Blob([wav.buffer as ArrayBuffer], { type: "audio/wav" }),
@@ -1415,9 +1482,7 @@ export class Sound {
   // back to live synthesis (typically while the first bake is still running).
   private playBaked(name: SoundName, pitchRatio: number, playbackRate = 1): boolean {
     if (!this.ctx) return false;
-    // Pick the channel sink: bgBeat is the background pulsar pulse and rides
-    // the basePulse slider; everything else baked is an SFX one-shot.
-    const sink = name === "bgBeat" ? this.chBasePulseBaked : this.chSfxBaked;
+    const sink = this.bakedSink(name);
     if (!sink) return false;
     const key = this.bakedKey(name, pitchRatio);
     const buf = this.bakedBuffers.get(key);
@@ -1669,12 +1734,12 @@ export class Sound {
     }
     // Every pure-WebAudio one-shot (no Tone, no reverb bus) renders through
     // one path: look the graph builder up in the registry, run it at time
-    // origin 0 into a baked copy of the live master chain, done. These voices
-    // are played LIVE into this.master when their mp3 hasn't landed yet, and
-    // the live master applies a compressor + limiter on playback that baked
-    // buffers skip (their leg swaps the compressor for the unity-trimmed
-    // glue) — so the render has to carry that chain itself or the baked clip
-    // would come back hotter and less glued than the live one.
+    // origin 0 into the render's destination, done. Nothing of the master
+    // chain goes into the file — the buffer plays back through this.master,
+    // the same compressor + limiter the live fallback of this very graph
+    // runs through, so the two legs are the same signal by construction.
+    // Baking the dynamics in instead made the file a snapshot of one voice
+    // compressed alone, which is a mix, and a mix cannot be pre-rendered.
     // The two sampled-guitar alien voices can't render until their WAV is
     // decoded — wait for it rather than baking silence.
     if ((name === "alienFireBig" || name === "alienFireMedium") && !this.guitarSampleJazz) {
@@ -1689,8 +1754,7 @@ export class Sound {
       // the live path plays it into a stereo destination and keeps both.
       const channels = Sound.STEREO_BAKES.has(name) ? 2 : 1;
       const offline = new OACearly(channels, len, sr);
-      const masterIn = this.buildBakedMasterChain(offline);
-      oneShot(offline, masterIn);
+      oneShot(offline, offline.destination);
       return offline.startRendering();
     }
 
@@ -4283,30 +4347,6 @@ export class Sound {
   // buildCometDestroyedGraph for the actual synthesis.
   playCometDestroyed() {
     this.playBaked("cometDestroyed", 1);
-  }
-
-  // Build a compressor → limiter into an offline render context so the baked
-  // buffer contains the same per-voice dynamics the live leg applies on
-  // playback — at runtime baked buffers trade this compressor for the
-  // unity-trimmed glue (see buildMixGraph). The settings here are frozen
-  // into every mp3 already on disk; retuning the live chain must NOT touch
-  // them, or fresh bakes would stop matching the shipped files.
-  private buildBakedMasterChain(ctx: BaseAudioContext): AudioNode {
-    const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -18;
-    compressor.ratio.value = 3;
-    compressor.attack.value = 0.01;
-    compressor.release.value = 0.18;
-    compressor.knee.value = 12;
-    const limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -1;
-    limiter.ratio.value = 20;
-    limiter.attack.value = 0.003;
-    limiter.release.value = 0.01;
-    limiter.knee.value = 0;
-    compressor.connect(limiter);
-    limiter.connect(ctx.destination);
-    return compressor;
   }
 
   // The comet-hit graph, built into `ctx` ending at `dest`, with time origin 0.
@@ -8613,7 +8653,8 @@ export class Sound {
   playLaserShot(damage: number = 2, dots: number = 0) {
     if (!this.enabled) return;
     this.ensureContext();
-    if (!this.ctx || !this.bakedOut) return;
+    const sink = this.bakedSink("laserShot");
+    if (!this.ctx || !sink) return;
     const tier = Math.max(0, Math.min(4, Math.floor(dots)));
     const buf = this.bakedBuffers.get(this.bakedKey("laserShot", tier));
     if (!buf) {
@@ -8635,7 +8676,7 @@ export class Sound {
     // `damage` rides a small bump on top so a 32-damage shot lands a touch hotter.
     gain.gain.value = Math.min(0.72, 0.6 + damage * 0.004);
     src.connect(gain);
-    gain.connect(this.bakedOut);
+    gain.connect(sink);
     src.start(t);
   }
 

@@ -23,6 +23,13 @@ Key facts:
   the WAV to the `/__bake-dump__` hook in `vite.config.ts`, which pipes it
   through ffmpeg. **Existing files win** — the hook refuses to overwrite, so
   ordinary dev play never churns good bakes.
+- A one-shot mp3 holds the **bare voice**, with none of the master chain in
+  it, and plays back through the same compressor + limiter the live fallback
+  does. Its encode level is normalized and undone on decode via
+  `bake-gains.json` (see *Where a bake can drift*, 1 and 1b).
+- `npm run check:bake-fidelity` renders every one-shot both ways and prints
+  the per-band difference — the check that a bake still sounds like its graph.
+  `npm run check:mix-stress` is the companion for the busy-moment mix.
 - `npm run bake` does that headlessly: boots `vite dev`, opens the page in
   Chromium (`playwright-core`, `CHROME_PATH` to point at a browser), and waits
   for `warmBakedCache` to drain. Requires ffmpeg with libmp3lame on PATH.
@@ -187,43 +194,47 @@ the sample flips at the halfway point, so there are only 4 distinct
 Worth reading before adding a voice to the registry — most of these are the
 reason a baked sound comes out subtly wrong rather than obviously broken.
 
-**1. The master chain differs between the two legs.** Live voices run
-`voice → chSfxLive → liveSum → compressor → limiter → soft clip →
-destination`; baked buffers run `buffer → chSfxBaked → bakedSum → glue →
-limiter → soft clip → destination`. The baked leg swaps the compressor for a
-glue stage because the mp3 is supposed to already carry the compressor: every
-bake renders through `buildBakedMasterChain` — the compressor and limiter
-settings frozen into every file on disk (do not retune that method without
-re-baking everything). Miss this and the baked clip comes back hotter and
-less glued than the live one. `MASTER_BASE_GAIN` and `BAKED_BASE_GAIN` are
-both 1.0, so there is no level offset between the legs.
+**1. What a file holds, and which leg it plays on.** A raw-voice bake — every
+`oneShotGraph` recipe and every seamless drone loop — is the bare output of
+the graph, nothing else. It plays back through `chSfxLive → liveSum →
+compressor → limiter → soft clip`, the same chain the live fallback of that
+same graph runs through, so the baked and live legs are the same signal by
+construction and a cache miss is inaudible.
 
-The glue (2.5:1 above −10 dB, slow release, trimmed by `BAKED_GLUE_TRIM` to
-unity for a lone voice) exists because per-file compression cannot duck one
-voice against another: without it, a same-frame stack of pre-limited mp3s
-hit the master limiter with the full linear sum, which the limiter — a
-DynamicsCompressor at 20:1, not a true brick wall — passed partly through to
-hard-clip at the DAC, while its old 10 ms release pumped at audio rate on
-bass content. `scripts/check-mix-stress.mjs` replays busy-moment schedules of
-the real mp3s through the chain and measures this: pre-fix, a 12-sound
-mayhem left 3.5% of samples beyond full scale with 1.7 dB/5 ms gain ripple;
-the shipped chain leaves zero (the soft clip is the true ceiling) with a
-third of the ripple. Keep the script's `current` variant in lockstep with
-`buildMixGraph`, and retune `BAKED_GLUE_TRIM` there if the glue changes.
+The files that *do* carry their own dynamics are the Tone recipes (rendered
+through the Tone engine's compressor + limiter) and the ElevenLabs `wraith*`
+one-shots, which arrived mastered. `Sound.PREMASTERED_BAKES` lists them, and
+they alone take the baked leg: `chSfxBaked → bakedSum → glue → trim →
+limiter → soft clip`. The glue (2.5:1 above −10 dB, slow release, trimmed by
+`BAKED_GLUE_TRIM` to unity for a lone voice) is there because per-file
+dynamics cannot duck one voice against another: a same-frame stack of
+pre-limited mp3s used to hit the master limiter with the full linear sum,
+which the limiter — a DynamicsCompressor at 20:1, not a true brick wall —
+passed partly through to hard-clip at the DAC.
 
-Two residual differences are inherent to the design and predate this work:
-the baked leg is limited twice (once into the file, once on the shared bus),
-and the channel-volume slider sits *before* the compressor on the live leg but
-*after* it on the baked leg — so pulling the SFX slider down compresses a live
-voice less, and a baked voice not at all. Both apply equally to every voice
-that was already baked.
+This is worth stating plainly because the first version of the baked path did
+the opposite: it rendered each one-shot through a frozen copy of the master
+chain, so every mp3 was a snapshot of one voice compressed *alone*, and then
+played that snapshot through the glue instead of the compressor. Measured
+against its own live fallback, `comboTick` came back 8 dB down, `fire` lost
+8 dB of its tick, and everything quiet sat about 1.6 dB under — the thin,
+tinny versions of themselves. A mix cannot be pre-rendered; only a voice can.
+`scripts/check-bake-fidelity.mjs` is the guard: it renders every one-shot both
+ways and reports the per-band difference, which should be a fraction of a dB
+in any band carrying audible energy.
 
-**2. The compressor is program-dependent.** A bake can only ever capture the
-sound in isolation. Live, `bassKick` and `explosionLarge` landing together duck
-each other; baked, each one carries the compression it had when rendered
-alone. This is the fundamental limit of the approach, not a bug in any
-particular recipe, and it is why the master limiter — and since the stacking
-fix, the baked leg's glue compressor — is still live.
+**1b. Encode gain.** Raw voices span a huge range — `comboSparkle` peaks at
+0.10 and `asteroidBoomBeat` at 3.85 — so each render is normalized to
+`BAKE_ENCODE_PEAK` before ffmpeg sees it and scaled back on decode by the
+multiplier in `public/sounds/baked/bake-gains.json`, which the dev bake hook
+writes beside the mp3s. Headroom is a property of the file, never of the
+sound. A file with no manifest entry plays at the level it was rendered at.
+
+**2. The compressor is program-dependent.** A bake can only ever capture one
+voice; how voices duck each other is a property of the moment they land in.
+That is exactly why raw bakes keep the compressor live rather than freezing
+it into the file, and why the pre-mastered files — which have no choice —
+still need the glue.
 
 **3. Tails get chopped.** `ONE_SHOT_BAKE_LEN` must cover the graph's latest
 `stop()`, not its perceptual length. A chop is an audible click, and it also
@@ -306,7 +317,8 @@ means bakes are not bit-reproducible across machines.
    touches no live state — no `this.ctx`, no `this.master`, no
    `ctx.currentTime`, all times relative to `t`.
 2. Make the play method `if (this.playBaked(name, key)) return;` and then call
-   the builder into `this.master` at `this.voiceTime(name)`.
+   the builder into `this.master` at `this.voiceTime(name)`. Both legs end up
+   in the same place — `playBaked` sends a raw bake to `this.master` too.
 3. Register the builder in `Sound.oneShotGraph` and add a length to
    `Sound.ONE_SHOT_BAKE_LEN`.
 4. Add the variants to `SOUND_LOAD_SCHEDULE` with the earliest wave they can
