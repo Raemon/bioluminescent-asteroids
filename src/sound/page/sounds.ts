@@ -116,6 +116,15 @@ export const OBJECTS: GameObject[] = [
     ],
   },
   {
+    id: "bullet-bomb",
+    label: "bomb bullet",
+    about: "bomb upgrade — two octaves under the normal shot",
+    actions: [
+      { verb: "fires off-beat", sound: "fireBomb", trigger: beat(1, 0.5) },
+      { verb: "fires on-beat", sound: "fireBombBeat", trigger: beat(1) },
+    ],
+  },
+  {
     id: "bullet-prong",
     label: "prong bullets",
     about: "rapid+prong powerup spread",
@@ -370,7 +379,7 @@ const MENTIONED_SOUNDS = [
   // ship
   "death", "thrust", "reverseThrust", "sideThrust", "shieldPop", "bonusLife",
   // bullets
-  "fire", "fireBeat", "comboTick",
+  "fire", "fireBeat", "fireBomb", "fireBombBeat", "comboTick",
   // asteroids
   "explosionSmall", "explosionMedium", "explosionLarge", "asteroidBoomBeat",
   "bassKick", "bassPluck", "bassBoom", "bassSnap", "bassHit", "bassEcho",

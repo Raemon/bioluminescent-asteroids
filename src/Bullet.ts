@@ -13,6 +13,12 @@ export const BULLET_DAMAGE_BEAT = 4;
 // halo is up (combo ≥ 4). Doubles the on-beat damage to reward the streak.
 export const BULLET_DAMAGE_BEAT_BOOSTED = 8;
 
+// The Bomb upgrade's tradeoff, in three numbers: twice the visible core (and
+// therefore twice the hitbox, since hitRadius derives from it), twice the
+// damage, and — via half the muzzle speed in shipWeapons — half the range.
+export const BOMB_RADIUS_MULT = 2;
+export const BOMB_DAMAGE_MULT = 2;
+
 // Seconds over which an on-beat flash's ballooned core shrinks back to its
 // resting size. The flash itself lasts longer (FLASH_DURATION_SEC in
 // gameUpdate); this shorter tail makes the envelope hold at full size for the
@@ -55,6 +61,10 @@ export class Bullet {
   // collision pass keeps a piercing bullet alive on hit instead of consuming
   // it, so a single shot can punch through a row of asteroids.
   pierce = false;
+  // Set by Ship.fire when the player has the bomb upgrade. Doubles core radius
+  // (and hitbox) and damage, and swaps the tier palette from blue/gold/white to
+  // red/orange/white-with-a-gold-halo.
+  bomb = false;
   // A bullet's momentum transfers once, ever. Set on the first knockback it
   // applies (deflection or cracked hit); repeat deflections off a spinning
   // armored crystal — or later pierce hits — shove nothing more.
@@ -91,8 +101,10 @@ export class Bullet {
   }
 
   damage(): number {
-    if (this.boosted) return BULLET_DAMAGE_BEAT_BOOSTED;
-    return this.onBeat ? BULLET_DAMAGE_BEAT : BULLET_DAMAGE_BASE;
+    const base = this.boosted
+      ? BULLET_DAMAGE_BEAT_BOOSTED
+      : this.onBeat ? BULLET_DAMAGE_BEAT : BULLET_DAMAGE_BASE;
+    return this.bomb ? base * BOMB_DAMAGE_MULT : base;
   }
 
   // True when this on-beat hit should award the drift-shot 4× bonus: any
@@ -118,7 +130,8 @@ export class Bullet {
   // Visual core radius. On-beat shots render larger; hitRadius() scales with
   // this so the collision box matches the visible glow.
   effectiveRadius(): number {
-    return this.onBeat ? this.radius * 2.38 : this.radius;
+    const base = this.onBeat ? this.radius * 2.38 : this.radius;
+    return this.bomb ? base * BOMB_RADIUS_MULT : base;
   }
 
   // Radius of the bright painted core dot. Balloons during an on-beat flash
@@ -160,6 +173,28 @@ export class Bullet {
     wrapMut(this.pos, w, h);
   }
 
+  // Bomb tier palette: red at tier 1, orange at tier 2. Tier 3 paints its head
+  // glow white (like any super-boosted shot) and gets the gold ONLY from the
+  // wide corona in render(), which is what makes it read as a white shot inside
+  // a gold halo rather than a uniformly gold one.
+  bombHue(): number {
+    if (this.superBoosted) return 45;
+    // 30/0 rather than 25/5: glow sprites are cached in 15-degree hue buckets,
+    // so landing on a bucket edge keeps painted orange looking orange.
+    return this.boosted ? 30 : 0;
+  }
+
+  // Bright core dot colour for a bomb shot: white at tier 3, otherwise a
+  // near-white tint of the tier hue so the halo reads as the carrier.
+  bombCoreFill(): string {
+    if (this.superBoosted) return "hsla(0, 0%, 100%, 1)";
+    return this.boosted ? "hsla(28, 100%, 88%, 1)" : "hsla(4, 100%, 86%, 1)";
+  }
+
+  whiteGlow(): boolean {
+    return this.superBoosted;
+  }
+
   render(ctx: CanvasRenderingContext2D) {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -170,9 +205,11 @@ export class Bullet {
     // Boosted on-beat: gold (hue 45) to match the tier-2 combo halo.
     // On-beat: deep saturated blue (hue 220) — sells "weightier" rhythm shot.
     // Pierce: yellow. Non-beat: pale cyan, smaller and quieter visually.
+    // Bomb runs its own tier palette (see bombHue): red → orange → gold-haloed
+    // white, so a bomb shot never reads as an ordinary blue rhythm bullet.
     const flashing = this.flashTimer > 0;
-    const trailHue = this.boosted ? 45 : this.onBeat ? 220 : this.pierce ? 60 : 180;
-    const headHue = this.boosted ? 48 : this.onBeat ? 222 : this.pierce ? 60 : 180;
+    const trailHue = this.bomb ? this.bombHue() : this.boosted ? 45 : this.onBeat ? 220 : this.pierce ? 60 : 180;
+    const headHue = this.bomb ? this.bombHue() : this.boosted ? 48 : this.onBeat ? 222 : this.pierce ? 60 : 180;
     const trailAlphaScale = this.onBeat ? 0.85 : 0.4;
     const headAlpha = this.onBeat ? 1.0 : 0.75;
     const headRadiusMul = this.headGlowRadiusMul();
@@ -182,10 +219,15 @@ export class Bullet {
       const segmentT = i / this.trail.length;
       const p = this.trail[i];
       const r = coreRadius * segmentT * 1.5;
-      drawGlow(ctx, p.x, p.y, r * trailRadiusMul, trailHue, trailAlphaScale * segmentT * rangeAlpha, this.superBoosted);
+      drawGlow(ctx, p.x, p.y, r * trailRadiusMul, trailHue, trailAlphaScale * segmentT * rangeAlpha, this.whiteGlow());
     }
 
-    drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul, headHue, headAlpha * rangeAlpha, this.superBoosted || flashing);
+    drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul, headHue, headAlpha * rangeAlpha, this.whiteGlow() || flashing);
+    // Tier-3 bomb: a wide gold corona outside the head glow, so the white core
+    // sits in a halo rather than just reading as a bigger white shot.
+    if (this.bomb && this.superBoosted) {
+      drawGlow(ctx, this.pos.x, this.pos.y, coreRadius * headRadiusMul * 2.2, 45, 0.7 * rangeAlpha);
+    }
     if (flashing) {
       // sharp attack, tail-off — peak brightness lands on the first frame of the flash.
       const flashEnv = Math.min(1, this.flashTimer / CORE_FLASH_TAIL_SEC);
@@ -200,6 +242,8 @@ export class Bullet {
     // the deep-blue halo reads as the carrier and the core still pops.
     ctx.fillStyle = flashing
       ? "hsla(0, 0%, 100%, 1)"
+      : this.bomb
+      ? this.bombCoreFill()
       : this.superBoosted
       ? "hsla(0, 0%, 100%, 1)"
       : this.boosted

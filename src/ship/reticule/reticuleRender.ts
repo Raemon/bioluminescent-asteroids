@@ -8,7 +8,7 @@ import {
   reticuleOverlapsAnyTarget,
   paintAimDiscs,
 } from "./aimDisc";
-import { prongOffsets } from "../shipWeapons";
+import { prongOffsets, effectiveBulletSpeed } from "../shipWeapons";
 import { BULLET_HIT_RADIUS_ON_BEAT } from "./trajectoryPreview";
 import { toroidalDelta } from "./coneGeometry";
 
@@ -263,7 +263,7 @@ const paintDriftLockHint = (ctx: CanvasRenderingContext2D, beatTime: number) => 
 // of truth so the reticule painter and the gameRender red-tint check agree on geometry.
 export const computeAimCircle = (ship: Ship, beatGrid: number) => ({
   center: add(ship.pos, mul(ship.vel, 0.4 * beatGrid)),
-  radius: ship.radius + 4 + ship.bulletSpeed * beatGrid,
+  radius: ship.radius + 4 + effectiveBulletSpeed(ship) * beatGrid,
 });
 
 // Where a shot fired with the given heading offset lands after `beatFraction` of a
@@ -278,7 +278,7 @@ const computeReticulePosition = (
 ): Vec => {
   const dir = fromAngle(ship.heading + headingOffset, 1);
   const muzzle = add(ship.pos, mul(dir, ship.radius + 4));
-  const bulletVel = add(mul(dir, ship.bulletSpeed), mul(ship.vel, 0.4));
+  const bulletVel = add(mul(dir, effectiveBulletSpeed(ship)), mul(ship.vel, 0.4));
   return add(muzzle, mul(bulletVel, beatGrid * beatFraction));
 };
 

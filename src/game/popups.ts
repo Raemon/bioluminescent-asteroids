@@ -53,6 +53,7 @@ const POWERUP_LABEL: Record<PowerupKind, string> = {
   longshot: "FARSHOT",
   sideEngines: "SIDE ENGINES",
   lasershot: "LASER SHOT",
+  bomb: "BOMB",
 };
 
 // anchors the multiplier feedback at the spot the player actually struck, not a corner pulse.

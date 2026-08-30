@@ -106,6 +106,9 @@ export class Ship {
   longshotActive = false;
   sideEnginesActive = false;
   lasershotActive = false;
+  // Bomb upgrade: bullets fly at half speed (so half range) but hit with twice
+  //   the radius, hitbox and damage. See BOMB_* in Bullet.ts / shipWeapons.ts.
+  bombActive = false;
   // Laser-shot charge state. Active while the player holds fire under the
   //   lasershot upgrade; release fires a beam dealing 1 + numChargedDots damage.
   //   See game/laserShot.ts for the charge/release logic.

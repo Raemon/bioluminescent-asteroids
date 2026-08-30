@@ -29,6 +29,17 @@ export const prongOffsets = (prongCount: number): number[] => {
 const PIERCE_RANGE_MULT = 2;
 // longshot extends bullet range 1.5x so a shot reaches further than the 1-beat reticule.
 const LONGSHOT_RANGE_MULT = 1.5;
+// The Bomb upgrade halves muzzle speed and leaves lifetime alone, so its shells
+// travel half as far as a normal bullet — range is paid for in speed, which also
+// makes the slower, fatter shell readable in flight (see BOMB_* in Bullet.ts).
+const BOMB_SPEED_MULT = 0.5;
+
+// Muzzle speed the ship's bullets actually leave at. Every consumer of "how far
+// does a shot reach" — the beat reticules, the drift-aim distance reference, the
+// shard rays a metal chunk lays on the prong fan — must read this rather than
+// ship.bulletSpeed, or the bomb's shells land short of their own aim glyphs.
+export const effectiveBulletSpeed = (ship: Ship): number =>
+  ship.bombActive ? ship.bulletSpeed * BOMB_SPEED_MULT : ship.bulletSpeed;
 
 // bullet inherits a fraction of ship velocity so muzzle output reads as physical, not portaled.
 // Exported so metalChunk can reproduce the true (velocity-bent) prong ray when it
@@ -37,12 +48,13 @@ export const BULLET_VEL_INHERIT = 0.4;
 const launchBullet = (ship: Ship, headingOffset: number, pierce: boolean, longshot: boolean): Bullet => {
   const dir = fromAngle(ship.heading + headingOffset, 1);
   const muzzle = add(ship.pos, mul(dir, ship.radius + 4));
-  const vel = add(mul(dir, ship.bulletSpeed), mul(ship.vel, BULLET_VEL_INHERIT));
+  const vel = add(mul(dir, effectiveBulletSpeed(ship)), mul(ship.vel, BULLET_VEL_INHERIT));
   let life = ship.bulletLife;
   if (pierce) life *= PIERCE_RANGE_MULT;
   if (longshot) life *= LONGSHOT_RANGE_MULT;
   const bullet = new Bullet(muzzle, vel, life);
   bullet.pierce = pierce;
+  bullet.bomb = ship.bombActive;
   // farthest reticule sits at floor(life/BEAT_GRID) beats out; anything past that
   // can't land on a beat, so fade the bullet across the leftover tail to expiry.
   const slotCount = Math.max(1, Math.floor(life / BEAT_GRID));
@@ -67,4 +79,5 @@ export const applyPowerup = (ship: Ship, kind: PowerupKind) => {
   else if (kind === "longshot") ship.longshotActive = true;
   else if (kind === "sideEngines") ship.sideEnginesActive = true;
   else if (kind === "lasershot") ship.lasershotActive = true;
+  else if (kind === "bomb") ship.bombActive = true;
 };
