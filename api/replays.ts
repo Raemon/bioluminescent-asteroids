@@ -1,10 +1,12 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { gunzipSync } from "node:zlib";
 import { prisma } from "./_lib/prisma.js";
 
 // 256 KB after base64 expansion (≈190 KB binary). Typical replays land at
 //   ~3-8 KB gzipped, so this caps clearly-malicious payloads without rejecting
 //   any real run.
 const MAX_REPLAY_B64_LEN = 256 * 1024;
+const MAX_REPLAY_INFLATED_BYTES = 16 * 1024 * 1024;
 const MAX_NAME_LEN = 16;
 
 type IncomingReplay = {
@@ -28,6 +30,21 @@ const sanitizeName = (raw: unknown): string | null => {
 };
 
 const isBase64 = (s: string): boolean => /^[A-Za-z0-9+/=]+$/.test(s);
+
+const readReplayVersion = (b64: string): number | null => {
+  try {
+    const buf = Buffer.from(b64, "base64");
+    const json = gunzipSync(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), {
+      maxOutputLength: MAX_REPLAY_INFLATED_BYTES,
+    }).toString("utf8");
+    const payload = JSON.parse(json) as { header?: { v?: unknown } };
+    const v = payload?.header?.v;
+    if (typeof v !== "number" || !Number.isInteger(v)) return null;
+    return sanitizeInt(v, 0, 2_147_483_647);
+  } catch {
+    return null;
+  }
+};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === "GET") {
@@ -99,7 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       await prisma.highscore.update({
         where: { id: scoreId },
-        data: { replayData: body.data },
+        data: { replayData: body.data, replayVersion: readReplayVersion(body.data) },
       });
       res.status(201).json({ ok: true });
     } catch (err) {
