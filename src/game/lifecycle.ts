@@ -188,6 +188,7 @@ export const showTitle = (game: Game) => {
   game.ship.radarActive = false;
   game.ship.longshotActive = false;
   game.ship.sideEnginesActive = false;
+  game.ship.bombActive = false;
   syncPowerupHud(game);
   hideScoreEntry(game);
   showLeaderboard(game);

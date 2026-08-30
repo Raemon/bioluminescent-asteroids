@@ -1,5 +1,5 @@
 import { Vec, TAU } from "../../vec";
-import { BULLET_HIT_RADIUS_ON_BEAT, BULLET_HIT_RADIUS_OFF_BEAT, ReticuleTarget, slotCrosshairLengthTrajectory } from "./trajectoryPreview";
+import { BULLET_SIGHT_RADIUS_ON_BEAT, BULLET_SIGHT_RADIUS_OFF_BEAT, ReticuleTarget, slotCrosshairLengthTrajectory } from "./trajectoryPreview";
 import { toroidalDelta } from "./coneGeometry";
 
 // matches the ship trajectory chevron hue so the reticule reads as "yours"
@@ -26,11 +26,11 @@ const TUTORIAL_HIGHLIGHT_GLOW_ALPHA = 0.9;
 
 // pre-check whether any target's silhouette overlaps the on-beat disc before painting anything.
 export const reticuleOverlapsAnyTarget = (
-  reticulePos: Vec, targets: ReadonlyArray<ReticuleTarget>, w: number, h: number,
+  reticulePos: Vec, targets: ReadonlyArray<ReticuleTarget>, w: number, h: number, sightScale: number,
 ): boolean => {
   for (const t of targets) {
     const [dx, dy] = toroidalDelta(reticulePos.x - t.pos.x, reticulePos.y - t.pos.y, w, h);
-    const rSum = (t.radius ?? 0) + BULLET_HIT_RADIUS_ON_BEAT;
+    const rSum = (t.radius ?? 0) + BULLET_SIGHT_RADIUS_ON_BEAT * sightScale;
     if (dx * dx + dy * dy <= rSum * rSum) return true;
   }
   return false;
@@ -45,9 +45,13 @@ export const paintAimDiscs = (
   overlapsTarget: boolean, onFirstBeatDot: boolean,
   tutorialHighlight: boolean = false,
   slot: number = 1,
+  // whole-sight size multiplier for the live weapon (1 = stock bullet, 2 = bomb).
+  // Scales the discs AND their crosshair ticks together, so a bigger shell gets a
+  // bigger sight of the same shape rather than the stock ring on a wider hit area.
+  sightScale: number = 1,
 ) => {
   // slot ≤ 0 (e.g. prong fans the shot off-axis) falls back to the default 1-beat tick length.
-  const tickLength = (slot >= 1 ? slotCrosshairLengthTrajectory(slot) : slotCrosshairLengthTrajectory(1)) + RETICULE_TICK_BONUS;
+  const tickLength = ((slot >= 1 ? slotCrosshairLengthTrajectory(slot) : slotCrosshairLengthTrajectory(1)) + RETICULE_TICK_BONUS) * sightScale;
   const locked = onFirstBeatDot || tutorialHighlight;
   const overlapBoost = overlapsTarget || locked ? RETICULE_OVERLAP_BRIGHTNESS : 1;
   const hitAlpha = Math.min(1, baseAlpha * overlapBoost);
@@ -65,16 +69,16 @@ export const paintAimDiscs = (
   // ticks — no circles — so only the primary reads as the full targeting disc.
   if (!isSecondary) {
     ctx.beginPath();
-    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_OFF_BEAT, 0, TAU);
+    ctx.arc(reticulePos.x, reticulePos.y, BULLET_SIGHT_RADIUS_OFF_BEAT * sightScale, 0, TAU);
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(reticulePos.x, reticulePos.y, BULLET_HIT_RADIUS_ON_BEAT, 0, TAU);
+    ctx.arc(reticulePos.x, reticulePos.y, BULLET_SIGHT_RADIUS_ON_BEAT * sightScale, 0, TAU);
     ctx.stroke();
   }
   if (isSecondary) ctx.setLineDash([]);
   else ctx.setLineDash(RETICULE_CROSSHAIR_DASH);
-  const ringRadius = isSecondary ? BULLET_HIT_RADIUS_OFF_BEAT : BULLET_HIT_RADIUS_ON_BEAT;
-  const cInner = ringRadius + RETICULE_CROSSHAIR_GAP;
+  const ringRadius = (isSecondary ? BULLET_SIGHT_RADIUS_OFF_BEAT : BULLET_SIGHT_RADIUS_ON_BEAT) * sightScale;
+  const cInner = ringRadius + RETICULE_CROSSHAIR_GAP * sightScale;
   const cOuter = cInner + tickLength;
   ctx.beginPath();
   ctx.moveTo(reticulePos.x - cOuter, reticulePos.y); ctx.lineTo(reticulePos.x - cInner, reticulePos.y);

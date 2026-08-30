@@ -41,6 +41,8 @@ export type ObjectId =
   | "ship-death"
   | "bullet-weak"
   | "bullet-rhythm"
+  | "bullet-bomb-weak"
+  | "bullet-bomb-rhythm"
   | "bullet-prong"
   | "asteroid-normal"
   | "asteroid-bassA"
@@ -120,7 +122,7 @@ function drawShip(opts: { thrust?: boolean; reverse?: boolean; shield?: boolean;
   };
 }
 
-function drawBullet(opts: { onBeat: boolean; boosted: boolean; count: number }): Animator {
+function drawBullet(opts: { onBeat: boolean; boosted: boolean; count: number; bomb?: boolean }): Animator {
   const lanes = opts.count === 2 ? [-0.3, 0.3] : opts.count === 3 ? [-0.35, 0, 0.35] : [0];
   type Tracked = { bullet: Bullet; vx: number; vy: number };
   let tracked: Tracked[] = [];
@@ -137,6 +139,7 @@ function drawBullet(opts: { onBeat: boolean; boosted: boolean; count: number }):
         );
         b.onBeat = opts.onBeat;
         b.boosted = opts.boosted;
+        b.bomb = opts.bomb ?? false;
         tracked.push({ bullet: b, vx: 140, vy: lane * 18 });
       }
     }
@@ -375,6 +378,8 @@ export const ANIMATIONS: Record<ObjectId, () => Animator> = {
   "ship-death": () => drawShip({ death: true }),
   "bullet-weak": () => drawBullet({ onBeat: false, boosted: false, count: 1 }),
   "bullet-rhythm": () => drawBullet({ onBeat: true, boosted: false, count: 1 }),
+  "bullet-bomb-weak": () => drawBullet({ onBeat: false, boosted: false, count: 1, bomb: true }),
+  "bullet-bomb-rhythm": () => drawBullet({ onBeat: true, boosted: false, count: 1, bomb: true }),
   "bullet-prong": () => drawBullet({ onBeat: true, boosted: true, count: 2 }),
   "asteroid-normal": () => drawAsteroid("normal", "chip"),
   "asteroid-bassA": () => drawAsteroid("bassA", "chip"),

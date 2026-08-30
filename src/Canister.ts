@@ -6,7 +6,7 @@ import { SIDE_THRUST_ALWAYS_ON } from "./ship/shipPhysics";
 // Five powerup kinds, each with its own glyph so the player can read the
 // canister at a glance from across the screen. Keeping the list short
 // (rather than 10+ kinds) means each one stays familiar after a few waves.
-export type PowerupKind = "prong" | "rapid" | "pierce" | "shield" | "slow" | "radar" | "longshot" | "sideEngines" | "lasershot";
+export type PowerupKind = "prong" | "rapid" | "pierce" | "shield" | "slow" | "radar" | "longshot" | "sideEngines" | "lasershot" | "bomb";
 
 // Hue is kept for downstream effects (pickup burst tinting) but the canister
 // itself renders pure white so the player reads it as "incoming pod" first
@@ -21,6 +21,7 @@ export const POWERUP_HUE: Record<PowerupKind, number> = {
   longshot: 270,
   sideEngines: 25,
   lasershot: 195,
+  bomb: 0,
 };
 
 const POWERUP_GLYPH: Record<PowerupKind, string> = {
@@ -33,11 +34,12 @@ const POWERUP_GLYPH: Record<PowerupKind, string> = {
   longshot: "F",
   sideEngines: "E",
   lasershot: "L",
+  bomb: "B",
 };
 
 // sideEngines is dropped from the pool when side thrust is always-on (it would
 // be a no-op pickup); flip SIDE_THRUST_ALWAYS_ON back to false to restore it.
-export const POWERUP_KINDS: PowerupKind[] = (["prong", "shield", "slow", "radar", "longshot", "sideEngines", "lasershot"] as PowerupKind[])
+export const POWERUP_KINDS: PowerupKind[] = (["prong", "shield", "slow", "radar", "longshot", "sideEngines", "lasershot", "bomb"] as PowerupKind[])
   .filter((k) => !(k === "sideEngines" && SIDE_THRUST_ALWAYS_ON));
 
 // warp-out plays a brief vortex flash before the canister vanishes so the player

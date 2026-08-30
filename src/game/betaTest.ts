@@ -50,6 +50,7 @@ const applyPowerup = (game: Game, kind: PowerupKind) => {
   else if (kind === "longshot") game.ship.longshotActive = true;
   else if (kind === "sideEngines") game.ship.sideEnginesActive = true;
   else if (kind === "lasershot") game.ship.lasershotActive = true;
+  else if (kind === "bomb") game.ship.bombActive = true;
   else if (kind === "slow") game.slowMoTimer = SLOW_MO_DURATION;
 };
 
@@ -111,6 +112,7 @@ const POWERUP_LABELS: Record<PowerupKind, string> = {
   longshot: "Farshot",
   sideEngines: "Side Engines",
   lasershot: "Laser",
+  bomb: "Bomb",
 };
 
 const ALIEN_TILES: Record<AlienSize, string> = {
@@ -273,6 +275,7 @@ const iconFor = (id: string): string => {
   if (id === "longshot") return `<svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2" fill="none" stroke="${c}" stroke-width="1.7"/><circle cx="18" cy="12" r="2" fill="none" stroke="${c}" stroke-width="1.7"/><path d="M3 12 L21 12 M18 9 L21 12 L18 15" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   if (id === "sideEngines") return `<svg viewBox="0 0 24 24"><path d="M12 4 L8 10 L12 8 L16 10 Z" fill="none" stroke="${c}" stroke-width="1.7" stroke-linejoin="round"/><path d="M2 12 L8 12 M22 12 L16 12 M5 9 L2 12 L5 15 M19 9 L22 12 L19 15" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   if (id === "lasershot") return `<svg viewBox="0 0 24 24"><path d="M3 12 L21 12" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/><path d="M3 12 L21 12" stroke="${c}" stroke-width="1" stroke-linecap="round" opacity="0.5"/><path d="M18 7 L21 12 L18 17" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (id === "bomb") return `<svg viewBox="0 0 24 24"><circle cx="11" cy="14" r="7" fill="none" stroke="${c}" stroke-width="1.7"/><path d="M15 8 L18 5 M18 5 L21 3 M18 5 L20 7" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round"/></svg>`;
   return "";
 };
 
