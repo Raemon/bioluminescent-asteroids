@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 34;
+export const REPLAY_FORMAT_VERSION = 35;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -131,6 +131,12 @@ export const REPLAY_FORMAT_VERSION = 34;
 //   with a single seeded draw either way, so the RNG stream is untouched, but a
 //   v33 recording's canister would now resolve to a different upgrade — and a
 //   bomb changes bullet speed, size and damage, so the run diverges from there.
+// v35 pulls every on-beat aim dot back by the shot's REAL collision reach instead of
+//   a hardcoded stock-bullet one. A bomb's dot moves 25.7px further from the target
+//   (its shells reach twice as far) and a combo>=12 dot 10.3px closer (that tier's
+//   halo, and so its reach, is tighter). Dot positions feed the drift-lock proximity
+//   test, which is sim state, so a v34 recording that hovered a lock at either of
+//   those can lock on a different frame and re-sim into a different run.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat
