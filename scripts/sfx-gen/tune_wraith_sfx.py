@@ -10,7 +10,8 @@ tone, auto-picks the best take, then for the chosen take:
   - applies short edge fades so the buffer can't click;
   - peak-normalizes to PEAK_DBFS;
 and writes it to public/sounds/baked/<sound>__1.0000.mp3 (the pitchRatio=1 slug
-Sound.ts.bakedFileSlug expects). Raw candidates are left in place for audition.
+Sound.ts.bakedFileSlug expects). Raw candidates are left in place so picks can
+be re-run with --pick.
 
 Auto-pick can be overridden per sound:
     tune_wraith_sfx.py --pick wraithScream=2 wraithLunge=1
