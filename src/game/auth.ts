@@ -27,7 +27,7 @@ type AuthState = {
   user: PublicUser | null;
 };
 
-const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? "";
+const CLIENT_ID = ((import.meta.env as unknown as { VITE_GOOGLE_CLIENT_ID?: string })?.VITE_GOOGLE_CLIENT_ID) ?? "";
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 const TOKEN_KEY = "pulsar.auth.token";
 const USER_KEY = "pulsar.auth.user";

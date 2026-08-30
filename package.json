@@ -5,14 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "build": "prisma generate && tsc -b && tsc -p api && vite build",
+    "build": "prisma generate && npm run typecheck && vite build",
     "preview": "vite preview",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "postinstall": "prisma generate",
     "devlog": "node scripts/devlog-gen.mjs",
-    "merge": "bash scripts/merge.sh"
+    "merge": "bash scripts/merge.sh",
+    "typecheck": "tsc -b && tsc -p api",
+    "replay:closed-loop": "node scripts/record-resim.mjs",
+    "replay:golden:record": "SEED=20260810 FRAMES=20000 node scripts/record-resim.mjs --save scripts/golden/replay.json",
+    "replay:golden:verify": "node scripts/resim-replay.mjs --file scripts/golden/replay.json"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
