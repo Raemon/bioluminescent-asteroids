@@ -10,6 +10,7 @@ import {
   getRecentName,
   getSaveReplayPref,
   getTopEntriesOnly,
+  markReplaySaved,
   saveCachedHighscores,
   saveRecentName,
   saveSaveReplayPref,
@@ -18,6 +19,7 @@ import {
   type HighscoreRow,
 } from "./highscores";
 import { uploadReplay, fetchReplay } from "./replayApi";
+import { REPLAY_FORMAT_VERSION, UnsupportedReplayVersionError } from "./replayFormat";
 import { startReplay } from "./lifecycle";
 import {
   claimUsername,
@@ -74,12 +76,6 @@ const handleSubmit = async (game: Game, ev: Event) => {
     // Signed-in submit came back with refreshed lifetime stats — show them
     //   under the form so the pilot sees their totals tick up.
     if (result.user) renderSubmitStats(result.user);
-    // Arm the one-shot "your standing" view and pre-fetch its rows now, while
-    //   the player is still reading the game-over screen, so returning home
-    //   renders the centred neighborhood without a loading flash. The catch
-    //   keeps the promise non-rejecting; null falls back to the hall-of-fame.
-    game.showNeighborhoodOnce = true;
-    game.neighborhoodFetch = fetchNeighborhood(saved.id, 25).catch(() => null);
     game.scoreEntryInputEl.blur();
     if (wantReplay) {
       setStatus(game, "Uploading replay…", "info");
@@ -89,6 +85,7 @@ const handleSubmit = async (game: Game, ev: Event) => {
           setStatus(game, "Score saved. Replay unavailable. Press enter to continue.", "success");
         } else {
           await uploadReplay(saved.id, rawName, bytes);
+          markReplaySaved(saved.id);
           setStatus(game, "Score + replay saved. Press enter to continue.", "success");
         }
       } catch (err) {
@@ -97,6 +94,11 @@ const handleSubmit = async (game: Game, ev: Event) => {
     } else {
       setStatus(game, "Score saved. Press enter to continue.", "success");
     }
+    // Arm the one-shot "your standing" view and pre-fetch its rows, so returning
+    //   home renders the centred neighborhood without a loading flash. Fetched
+    //   AFTER the replay upload, not before.
+    game.showNeighborhoodOnce = true;
+    game.neighborhoodFetch = fetchNeighborhood(saved.id, 25).catch(() => null);
     game.scoreSubmitState = "submitted";
   } catch (err) {
     game.scoreSubmitState = "idle";
@@ -454,6 +456,22 @@ const windowStart = (selection: number, total: number, size: number): number => 
   return Math.max(0, Math.min(maxStart, ideal));
 };
 
+type ReplayBuildMismatch = "older" | "newer" | null;
+
+const replayBuildMismatch = (row: HighscoreRow): ReplayBuildMismatch => {
+  const v = row.replay_version;
+  if (typeof v !== "number" || v === REPLAY_FORMAT_VERSION) return null;
+  return v < REPLAY_FORMAT_VERSION ? "older" : "newer";
+};
+
+const renderReplayButton = (row: HighscoreRow): string => {
+  const mismatch = replayBuildMismatch(row);
+  const cls = mismatch ? "lb-replay lb-replay-older" : "lb-replay";
+  const title = mismatch ? `Recorded on a ${mismatch} build` : "Watch replay";
+  const note = mismatch ? `<span class="lb-replay-note">${mismatch} build</span>` : "";
+  return `<button class="${cls}" data-replay-id="${row.id}" title="${title}" type="button">▶</button>${note}`;
+};
+
 const renderLeaderboard = (game: Game) => {
   const rows = game.leaderboardRows;
   if (rows.length === 0) {
@@ -483,9 +501,7 @@ const renderLeaderboard = (game: Game) => {
     const comboTier = combo >= 12 ? "white" : combo >= 4 ? "gold" : combo >= 2 ? "cyan" : "dim";
     const wave = row.wave ?? 1;
     const cls = i === game.leaderboardSelection ? ' class="lb-self"' : "";
-    const replayBtn = row.has_replay
-      ? `<button class="lb-replay" data-replay-id="${row.id}" title="Watch replay" type="button">▶</button>`
-      : "";
+    const replayBtn = row.has_replay ? renderReplayButton(row) : "";
     const fromNow = formatFromNow(row.created_at);
     const exactDate = escapeHtml(formatExactDate(row.created_at));
     const dateCell = fromNow
@@ -659,6 +675,7 @@ const exitPlayerProfile = (game: Game) => {
 };
 
 export const showLeaderboard = (game: Game) => {
+  hideLeaderboardNotice();
   bindLeaderboardClicks(game);
   bindLeaderboardFooter(game);
   bindPlayerPopstate(game);
@@ -689,6 +706,7 @@ export const showLeaderboard = (game: Game) => {
 //   work against this set; "show more" pages the pilot's remaining runs by score.
 //   Falls back to the hall-of-fame if the pilot has no rows or the fetch fails.
 const renderPlayerProfile = async (game: Game, name: string) => {
+  hideLeaderboardNotice();
   game.leaderboardNeighborhood = false;
   game.leaderboardRankBase = 0;
   game.leaderboardTopOnly = false;
@@ -1094,12 +1112,43 @@ const bindLeaderboardClicks = (game: Game) => {
   });
 };
 
+const LEADERBOARD_NOTICE_MS = 6000;
+let leaderboardNoticeTimer = 0;
+
+const showLeaderboardNotice = (msg: string) => {
+  const el = document.getElementById("leaderboard-notice");
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove("hidden");
+  window.clearTimeout(leaderboardNoticeTimer);
+  leaderboardNoticeTimer = window.setTimeout(() => el.classList.add("hidden"), LEADERBOARD_NOTICE_MS);
+};
+
+const hideLeaderboardNotice = () => {
+  window.clearTimeout(leaderboardNoticeTimer);
+  document.getElementById("leaderboard-notice")?.classList.add("hidden");
+};
+
+const OLDER_BUILD_NOTICE = "Replay from an older build — can't be played.";
+const NEWER_BUILD_NOTICE = "Replay from a newer build — refresh to watch.";
+
 const launchReplay = async (game: Game, scoreId: number) => {
+  const row = game.leaderboardRows.find((r) => r.id === scoreId);
+  const mismatch = row ? replayBuildMismatch(row) : null;
+  if (mismatch) {
+    showLeaderboardNotice(mismatch === "newer" ? NEWER_BUILD_NOTICE : OLDER_BUILD_NOTICE);
+    return;
+  }
   try {
     const bytes = await fetchReplay(scoreId);
     await startReplay(game, bytes);
   } catch (err) {
     console.error("[replay launch] failed:", err);
+    showLeaderboardNotice(
+      err instanceof UnsupportedReplayVersionError
+        ? OLDER_BUILD_NOTICE
+        : "Replay unavailable — couldn't load that run.",
+    );
   }
 };
 

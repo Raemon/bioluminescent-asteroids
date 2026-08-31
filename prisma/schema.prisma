@@ -7,19 +7,20 @@ datasource db {
 }
 
 model Highscore {
-  id          Int      @id @default(autoincrement())
-  name        String
-  score       Int
-  wave        Int      @default(1)
-  maxCombo    Int      @default(0) @map("max_combo")
-  killCount   Int      @default(0) @map("kill_count")
-  killSummary Json     @default("{}") @map("kill_summary")
+  id            Int      @id @default(autoincrement())
+  name          String
+  score         Int
+  wave          Int      @default(1)
+  maxCombo      Int      @default(0) @map("max_combo")
+  killCount     Int      @default(0) @map("kill_count")
+  killSummary   Json     @default("{}") @map("kill_summary")
   // Gzipped JSON replay payload (base64-encoded text). Nullable so older rows
   //   and runs where the player skipped "Save replay" still work. Stored
   //   inline because typical replays are 3-8 KB after gzip — fine for BYTEA
   //   semantics via TEXT b64.
-  replayData  String?  @map("replay_data")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  replayData    String?  @map("replay_data")
+  replayVersion Int?     @map("replay_version")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   // Set when a signed-in pilot submits (or when an anonymous row is adopted by a
   //   callsign claim). Null for legacy/guest rows. On-delete SetNull so removing

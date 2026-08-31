@@ -2,6 +2,7 @@ import type { Game } from "../Game";
 import type { KillBucket } from "./killBuckets";
 import { displayWave } from "./waveDirector";
 import { getIdToken, type PublicUser } from "./auth";
+import { REPLAY_FORMAT_VERSION } from "./replayFormat";
 
 // bucket names are emitted by killEffects.ts; this label map keeps the
 // leaderboard summary readable instead of leaking internal asteroid kinds.
@@ -37,6 +38,7 @@ export type HighscoreRow = {
   kill_count: number;
   kill_summary: Record<string, number>;
   has_replay?: boolean;
+  replay_version?: number | null;
   created_at: string;
 };
 
@@ -44,6 +46,55 @@ export const totalKills = (tally: Readonly<Record<string, number>>): number => {
   let total = 0;
   for (const n of Object.values(tally)) total += n;
   return total;
+};
+
+// Score ids this browser has successfully uploaded a replay for. A replay
+//   lands a moment after its score row, so every cache between here and the
+//   database — the API's module cache, the CDN's s-maxage window, and our own
+//   localStorage snapshot — can still be holding has_replay: false for the run
+//   the pilot just saved, and the leaderboard would render it without a play
+//   button. This is the one thing that knows better, so it overrides them all.
+const SAVED_REPLAY_IDS_KEY = "pulsar.savedReplayIds";
+// Bounded so the key can't grow without limit; only recent runs are still
+//   young enough for a stale cache to be lying about them.
+const SAVED_REPLAY_IDS_MAX = 200;
+
+const readSavedReplayIds = (): number[] => {
+  try {
+    const raw = localStorage.getItem(SAVED_REPLAY_IDS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((n): n is number => typeof n === "number");
+  } catch {
+    return [];
+  }
+};
+
+let savedReplayIds = new Set<number>(readSavedReplayIds());
+
+export const markReplaySaved = (id: number) => {
+  savedReplayIds.add(id);
+  try {
+    const kept = [...savedReplayIds].slice(-SAVED_REPLAY_IDS_MAX);
+    savedReplayIds = new Set(kept);
+    localStorage.setItem(SAVED_REPLAY_IDS_KEY, JSON.stringify(kept));
+  } catch {
+    // localStorage may be blocked; the in-session set still covers this visit.
+  }
+};
+
+// Force the replay flag true on rows we know we uploaded. replay_version is
+//   filled in too: we recorded it on this build, so a null from a stale cache
+//   would otherwise be indistinguishable from a legacy row and the button
+//   would render without the version it needs.
+const applyKnownReplays = (rows: HighscoreRow[]): HighscoreRow[] => {
+  if (savedReplayIds.size === 0) return rows;
+  return rows.map((row) =>
+    savedReplayIds.has(row.id)
+      ? { ...row, has_replay: true, replay_version: row.replay_version ?? REPLAY_FORMAT_VERSION }
+      : row,
+  );
 };
 
 export type SubmitResult = { score: HighscoreRow; user: PublicUser | null };
@@ -93,7 +144,7 @@ export const fetchHighscores = async (limit = 10, offset = 0): Promise<Highscore
   const res = await fetch(url, { method: "GET", cache: "no-store" });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
   const body = (await res.json()) as { scores: HighscoreRow[] };
-  return body.scores;
+  return applyKnownReplays(body.scores);
 };
 
 // Server-side deduped "top N pilots" view — the initial title-screen payload.
@@ -103,7 +154,7 @@ export const fetchTopPilots = async (): Promise<HighscoreRow[]> => {
   const res = await fetch("/api/highscores?mode=top-pilots", { method: "GET", cache: "no-store" });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
   const body = (await res.json()) as { scores: HighscoreRow[] };
-  return body.scores;
+  return applyKnownReplays(body.scores);
 };
 
 // The most-recent rows, regardless of score. Folded into the title-screen pool
@@ -113,7 +164,7 @@ export const fetchRecentScores = async (): Promise<HighscoreRow[]> => {
   const res = await fetch("/api/highscores?mode=recent", { method: "GET", cache: "no-store" });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
   const body = (await res.json()) as { scores: HighscoreRow[] };
-  return body.scores;
+  return applyKnownReplays(body.scores);
 };
 
 // Player-profile view: every run by one pilot, server-gathered as the top-50 in
@@ -129,7 +180,7 @@ export const fetchPlayerScores = async (name: string): Promise<PlayerProfile> =>
   });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
   const body = (await res.json()) as { scores: HighscoreRow[]; user?: PublicUser | null };
-  return { scores: body.scores, user: body.user ?? null };
+  return { scores: applyKnownReplays(body.scores), user: body.user ?? null };
 };
 
 // "Load more" for a profile: that pilot's next page of runs by score-desc, past
@@ -144,7 +195,7 @@ export const fetchPlayerPage = async (
   const res = await fetch(url, { method: "GET", cache: "no-store" });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
   const body = (await res.json()) as { scores: HighscoreRow[] };
-  return body.scores;
+  return applyKnownReplays(body.scores);
 };
 
 // Post-run "your standing": the rows ranked just above and below the player's
@@ -159,7 +210,8 @@ export const fetchNeighborhood = async (
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-  return (await res.json()) as { scores: HighscoreRow[]; selfRank: number };
+  const body = (await res.json()) as { scores: HighscoreRow[]; selfRank: number };
+  return { scores: applyKnownReplays(body.scores), selfRank: body.selfRank };
 };
 
 // the leaderboard row shows a compressed kill breakdown; pick the top few
@@ -204,7 +256,7 @@ export const getCachedHighscores = (): HighscoreRow[] => {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed as HighscoreRow[];
+    return applyKnownReplays(parsed as HighscoreRow[]);
   } catch {
     return [];
   }

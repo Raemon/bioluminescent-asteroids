@@ -669,7 +669,13 @@ export const finalizeRecorder = (game: Game): void => {
     wave: game.wave,
     maxCombo: game.maxCombo,
     killCount: Object.values(game.killTally).reduce((s, n) => s + n, 0),
-  }).then((bytes) => { game.lastRunReplay = bytes; });
+  }).then(
+    (bytes) => { game.lastRunReplay = bytes; },
+    // A gzip/serialise failure would otherwise leave lastRunReplay null forever:
+    //   the score form polls for 15s and then reports "Replay unavailable" with
+    //   no reason logged anywhere. Say what actually broke.
+    (err) => { console.error("[replay] serialise failed — no upload bytes:", err); },
+  );
 };
 
 // lets a stuck player exit cleanly via the kill-row screen without having to die out.
