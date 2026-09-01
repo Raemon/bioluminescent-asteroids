@@ -3,7 +3,7 @@ import type { Sound } from "../../Sound";
 import { Vec, add, mul, fromAngle, TAU } from "../../vec";
 import { computeConeFrame } from "./coneGeometry";
 import { paintConeBackground, paintRangeArcs } from "./radarCone";
-import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, computeBeatPulseBoost, expireHoverZoneHintIfHoverEnded, paintHoverZoneHint, nearestFirstBeatDot, wrapReticuleVec } from "./trajectoryPreview";
+import { paintTrajectoryPreviews, ReticuleTarget, TrajectoryTrackMap, AimHintRender, computeBeatPulseBoost, expireHoverZoneHintIfHoverEnded, paintHoverZoneHint, nearestFirstBeatDot, wrapReticuleVec } from "./trajectoryPreview";
 import {
   reticuleOverlapsAnyTarget,
   paintAimDiscs,
@@ -670,6 +670,8 @@ export const renderShipReticules = (
   // stationary "First Dot" probes (e.g. gold crystals). Trajectory walk skips speed<1
   // targets, so parked objects need a direct reticule-proximity pass.
   hoverProbes: ReadonlyArray<ReticuleHoverProbe> = [],
+  // once-a-run targeting lesson; null whenever no hint is live (game/aimHint.ts).
+  aimHint: AimHintRender | null = null,
 ) => {
   if (!ship.alive) return;
   // The bullet sight (circular aim disc + trajectory previews + drift-hover) has no
@@ -709,7 +711,7 @@ export const renderShipReticules = (
     reticulesBySlot, aimCircleCenter, aimCircleRadius,
     trajectoryTracks: state.trajectoryTracks, doubletime, tutorialHighlight,
     hoverZoneEnterBySlot: state.hoverDotRings.map(r => r.zoneEnterBeatTime),
-    sightScale, collisionRadiusOnBeat,
+    sightScale, collisionRadiusOnBeat, aimHint,
   }, targets);
   const fromTrajectory = trajectoryResult.overlapsReticule;
   // reverse map: position-index → slot number (1-indexed). Every reticule that belongs to a slot

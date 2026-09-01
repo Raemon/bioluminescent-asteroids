@@ -1,4 +1,5 @@
 import type { Game } from "../Game";
+import { resetAimHint } from "./aimHint";
 import { Ship } from "../Ship";
 import { ParticleSystem } from "../Particle";
 import { v } from "../vec";
@@ -328,6 +329,7 @@ const startBetaWave = (game: Game) => {
   game.slowMoTimer = 0;
   game.hasLostComboEver = false;
   game.rhythmLossHintPending = false;
+  resetAimHint(game);
 
   game.bullets = [];
   game.popups = [];

@@ -226,6 +226,7 @@ export const popupStreakBonus = (pos: Vec, points: number): Popup => ({
   holdUntil: 0.4, fadeGain: 1,
 });
 
+export const COMBO_LOST_POPUP_LIFE = 5;
 // surfaces the streak break at the spot that caused it (ship fire / target hit).
 //   reason names which half of the rhythm gate failed so the player can correct it.
 //   Distinct hues so a glance tells you which: crimson = mistimed *press* (the
@@ -258,8 +259,8 @@ export const popupComboLost = (pos: Vec, reason: "fire" | "hit", timing?: "early
   return {
     pos: { x: pos.x, y: pos.y - 6 },
     vel: { x: rand(-10, 10), y: -55 },
-    life: 5,
-    maxLife: 5,
+    life: COMBO_LOST_POPUP_LIFE,
+    maxLife: COMBO_LOST_POPUP_LIFE,
     text: "RHYTHM LOST",
     font: labelFont,
     fill: titleFill,
@@ -276,6 +277,46 @@ export const popupComboLost = (pos: Vec, reason: "fire" | "hit", timing?: "early
       ctx.fillStyle = subFill;
       ctx.shadowColor = subShadow;
       ctx.fillText(subtitle, 0, 12);
+    },
+  };
+};
+
+// The once-a-run targeting lesson (see game/aimHint.ts): shown instead of the usual
+//   "RHYTHM LOST / Didn't hit on beat" popup when the player is pressing in time but
+//   shooting at the rock rather than at the lead reticule. Pinned to the reticule the
+//   pulse is blooming around, so text and target read as one instruction, and it holds
+//   AIM_HINT_LIFE_MUL longer than the popup it replaces since it asks for two changes.
+export const AIM_HINT_LIFE_MUL = 1.3;
+const AIM_HINT_FILL = "#ffd9a8";
+const AIM_HINT_SHADOW = "rgba(255, 185, 110, 0.85)";
+export const popupAimHint = (anchor: { pos: Vec }, targetRadius: number): Popup => {
+  // same face/size as the off-beat-hit correction line this replaces.
+  const font = "700 16px 'Space Grotesk', system-ui, sans-serif";
+  const life = COMBO_LOST_POPUP_LIFE * AIM_HINT_LIFE_MUL;
+  return {
+    pos: { x: anchor.pos.x, y: anchor.pos.y },
+    vel: { x: 0, y: 0 },
+    life,
+    maxLife: life,
+    text: "Aim for the target.",
+    font,
+    fill: AIM_HINT_FILL,
+    shadowColor: AIM_HINT_SHADOW,
+    decayX: 1, decayY: 1,
+    popPeak: 0.35, popDuration: 0.15,
+    holdUntil: 0.35, fadeGain: 1,
+    follow: anchor,
+    // The reticule this pins to sits on the target's player-facing surface, so the body
+    //   extends a full diameter past it — anything less than that plus the text's own height
+    //   lands the lines on the lit rock.
+    followOffset: { x: 0, y: -(2 * targetRadius + 56) },
+    halfH: 22,
+    draw: (ctx) => {
+      ctx.font = font;
+      ctx.fillStyle = AIM_HINT_FILL;
+      ctx.shadowColor = AIM_HINT_SHADOW;
+      ctx.fillText("Aim for the target.", 0, -10);
+      ctx.fillText("Hit on the beat.", 0, 12);
     },
   };
 };

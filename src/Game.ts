@@ -33,6 +33,7 @@ import { ParadeEntry } from "./game/killedParade";
 import { HighlightTimeline } from "./game/highlightTimeline";
 import type { WaveTransition } from "./game/waveTransition";
 import type { BeatCue } from "./game/beatCues";
+import type { AimHint } from "./game/aimHint";
 import { WaveEventSchedule, newWaveEventSchedule } from "./game/waveEvents";
 import { HudElements, bindHudElements } from "./game/hud";
 import { showTitle, toggleMute, applyVolume, abortMission, setFirstWaveHintStage, triggerOverlayStart, openBeatCalibrator, finishCalibrationIntro, advanceIntroOverlay, unfreezeIntroWorld, togglePause, exitReplay } from "./game/lifecycle";
@@ -255,6 +256,16 @@ export class Game implements HudElements {
   firedOffBeatSinceLastBeat = false;
   // first-ever meaningful combo loss in a run gets a labeled popup so the player learns the mechanic.
   hasLostComboEver = false;
+  // Targeting lesson (game/aimHint.ts): hits that were FIRED on the beat but LANDED off it —
+  //   the signature of aiming at the rock instead of at the lead reticule. Counted so the
+  //   once-per-run hint can wait for the pattern to establish itself.
+  firedOnBeatMissCount = 0;
+  aimHintShown = false;
+  // live hint: a pulse blooming around one target's reticule plus the popup beside it.
+  aimHint: AimHint | null = null;
+  // set for the duration of one hit judgement when the hint takes over, so the combo-loss
+  //   path skips the popup + "fire (and hit) on the beat" banner it replaces.
+  aimHintSuppressLossPopup = false;
   // combo x6 unlocks the first Pilot's Log vocal — fires once per run, gated by this flag.
   pilotLog1Unlocked = false;
   // combo x12 unlocks Entry 3 — same once-per-run gate, no HUD toast.

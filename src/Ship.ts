@@ -12,7 +12,7 @@ import { fireBullets, applyPowerup } from "./ship/shipWeapons";
 import { setComboFromValue } from "./ship/shipComboHalo";
 import { renderShipBody } from "./ship/shipRender";
 import { renderShipReticules, tickHoverLockState, ReticuleHoverProbe } from "./ship/reticule/reticuleRender";
-import { ReticuleTarget, TrajectoryTrackMap } from "./ship/reticule/trajectoryPreview";
+import { ReticuleTarget, TrajectoryTrackMap, AimHintRender } from "./ship/reticule/trajectoryPreview";
 import { Wormhole, clipBehindPortalFarLip } from "./game/wormhole";
 
 // BEAT_GRID is re-exported from Game.ts for backwards compatibility; Ship code reads it directly here.
@@ -208,8 +208,16 @@ export class Ship {
     tutorialHighlight: boolean = false, sound: Sound | null = null, audioBeatTime: number = beatTime,
     superBoosted: boolean = false,
     hoverProbes: ReadonlyArray<ReticuleHoverProbe> = [],
+    aimHint: AimHintRender | null = null,
   ) {
-    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRings: this.hoverDotRingStates }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight, sound, audioBeatTime, superBoosted, hoverProbes);
+    renderShipReticules(this, { trajectoryTracks: this.trajectoryTracks, hoverDotRings: this.hoverDotRingStates }, ctx, beatGrid, w, h, targets, beatTime, doubletime, tutorialHighlight, sound, audioBeatTime, superBoosted, hoverProbes, aimHint);
+  }
+
+  // How long ago the radar last had this target in its cone, in beat-time seconds; null if it
+  //   has never been tracked. Lets the targeting hint pick a rock the player can already see.
+  secondsSinceRadarContact(target: object, beatTime: number): number | null {
+    const track = this.trajectoryTracks.get(target);
+    return track ? beatTime - track.lastInConeAt : null;
   }
 
   // SIM-side hover-lock tick — runs the lock state machine (drift-shot eligibility) deterministically

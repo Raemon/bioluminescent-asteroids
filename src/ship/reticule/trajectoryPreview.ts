@@ -334,6 +334,9 @@ export type TrajectoryContext = {
   // per-slot beat-time the reticule first entered that slot's 75px approach zone (null = not in
   // zone). Drives the contracting approach ring's beat-aligned launch. Index 0 = 1-beat slot.
   hoverZoneEnterBySlot: Array<number | null>;
+  // live targeting hint, render-pass only (the headless sim pass leaves it undefined so the
+  //   forced preview + focus override stay purely cosmetic and can't reach the simulation).
+  aimHint?: AimHintRender | null;
 };
 
 // dots pulse from 0→1 the first beat, then sinusoidally — gives a "lock-on" feel as targets enter.
@@ -387,6 +390,61 @@ const paintOnRhythmCrosshair = (ctx: CanvasRenderingContext2D, px: number, py: n
   ctx.moveTo(px, py + inner); ctx.lineTo(px, py + outer);
   ctx.stroke();
   ctx.setLineDash(prevDash);
+};
+
+// Once-a-run targeting lesson (game/aimHint.ts): rings bloom outward from ONE target's
+// 1-beat dot — the ringed "shoot here next beat" reticule — while a popup beside it spells
+// out the correction. `key` is the target object the pulse belongs to; `anchor` is rewritten
+// each frame with that dot's world position so the popup can ride along with it.
+export type AimHintRender = {
+  key: object;
+  anchor: { pos: Vec };
+  elapsed: number;
+  duration: number;
+};
+
+// Amber, matching the off-beat-hit popup this replaces — the cyan of the reticule
+// itself stays the "aim here" colour, and the warm ring reads as the correction on top.
+const AIM_HINT_HSL = "33, 100%, 65%";
+const AIM_HINT_RING_PERIOD = 0.75;
+// starts just outside the focused first-beat dot's own ring + crosshair so the bloom reads as
+// coming off that reticule rather than through it.
+const AIM_HINT_RING_INNER_GAP = 6;
+const AIM_HINT_RING_COUNT = 2;
+const AIM_HINT_RING_SPAN = 34;
+const AIM_HINT_RING_LINE_WIDTH = 2.5;
+const AIM_HINT_RING_PEAK_ALPHA = 0.9;
+const AIM_HINT_ENVELOPE_IN_SEC = 0.3;
+const AIM_HINT_ENVELOPE_OUT_SEC = 0.7;
+
+// ramps in on arrival and out on expiry so neither the rings nor a faded-in preview pops.
+export const aimHintEnvelope = (elapsed: number, duration: number): number => {
+  if (elapsed < 0 || elapsed > duration) return 0;
+  const inRamp = Math.min(1, elapsed / AIM_HINT_ENVELOPE_IN_SEC);
+  const outRamp = Math.min(1, (duration - elapsed) / AIM_HINT_ENVELOPE_OUT_SEC);
+  return Math.min(inRamp, outRamp);
+};
+
+// staggered rings expanding out of the reticule circle, each fading as it grows.
+const paintAimHintPulse = (
+  ctx: CanvasRenderingContext2D, px: number, py: number, hint: AimHintRender,
+) => {
+  const envelope = aimHintEnvelope(hint.elapsed, hint.duration);
+  if (envelope <= 0) return;
+  const phase = hint.elapsed / AIM_HINT_RING_PERIOD;
+  const inner = FOCUSED_FIRST_DOT_RING_RADIUS + FOCUSED_FIRST_DOT_CROSSHAIR_GAP
+    + FOCUSED_FIRST_DOT_CROSSHAIR_LENGTH + AIM_HINT_RING_INNER_GAP;
+  ctx.lineWidth = AIM_HINT_RING_LINE_WIDTH;
+  ctx.setLineDash([]);
+  for (let i = 0; i < AIM_HINT_RING_COUNT; i++) {
+    const p = (phase + i / AIM_HINT_RING_COUNT) % 1;
+    const alpha = AIM_HINT_RING_PEAK_ALPHA * envelope * (1 - p) * (1 - p);
+    if (alpha <= 0.01) continue;
+    ctx.strokeStyle = `hsla(${AIM_HINT_HSL}, ${alpha})`;
+    ctx.beginPath();
+    ctx.arc(px, py, inner + p * AIM_HINT_RING_SPAN, 0, TAU);
+    ctx.stroke();
+  }
 };
 
 // dashed lock-circle + crosshair for the on-rhythm aim spot — the "where to aim NOW to hit
@@ -983,6 +1041,7 @@ const paintTrajectoryFromSnapshot = (
   ctx: TrajectoryContext, snap: TrajectorySnapshot, firstSeen: number,
   alphaMultiplier: number, clipToCone: boolean,
   showOnRhythmSpot: boolean,
+  aimHint: AimHintRender | null = null,
 ): DotWalkResult => {
   const speed = Math.hypot(snap.velX, snap.velY);
   if (speed < 1) return EMPTY_DOT_WALK_RESULT;
@@ -1063,6 +1122,21 @@ const paintTrajectoryFromSnapshot = (
     const [aimDrawX, aimDrawY] = wrapToCanvas(aim.x, aim.y, ctx.w, ctx.h);
     paintOnRhythmSpot(c, aimDrawX, aimDrawY, aim.willHitOnBeat, aim.reachable, entryFlashBoost, beatPulseBoost, focusBoost);
   }
+  if (c && aimHint) {
+    // The reticule the lesson is about is the 1-beat dot — the ringed "shoot here next beat"
+    //   marker. Under doubletime it sits at k=2 on a half-width step, so the on-beat dot is one
+    //   full beat of travel out either way; the slot-0 override is the same point pulled back by
+    //   the shell's reach, which is exactly where the player should put their sight.
+    const [hintX, hintY] = onBeatDotOverrides[0]
+      ?? [rawStartX + ux * (dotOffset + dotStep), rawStartY + uy * (dotOffset + dotStep)];
+    const [hintDrawX, hintDrawY] = wrapToCanvas(hintX, hintY, ctx.w, ctx.h);
+    // the popup pins to this spot, so publish it in wrapped world coordinates (the foreground
+    //   layer is drawn under the same camera offset as the popups).
+    aimHint.anchor.pos.x = ((hintX % ctx.w) + ctx.w) % ctx.w;
+    aimHint.anchor.pos.y = ((hintY % ctx.h) + ctx.h) % ctx.h;
+    c.globalAlpha = 1;
+    paintAimHintPulse(c, hintDrawX, hintDrawY, aimHint);
+  }
   if (c) c.restore();
   return result;
 };
@@ -1111,7 +1185,7 @@ const trajectoryRayOverlapsCone = (
 // crosses the cone; the player can still aim the radar at the trajectory line itself.
 const previewLiveTarget = (
   ctx: TrajectoryContext, t: ReticuleTarget, rendered: Set<object>,
-  showSpot: boolean,
+  showSpot: boolean, aimHint: AimHintRender | null = null,
 ): DotWalkResult => {
   const [dx, dy] = toroidalDelta(t.pos.x - ctx.apex.x, t.pos.y - ctx.apex.y, ctx.w, ctx.h);
   const tr = t.radius ?? 0;
@@ -1123,7 +1197,20 @@ const previewLiveTarget = (
   // when only the ray (not the target itself) is in the cone, disable cone clipping so the
   // visible dots span the full forward path — clipping would chop the line back inside the wedge
   // and could omit the section the radar is actually overlapping.
-  return paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, 1, targetInCone, showSpot);
+  return paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, 1, targetInCone, showSpot, aimHint);
+};
+
+// The hinted target may be nowhere near the radar cone — the shot that earned the hint could
+// have landed anywhere. Draw its preview anyway (uncone-clipped, ramped in by the hint
+// envelope) so there is a reticule for the pulse to bloom around and for the text to name.
+const previewAimHintTarget = (
+  ctx: TrajectoryContext, t: ReticuleTarget, hint: AimHintRender, rendered: Set<object>,
+) => {
+  const track = refreshTrack(ctx.trajectoryTracks, t, ctx.beatTime);
+  rendered.add(t as unknown as object);
+  paintTrajectoryFromSnapshot(
+    ctx, track.snapshot, track.firstSeen, aimHintEnvelope(hint.elapsed, hint.duration), false, true, hint,
+  );
 };
 
 // drain expired fade entries and render fading-out trajectories for targets that left the cone or
@@ -1243,7 +1330,11 @@ export const paintTrajectoryPreviews = (
   const c = ctx.ctx; // null on the compute-only (sim) pass
   if (c) { c.save(); c.setLineDash([]); c.lineWidth = 1.5; }
   const rendered = new Set<object>();
-  const spotTarget = pickCenterMostTarget(ctx, targets);
+  const hint = ctx.aimHint ?? null;
+  const hintTarget = hint ? targets.find((t) => (t as unknown as object) === hint.key) ?? null : null;
+  // while the hint is up its target takes the focus — the bright ringed first-beat dot is the
+  //   spot the lesson is about, and it can't be sitting on a different rock behind the pulse.
+  const spotTarget = hintTarget ?? pickCenterMostTarget(ctx, targets);
   let overlapsReticule = false;
   const slotProximities = emptySlotProximities(slotCount);
   const slotWinnerReticuleIdx = emptyWinnerIdx(slotCount);
@@ -1251,7 +1342,7 @@ export const paintTrajectoryPreviews = (
   const liveByKey = new Map<object, ReticuleTarget>();
   for (const t of targets) liveByKey.set(t as unknown as object, t);
   for (const t of targets) {
-    const r = previewLiveTarget(ctx, t, rendered, t === spotTarget);
+    const r = previewLiveTarget(ctx, t, rendered, t === spotTarget, t === hintTarget ? hint : null);
     if (r.overlapsReticule) overlapsReticule = true;
     for (let i = 0; i < slotCount && i < r.slotProximities.length; i++) {
       if (r.slotProximities[i] > slotProximities[i]) {
@@ -1261,6 +1352,7 @@ export const paintTrajectoryPreviews = (
       if (i < r.slotWithin75.length && r.slotWithin75[i]) slotWithin75[i] = true;
     }
   }
+  if (c && hint && hintTarget && !rendered.has(hint.key)) previewAimHintTarget(ctx, hintTarget, hint, rendered);
   // Fade-out ghosts are render-only and mutate trajectoryTracks (delete) — skip on the
   //   compute pass so the sim never touches that cosmetic map.
   if (c) { renderFadingTrajectories(ctx, rendered, liveByKey); c.restore(); }

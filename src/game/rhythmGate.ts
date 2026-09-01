@@ -108,7 +108,8 @@ export const loseCombo = (game: Game, sourcePos?: Vec, reason: "fire" | "hit" = 
     // sharper sour wrrr for a mistimed press, deflating wrrr for an off-beat hit.
     game.sound.play(reason === "fire" ? "comboLostFire" : "comboLost");
     game.ship.comboLossFlash = 1;
-    if (sourcePos && (!game.hasLostComboEver || haloActive)) {
+    // aimHint.ts has already taken over this miss with its own pulse + correction text.
+    if (sourcePos && !game.aimHintSuppressLossPopup && (!game.hasLostComboEver || haloActive)) {
       // the hit was judged against perceivedBeatTime at the moment of impact (see
       //   collisions.ts), so the signed offset here is the same one the gate rejected:
       //   before the beat = too early, after it = too late. Only hits show it.
@@ -121,7 +122,7 @@ export const loseCombo = (game: Game, sourcePos?: Vec, reason: "fire" | "hit" = 
     // on the first meaningful loss outside the tutorial. The tutorial's own
     // FirstWaveHint owns the screen while a stage is up, so suppress then.
     // killEffects fires `rhythm-loss-hint:dismiss` on the next on-beat hit.
-    if (!game.hasLostComboEver && game.firstWaveHintStage === 0) {
+    if (!game.hasLostComboEver && game.firstWaveHintStage === 0 && !game.aimHintSuppressLossPopup) {
       // If the start-of-run controls pane is still up, defer the hint instead
       //   of stacking it on top — dismissControlsHint fires it once the pane
       //   fades (all controls used, or Wave 1 ends first).

@@ -1,4 +1,5 @@
 import type { Game } from "../Game";
+import { resetAimHint } from "./aimHint";
 import { Ship } from "../Ship";
 import { spawnAsteroidAtEdge, BASS_KINDS } from "../Asteroid";
 import { ParticleSystem } from "../Particle";
@@ -565,6 +566,7 @@ const resetRunTimers = (game: Game) => {
   game.controlsHintActive = false;
   game.rhythmLossHintPending = false;
   game.beatIntensityRamp = null;
+  resetAimHint(game);
   game.hasSpawnedFirstLevel = false;
   game.replayDyingTimer = null;
   resetWaveSkip(game);
