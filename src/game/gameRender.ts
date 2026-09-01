@@ -21,6 +21,7 @@ import { updateSpectrumVisualizer, paintSpectrumVisualizer } from "./spectrumVis
 import { cosmeticRng } from "./rng";
 import { traceCitadelHolePath } from "../Asteroid";
 import { paintInkClouds, isPointInAnyInkPatch } from "./inkCloud";
+import { aimHintRender } from "./aimHint";
 
 // Overdrive ramp above the tier-3 white threshold. The combo halo saturates to
 // white at rhythm 12; this 0→1 factor keeps climbing from there to 24 so the
@@ -291,7 +292,7 @@ const paintForeground = (game: Game, targets: ReadonlyArray<ReticuleTarget>) => 
   // gold crystals are stationary (or near-stationary) "First Dot" probes — they need a direct
   // proximity pass since the trajectory walk skips speed<1 targets.
   if (!warping) {
-    game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime, superBoosted, game.gems);
+    game.ship.renderReticules(ctx, BEAT_GRID, game.w, game.h, targets, game.perceivedBeatTime, doubletime, tutorialHighlight, game.sound, game.beatTime, superBoosted, game.gems, aimHintRender(game));
     // Streak orbs orbit the primary "next-beat" reticule.
     const reticuleCenter = primaryReticulePosition(game.ship, BEAT_GRID, game.w, game.h, doubletime, superBoosted);
     ctx.save();

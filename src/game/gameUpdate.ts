@@ -40,6 +40,7 @@ import { recordHighlightFrame } from "./highlightTimeline";
 import { tryStartHighlightClip, tickHighlightGameOverInput, beginHighlightLoop, tickHighlightLoop } from "./highlightReplay";
 import { snapshotShipKill } from "./killSnapshot";
 import { updatePopups, popupDriftBonus, popupDriftCombo } from "./popups";
+import { updateAimHint } from "./aimHint";
 import { updateBassLightnings } from "./bassLightning";
 import { updateDriftBursts } from "./driftBurst";
 import { updateInkClouds } from "./inkCloud";
@@ -841,6 +842,7 @@ const updatePlaying = (game: Game, dt: number) => {
   tickEntrances(game, musicDt);
   game.particles.update(musicDt);
   game.popups = updatePopups(game.popups, dt, game.w, game.h);
+  updateAimHint(game, dt);
   game.bassLightnings = updateBassLightnings(game.bassLightnings, dt);
   game.driftBursts = updateDriftBursts(game.driftBursts, dt);
   updateInkClouds(game, dt);

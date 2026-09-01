@@ -20,6 +20,7 @@ import { SLOW_MO_DURATION } from "./slowMo";
 import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGemPickup, emitFuelOrbPickup, emitBounceSparks, emitAlienBulletPop } from "./particleBursts";
 import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage } from "./popups";
+import { registerFiredOnBeatMiss } from "./aimHint";
 import {
   applyHitToCombo,
   applyNonKillHitToCombo,
@@ -48,7 +49,15 @@ const logBulletHit = (game: Game, kind: string, b: Bullet) => {
 
 // strict on both ends — a bullet drifting out of the window between fire and hit doesn't count.
 //   Judged on perceivedBeatTime (latency-shifted) to match the fire-time classification.
-const isHitOnBeat = (game: Game, b: Bullet) => isInBeatWindow(game, game.perceivedBeatTime) && b.onBeat;
+//   Every hit routes through here, so it's also where the "pressed in time, connected late"
+//   pattern is counted for the once-per-run targeting hint (game/aimHint.ts). The suppression
+//   flag is reset per judgement so it only ever covers the hit that just raised it.
+const isHitOnBeat = (game: Game, b: Bullet) => {
+  const onBeat = isInBeatWindow(game, game.perceivedBeatTime) && b.onBeat;
+  game.aimHintSuppressLossPopup = false;
+  if (!onBeat && b.onBeat) registerFiredOnBeatMiss(game, b.pos);
+  return onBeat;
+};
 
 // single-hit targets (comets/canisters) share this shape; multi-hit targets bookkeep separately.
 type CollidableTarget = { collidesWith: (pos: { x: number; y: number }, r: number) => boolean };
