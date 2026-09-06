@@ -1,5 +1,33 @@
 [
   {
+    "id": "2026-09-06-47c7a0a",
+    "date": "2026-09-06",
+    "title": "Far Shot bonus and seam-stable trajectory preview",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "Far Shot combo: hitting a target 2+ quarter-note beats after firing awards bonus rhythm points, with staggered flash effects.",
+          "Shots landing 3+ beats out display a 'N BEATS OUT' label and trigger a special drift burst and boom in the Far Shot hue.",
+          "Trajectory preview dots now stay stable as targets cross the screen edge instead of jumping or vanishing."
+        ]
+      },
+      {
+        "heading": "Tuning",
+        "items": [
+          "Far Shot rhythm payout now counts only the extra beats beyond the first, so a 2-beat shot pays +1 and a 3-beat shot pays +2."
+        ]
+      }
+    ],
+    "commits": [
+      "47c7a0a",
+      "1cc1da9",
+      "e7371c8",
+      "5f3ffe2",
+      "8539d40"
+    ]
+  },
+  {
     "id": "2026-09-06-e626245",
     "date": "2026-09-06",
     "title": "Drift-lock visuals and wormhole colour fixes",

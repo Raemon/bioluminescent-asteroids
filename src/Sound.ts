@@ -458,7 +458,10 @@ export class Sound {
   // Master volume multiplier. 1.0 = original baseline (master/bakedOut gains
   // at 0.6); 2.0 = double, the slider's default max. 0 disables playback via
   // `enabled` so per-voice early-outs still kick in.
-  volume = 2;
+  // The mix is tuned at this master level (the slider's default and the level
+  //   every check:* script drives the bus at); it is also what the export pins.
+  static readonly DEFAULT_VOLUME = 2;
+  volume = Sound.DEFAULT_VOLUME;
   // Extra multiplier applied on top of `volume` so pause can fade the mix
   // to silence without losing the player's slider setting. 1 = no fade.
   private pauseFadeFactor = 1;
@@ -1504,7 +1507,7 @@ export class Sound {
       // 1/sqrt(k) so the pile gains energy gently instead of linearly.
       const burst = this.bakedBursts.get(key);
       let copies = 1;
-      if (burst && startAt - burst.start <= Sound.BAKED_RETRIGGER_WINDOW) {
+      if (burst && Math.abs(startAt - burst.start) <= Sound.BAKED_RETRIGGER_WINDOW) {
         copies = ++burst.count;
       } else {
         this.bakedBursts.set(key, { start: startAt, count: 1 });
@@ -2357,13 +2360,17 @@ export class Sound {
     this.stopHaloFullMusic();
     this.stopLaserCharge();
     this.abandonReleasingVoices();
+    // Burst starts are clock readings; the next context's clock starts over.
+    this.bakedBursts.clear();
     this.enabled = wasEnabled;
   }
 
   // Swap the engine onto the capture context. Rebuilds the full mix graph
   //   (compressor + limiter + channel legs at the player's per-channel
   //   volumes) on the offline destination, with the overall volume pinned to
-  //   a fixed neutral level regardless of the live slider/mute.
+  //   the level the mix is tuned at regardless of the live slider/mute — the
+  //   master gain sits ahead of the compressor and limiter, so any other level
+  //   renders a differently-squashed mix than the one the game plays.
   beginExportCapture(captureCtx: AudioContext) {
     if (this.exportRestore || !this.ctx) return;
     this.stopVoicesForContextSwap();
@@ -2389,7 +2396,7 @@ export class Sound {
       pauseFadeFactor: this.pauseFadeFactor,
     };
     this.ctx = captureCtx;
-    this.volume = 1;
+    this.volume = Sound.DEFAULT_VOLUME;
     this.pauseFadeFactor = 1;
     this.buildMixGraph();
     this.enabled = true;
