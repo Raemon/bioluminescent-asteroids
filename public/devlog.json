@@ -1,5 +1,34 @@
 [
   {
+    "id": "2026-09-06-897dee8",
+    "date": "2026-09-06",
+    "title": "Aim hint and replay button reliability fixes",
+    "sections": [
+      {
+        "heading": "New",
+        "items": [
+          "A one-time targeting hint now appears when you fire in rhythm but keep missing: a pulsing ring blooms around the lead reticule with on-screen text guiding you to aim ahead of the asteroid, not at it."
+        ]
+      },
+      {
+        "heading": "Fixed",
+        "items": [
+          "Replay buttons no longer disappear on leaderboard rows right after you upload a run — stale cache layers no longer hide a replay you just saved.",
+          "Your post-run standings view is now fetched after your replay uploads, so it correctly shows a play button for your new run.",
+          "Replay encoding failures are now logged instead of silently leaving your run without an uploadable replay."
+        ]
+      }
+    ],
+    "commits": [
+      "897dee8",
+      "79a3a24",
+      "252b6a1",
+      "d0818ec",
+      "979d474",
+      "65a955a"
+    ]
+  },
+  {
     "id": "2026-08-30-cf83bb3",
     "date": "2026-08-30",
     "title": "Phone support, audio fixes, and prong tuning",
