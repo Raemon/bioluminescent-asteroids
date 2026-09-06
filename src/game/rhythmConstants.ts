@@ -16,3 +16,10 @@ export const DEBUG_BEAT_TIMING = false;
 //   combo +1, so this lands the streak at +2 total over the pre-shot value. Tier scales damage,
 //   not rhythm, so this is a flat +1 regardless of how long the lock was held.
 export const DRIFT_RHYTHM_BONUS = 1;
+
+// Far Shot: a combo hit that lands FAR_SHOT_MIN_BEATS or more quarter-note beats after the shot
+//   was fired (the 2-beat reticule or deeper) pays one rhythm per beat of lead, capped at
+//   FAR_SHOT_MAX_RHYTHM. From FAR_SHOT_BIG_BEATS it also gets the two-line popup, burst and boom.
+export const FAR_SHOT_MIN_BEATS = 2;
+export const FAR_SHOT_BIG_BEATS = 3;
+export const FAR_SHOT_MAX_RHYTHM = 6;

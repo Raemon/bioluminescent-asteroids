@@ -59,13 +59,15 @@ export type DriftBurst = {
   rings: number;
 };
 
-export const spawnDriftBurst = (game: Game, x: number, y: number, tier: number) => {
+// `hue` lets another bonus (Far Shot) borrow the detonation in its own colour; it must be the
+// same integer "H, S%, L%" shape as the tier hues, which is what hslaBoost parses.
+export const spawnDriftBurst = (game: Game, x: number, y: number, tier: number, hue?: string) => {
   const t = Math.max(1, tier);
   const life = BASE_LIFE + (t - 1) * LIFE_PER_TIER;
   game.driftBursts.push({
     x,
     y,
-    hue: driftTierPulseHsl(t),
+    hue: hue ?? driftTierPulseHsl(t),
     tier: t,
     life,
     maxLife: life,

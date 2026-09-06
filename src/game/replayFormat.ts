@@ -1,7 +1,7 @@
 // Replay wire format. JSON shape is stable across (v: 2) revisions; bump the
 // version when the binary layout or sim semantics change.
 
-export const REPLAY_FORMAT_VERSION = 35;
+export const REPLAY_FORMAT_VERSION = 36;
 
 // v2 added tutorial/veteran/bindings so wave-1 spawn (which forks on those
 //   flags) and per-action key mapping reproduce on a different machine.
@@ -137,6 +137,12 @@ export const REPLAY_FORMAT_VERSION = 35;
 //   halo, and so its reach, is tighter). Dot positions feed the drift-lock proximity
 //   test, which is sim state, so a v34 recording that hovered a lock at either of
 //   those can lock on a different frame and re-sim into a different run.
+// v36 adds the Far Shot rhythm bonus (+N rhythm for a combo hit that lands N >= 2
+//   quarter-note beats after its shot was fired) and makes the trajectory preview
+//   toroidal: every on-screen image of a target is walked, and an entering body only
+//   at its entrance image. Combo totals move wherever a range-boosted shot lands deep,
+//   and the drift-lock proximity (sim state) can now see a dot through the seam, so
+//   v35 recordings re-sim into different runs.
 // Beat-clock snapshot taken on the recording's first captured frame. These are
 //   all deterministic dt-sums / dt-derived indices accumulated during the held
 //   intro; restoring them on replay reproduces the recording's frame-0 beat

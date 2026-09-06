@@ -4,7 +4,7 @@ import { Vec, cosmeticRand as rand, toroidalDelta } from "../vec";
 import { PowerupKind, POWERUP_HUE } from "../Canister";
 import { formatScore } from "./formatScore";
 import { driftTierPulseHsl } from "../ship/reticule/reticuleRender";
-import { BEAT_GRID } from "./rhythmConstants";
+import { BEAT_GRID, FAR_SHOT_BIG_BEATS } from "./rhythmConstants";
 
 // one shape powers combo/pickup/debug overlays so all three share the tick + render loop.
 export type Popup = {
@@ -203,6 +203,47 @@ export const popupRapidRhythm = (pos: Vec): Popup =>
 // prong pair landing two combo hits on one beat — label sits between the two.
 export const popupTwinShot = (pos: Vec): Popup =>
   popupBonusLabel(pos, "TWIN SHOT", "#c9a6ff", "rgba(180, 140, 255, 0.85)");
+
+// a combo hit that landed two beats or more after firing — the 2-beat reticule or deeper.
+//   Mint, so it reads apart from the pink/violet/blue bonus family. From FAR_SHOT_BIG_BEATS the
+//   label grows a "N BEATS OUT" line, snaps in larger and holds longer: the longer lead is the
+//   bigger achievement and its popup should look it.
+const FAR_SHOT_POPUP_FILL = "#9dffb0";
+const FAR_SHOT_POPUP_SHADOW = "rgba(120, 255, 170, 0.85)";
+const FAR_SHOT_SUB_FILL = "#e6fff0";
+const FAR_SHOT_SUB_SHADOW = "rgba(200, 255, 225, 0.85)";
+const FAR_SHOT_BIG_POPUP_LIFE = 1.6;
+export const popupFarShot = (pos: Vec, beatsAway: number): Popup => {
+  if (beatsAway < FAR_SHOT_BIG_BEATS) {
+    return popupBonusLabel(pos, "FAR SHOT", FAR_SHOT_POPUP_FILL, FAR_SHOT_POPUP_SHADOW);
+  }
+  const labelFont = "700 22px 'Space Grotesk', system-ui, sans-serif";
+  const subFont = "600 13px 'Space Grotesk', system-ui, sans-serif";
+  return {
+    pos: { x: pos.x, y: pos.y - 18 },
+    vel: { x: rand(-10, 10), y: -65 },
+    life: FAR_SHOT_BIG_POPUP_LIFE,
+    maxLife: FAR_SHOT_BIG_POPUP_LIFE,
+    text: "FAR SHOT",
+    font: labelFont,
+    fill: FAR_SHOT_POPUP_FILL,
+    shadowColor: FAR_SHOT_POPUP_SHADOW,
+    decayX: 0.94, decayY: 0.94,
+    popPeak: 0.55, popDuration: 0.18,
+    holdUntil: 0, fadeGain: 1.4,
+    halfH: 22,
+    draw: (ctx) => {
+      ctx.font = labelFont;
+      ctx.fillStyle = FAR_SHOT_POPUP_FILL;
+      ctx.shadowColor = FAR_SHOT_POPUP_SHADOW;
+      ctx.fillText("FAR SHOT", 0, -9);
+      ctx.font = subFont;
+      ctx.fillStyle = FAR_SHOT_SUB_FILL;
+      ctx.shadowColor = FAR_SHOT_SUB_SHADOW;
+      ctx.fillText(`${beatsAway} BEATS OUT`, 0, 12);
+    },
+  };
+};
 
 // per-shot streak payout tag — a single "Streak +N" line naming the points it
 //   paid. Cyan-white to match the spark ring carrying the streak and stand
