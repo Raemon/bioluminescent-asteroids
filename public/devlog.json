@@ -1,5 +1,24 @@
 [
   {
+    "id": "2026-09-06-83406f0",
+    "date": "2026-09-06",
+    "title": "Fix replay export: audio mix, video framerate",
+    "sections": [
+      {
+        "heading": "Fixed",
+        "items": [
+          "Exported replay videos no longer have sounds (bass pulse, shots, explosions) that gradually fade out over the course of the movie.",
+          "Exported replay audio now matches the in-game mix volume and dynamics instead of sounding quieter with sharper transients.",
+          "Exported replay videos are now a fixed 60 fps instead of a variable ~119 fps, halving file size and improving compatibility."
+        ]
+      }
+    ],
+    "commits": [
+      "83406f0",
+      "e03f94c"
+    ]
+  },
+  {
     "id": "2026-09-06-47c7a0a",
     "date": "2026-09-06",
     "title": "Far Shot bonus and seam-stable trajectory preview",
