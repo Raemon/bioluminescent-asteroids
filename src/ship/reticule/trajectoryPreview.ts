@@ -287,11 +287,16 @@ export type ReticuleTarget = {
 // snapshot the last in-cone state so fade-out can keep rendering even if the target dies/leaves.
 type TrajectorySnapshot = { posX: number; posY: number; velX: number; velY: number; radius: number };
 
-// per-target tracking for entry flash phase and post-exit fade lingering.
+// per-target tracking for entry flash phase and post-exit fade lingering. imageDx/imageDy is
+//   the apex-relative displacement of the toroidal image the preview last painted for this
+//   target, so the fade ghost keeps to the side of the screen the radar last showed it instead
+//   of snapping to the opposite edge when the nearest image flips at the seam (candidateImages).
 export type TrajectoryTrack = {
   firstSeen: number;
   lastInConeAt: number;
   snapshot: TrajectorySnapshot;
+  imageDx: number;
+  imageDy: number;
 };
 
 // strong Map (not WeakMap) is required because we need to keep rendering a target's fade-out
@@ -728,9 +733,9 @@ export const setReticuleWrapAnchor = (anchor: { x: number; y: number } | null): 
 // fold them into [0,w) — dots reappear on the opposite edge, matching the wrapped target
 // sprite. In scroll mode the world is wrap-REPLICATED behind a camera translate that pins the
 // ship to centre, so we pass the raw apex-relative coordinate straight through and let the
-// camera translate place it: every point that reaches here is already nearest-apex — target
-// dots were toroidalDelta-remapped to their near copy upstream, and the forward reticule ray
-// is an intentional projection from the ship. Folding the offset into ±w/2 here was the bug:
+// camera translate place it: every point that reaches here already belongs to a chosen image —
+// target dots are walked per on-screen toroidal image upstream (candidateImages), and the
+// forward reticule ray is an intentional projection from the ship. Folding the offset into ±w/2 here was the bug:
 // a fast ship's 1-beat reticule projects past half a screen, and the fold snapped it a full
 // screen back toward the ship while the bullet (drawn at its true offset by the world layer)
 // kept going — so the shot visibly overshot its own sight. Unfolded, the sight tracks the
@@ -1037,17 +1042,45 @@ const computeOnBeatAim = (
 // lingering ghost remains visible even after the target has left the radar wedge.
 const EMPTY_DOT_WALK_RESULT: DotWalkResult = { overlapsReticule: false, slotProximities: [], slotWinnerReticuleIdx: [], slotWithin75: [] };
 
+const emptySlotProximities = (n: number): number[] => new Array(n).fill(0);
+const emptyWinnerIdx = (n: number): number[] => new Array(n).fill(-1);
+const emptyWithin75 = (n: number): boolean[] => new Array(n).fill(false);
+const emptyDotWalk = (slotCount: number): DotWalkResult => ({
+  overlapsReticule: false,
+  slotProximities: emptySlotProximities(slotCount),
+  slotWinnerReticuleIdx: emptyWinnerIdx(slotCount),
+  slotWithin75: emptyWithin75(slotCount),
+});
+
+// fold one walk (a target, or one toroidal image of it) into the running per-slot maxima:
+//   strictly greater proximity wins and carries its winning reticule index; the booleans OR.
+//   `r` is never mutated — EMPTY_DOT_WALK_RESULT is shared.
+const mergeDotWalkInto = (acc: DotWalkResult, r: DotWalkResult) => {
+  if (r.overlapsReticule) acc.overlapsReticule = true;
+  const n = Math.min(acc.slotProximities.length, r.slotProximities.length);
+  for (let i = 0; i < n; i++) {
+    if (r.slotProximities[i] > acc.slotProximities[i]) {
+      acc.slotProximities[i] = r.slotProximities[i];
+      acc.slotWinnerReticuleIdx[i] = r.slotWinnerReticuleIdx[i];
+    }
+    if (i < r.slotWithin75.length && r.slotWithin75[i]) acc.slotWithin75[i] = true;
+  }
+};
+
+// imageDx/imageDy: the apex-relative displacement of the ONE toroidal image of the target this
+//   walk runs at (callers choose it — see candidateImages). Everything downstream stays in the raw
+//   apex frame, so an image past the seam simply yields dots at their true unfolded coordinates and
+//   the camera translate places the on-screen ones.
 const paintTrajectoryFromSnapshot = (
-  ctx: TrajectoryContext, snap: TrajectorySnapshot, firstSeen: number,
-  alphaMultiplier: number, clipToCone: boolean,
+  ctx: TrajectoryContext, snap: TrajectorySnapshot, imageDx: number, imageDy: number,
+  firstSeen: number, alphaMultiplier: number, clipToCone: boolean,
   showOnRhythmSpot: boolean,
   aimHint: AimHintRender | null = null,
 ): DotWalkResult => {
   const speed = Math.hypot(snap.velX, snap.velY);
   if (speed < 1) return EMPTY_DOT_WALK_RESULT;
-  const [dx, dy] = toroidalDelta(snap.posX - ctx.apex.x, snap.posY - ctx.apex.y, ctx.w, ctx.h);
-  const cx = ctx.apex.x + dx;
-  const cy = ctx.apex.y + dy;
+  const cx = ctx.apex.x + imageDx;
+  const cy = ctx.apex.y + imageDy;
   const ux = snap.velX / speed;
   const uy = snap.velY / speed;
   const r = snap.radius;
@@ -1144,7 +1177,7 @@ const paintTrajectoryFromSnapshot = (
 // refresh the track for an in-cone target — entry flash starts when no track existed, or when the
 // target had fully faded out and re-enters; otherwise re-arming preserves the existing pulse phase.
 const refreshTrack = (
-  tracks: TrajectoryTrackMap, t: ReticuleTarget, beatTime: number,
+  tracks: TrajectoryTrackMap, t: ReticuleTarget, beatTime: number, imageDx: number, imageDy: number,
 ): TrajectoryTrack => {
   const key = t as unknown as object;
   const existing = tracks.get(key);
@@ -1153,12 +1186,14 @@ const refreshTrack = (
     posX: t.pos.x, posY: t.pos.y, velX: t.vel.x, velY: t.vel.y, radius,
   };
   if (!existing) {
-    const fresh: TrajectoryTrack = { firstSeen: beatTime, lastInConeAt: beatTime, snapshot };
+    const fresh: TrajectoryTrack = { firstSeen: beatTime, lastInConeAt: beatTime, snapshot, imageDx, imageDy };
     tracks.set(key, fresh);
     return fresh;
   }
   existing.snapshot = snapshot;
   existing.lastInConeAt = beatTime;
+  existing.imageDx = imageDx;
+  existing.imageDy = imageDy;
   return existing;
 };
 
@@ -1180,24 +1215,98 @@ const trajectoryRayOverlapsCone = (
   return clip.sMax > clip.sMin;
 };
 
-// per-target live render — checks cone membership and updates track.
-// Treat the trajectory as "in cone" if EITHER the target overlaps the cone OR its forward path
-// crosses the cone; the player can still aim the radar at the trajectory line itself.
+// The torus is exactly one screen wide, so a target's nearest toroidal image is the on-screen
+// one — until the body crosses the seam, when "nearest" flips to the opposite edge and every dot
+// computed from it jumps a full screen (or vanishes, because the flipped image's path no longer
+// crosses the cone). So the preview does not commit to one image: it walks EVERY image whose body
+// or on-beat dots are on screen. Each physical future position is then drawn at most once, never
+// jumps, and a rock that just left one edge keeps its dots on that side for as long as the radar
+// still covers its path — the same treatment the world layer's wrap copies give the sprite.
+// Nearest image first, so the ordinary single-image case keeps its order and cost.
+type ImageDelta = { dx: number; dy: number };
+const candidateImages = (t: ReticuleTarget, apex: Vec, w: number, h: number): ImageDelta[] => {
+  // An entering body is drawn at exactly one image (pos + enterOff, gameRender.paintEntrances)
+  //   while it slides in, so that is the only image its dots may follow. enterOff is always a
+  //   whole multiple of w/h (entrance.ts), i.e. one of the nine images below.
+  if (t.entering) {
+    return [{ dx: t.pos.x + (t.enterOffX ?? 0) - apex.x, dy: t.pos.y + (t.enterOffY ?? 0) - apex.y }];
+  }
+  const [dx0, dy0] = toroidalDelta(t.pos.x - apex.x, t.pos.y - apex.y, w, h);
+  const images: ImageDelta[] = [{ dx: dx0, dy: dy0 }];
+  for (let ky = -1; ky <= 1; ky++) {
+    for (let kx = -1; kx <= 1; kx++) {
+      if (kx !== 0 || ky !== 0) images.push({ dx: dx0 + kx * w, dy: dy0 + ky * h });
+    }
+  }
+  return images;
+};
+
+// An image counts as radar contact only if its body, or one of its on-beat dots, is on screen.
+//   Without this a wrap-around copy whose path crosses the cone from off screen would consume the
+//   entry flash and keep refreshing lastInConeAt — which the aim hint reads as "the player can
+//   see this one". The pad covers the dot's pull-back toward the ship plus its halo + crosshair.
+const IMAGE_ON_SCREEN_PAD = 30;
+const imageIsOnScreen = (ctx: TrajectoryContext, t: ReticuleTarget, img: ImageDelta): boolean => {
+  const pad = (t.radius ?? 0) + ctx.collisionRadiusOnBeat + IMAGE_ON_SCREEN_PAD;
+  const halfW = ctx.w / 2 + pad;
+  const halfH = ctx.h / 2 + pad;
+  if (Math.abs(img.dx) <= halfW && Math.abs(img.dy) <= halfH) return true;
+  const dotOnScreen = (beatsAhead: number): boolean => {
+    const fx = img.dx + t.vel.x * ctx.beatGrid * beatsAhead;
+    const fy = img.dy + t.vel.y * ctx.beatGrid * beatsAhead;
+    return Math.abs(fx) <= halfW && Math.abs(fy) <= halfH;
+  };
+  if (ctx.doubletime && dotOnScreen(0.5)) return true;
+  const slotCount = ctx.reticulesBySlot.length;
+  for (let k = 1; k <= slotCount; k++) if (dotOnScreen(k)) return true;
+  return false;
+};
+
+// per-target live render — checks radar membership at every on-screen toroidal image of the
+// target and updates its track. An image counts if EITHER its body overlaps the cone OR its
+// forward path crosses the cone; the player can still aim the radar at the trajectory line
+// itself. Every qualifying image is walked and their lock proximities merge per slot, so a dot
+// that is physically near a reticule through the seam locks the same as one beside it.
 const previewLiveTarget = (
   ctx: TrajectoryContext, t: ReticuleTarget, rendered: Set<object>,
   showSpot: boolean, aimHint: AimHintRender | null = null,
 ): DotWalkResult => {
-  const [dx, dy] = toroidalDelta(t.pos.x - ctx.apex.x, t.pos.y - ctx.apex.y, ctx.w, ctx.h);
   const tr = t.radius ?? 0;
-  const targetInCone = targetIsInsideCone(dx, dy, tr, ctx.frame);
-  const rayInCone = !targetInCone && trajectoryRayOverlapsCone(dx, dy, t, ctx.frame);
-  if (!targetInCone && !rayInCone) return EMPTY_DOT_WALK_RESULT;
-  const track = refreshTrack(ctx.trajectoryTracks, t, ctx.beatTime);
-  rendered.add(t as unknown as object);
-  // when only the ray (not the target itself) is in the cone, disable cone clipping so the
-  // visible dots span the full forward path — clipping would chop the line back inside the wedge
-  // and could omit the section the radar is actually overlapping.
-  return paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, 1, targetInCone, showSpot, aimHint);
+  const qualifying: Array<ImageDelta & { targetInCone: boolean }> = [];
+  for (const img of candidateImages(t, ctx.apex, ctx.w, ctx.h)) {
+    if (!imageIsOnScreen(ctx, t, img)) continue;
+    const targetInCone = targetIsInsideCone(img.dx, img.dy, tr, ctx.frame);
+    if (!targetInCone && !trajectoryRayOverlapsCone(img.dx, img.dy, t, ctx.frame)) continue;
+    qualifying.push({ dx: img.dx, dy: img.dy, targetInCone });
+  }
+  if (qualifying.length === 0) return EMPTY_DOT_WALK_RESULT;
+  const key = t as unknown as object;
+  // The primary image carries the hint pulse and the track's remembered side. Keep it on the
+  //   side the track already showed so neither hops when the nearest image flips at the seam; a
+  //   fresh track (and the headless sim pass, whose map is always empty) takes the nearest image.
+  //   The choice only steers render-only state — every qualifying image is walked below either way.
+  const existing = ctx.trajectoryTracks.get(key);
+  let primary = qualifying[0];
+  if (existing) {
+    let bestDist = Infinity;
+    for (const q of qualifying) {
+      const d = Math.abs(q.dx - existing.imageDx) + Math.abs(q.dy - existing.imageDy);
+      if (d < bestDist) { bestDist = d; primary = q; }
+    }
+  }
+  const track = refreshTrack(ctx.trajectoryTracks, t, ctx.beatTime, primary.dx, primary.dy);
+  rendered.add(key);
+  const acc = emptyDotWalk(ctx.reticulesBySlot.length);
+  for (const q of qualifying) {
+    // when only the ray (not the body) is in the cone, disable cone clipping so the visible dots
+    //   span the full forward path — clipping would chop the line back inside the wedge and could
+    //   omit the section the radar is actually overlapping.
+    mergeDotWalkInto(acc, paintTrajectoryFromSnapshot(
+      ctx, track.snapshot, q.dx, q.dy, track.firstSeen, 1, q.targetInCone, showSpot,
+      q === primary ? aimHint : null,
+    ));
+  }
+  return acc;
 };
 
 // The hinted target may be nowhere near the radar cone — the shot that earned the hint could
@@ -1206,10 +1315,11 @@ const previewLiveTarget = (
 const previewAimHintTarget = (
   ctx: TrajectoryContext, t: ReticuleTarget, hint: AimHintRender, rendered: Set<object>,
 ) => {
-  const track = refreshTrack(ctx.trajectoryTracks, t, ctx.beatTime);
+  const [dx, dy] = toroidalDelta(t.pos.x - ctx.apex.x, t.pos.y - ctx.apex.y, ctx.w, ctx.h);
+  const track = refreshTrack(ctx.trajectoryTracks, t, ctx.beatTime, dx, dy);
   rendered.add(t as unknown as object);
   paintTrajectoryFromSnapshot(
-    ctx, track.snapshot, track.firstSeen, aimHintEnvelope(hint.elapsed, hint.duration), false, true, hint,
+    ctx, track.snapshot, dx, dy, track.firstSeen, aimHintEnvelope(hint.elapsed, hint.duration), false, true, hint,
   );
 };
 
@@ -1235,7 +1345,16 @@ const renderFadingTrajectories = (
         radius: live.radius ?? track.snapshot.radius,
       };
     }
-    paintTrajectoryFromSnapshot(ctx, track.snapshot, track.firstSeen, fade, false, false);
+    // keep the ghost on the side of the screen the radar last showed it: of the snapshot's
+    //   images take the one nearest the remembered displacement, and remember that instead, so
+    //   it follows the body (or the moving apex, for a dead target) continuously rather than
+    //   snapping to the opposite edge when the nearest image flips at the seam.
+    const [dx0, dy0] = toroidalDelta(track.snapshot.posX - ctx.apex.x, track.snapshot.posY - ctx.apex.y, ctx.w, ctx.h);
+    const dx = dx0 + Math.round((track.imageDx - dx0) / ctx.w) * ctx.w;
+    const dy = dy0 + Math.round((track.imageDy - dy0) / ctx.h) * ctx.h;
+    track.imageDx = dx;
+    track.imageDy = dy;
+    paintTrajectoryFromSnapshot(ctx, track.snapshot, dx, dy, track.firstSeen, fade, false, false);
   }
 };
 
@@ -1318,15 +1437,12 @@ export type TrajectoryPreviewResult = {
   slotWithin75: boolean[];
 };
 
-const emptySlotProximities = (n: number): number[] => new Array(n).fill(0);
-const emptyWinnerIdx = (n: number): number[] => new Array(n).fill(-1);
-const emptyWithin75 = (n: number): boolean[] => new Array(n).fill(false);
-
 export const paintTrajectoryPreviews = (
   ctx: TrajectoryContext, targets: ReadonlyArray<ReticuleTarget>,
 ): TrajectoryPreviewResult => {
   const slotCount = ctx.reticulesBySlot.length;
-  if (ctx.frame.length <= 0) return { overlapsReticule: false, slotProximities: emptySlotProximities(slotCount), slotWinnerReticuleIdx: emptyWinnerIdx(slotCount), slotWithin75: emptyWithin75(slotCount) };
+  const acc = emptyDotWalk(slotCount);
+  if (ctx.frame.length <= 0) return acc;
   const c = ctx.ctx; // null on the compute-only (sim) pass
   if (c) { c.save(); c.setLineDash([]); c.lineWidth = 1.5; }
   const rendered = new Set<object>();
@@ -1335,26 +1451,14 @@ export const paintTrajectoryPreviews = (
   // while the hint is up its target takes the focus — the bright ringed first-beat dot is the
   //   spot the lesson is about, and it can't be sitting on a different rock behind the pulse.
   const spotTarget = hintTarget ?? pickCenterMostTarget(ctx, targets);
-  let overlapsReticule = false;
-  const slotProximities = emptySlotProximities(slotCount);
-  const slotWinnerReticuleIdx = emptyWinnerIdx(slotCount);
-  const slotWithin75 = emptyWithin75(slotCount);
   const liveByKey = new Map<object, ReticuleTarget>();
   for (const t of targets) liveByKey.set(t as unknown as object, t);
   for (const t of targets) {
-    const r = previewLiveTarget(ctx, t, rendered, t === spotTarget, t === hintTarget ? hint : null);
-    if (r.overlapsReticule) overlapsReticule = true;
-    for (let i = 0; i < slotCount && i < r.slotProximities.length; i++) {
-      if (r.slotProximities[i] > slotProximities[i]) {
-        slotProximities[i] = r.slotProximities[i];
-        slotWinnerReticuleIdx[i] = r.slotWinnerReticuleIdx[i];
-      }
-      if (i < r.slotWithin75.length && r.slotWithin75[i]) slotWithin75[i] = true;
-    }
+    mergeDotWalkInto(acc, previewLiveTarget(ctx, t, rendered, t === spotTarget, t === hintTarget ? hint : null));
   }
   if (c && hint && hintTarget && !rendered.has(hint.key)) previewAimHintTarget(ctx, hintTarget, hint, rendered);
   // Fade-out ghosts are render-only and mutate trajectoryTracks (delete) — skip on the
   //   compute pass so the sim never touches that cosmetic map.
   if (c) { renderFadingTrajectories(ctx, rendered, liveByKey); c.restore(); }
-  return { overlapsReticule, slotProximities, slotWinnerReticuleIdx, slotWithin75 };
+  return acc;
 };

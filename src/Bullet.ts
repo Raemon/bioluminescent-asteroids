@@ -103,6 +103,10 @@ export class Bullet {
   // Muzzle position, frozen at fire time. The citadel reads it to tell an
   // inside-the-escape-hole shot (armour-bypassing) from an outside one.
   firedFrom: Vec;
+  // True for the laser's synthesised strike bullet: a beam connects the instant
+  // it fires, so it has no flight time and can never be a Far Shot
+  // (rhythmBonus.beatsAwayAtHit).
+  instantHit = false;
   // life-remaining threshold below which the bullet fades to 0 opacity. Set by
   // shipWeapons at fire-time to the gap between maxLife and the farthest beat
   // reticule, so the visible bullet dims out across the post-reticule tail

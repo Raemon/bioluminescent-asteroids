@@ -21,6 +21,7 @@ import { syncHud } from "./hud";
 import { emitShieldPop, emitCanisterPickup, emitCanisterPop, emitGemPickup, emitFuelOrbPickup, emitBounceSparks, emitAlienBulletPop } from "./particleBursts";
 import { popupPickup, popupScore, popupSideEnginesPickup, popupLaserShotPickup, popupInsufficientDamage } from "./popups";
 import { registerFiredOnBeatMiss } from "./aimHint";
+import { beatsAwayAtHit } from "./rhythmBonus";
 import {
   applyHitToCombo,
   applyNonKillHitToCombo,
@@ -456,7 +457,7 @@ export const handleGems = (game: Game) => {
       const onBeat = isHitOnBeat(game, b);
       const dmg = b.damage();
       if (onBeat && dmg >= 4) {
-        applyHitToCombo(game, onBeat, b.pos);
+        applyHitToCombo(game, onBeat, b.pos, beatsAwayAtHit(game, b));
         crackGemForCanister(game, g, b.driftTierAtHit());
       } else {
         applyNonKillHitToCombo(game, onBeat, b.pos);
