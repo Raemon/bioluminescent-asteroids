@@ -18,7 +18,7 @@ import { emitCrackParticles } from "./particleBursts";
 import { completeEntrance, shiftEntranceFrames } from "./entrance";
 import { newWaveEventSchedule } from "./waveEvents";
 
-// The wave-skip warp. A player-killed alien tears open a lingering emerald
+// The wave-skip warp. A player-killed alien tears open a lingering
 // portal at its death spot; flying into it ends the wave on the spot and jumps
 // ahead — one wave for a small alien, up to five for a big one, never past a
 // boss wave. The ship dives down the throat and stays gone through the normal
@@ -81,8 +81,6 @@ export const maybeSpawnSkipPortal = (game: Game, al: Alien) => {
   const skip = lo + Math.floor(rng() * (hi - lo + 1));
   const wormhole = spawnWormhole(game.wormholes, al.pos, al.radius, al.warpHeading, {
     holdSec: skipCfg().lifetimeBeats * BEAT_GRID,
-    rimHue: skipCfg().rimHue,
-    throatHue: skipCfg().throatHue,
   });
   game.skipPortals.push({ wormhole, skip });
   game.sound.play("canisterAppear", 1, al.pos);
@@ -241,8 +239,6 @@ export const tickWaveSkip = (game: Game, musicDt: number) => {
     if (!warp.emergePortalSpawned && game.beatTime >= warp.emergePortalBeat) {
       const emerge = spawnWormhole(game.wormholes, ship.pos, skipCfg().emergePortalBodyRadius, ship.heading, {
         holdSec: skipCfg().emergeRideBeats * BEAT_GRID + skipCfg().emergeSec + 0.5,
-        rimHue: skipCfg().rimHue,
-        throatHue: skipCfg().throatHue,
       });
       warp.cropPortal = emerge;
       game.sound.play("canisterAppear", 1, ship.pos);
