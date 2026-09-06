@@ -1,10 +1,11 @@
 // Offline replay → MP4 exporter. Re-steps the open replay from frame 0 as
 //   fast as the CPU allows (the sim is a deterministic input re-sim), rendering
-//   every frame to canvas and encoding it with WebCodecs using the *recorded*
-//   per-frame dt as timestamps. Audio never plays live: Sound runs in export
-//   capture (audioCapture.ts) so every voice schedules onto one
-//   OfflineAudioContext, which is rendered in a single pass after the sim
-//   sweep and muxed with the video (mp4-muxer). No MediaRecorder anywhere.
+//   every frame to canvas and encoding a fixed EXPORT_FPS video with WebCodecs,
+//   each output tick showing the sim frame whose recorded interval contains it.
+//   Audio never plays live: Sound runs in export capture (audioCapture.ts) so
+//   every voice schedules onto one OfflineAudioContext, which is rendered in a
+//   single pass after the sim sweep and muxed with the video (mp4-muxer). No
+//   MediaRecorder anywhere.
 
 import type { Game } from "../Game";
 import type { ReplayPlayer } from "./replayPlayer";
@@ -18,6 +19,16 @@ export type ExportPhase = "prewarm" | "render" | "audio" | "mux" | "done";
 
 const MAX_OUT_W = 1920;
 const MAX_OUT_H = 1080;
+// The video track runs at a fixed rate. Encoding every sim step as its own frame
+//   made a recording from a 120 Hz display into a ~119 fps variable-rate stream:
+//   twice the intended size, and more frames than a 1080p High@4.2 stream may
+//   carry, which is the kind of file players handle unpredictably. Each output
+//   tick k / EXPORT_FPS shows the sim frame whose interval [acc, acc + dt)
+//   contains it, so a long recorded frame holds for several ticks and a 120 Hz
+//   run shows every other step. Audio is untouched: it schedules on the same
+//   `acc` timeline the ticks index, so the two stay locked.
+const EXPORT_FPS = 60;
+const EXPORT_FRAME_SEC = 1 / EXPORT_FPS;
 const VIDEO_BITRATE = 12_000_000;
 const AUDIO_BITRATE = 192_000;
 const KEYFRAME_INTERVAL_SEC = 2;
@@ -101,7 +112,7 @@ const pickVideoConfig = async (width: number, height: number): Promise<VideoEnco
       width,
       height,
       bitrate: VIDEO_BITRATE,
-      framerate: 60,
+      framerate: EXPORT_FPS,
       avc: {
         format: "avc",
       },
@@ -168,11 +179,12 @@ const restoreViewerPosition = (game: Game, resumePos: number, resumeSpeed: numbe
 // Rebuild at frame 0 and step every recorded frame, rendering each one (some
 //   voices — reticule hums, streak stems — are driven from render code, so the
 //   render call is part of audio capture too). clock.now is set to the frame's
-//   presentation time BEFORE stepping, so all audio scheduled during the frame
-//   lands at the same timeline position its video frame is stamped with.
-//   `onFrame` (video path) encodes the just-rendered canvas; awaiting it every
-//   frame also drains microtasks so cached-buffer awaits inside async voice
-//   starts (halo music, vocals) resolve within a frame of their trigger.
+//   start time BEFORE stepping, so all audio scheduled during the frame lands
+//   at the timeline position the frame's video ticks are stamped from.
+//   `onFrame` (video path) encodes the just-rendered canvas once per output
+//   tick that falls inside the frame; awaiting it also drains microtasks so
+//   cached-buffer awaits inside async voice starts (halo music, vocals)
+//   resolve within a frame of their trigger.
 const runSimCapturePass = async (
   game: Game,
   clock: ExportClock,
@@ -187,6 +199,7 @@ const runSimCapturePass = async (
   const total = Math.max(1, player.total());
   let acc = 0;
   let frame = 0;
+  let tick = 0;
   try {
     while (!state.cancelled) {
       const dt = player.peekFrameDt();
@@ -194,7 +207,13 @@ const runSimCapturePass = async (
       clock.now = acc;
       if (!stepReplayFrame(game)) break;
       renderGame(game);
-      await onFrame?.(acc, dt);
+      if (onFrame) {
+        const frameEnd = acc + dt;
+        while (tick / EXPORT_FPS < frameEnd && !state.cancelled) {
+          await onFrame(tick / EXPORT_FPS, EXPORT_FRAME_SEC);
+          tick++;
+        }
+      }
       acc += dt;
       frame++;
       if (frame % PROGRESS_EVERY_FRAMES === 0) emitProgress((frame / total) * RENDER_SHARE, "render");
@@ -202,6 +221,14 @@ const runSimCapturePass = async (
     }
   } finally {
     player.logDivergences = true;
+    // The sweep ran silent; say so if the movie's re-sim drifted off the
+    //   recording, since that is a movie that shows a run nobody played.
+    const divs = player.divergences;
+    if (divs.length > 0) {
+      const first = divs[0];
+      const fields = first.fields.map((f) => `${f.field} ${f.recorded}→${f.replayed}`).join(", ");
+      console.warn(`[export] re-sim diverged from the recording at ${divs.length} checkpoint(s); first at frame ${first.frame} (${first.timeSec.toFixed(2)}s in): ${fields}`);
+    }
   }
 };
 
