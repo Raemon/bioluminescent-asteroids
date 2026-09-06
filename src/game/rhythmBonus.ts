@@ -138,14 +138,17 @@ export const beatsAwayAtHit = (game: Game, b: Bullet): number => {
 };
 
 // Far Shot: the kill landed on the 2-beat reticule or deeper — the player led the target by
-//   beatsAway beats and the shot flew that long. Pays +1 rhythm per beat of lead, one staggered
-//   flash each. From FAR_SHOT_BIG_BEATS the label grows its "N BEATS OUT" line and the hit
-//   detonates with the drift burst + boom in the Far Shot hue, so the longer lead reads as the
-//   bigger event it is. `firstOrder` continues the stagger after any bonus queued before it.
+//   beatsAway beats and the shot flew that long. Every shot already crosses one beat, so the
+//   payout is one rhythm per EXTRA beat of lead, one staggered flash each: the level-1 far shot
+//   (2 beats, reachable on either Farshot or 12+ rhythm) pays +1, and the level-2 one (3 beats,
+//   which needs both) pays +2. From FAR_SHOT_BIG_BEATS the label grows its "N BEATS OUT" line
+//   and the hit detonates with the drift burst + boom in the Far Shot hue, so the harder lead
+//   reads as the bigger event it is. `firstOrder` continues the stagger after any bonus queued
+//   before it.
 const FAR_SHOT_BURST_HSL = "150, 100%, 70%";
 const awardFarShot = (game: Game, hitPos: Vec, beatsAway: number, firstOrder: number) => {
   game.popups.push(popupFarShot(hitPos, beatsAway));
-  const rhythm = Math.min(beatsAway, FAR_SHOT_MAX_RHYTHM);
+  const rhythm = Math.min(beatsAway - 1, FAR_SHOT_MAX_RHYTHM);
   for (let i = 0; i < rhythm; i++) queueRhythmBonus(game, hitPos, firstOrder + i);
   if (beatsAway < FAR_SHOT_BIG_BEATS) return;
   const tier = Math.min(6, beatsAway + 1);
