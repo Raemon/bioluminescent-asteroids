@@ -619,6 +619,7 @@ const makeFakeBullet = (pos: Vec, dir: Vec, firedOnBeat: boolean): Bullet => {
   b.superBoosted = false;
   b.pierce = false;
   b.driftLockedSlots = [];
+  b.instantHit = true;
   return b;
 };
 

@@ -14,7 +14,7 @@ import { setFirstWaveHintStage, emitFirstWaveHintHitProgress, emitFirstWaveHintS
 import { tryUnlockPilotLog1, tryUnlockPilotLog3 } from "./pilotLog";
 import { popupCombo, popupScore, popupDriftCombo } from "./popups";
 import { resonanceBonus } from "./resonanceBonus";
-import { trackRhythmComboHit, extendStreakWindow } from "./rhythmBonus";
+import { trackRhythmComboHit, extendStreakWindow, beatsAwayAtHit } from "./rhythmBonus";
 import { triggerBassLightning } from "./bassLightning";
 import { spawnDriftBurst } from "./driftBurst";
 import { checkBonusLife } from "./bonusLife";
@@ -106,14 +106,16 @@ export const hitSoundFor = (
 //   hitPos anchors the "RHYTHM LOST" popup at the target the off-beat shot landed on.
 //   Only kills (and gem cracks) route here; a landed hit that
 //   didn't earn the kill goes through applyNonKillHitToCombo.
-export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec) => {
+//   beatsAway is the shot's flight in beats (rhythmBonus.beatsAwayAtHit) for the Far Shot
+//   bonus; strikes with no flight time (the laser) leave it 0.
+export const applyHitToCombo = (game: Game, isOnBeatHit: boolean, hitPos: Vec, beatsAway = 0) => {
   if (isOnBeatHit && game.beatCombo >= 1) {
     const crossedSparkleThreshold = game.beatCombo === 31;
     game.beatCombo += 1;
     if (game.beatCombo > game.maxCombo) game.maxCombo = game.beatCombo;
     if (game.beatCombo > game.maxComboThisWave) game.maxComboThisWave = game.beatCombo;
     if (game.beatCombo >= 6) markVeteranPilot();
-    trackRhythmComboHit(game, hitPos);
+    trackRhythmComboHit(game, hitPos, beatsAway);
     // Dismiss the post-rhythm-loss "fire and hit on the beat" hint as soon as
     // the player lands one — reaching here means an on-beat fire was followed
     // by an on-beat hit. The component no-ops if it's not currently visible.
@@ -332,7 +334,7 @@ export const onAsteroidKilledByBullet = (
   b: Bullet,
   isOnBeatHit: boolean,
 ): Asteroid[] => {
-  applyHitToCombo(game, isOnBeatHit, b.pos);
+  applyHitToCombo(game, isOnBeatHit, b.pos, beatsAwayAtHit(game, b));
   const scoreEarned = awardScoreForKill(game, b.pos, a.scoreValue(), isOnBeatHit, b.driftTierAtHit());
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   if (isOnBeatHit) triggerBassLightning(game, a.pos, a);
@@ -415,7 +417,7 @@ export const onAsteroidCrackedByRam = (game: Game, a: Asteroid) => {
 
 // no split path here — alien deaths fall into the "single body, fixed sound" pattern.
 export const onAlienKilled = (game: Game, al: Alien, b: Bullet, isOnBeatHit: boolean) => {
-  applyHitToCombo(game, isOnBeatHit, b.pos);
+  applyHitToCombo(game, isOnBeatHit, b.pos, beatsAwayAtHit(game, b));
   const scoreEarned = awardScoreForKill(game, b.pos, al.scoreValue, isOnBeatHit, b.driftTierAtHit());
   const comboAtKill = isOnBeatHit ? game.beatCombo : 0;
   if (isOnBeatHit) triggerBassLightning(game, al.pos);
@@ -447,7 +449,7 @@ export const onAlienCracked = (game: Game, isOnBeatHit: boolean, pos: Vec) => {
 // Off-rhythm hits also get a sadder explosion variant so the audio tells the
 // player they wasted the celestial visitor.
 export const onCometKilled = (game: Game, c: Comet, b: Bullet, isOnBeatHit: boolean) => {
-  applyHitToCombo(game, isOnBeatHit, b.pos);
+  applyHitToCombo(game, isOnBeatHit, b.pos, beatsAwayAtHit(game, b));
   // Meteors are the cheaper flock: an on-beat hit pays 500 × combo vs the
   // comet's 1000 × combo, but there are many of them. Off-beat pays the same
   // flat amount halved.
