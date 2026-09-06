@@ -20,8 +20,7 @@ import { cosmeticRng as rng } from "./rng";
 // toward. The red runs from a hot white-cored crimson on the sharpest edges out
 // to a deep oxblood in the folds, so the light reads as fire caught on black
 // tissue rather than a flat tint. The whole thing pulses and wobbles as it
-// drinks. (Recolour hooks stay live so the wave-skip portals can wear their
-// distinct emerald.)
+// drinks.
 //
 // The effect is purely cosmetic and self-contained (same lifecycle shape as
 // DriftBurst): spawn → update(dt) prunes by life → render() draws additively.
@@ -96,16 +95,10 @@ export type Wormhole = {
   seed: number;
   life: number;
   maxLife: number;
-  // Hue overrides for recoloured portals (the wave-skip kind). The defaults
-  // reproduce the dark-wound departure portal; wave-skip wears emerald.
-  rimHue?: number;
-  throatHue?: number;
 };
 
 export type WormholeOpts = {
   holdSec?: number;
-  rimHue?: number;
-  throatHue?: number;
 };
 
 export const spawnWormhole = (
@@ -122,8 +115,6 @@ export const spawnWormhole = (
     seed: rng() * TAU,
     life,
     maxLife: life,
-    rimHue: opts?.rimHue,
-    throatHue: opts?.throatHue,
   };
   list.push(wh);
   return wh;
@@ -434,8 +425,8 @@ export const renderWormholes = (
     if (open < 0.02) continue;
     const long = wh.radius * open;
     const inner = long * INNER_FRAC;
-    const membraneHue = (wh.rimHue ?? MEMBRANE_HUE) + wh.hueShift;
-    const throatHue = (wh.throatHue ?? THROAT_HUE) + wh.hueShift;
+    const membraneHue = MEMBRANE_HUE + wh.hueShift;
+    const throatHue = THROAT_HUE + wh.hueShift;
     // Slow rotation of the whole swirl, a per-portal phase, and a churning flux
     // that drives every organic wobble so the maw writhes and pulses.
     const swirl = tSec * 1.4 + wh.seed;

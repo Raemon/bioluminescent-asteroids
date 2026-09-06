@@ -360,11 +360,18 @@ const bulletSightGeometry = (ship: Ship, superBoosted: boolean) => ({
 });
 
 const sightRadius = (sightScale: number): number => BULLET_SIGHT_RADIUS_ON_BEAT * sightScale;
-const hoverDotRingRadius = (sightScale: number): number => HOVER_DOT_RING_RADIUS * sightScale;
-const hoverPulseStartR = (sightScale: number): number => sightRadius(sightScale);
-const hoverPulseEndR = (sightScale: number): number => (BULLET_SIGHT_RADIUS_ON_BEAT + HOVER_PULSE_SPAN) * sightScale;
-const hoverWaveStartR = (sightScale: number): number => sightRadius(sightScale);
-const hoverWaveEndR = (sightScale: number): number => (HOVER_DOT_RING_RADIUS + HOVER_WAVE_END_GAP) * sightScale;
+
+// The drift-lock flourish — dashed ring, soundwaves, lock flash, lock-on pulse — is a REWARD
+// cue, not a readout of the hit zone, so it doesn't have to shrink to the stock bullet's sight.
+// Floored so a normal-bullet lock reads nearly as large as the bomb's, which used to dwarf it.
+const LOCK_VISUAL_MIN_SCALE = 1.6;
+const lockVisualScale = (sightScale: number): number => Math.max(sightScale, LOCK_VISUAL_MIN_SCALE);
+
+const hoverDotRingRadius = (sightScale: number): number => HOVER_DOT_RING_RADIUS * lockVisualScale(sightScale);
+const hoverPulseStartR = (sightScale: number): number => sightRadius(lockVisualScale(sightScale));
+const hoverPulseEndR = (sightScale: number): number => (BULLET_SIGHT_RADIUS_ON_BEAT + HOVER_PULSE_SPAN) * lockVisualScale(sightScale);
+const hoverWaveStartR = (sightScale: number): number => sightRadius(lockVisualScale(sightScale));
+const hoverWaveEndR = (sightScale: number): number => (HOVER_DOT_RING_RADIUS + HOVER_WAVE_END_GAP) * lockVisualScale(sightScale);
 
 // ring just crossed into "filled" this frame (rising-edge signal for the audio companion).
 const paintHoverDotRing = (
@@ -416,8 +423,8 @@ const paintHoverDotRing = (
     const waveHsl = fullyBuilt ? tierWarmHsl : HOVER_DOT_HSL_UNARMED;
     paintSoundwaves(ctx, center, elapsed - wavesStartSec, beatTime, beatGrid, sightScale, fadeOutAlpha, waveHsl, tierWidth);
   }
-  // white center flash on lock acquisition — sized to the bullet's on-beat hit radius so the
-  // moment of lock visually anchors on the actual hit zone, not the wider dashed dot ring.
+  // white center flash on lock acquisition — anchored on the aim disc rather than the wider
+  // dashed dot ring, at the shared lock-visual scale so a stock shot's lock still lands as an event.
   if (flareAge >= 0 && flareAge < HOVER_CENTER_FLASH_SEC) {
     const t = flareAge / HOVER_CENTER_FLASH_SEC;
     // sin-shaped swell-and-fade instead of front-loaded pop, so the flash reads as a glow
@@ -426,13 +433,13 @@ const paintHoverDotRing = (
     ctx.save();
     ctx.fillStyle = `hsla(0, 0%, 100%, ${HOVER_CENTER_FLASH_PEAK_ALPHA * env * fadeOutAlpha})`;
     ctx.beginPath();
-    ctx.arc(center.x, center.y, sightRadius(sightScale), 0, TAU);
+    ctx.arc(center.x, center.y, sightRadius(lockVisualScale(sightScale)), 0, TAU);
     ctx.fill();
     ctx.strokeStyle = `hsla(0, 0%, 100%, ${0.6 * env * fadeOutAlpha})`;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.arc(center.x, center.y, sightRadius(sightScale) * (1 + 0.4 * t), 0, TAU);
+    ctx.arc(center.x, center.y, sightRadius(lockVisualScale(sightScale)) * (1 + 0.4 * t), 0, TAU);
     ctx.stroke();
     ctx.restore();
   }

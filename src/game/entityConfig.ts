@@ -170,10 +170,6 @@ export const ENTITY_CONFIG = {
     invulnOnEmerge: 2.0,
     // Body radius fed to portalLongAxis for the return portal.
     emergePortalBodyRadius: 30,
-    // Emerald light so "fly in here" never reads as the violet departure
-    // portal or the warm gold upgrade warp.
-    rimHue: 148,
-    throatHue: 126,
   },
 
   comet: {
