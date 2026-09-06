@@ -1,5 +1,25 @@
 [
   {
+    "id": "2026-09-06-e626245",
+    "date": "2026-09-06",
+    "title": "Drift-lock visuals and wormhole colour fixes",
+    "sections": [
+      {
+        "heading": "Fixed",
+        "items": [
+          "Drift-lock flourish (dashed ring, soundwaves, flash, pulse) now appears at a consistent size for standard bullets, no longer dwarfed by the bomb's larger version.",
+          "Wave-skip wormholes left by killed aliens now render in the standard portal colour instead of a separate emerald tint."
+        ]
+      }
+    ],
+    "commits": [
+      "e626245",
+      "320d5f9",
+      "6754d09",
+      "3c295c6"
+    ]
+  },
+  {
     "id": "2026-09-06-897dee8",
     "date": "2026-09-06",
     "title": "Aim hint and replay button reliability fixes",
